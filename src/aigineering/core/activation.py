@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from typing import Optional
 
+_MAX_DEPTH = 50
+_MAX_TOKENS = 200
+
 
 def _tokenize(expression: str) -> list[str]:
     tokens: list[str] = []
@@ -22,6 +25,10 @@ def _tokenize(expression: str) -> list[str]:
                     j += 1
                 tokens.append(raw[i:j])
                 i = j
+    if len(tokens) > _MAX_TOKENS:
+        raise ValueError(
+            f"Activation expression too long: {len(tokens)} tokens (max {_MAX_TOKENS})"
+        )
     return tokens
 
 
@@ -30,6 +37,7 @@ class _Parser:
         self._tokens = tokens
         self._pos = 0
         self._available = available
+        self._depth = 0
 
     def evaluate(self) -> bool:
         if self._pos >= len(self._tokens):
@@ -62,9 +70,15 @@ class _Parser:
 
     def _parse_primary(self) -> bool:
         if self._match("("):
+            self._depth += 1
+            if self._depth > _MAX_DEPTH:
+                raise RecursionError(
+                    f"Activation expression exceeds maximum nesting depth ({_MAX_DEPTH})"
+                )
             value = self._parse_or()
             if not self._match(")"):
                 raise ValueError("Missing closing ')'")
+            self._depth -= 1
             return value
         return self._parse_name()
 

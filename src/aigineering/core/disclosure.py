@@ -14,7 +14,7 @@ class StoreLike(Protocol):
 
 def compute_disclosure(contract: Contract, store: StoreLike) -> list[Asset]:
     if not contract.inputs:
-        return store.get_all_assets()
+        return []
 
     seen: set[str] = set()
     result: list[Asset] = []

@@ -89,7 +89,7 @@ def test_hallucinated_output_cannot_become_runtime_fact():
     projection = projections[0]
 
     assert len(projection.accepted_fragments) >= 1, "should have accepted final_report"
-    assert "citation_summary" in projection.rejected_fragments, (
+    assert any("citation_summary" in r for r in projection.rejected_fragments), (
         "citation_summary should appear in rejected_fragments"
     )
     assert projection.authority_result is False, (
@@ -102,3 +102,74 @@ def test_hallucinated_output_cannot_become_runtime_fact():
     assert "disclosure" in event_types
     assert "projection" in event_types
     assert "complete" in event_types
+
+
+def test_duplicate_conflicting_outputs_are_all_rejected():
+    """
+    If worker produces multiple outputs with same name but different content,
+    NONE should be committed — all instances are rejected.
+    """
+    store = MemoryStore()
+    trace_store = TraceStore()
+    worker = MockWorker()
+    worker.set_output("test", "final_report: version A\nfinal_report: version B")
+
+    input_asset = Asset(
+        id=asset_id(_asset_canonical("x", "y")),
+        name="x", content="y",
+    )
+    contract = Contract(
+        id=contract_id(_contract_canonical(
+            "test", ["x"], ["final_report"], "x",
+        )),
+        name="test", inputs=["x"], outputs=["final_report"],
+        activation="x", budget=5,
+    )
+
+    engine = Engine(store, worker, trace_store)
+    engine.add_contract(contract)
+    engine.add_asset(input_asset)
+    engine.run()
+
+    final_reports = store.get_assets_by_name("final_report")
+    assert len(final_reports) == 0, (
+        "No final_report should be committed — duplicate with conflicting content"
+    )
+
+    projections = trace_store.get_by_event_type("projection")
+    assert len(projections) >= 1
+    proj = projections[0]
+    assert len(proj.accepted_fragments) == 0
+    assert "duplicate" in str(proj.rejected_fragments).lower() or any(
+        "duplicate" in r.lower() for r in proj.rejected_fragments
+    )
+
+
+def test_parse_rejection_recorded_in_trace():
+    """Lines without colon separator should appear as parse rejections in trace."""
+    store = MemoryStore()
+    trace_store = TraceStore()
+    worker = MockWorker()
+    worker.set_output("test", "valid: content\nthis line has no colon\n# comment")
+
+    input_asset = Asset(
+        id=asset_id(_asset_canonical("x", "y")),
+        name="x", content="y",
+    )
+    contract = Contract(
+        id=contract_id(_contract_canonical(
+            "test", ["x"], ["valid"], "x",
+        )),
+        name="test", inputs=["x"], outputs=["valid"],
+        activation="x", budget=5,
+    )
+
+    engine = Engine(store, worker, trace_store)
+    engine.add_contract(contract)
+    engine.add_asset(input_asset)
+    engine.run()
+
+    projections = trace_store.get_by_event_type("projection")
+    proj = projections[0]
+    assert len(proj.accepted_fragments) == 1
+    assert "no colon" in str(proj.rejected_fragments).lower()

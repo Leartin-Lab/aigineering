@@ -87,6 +87,7 @@ def _run_demo(goal: str, mock: bool) -> tuple[MemoryStore, TraceStore, Contract]
         inputs=["data_file", "citation_db"],
         outputs=["final_report"],
         activation="data_file AND citation_db",
+        budget=5,
     )
     contract = Contract(
         id=contract_id(contract_canonical), name="build_report",
@@ -130,7 +131,7 @@ def run(goal: str, mock: bool) -> None:
             total = len(entry.accepted_fragments) + len(entry.rejected_fragments)
             click.echo(f"→ worker produced {total} candidates")
             for name in entry.rejected_fragments:
-                click.echo(f"✗ '{name}' REJECTED: not in declared outputs")
+                click.echo(f"✗ '{name}' REJECTED")
             for aid in entry.accepted_fragments:
                 asset = store.get_asset(aid)
                 name = asset.name if asset else aid

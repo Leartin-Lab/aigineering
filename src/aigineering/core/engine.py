@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from aigineering.core.activation import check_activation
@@ -10,6 +11,21 @@ from aigineering.core.projection import project_candidate
 from aigineering.core.store import MemoryStore
 from aigineering.core.trace import TraceStore
 from aigineering.protocol.types import Asset, Candidate, Contract
+
+_logger = logging.getLogger(__name__)
+
+_MAX_ACTIVATION_TOKENS = 200
+
+
+def _safe_check_activation(expression: str, available_names: set[str]) -> bool:
+    if len(expression) > _MAX_ACTIVATION_TOKENS:
+        _logger.warning("Activation expression too long (%d chars)", len(expression))
+        return False
+    try:
+        return check_activation(expression, available_names)
+    except (ValueError, RecursionError) as e:
+        _logger.warning("Invalid activation expression: %s", e)
+        return False
 
 
 class Engine:
@@ -27,7 +43,7 @@ class Engine:
 
     def add_contract(self, contract: Contract) -> None:
         self._store.add_contract(contract)
-        self._budget[contract.id] = contract.budget
+        self._budget[contract.id] = max(contract.budget, 1)
 
     def add_asset(self, asset: Asset) -> None:
         self._store.add_asset(asset)
@@ -43,7 +59,7 @@ class Engine:
                 for c in self._store.get_all_contracts()
                 if c.id not in self._completed
                 and self._resolve_budget(c) > 0
-                and check_activation(c.activation, available_names)
+                and _safe_check_activation(c.activation, available_names)
             ]
 
             if not enabled:
@@ -77,7 +93,10 @@ class Engine:
                     worker_id=candidate.worker_id,
                     candidate_raw=candidate.raw_output,
                     accepted_fragments=[a.id for a in accepted],
-                    rejected_fragments=[r["name"] for r in rejected],
+                    rejected_fragments=[
+                        f"{r['name']}: {r.get('reject_reason', 'rejected')}"
+                        for r in rejected
+                    ],
                     authority_result=len(rejected) == 0,
                     budget_remaining=self._resolve_budget(contract),
                 )
@@ -101,6 +120,7 @@ class Engine:
 
     def _all_outputs_satisfied(self, contract: Contract) -> bool:
         for output_name in contract.outputs:
-            if not self._store.has_asset_named(output_name):
+            matching = self._store.get_assets_by_name(output_name)
+            if not any(a.created_by == contract.id for a in matching):
                 return False
         return True

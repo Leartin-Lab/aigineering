@@ -19,20 +19,65 @@ def project_candidate(
     store: "MemoryStore",
 ) -> tuple[list[Asset], list[dict]]:
     fragments: list[dict] = []
+    parse_rejected: list[dict] = []
+
     for line in candidate.raw_output.splitlines():
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
             continue
         if ":" not in stripped:
+            parse_rejected.append({
+                "name": stripped[:40],
+                "content": "",
+                "reject_reason": f"unparsable line (no colon separator): '{stripped[:80]}'",
+            })
             continue
         name, _, content = stripped.partition(":")
         name = name.strip()
         content = content.strip()
-        if name and content:
-            fragments.append({"name": name, "content": content})
+        if not name:
+            parse_rejected.append({
+                "name": "(empty)",
+                "content": content,
+                "reject_reason": f"empty asset name in line: '{stripped[:80]}'",
+            })
+            continue
+        if not content:
+            parse_rejected.append({
+                "name": name,
+                "content": "",
+                "reject_reason": f"empty content for asset '{name}'",
+            })
+            continue
+        fragments.append({"name": name, "content": content})
 
-    accepted_dicts, rejected_dicts = check_authority(contract, fragments)
+    # Reject duplicate names with conflicting content: reject ALL for that name
+    seen_names: dict[str, str] = {}  # name → first content
+    conflict_names: set[str] = set()
+    for f in fragments:
+        name = f["name"]
+        if name in seen_names:
+            if seen_names[name] != f["content"]:
+                conflict_names.add(name)
+        else:
+            seen_names[name] = f["content"]
+
+    deduped_fragments: list[dict] = []
+    for f in fragments:
+        name = f["name"]
+        if name in conflict_names:
+            if name not in {r["name"] for r in parse_rejected}:
+                parse_rejected.append({
+                    "name": name,
+                    "content": f["content"],
+                    "reject_reason": f"duplicate output '{name}' with conflicting content — all instances rejected",
+                })
+        else:
+            deduped_fragments.append(f)
+
+    accepted_dicts, authority_rejected = check_authority(contract, deduped_fragments)
     accepted_assets: list[Asset] = []
+
     for a in accepted_dicts:
         canonical_str = json.dumps(
             {
@@ -56,4 +101,5 @@ def project_candidate(
         store.add_asset(asset)
         accepted_assets.append(asset)
 
-    return accepted_assets, rejected_dicts
+    all_rejected = parse_rejected + authority_rejected
+    return accepted_assets, all_rejected
