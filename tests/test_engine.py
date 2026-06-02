@@ -1,0 +1,104 @@
+"""Killer integration test — ACM boundary prevents hallucinated facts."""
+
+import json
+
+from aigineering.core.store import MemoryStore
+from aigineering.core.engine import Engine
+from aigineering.core.trace import TraceStore
+from aigineering.agent.mock import MockWorker
+from aigineering.core.ids import asset_id, contract_id
+from aigineering.protocol.types import Asset, Contract
+
+
+def _asset_canonical(name: str, content: str) -> str:
+    return json.dumps(
+        {"name": name, "content": content, "content_type": "text",
+         "created_by": "", "origin": "human"},
+        sort_keys=True, ensure_ascii=False,
+    )
+
+
+def _contract_canonical(name: str, inputs: list[str], outputs: list[str], activation: str) -> str:
+    return json.dumps(
+        {"parent_id": None, "name": name, "description": "",
+         "inputs": sorted(inputs), "outputs": sorted(outputs),
+         "activation": activation, "budget": 5, "tool_scope": [], "origin": "human"},
+        sort_keys=True, ensure_ascii=False,
+    )
+
+
+def test_hallucinated_output_cannot_become_runtime_fact():
+    """
+    The ACM boundary must reject undeclared outputs from the worker.
+
+    Scenario:
+      - Contract 'build_report' declares outputs: [final_report]
+      - Mock worker produces: final_report AND citation_summary (hallucinated)
+      - Authority REJECTS citation_summary (not in declared outputs)
+      - Trace records the rejection
+    """
+    store = MemoryStore()
+    trace_store = TraceStore()
+    worker = MockWorker()
+
+    # Input assets
+    data_file = Asset(
+        id=asset_id(_asset_canonical("data_file", "Sample data")),
+        name="data_file", content="Sample data",
+    )
+    citation_db = Asset(
+        id=asset_id(_asset_canonical("citation_db", "Sample citations")),
+        name="citation_db", content="Sample citations",
+    )
+
+    # Contract with only final_report as declared output
+    contract = Contract(
+        id=contract_id(_contract_canonical(
+            "build_report", ["data_file", "citation_db"],
+            ["final_report"], "data_file AND citation_db",
+        )),
+        name="build_report",
+        inputs=["data_file", "citation_db"],
+        outputs=["final_report"],
+        activation="data_file AND citation_db",
+        budget=5,
+    )
+
+    engine = Engine(store, worker, trace_store)
+    engine.add_contract(contract)
+    engine.add_asset(data_file)
+    engine.add_asset(citation_db)
+    engine.run()
+
+    # ── Verify ──────────────────────────────────────────────
+
+    # 1. final_report EXISTS in the store
+    final_reports = store.get_assets_by_name("final_report")
+    assert len(final_reports) == 1, "final_report should be committed"
+    assert "thermal efficiency" in final_reports[0].content
+
+    # 2. citation_summary does NOT exist in the store
+    citation_assets = store.get_assets_by_name("citation_summary")
+    assert len(citation_assets) == 0, (
+        "citation_summary must NOT be committed — it was not a declared output"
+    )
+
+    # 3. Trace records the REJECTION
+    projections = trace_store.get_by_event_type("projection")
+    assert len(projections) == 1
+    projection = projections[0]
+
+    assert len(projection.accepted_fragments) >= 1, "should have accepted final_report"
+    assert "citation_summary" in projection.rejected_fragments, (
+        "citation_summary should appear in rejected_fragments"
+    )
+    assert projection.authority_result is False, (
+        "authority_result should be False because citation_summary was rejected"
+    )
+
+    # 4. Trace has all expected event types
+    event_types = {e.event_type for e in trace_store.get_all()}
+    assert "activation" in event_types
+    assert "disclosure" in event_types
+    assert "projection" in event_types
+    assert "complete" in event_types
