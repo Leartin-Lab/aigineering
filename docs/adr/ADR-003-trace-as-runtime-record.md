@@ -1,7 +1,7 @@
 # ADR-003: Trace as Runtime Record
 
 **Status**: Accepted  
-**Date**: 2025-06-02
+**Date**: 2026-06-02
 
 ## Context
 
@@ -14,6 +14,7 @@ In Aigineering, the trace is the **runtime record itself**, not a log. Each step
 ## Consequences
 
 - Trace completeness: the trace IS the execution, not a representation of it
-- Replay becomes trivial: replay trace entries to reconstruct any execution state
+- Replay becomes possible when trace completeness is maintained; the v0.1 MVP
+  records the boundary, while full replay is planned for a later milestone
 - Audit becomes first-class: reverse lineage from any asset to its origin
 - Other systems say "this happened" — ACM says "this happened, that was attempted and rejected, and here's why"

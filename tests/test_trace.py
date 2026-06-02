@@ -66,3 +66,55 @@ def test_sequence_auto_increments():
     store.new_entry("c1", "disclosure")
     store.new_entry("c1", "projection")
     assert store.sequence == 3
+
+
+def test_parent_chains_do_not_cross_contracts():
+    """Parent links must stay within the same contract."""
+    store = TraceStore()
+    store.new_entry("c1", "activation")
+    store.new_entry("c2", "activation")
+    store.new_entry("c1", "disclosure")
+    store.new_entry("c2", "disclosure")
+
+    c1_entries = store.get_by_contract("c1")
+    c2_entries = store.get_by_contract("c2")
+
+    # c1's disclosure should have c1's activation as parent
+    c1_disclosure = [e for e in c1_entries if e.event_type == "disclosure"][0]
+    c1_activation = [e for e in c1_entries if e.event_type == "activation"][0]
+    assert c1_disclosure.parent_id == c1_activation.id, (
+        f"c1 disclosure parent should be c1 activation, got {c1_disclosure.parent_id}"
+    )
+
+    # c2's disclosure should have c2's activation as parent
+    c2_disclosure = [e for e in c2_entries if e.event_type == "disclosure"][0]
+    c2_activation = [e for e in c2_entries if e.event_type == "activation"][0]
+    assert c2_disclosure.parent_id == c2_activation.id, (
+        f"c2 disclosure parent should be c2 activation, got {c2_disclosure.parent_id}"
+    )
+
+    # Cross-check: c1's entries should never reference c2's entries
+    c1_ids = {e.id for e in c1_entries}
+    for e in c1_entries:
+        if e.parent_id:
+            assert e.parent_id in c1_ids, (
+                f"c1 entry parent {e.parent_id} not in c1 entry set"
+            )
+
+    c2_ids = {e.id for e in c2_entries}
+    for e in c2_entries:
+        if e.parent_id:
+            assert e.parent_id in c2_ids, (
+                f"c2 entry parent {e.parent_id} not in c2 entry set"
+            )
+
+
+def test_new_entry_links_to_previous_entry_by_default():
+    store = TraceStore()
+    first = store.new_entry("c1", "activation")
+    second = store.new_entry("c1", "disclosure")
+    third = store.new_entry("c1", "projection")
+
+    assert first.parent_id is None
+    assert second.parent_id == first.id
+    assert third.parent_id == second.id

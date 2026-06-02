@@ -1,7 +1,7 @@
 # ADR-004: Methods as Subtasks
 
 **Status**: Accepted (future implementation)  
-**Date**: 2025-06-02
+**Date**: 2026-06-02
 
 ## Context
 

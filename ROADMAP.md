@@ -7,7 +7,7 @@
 - [x] Candidate-to-fact boundary (authority gate)
 - [x] Rejected candidate recording in trace
 - [x] Mock worker demo
-- [x] `aig run --mock`, `aig trace`, `aig audit` CLI
+- [x] `aig run`, `aig trace`, `aig audit` CLI
 
 ## v0.2 — Persistence & Replay
 

@@ -40,6 +40,7 @@ class Engine:
         self._trace = trace_store if trace_store is not None else TraceStore()
         self._budget: dict[str, int] = {}
         self._completed: set[str] = set()
+        self._contract_last_entry: dict[str, str] = {}  # contract_id → last trace entry id
 
     def add_contract(self, contract: Contract) -> None:
         self._store.add_contract(contract)
@@ -47,6 +48,11 @@ class Engine:
 
     def add_asset(self, asset: Asset) -> None:
         self._store.add_asset(asset)
+
+    def _add_trace(self, contract_id: str, event_type: str, **kwargs: object) -> None:
+        parent_id = self._contract_last_entry.get(contract_id)
+        entry = self._trace.new_entry(contract_id, event_type, parent_id=parent_id, **kwargs)
+        self._contract_last_entry[contract_id] = entry.id
 
     def run(self) -> None:
         while True:
@@ -66,14 +72,14 @@ class Engine:
                 break
 
             for contract in enabled:
-                self._trace.new_entry(
+                self._add_trace(
                     contract.id,
                     "activation",
                     budget_remaining=self._resolve_budget(contract),
                 )
 
                 scope = compute_disclosure(contract, self._store)
-                self._trace.new_entry(
+                self._add_trace(
                     contract.id,
                     "disclosure",
                     disclosed_assets=[a.id for a in scope],
@@ -86,7 +92,7 @@ class Engine:
                     contract, candidate, self._store
                 )
 
-                self._trace.new_entry(
+                self._add_trace(
                     contract.id,
                     "projection",
                     disclosed_assets=[a.id for a in scope],
@@ -105,7 +111,7 @@ class Engine:
                 self._budget[contract.id] = max(0, remaining - 1)
 
                 if self._all_outputs_satisfied(contract):
-                    self._trace.new_entry(
+                    self._add_trace(
                         contract.id,
                         "complete",
                         budget_remaining=self._resolve_budget(contract),

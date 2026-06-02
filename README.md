@@ -2,21 +2,23 @@
 
 > **Smarter boundaries, not smarter models.**
 
-**Models may hallucinate. Aigineering makes sure the runtime does not have to believe them.**
+**Models may hallucinate. Aigineering prevents unauthorized outputs from becoming runtime facts.**
 
-Aigineering is an **Agent Runtime** — infrastructure that manages agent task lifecycle, context isolation, permission control, resource constraints, and auditable traces. It is not a prompt harness, not a workflow engine, not "yet another agent framework."
+Aigineering is an **Agent Runtime** — infrastructure that manages agent task lifecycle, context isolation, permission control, and auditable traces. It is not a prompt harness, not a workflow engine, not "yet another agent framework."
 
 ---
 
 ## What Aigineering Does
 
-The core insight: **worker output is a candidate, not a fact.** Only output that passes the commitment boundary — disclosure checks, authority verification, budget accounting — becomes a committed runtime fact. Everything else (including hallucinations) is rejected and recorded in the trace.
+The core insight: **worker output is a candidate, not a fact.** Only output that passes the commitment boundary — disclosure checks, declared-output authority verification — becomes a committed runtime fact. Everything else (including undeclared outputs) is rejected and recorded in the trace.
+
+Aigineering does NOT prevent models from generating false content inside an authorized output. It prevents **unauthorized outputs** from entering shared state.
 
 This is **Zero Trust for AI agents** translated into runtime semantics:
 
 - **Never trust, always verify** → worker output is candidate, not fact
 - **Assume breach** → worker may be injected, confused, compromised, or wrong
-- **Least privilege** → disclosure, authority, and tool scope
+- **Least privilege** → disclosure is limited to declared inputs
 - **Explicit trust boundaries** → commitment boundary (candidate → fact)
 - **Explainability and audit** → trace completeness (including rejected candidates)
 
@@ -25,40 +27,43 @@ This is **Zero Trust for AI agents** translated into runtime semantics:
 ## Quick Start
 
 ```bash
-# Clone and install
+# Clone and install (requires Python 3.11+)
 git clone https://github.com/aigineering/aigineering.git
 cd aigineering
-uv sync
+pip install -e ".[dev]"
 
 # Run the hallucination containment demo
-uv run aig run "build report with citations" --mock
+aig run "build report with citations"
 
 # See what happened — including what was REJECTED
-uv run aig trace
+aig trace
 
 # Trace lineage from output back to source
-uv run aig audit --asset final_report
+aig audit --asset-name final_report
 ```
 
 ---
 
 ## Status: Pre-Alpha
 
-This is an early proof-of-concept demonstrating the core invariant: **hallucinated undeclared outputs cannot become runtime facts.**
+This is an early proof-of-concept demonstrating the core invariant: **undeclared outputs cannot become runtime facts.**
 
 **Currently implemented:**
 - Deterministic SHA-256 content-addressed IDs
 - Asset / Contract / Candidate / TraceEntry data models
-- Candidate-to-fact boundary (authority gate)
-- Rejected candidate recording in trace
-- Mock worker demo
+- Candidate-to-fact boundary (declared-output authority gate + reserved-name checks)
+- Rejected candidate recording in trace (with rejection reasons)
+- Parse-error and duplicate-output rejection
+- Mock worker demo (built-in `build_report` scenario)
+- CLI: `aig run`, `aig trace`, `aig audit` (demo-only; persistence in v0.2)
 
-**Not yet implemented:**
+**Not yet implemented (see ROADMAP.md):**
 - Real LLM integration
-- MCP / Skill / Tool support
+- Persistent trace (currently demo runs inline)
+- MCP / Skills / Tools
+- Multi-contract orchestration
 - Distributed runtime
-- Garbage collection
-- PyPI production release
+- PyPI release
 
 See [ROADMAP.md](ROADMAP.md) for the full plan.
 

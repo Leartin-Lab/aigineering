@@ -65,6 +65,11 @@ class TraceStore:
         event_type: str,
         **kwargs: object,
     ) -> TraceEntry:
+        if kwargs.get("parent_id") is None:
+            for e in reversed(self.entries):
+                if e.contract_id == contract_id:
+                    kwargs["parent_id"] = e.id
+                    break
         entry = create_entry(
             contract_id=contract_id,
             event_type=event_type,

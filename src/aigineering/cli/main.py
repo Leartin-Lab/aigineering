@@ -56,19 +56,16 @@ def _asset_names_for(asset_ids: list[str], store: MemoryStore) -> list[str]:
     ]
 
 
-def _run_demo(goal: str, mock: bool) -> tuple[MemoryStore, TraceStore, Contract]:
+def _run_demo(goal: str) -> tuple[MemoryStore, TraceStore, Contract]:
+    """Run the build_report hallucination containment demo."""
     store = MemoryStore()
     trace_store = TraceStore()
-
     worker = MockWorker()
-    if mock:
-        raw_output = (
-            f"final_report: Report content for goal '{goal}'\n"
-            f"citation_summary: Citation summary for goal '{goal}'"
-        )
-        worker.set_output("build_report", raw_output)
-
-    engine = Engine(store, worker, trace_store)
+    raw_output = (
+        f"final_report: Report content for goal '{goal}'\n"
+        f"citation_summary: Citation summary for goal '{goal}'"
+    )
+    worker.set_output("build_report", raw_output)
 
     data_canonical = _asset_json("data_file", "Sample data for report generation")
     citation_canonical = _asset_json("citation_db", "Sample citation database")
@@ -96,6 +93,7 @@ def _run_demo(goal: str, mock: bool) -> tuple[MemoryStore, TraceStore, Contract]
         budget=5,
     )
 
+    engine = Engine(store, worker, trace_store)
     engine.add_contract(contract)
     engine.add_asset(data_file)
     engine.add_asset(citation_db)
@@ -111,10 +109,9 @@ def cli() -> None:
 
 @cli.command()
 @click.argument("goal")
-@click.option("--mock", is_flag=True, help="Use deterministic mock worker")
-def run(goal: str, mock: bool) -> None:
-    """Execute a contract for GOAL and display the result."""
-    store, trace_store, contract = _run_demo(goal, mock)
+def run(goal: str) -> None:
+    """Execute a demo contract and display the commitment boundary result."""
+    store, trace_store, contract = _run_demo(goal)
     entries = trace_store.get_by_contract(contract.id)
     if not entries:
         click.echo("No trace entries recorded.")
@@ -141,11 +138,13 @@ def run(goal: str, mock: bool) -> None:
 
 
 @cli.command()
-@click.option("--contract", "contract_filter", default=None)
-@click.option("--mock", is_flag=True, help="Use deterministic mock worker")
-def trace(contract_filter: Optional[str], mock: bool) -> None:
-    """Show execution trace timeline including rejected fragments."""
-    _, trace_store, _ = _run_demo("demo", mock)
+@click.option("--contract", "contract_filter", default=None, help="Filter by contract ID")
+def trace(contract_filter: Optional[str]) -> None:
+    """Show the built-in demo trace timeline, including rejected fragments.
+    
+    Note: Currently runs the demo inline. Persisted trace coming in v0.2.
+    """
+    _, trace_store, _ = _run_demo("demo")
     entries = (
         trace_store.get_by_contract(contract_filter)
         if contract_filter
@@ -180,24 +179,33 @@ def _print_timeline_entry(entry: TraceEntry) -> None:
 
 
 @cli.command()
-@click.option("--asset", "asset_id_filter", default=None)
-@click.option("--asset-name", "asset_name_filter", default=None)
-@click.option("--mock", is_flag=True, help="Use deterministic mock worker")
+@click.option("--asset", "asset_id_filter", default=None, help="Asset ID to trace")
+@click.option("--asset-name", "asset_name_filter", default=None, help="Asset name to trace")
 def audit(
     asset_id_filter: Optional[str],
     asset_name_filter: Optional[str],
-    mock: bool,
 ) -> None:
-    """Show reverse lineage from an asset back to activation."""
-    store, trace_store, _ = _run_demo("demo", mock)
+    """Show the built-in demo lineage from an asset back to activation.
+    
+    Note: Currently runs the demo inline. Persisted audit coming in v0.2.
+    """
+    store, trace_store, _ = _run_demo("demo")
 
     target_id: Optional[str] = None
     target_name: Optional[str] = None
 
     if asset_id_filter:
-        target_id = asset_id_filter
         asset = store.get_asset(asset_id_filter)
-        target_name = asset.name if asset else asset_id_filter
+        if asset:
+            target_id = asset_id_filter
+            target_name = asset.name
+        else:
+            matches = store.get_assets_by_name(asset_id_filter)
+            if not matches:
+                click.echo(f"No asset found with id or name '{asset_id_filter}'")
+                return
+            target_id = matches[0].id
+            target_name = matches[0].name
     elif asset_name_filter:
         matches = store.get_assets_by_name(asset_name_filter)
         if not matches:

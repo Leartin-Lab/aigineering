@@ -1,7 +1,7 @@
 # ADR-001: Asset-Driven Execution
 
 **Status**: Accepted  
-**Date**: 2025-06-02
+**Date**: 2026-06-02
 
 ## Context
 

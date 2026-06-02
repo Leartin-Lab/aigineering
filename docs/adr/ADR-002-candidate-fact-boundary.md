@@ -1,7 +1,7 @@
 # ADR-002: Candidate-Fact Boundary
 
 **Status**: Accepted  
-**Date**: 2025-06-02
+**Date**: 2026-06-02
 
 ## Context
 
