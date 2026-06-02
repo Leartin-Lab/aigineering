@@ -28,7 +28,7 @@ This is **Zero Trust for AI agents** translated into runtime semantics:
 
 ```bash
 # Clone and install (requires Python 3.11+)
-git clone https://github.com/aigineering/aigineering.git
+git clone https://github.com/Leartin-Lab/aigineering.git
 cd aigineering
 pip install -e ".[dev]"
 
@@ -66,6 +66,13 @@ This is an early proof-of-concept demonstrating the core invariant: **undeclared
 - PyPI release
 
 See [ROADMAP.md](ROADMAP.md) for the full plan.
+
+---
+
+## Development
+
+Development happens on `dev`. Changes to `main` should go through pull requests
+after CI passes. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ---
 
