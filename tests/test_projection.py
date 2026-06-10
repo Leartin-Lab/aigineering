@@ -58,3 +58,41 @@ def test_parse_error_has_category():
     result = project_candidate(contract, candidate)
     assert len(result.rejected_candidates) == 1
     assert result.rejected_candidates[0].category == RejectionCategory.PARSE_ERROR
+
+
+def test_partial_acceptance_status():
+    contract = Contract(id="c1", outputs=["valid"])
+    candidate = Candidate(worker_id="w", raw_output="valid: content\nundeclared: content")
+    result = project_candidate(contract, candidate)
+    assert result.status == ProjectionStatus.PARTIAL
+    assert len(result.accepted_assets) == 1
+    assert len(result.rejected_candidates) == 1
+
+
+def test_all_rejected_status():
+    contract = Contract(id="c1", outputs=[])
+    candidate = Candidate(worker_id="w", raw_output="x: content")
+    result = project_candidate(contract, candidate)
+    assert result.status == ProjectionStatus.REJECTED
+
+
+def test_all_accepted_status():
+    contract = Contract(id="c1", outputs=["a", "b"])
+    candidate = Candidate(worker_id="w", raw_output="a: one\nb: two")
+    result = project_candidate(contract, candidate)
+    assert result.status == ProjectionStatus.ACCEPTED
+
+
+def test_multiple_rejection_categories():
+    contract = Contract(id="c1", outputs=["valid"])
+    candidate = Candidate(worker_id="w", raw_output="valid: content\nno colon here")
+    result = project_candidate(contract, candidate)
+    categories = {r.category for r in result.rejected_candidates}
+    assert RejectionCategory.PARSE_ERROR in categories
+
+
+def test_immutability():
+    import dataclasses
+    result = ProjectionResult(status=ProjectionStatus.REJECTED)
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        result.status = ProjectionStatus.ACCEPTED

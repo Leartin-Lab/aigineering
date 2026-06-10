@@ -1,5 +1,7 @@
 """Tests for authority checker — the commitment boundary."""
 
+import pytest
+
 from aigineering.core.authority import check_authority, RESERVED_PREFIXES
 from aigineering.protocol.types import Contract
 
@@ -80,3 +82,20 @@ def test_authority_policy_returned():
     assert "reserved_prefixes" in policy
     assert policy["declared_outputs"] == ["report"]
     assert len(policy["reserved_prefixes"]) == len(RESERVED_PREFIXES)
+
+
+@pytest.mark.parametrize("prefix", sorted(RESERVED_PREFIXES))
+def test_every_reserved_prefix_rejected(prefix):
+    name = f"{prefix}test_asset"
+    contract = Contract(id="c1", outputs=[name])
+    acc, rej, _ = check_authority(contract, [{"name": name, "content": "x"}])
+    assert len(rej) == 1
+    assert rej[0]["category"] == "protected_name_rejection"
+
+
+def test_tool_obs_names_rejected():
+    for name in ("_tool_obs_test", "_tool_call_test"):
+        contract = Contract(id="c1", outputs=[name])
+        acc, rej, _ = check_authority(contract, [{"name": name, "content": "x"}])
+        assert len(rej) == 1
+        assert rej[0]["category"] == "protected_name_rejection"
