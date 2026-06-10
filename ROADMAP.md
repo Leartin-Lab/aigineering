@@ -42,7 +42,7 @@
 - [x] Method context assets for scheduled sub-contracts
 - [x] System authority for declared reserved method outputs
 - [x] Tool method execution with call and observation assets
-- [ ] Parent resume from method observations
+- [x] Parent resume from method observations
 - [ ] Contract expansion for planner outputs
 
 ## v0.4 — MCP, Skills, GC, PyPI

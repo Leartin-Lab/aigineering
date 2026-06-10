@@ -11,6 +11,20 @@ from aigineering.core.ids import asset_id, contract_id
 from aigineering.protocol.types import Asset, Contract, ToolSpec
 
 
+class SequenceWorker:
+    worker_id = "sequence_worker"
+
+    def __init__(self, outputs: list[str]) -> None:
+        self._outputs = outputs
+        self.calls: list[tuple[Contract, list[Asset]]] = []
+
+    def invoke(self, contract: Contract, disclosed_assets: list[Asset]):
+        self.calls.append((contract, disclosed_assets))
+        raw_output = self._outputs.pop(0) if self._outputs else ""
+        from aigineering.protocol.types import Candidate
+        return Candidate(worker_id=self.worker_id, raw_output=raw_output)
+
+
 def _asset_canonical(name: str, content: str) -> str:
     return json.dumps(
         {"name": name, "content": content, "content_type": "text",
@@ -305,3 +319,42 @@ def test_tool_method_records_error_observation_for_out_of_scope_tool():
     assert "not in contract.tool_scope" in obs_assets[0].content
     tool_events = trace_store.get_by_event_type("tool_executed")
     assert tool_events[0].authority_result == "rejected"
+
+
+def test_tool_observation_resumes_parent_without_satisfying_output():
+    store = MemoryStore()
+    trace_store = TraceStore()
+    worker = SequenceWorker([
+        '/tool {"name": "lookup", "args": {"key": "x"}}',
+        '/exec {"outputs": {"report": "final after tool"}}',
+    ])
+    tools = ToolRegistry()
+    tools.register(ToolSpec(name="lookup"), lambda args: f"value:{args['key']}")
+    contract = Contract(
+        id="contract_parent",
+        name="root",
+        outputs=["report"],
+        activation="",
+        budget=5,
+        tool_scope=["lookup"],
+    )
+    engine = Engine(store, worker, trace_store, tools=tools)
+    engine.add_contract(contract)
+
+    engine.run()
+
+    reports = store.get_assets_by_name("report")
+    assert len(reports) == 1
+    assert reports[0].content == "final after tool"
+    obs_assets = store.get_assets_by_name(f"_tool_obs_{contract.id}")
+    assert len(obs_assets) == 1
+
+    parent_calls = [call for call in worker.calls if call[0].id == contract.id]
+    assert len(parent_calls) == 2
+    second_scope_names = {asset.name for asset in parent_calls[1][1]}
+    assert f"_tool_obs_{contract.id}" in second_scope_names
+
+    resumed = trace_store.get_by_event_type("method_resumed")
+    assert len(resumed) == 1
+    assert resumed[0].relation_type == "tool"
+    assert resumed[0].relation_target != contract.id

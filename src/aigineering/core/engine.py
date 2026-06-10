@@ -50,6 +50,7 @@ class Engine:
         self._labels = labels if labels is not None else {}
         self._tools = tools
         self._label_context: dict[str, list[Asset]] = {}
+        self._method_context: dict[str, list[Asset]] = {}
         self._budget: dict[str, int] = {}
         self._completed: set[str] = set()
         self._suspended: set[str] = set()
@@ -126,6 +127,7 @@ class Engine:
                             budget_remaining=self._resolve_budget(contract),
                         )
                         self._completed.add(contract.id)
+                        self._resume_parent_from_method(contract)
                     break
 
                 candidate: Candidate = self._worker.invoke(contract, scope)
@@ -181,6 +183,7 @@ class Engine:
                         budget_remaining=self._resolve_budget(contract),
                     )
                     self._completed.add(contract.id)
+                    self._resume_parent_from_method(contract)
                     break
 
     def _resolve_budget(self, contract: Contract) -> int:
@@ -196,6 +199,12 @@ class Engine:
                 seen.add(asset.id)
                 scope.append(asset)
         for asset in self._label_context.get(contract.id, []):
+            if not asset.promptable:
+                continue
+            if asset.id not in seen:
+                seen.add(asset.id)
+                scope.append(asset)
+        for asset in self._method_context.get(contract.id, []):
             if not asset.promptable:
                 continue
             if asset.id not in seen:
@@ -333,6 +342,33 @@ class Engine:
             budget_remaining=self._resolve_budget(contract),
         )
         return True
+
+    def _resume_parent_from_method(self, contract: Contract) -> None:
+        parent_id = contract.parent_id
+        if contract.origin != "system" or parent_id is None:
+            return
+
+        method_assets = [
+            asset
+            for asset in self._store.get_assets_by_contract(contract.id)
+            if asset.promptable
+        ]
+        if method_assets:
+            existing = {asset.id for asset in self._method_context.get(parent_id, [])}
+            for asset in method_assets:
+                if asset.id not in existing:
+                    self._method_context.setdefault(parent_id, []).append(asset)
+                    existing.add(asset.id)
+
+        self._suspended.discard(parent_id)
+        self._add_trace(
+            parent_id,
+            "method_resumed",
+            disclosed_assets=[asset.id for asset in method_assets],
+            relation_type=_method_payload(contract).get("method"),
+            relation_target=contract.id,
+            budget_remaining=self._budget.get(parent_id, 0),
+        )
 
 
 def _parse_method_action(candidate: Candidate) -> WorkerAction | None:
