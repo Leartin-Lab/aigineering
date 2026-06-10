@@ -9,8 +9,12 @@ from aigineering.agent.worker import Worker
 from aigineering.core.activation import check_activation
 from aigineering.core.disclosure import compute_disclosure
 from aigineering.core.labels import Label, resolve_contract_labels
-from aigineering.core.methods import method_contract
-from aigineering.core.ids import asset_id, contract_id
+from aigineering.core.methods import (
+    contracts_from_plan_asset,
+    method_contract,
+    method_payload,
+    system_asset,
+)
 from aigineering.core.projection import project_candidate
 from aigineering.core.provenance import sign_asset
 from aigineering.core.store import StoreProtocol
@@ -18,7 +22,6 @@ from aigineering.core.trace import MemoryTraceStore, TraceStoreProtocol
 from aigineering.core.tools import ToolRegistry
 from aigineering.protocol.actions import ActionParseError, WorkerAction, parse_action
 from aigineering.protocol.types import Asset, Candidate, Contract, ProjectionResult
-from aigineering.protocol.wire import contract_to_canonical
 
 _logger = logging.getLogger(__name__)
 
@@ -259,20 +262,15 @@ class Engine:
             sort_keys=True,
             ensure_ascii=False,
         )
-        asset = Asset(
-            id=_runtime_asset_id(name, content),
+        asset = system_asset(
             name=name,
             content=content,
             created_by=contract.id,
-            origin="system",
-            trust_tier="system",
-            minted_by="engine",
-            promptable=True,
         )
         self._store.add_asset(sign_asset(asset))
 
     def _run_system_method(self, contract: Contract) -> bool:
-        method = _method_payload(contract)
+        method = method_payload(contract)
         if contract.origin != "system" or method.get("method") != "tool":
             return False
 
@@ -289,7 +287,7 @@ class Engine:
             sort_keys=True,
             ensure_ascii=False,
         )
-        call_asset = _system_asset(
+        call_asset = system_asset(
             name=f"_tool_call_{contract.id}",
             content=call_content,
             created_by=contract.id,
@@ -323,7 +321,7 @@ class Engine:
             sort_keys=True,
             ensure_ascii=False,
         )
-        obs_asset = _system_asset(
+        obs_asset = system_asset(
             name=obs_name,
             content=obs_content,
             created_by=contract.id,
@@ -366,7 +364,7 @@ class Engine:
             parent_id,
             "method_resumed",
             disclosed_assets=[asset.id for asset in method_assets],
-            relation_type=_method_payload(contract).get("method"),
+            relation_type=method_payload(contract).get("method"),
             relation_target=contract.id,
             budget_remaining=self._budget.get(parent_id, 0),
         )
@@ -377,14 +375,14 @@ class Engine:
         method_contract: Contract,
         method_assets: list[Asset],
     ) -> None:
-        if _method_payload(method_contract).get("method") != "plan":
+        if method_payload(method_contract).get("method") != "plan":
             return
 
         created: list[str] = []
         for asset in method_assets:
             if not asset.name.startswith("_plan_result_"):
                 continue
-            for child in _contracts_from_plan_asset(asset, method_contract.parent_id):
+            for child in contracts_from_plan_asset(asset, method_contract.parent_id):
                 if self._store.get_contract(child.id) is None:
                     self.add_contract(child)
                     created.append(child.id)
@@ -417,98 +415,3 @@ def _parse_method_action(candidate: Candidate) -> WorkerAction | None:
     if action.type in {"plan", "replan", "tool"}:
         return action
     return None
-
-
-def _method_payload(contract: Contract) -> dict:
-    if not contract.description:
-        return {}
-    try:
-        parsed = json.loads(contract.description)
-    except json.JSONDecodeError:
-        return {}
-    return parsed if isinstance(parsed, dict) else {}
-
-
-def _runtime_asset_id(name: str, content: str) -> str:
-    canonical = json.dumps(
-        {"name": name, "content": content},
-        sort_keys=True,
-        ensure_ascii=False,
-    )
-    return asset_id(canonical)
-
-
-def _system_asset(
-    name: str,
-    content: str,
-    created_by: str,
-    promptable: bool = True,
-    source_uri: str = "",
-) -> Asset:
-    return Asset(
-        id=_runtime_asset_id(name, content),
-        name=name,
-        content=content,
-        created_by=created_by,
-        origin="system",
-        trust_tier="system",
-        minted_by="engine",
-        source_uri=source_uri,
-        promptable=promptable,
-    )
-
-
-def _contracts_from_plan_asset(
-    asset: Asset,
-    parent_id: str | None,
-) -> list[Contract]:
-    try:
-        payload = json.loads(asset.content)
-    except json.JSONDecodeError:
-        return []
-    if not isinstance(payload, dict):
-        return []
-
-    raw_contracts = payload.get("contracts", [])
-    if not isinstance(raw_contracts, list):
-        return []
-
-    contracts: list[Contract] = []
-    for raw in raw_contracts:
-        if not isinstance(raw, dict):
-            continue
-        contract = Contract(
-            id="",
-            parent_id=parent_id,
-            name=str(raw.get("name", "")),
-            description=str(raw.get("description", "")),
-            inputs=_string_list(raw.get("inputs", [])),
-            outputs=_string_list(raw.get("outputs", [])),
-            activation=str(raw.get("activation", "")),
-            budget=int(raw.get("budget", 1) or 1),
-            tool_scope=_string_list(raw.get("tool_scope", [])),
-            labels=_string_list(raw.get("labels", [])),
-            origin="plan",
-        )
-        contracts.append(
-            Contract(
-                id=contract_id(contract_to_canonical(contract)),
-                parent_id=contract.parent_id,
-                name=contract.name,
-                description=contract.description,
-                inputs=contract.inputs,
-                outputs=contract.outputs,
-                activation=contract.activation,
-                budget=contract.budget,
-                tool_scope=contract.tool_scope,
-                labels=contract.labels,
-                origin=contract.origin,
-            )
-        )
-    return contracts
-
-
-def _string_list(value: object) -> list[str]:
-    if not isinstance(value, list):
-        return []
-    return [item for item in value if isinstance(item, str)]
