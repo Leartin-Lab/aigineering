@@ -9,7 +9,7 @@ def contract_with_outputs(*outputs: str) -> Contract:
 
 
 def test_declared_output_accepted():
-    acc, rej = check_authority(
+    acc, rej, _ = check_authority(
         contract_with_outputs("report"),
         [{"name": "report", "content": "hello"}],
     )
@@ -19,27 +19,29 @@ def test_declared_output_accepted():
 
 
 def test_undeclared_output_rejected():
-    acc, rej = check_authority(
+    acc, rej, _ = check_authority(
         contract_with_outputs("report"),
         [{"name": "citation", "content": "Smith 2025"}],
     )
     assert len(acc) == 0
     assert len(rej) == 1
     assert "not in contract.outputs" in rej[0]["reject_reason"]
+    assert rej[0]["category"] == "authority_rejection"
 
 
 def test_reserved_prefix_rejected():
-    acc, rej = check_authority(
+    acc, rej, _ = check_authority(
         contract_with_outputs("_sys_config"),
         [{"name": "_sys_config", "content": "secret"}],
     )
     assert len(acc) == 0
     assert len(rej) == 1
     assert "reserved prefix" in rej[0]["reject_reason"]
+    assert rej[0]["category"] == "protected_name_rejection"
 
 
 def test_mixed_accept_reject():
-    acc, rej = check_authority(
+    acc, rej, _ = check_authority(
         contract_with_outputs("report", "data"),
         [
             {"name": "report", "content": "r"},
@@ -53,9 +55,28 @@ def test_mixed_accept_reject():
 
 
 def test_empty_outputs_allows_nothing():
-    acc, rej = check_authority(
+    acc, rej, _ = check_authority(
         Contract(id="c2", name="empty", outputs=[]),
         [{"name": "anything", "content": "x"}],
     )
     assert len(acc) == 0
     assert len(rej) == 1
+
+
+def test_rejected_has_category():
+    acc, rej, _ = check_authority(
+        Contract(id="c1", outputs=["x"]),
+        [{"name": "y", "content": "z"}],
+    )
+    assert rej[0]["category"] == "authority_rejection"
+
+
+def test_authority_policy_returned():
+    acc, rej, policy = check_authority(
+        Contract(id="c1", outputs=["report"]),
+        [{"name": "report", "content": "hello"}],
+    )
+    assert "declared_outputs" in policy
+    assert "reserved_prefixes" in policy
+    assert policy["declared_outputs"] == ["report"]
+    assert len(policy["reserved_prefixes"]) == len(RESERVED_PREFIXES)

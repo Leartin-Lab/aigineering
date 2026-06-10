@@ -27,25 +27,45 @@ RESERVED_PREFIXES: frozenset[str] = frozenset(
 def check_authority(
     contract: Contract,
     candidate_assets: list[dict],
-) -> tuple[list[dict], list[dict]]:
+) -> tuple[list[dict], list[dict], dict]:
+    """Check whether each candidate asset is within the contract's declared
+    outputs and does not collide with a reserved name prefix.
+
+    Returns
+    -------
+    (accepted, rejected, authority_policy)
+
+    accepted : list[dict]
+        Each dict has ``name`` and ``content``.
+    rejected : list[dict]
+        Each dict has ``name``, ``content``, ``reject_reason``, and
+        ``category`` (one of ``"protected_name_rejection"`` or
+        ``"authority_rejection"``).
+    authority_policy : dict
+        ``{"declared_outputs": contract.outputs,
+        "reserved_prefixes": sorted(RESERVED_PREFIXES)}``.
+    """
     accepted: list[dict] = []
     rejected: list[dict] = []
 
     for candidate in candidate_assets:
         name: str = candidate["name"]
         reasons: list[str] = []
+        category: str | None = None
 
         if name not in contract.outputs:
             reasons.append(
                 f"asset '{name}' is not in contract.outputs "
                 f"({contract.outputs!r})"
             )
+            category = "authority_rejection"
 
         for prefix in RESERVED_PREFIXES:
             if name.startswith(prefix):
                 reasons.append(
                     f"asset '{name}' starts with reserved prefix '{prefix}'"
                 )
+                category = "protected_name_rejection"
                 break
 
         if reasons:
@@ -54,9 +74,15 @@ def check_authority(
                     "name": name,
                     "content": candidate["content"],
                     "reject_reason": "; ".join(reasons),
+                    "category": category,
                 }
             )
         else:
             accepted.append({"name": name, "content": candidate["content"]})
 
-    return accepted, rejected
+    authority_policy: dict = {
+        "declared_outputs": contract.outputs,
+        "reserved_prefixes": sorted(RESERVED_PREFIXES),
+    }
+
+    return accepted, rejected, authority_policy

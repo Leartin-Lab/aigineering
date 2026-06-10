@@ -92,7 +92,7 @@ def project_candidate(
         else:
             deduped_fragments.append(f)
 
-    accepted_dicts, authority_rejected_dicts = check_authority(contract, deduped_fragments)
+    accepted_dicts, authority_rejected_dicts, authority_policy = check_authority(contract, deduped_fragments)
     accepted_assets: list[Asset] = []
 
     for a in accepted_dicts:
