@@ -15,6 +15,7 @@ from aigineering.core.replay import replay_all, replay_session
 from aigineering.core.session import SessionStore
 from aigineering.core.store import JsonLStore, MemoryStore, StoreProtocol
 from aigineering.core.trace import JsonLTraceStore, MemoryTraceStore, TraceStoreProtocol
+from aigineering.agent.llm import LLMWorker
 from aigineering.agent.mock import MockWorker
 from aigineering.protocol.types import Asset, Contract, Session, TraceEntry
 
@@ -178,18 +179,22 @@ def _run_demo(
     goal: str,
     trace_store: TraceStoreProtocol | None = None,
     store: StoreProtocol | None = None,
+    worker_kind: str = "mock",
+    model: Optional[str] = None,
+    base_url: str = "https://api.openai.com/v1",
 ) -> tuple[StoreProtocol, TraceStoreProtocol, Contract]:
     """Run the build_report hallucination containment demo."""
     if store is None:
         store = MemoryStore()
     if trace_store is None:
         trace_store = MemoryTraceStore()
-    worker = MockWorker()
-    raw_output = (
-        f"final_report: Report content for goal '{goal}'\n"
-        f"citation_summary: Citation summary for goal '{goal}'"
-    )
-    worker.set_output("build_report", raw_output)
+    worker = _build_worker(worker_kind, model, base_url)
+    if isinstance(worker, MockWorker):
+        raw_output = (
+            f"final_report: Report content for goal '{goal}'\n"
+            f"citation_summary: Citation summary for goal '{goal}'"
+        )
+        worker.set_output("build_report", raw_output)
 
     data_canonical = _asset_json("data_file", "Sample data for report generation")
     citation_canonical = _asset_json("citation_db", "Sample citation database")
@@ -209,6 +214,7 @@ def _run_demo(
 
     contract_canonical = _contract_json(
         name="build_report",
+        description=f"Build a report for goal: {goal}",
         inputs=["data_file", "citation_db"],
         outputs=["final_report"],
         activation="data_file AND citation_db",
@@ -228,6 +234,20 @@ def _run_demo(
     engine.run()
 
     return store, trace_store, contract
+
+
+def _build_worker(
+    worker_kind: str,
+    model: Optional[str],
+    base_url: str,
+) -> MockWorker | LLMWorker:
+    if worker_kind == "mock":
+        return MockWorker()
+    if worker_kind == "llm":
+        if not model:
+            raise click.ClickException("--model is required when --worker llm")
+        return LLMWorker(model=model, base_url=base_url)
+    raise click.ClickException(f"unsupported worker: {worker_kind}")
 
 
 # ---------------------------------------------------------------------------
@@ -273,7 +293,27 @@ def cli() -> None:
 
 @cli.command()
 @click.argument("goal")
-def run(goal: str) -> None:
+@click.option(
+    "--worker",
+    "worker_kind",
+    type=click.Choice(["mock", "llm"]),
+    default="mock",
+    show_default=True,
+    help="Worker implementation to use.",
+)
+@click.option("--model", default=None, help="LLM model name when --worker llm.")
+@click.option(
+    "--base-url",
+    default="https://api.openai.com/v1",
+    show_default=True,
+    help="OpenAI-compatible base URL when --worker llm.",
+)
+def run(
+    goal: str,
+    worker_kind: str,
+    model: Optional[str],
+    base_url: str,
+) -> None:
     """Execute a demo contract and persist the trace to JSONL."""
     session_id = _session_id()
     trace_path = _get_trace_dir() / f"{session_id}.jsonl"
@@ -282,6 +322,9 @@ def run(goal: str) -> None:
         goal,
         trace_store=jsonl_store,
         store=_persistent_store(),
+        worker_kind=worker_kind,
+        model=model,
+        base_url=base_url,
     )
     entries = trace_store.get_by_contract(contract.id)
     if not entries:
@@ -588,9 +631,34 @@ def _print_replay_result(result: dict) -> None:
 
 @cli.command()
 @click.argument("goal")
-def demo(goal: str) -> None:
+@click.option(
+    "--worker",
+    "worker_kind",
+    type=click.Choice(["mock", "llm"]),
+    default="mock",
+    show_default=True,
+    help="Worker implementation to use.",
+)
+@click.option("--model", default=None, help="LLM model name when --worker llm.")
+@click.option(
+    "--base-url",
+    default="https://api.openai.com/v1",
+    show_default=True,
+    help="OpenAI-compatible base URL when --worker llm.",
+)
+def demo(
+    goal: str,
+    worker_kind: str,
+    model: Optional[str],
+    base_url: str,
+) -> None:
     """Run a quick demo with the given goal (quickstart experience)."""
-    store, trace_store, contract = _run_demo(goal)
+    store, trace_store, contract = _run_demo(
+        goal,
+        worker_kind=worker_kind,
+        model=model,
+        base_url=base_url,
+    )
     click.echo(f"Demo completed for goal: '{goal}'")
     click.echo(f"  Contract: {contract.name}")
     click.echo(f"  Assets: {[a.name for a in store.get_all_assets()]}")

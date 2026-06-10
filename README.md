@@ -38,6 +38,10 @@ aig demo "build report with citations"
 # Or run with persistence (creates replayable session)
 aig run "build report with citations"
 
+# Use an OpenAI-compatible LLM worker
+export AIGINEERING_API_KEY="..."
+aig run "build report with citations" --worker llm --model gpt-4.1-mini
+
 # See what happened — including what was REJECTED
 aig trace
 
@@ -82,6 +86,7 @@ This is an early proof-of-concept demonstrating the core invariant: **undeclared
 - Method scheduling deduplication by deterministic child contract identity
 - Tool method execution with `_tool_call_*` and `_tool_obs_*` system assets
 - Parent resume from completed method assets without output shortcutting
+- CLI worker selection for mock and OpenAI-compatible LLM workers
 - CLI trace rendering for method scheduling events
 - Tool registry with serializable `ToolSpec` and private handlers
 

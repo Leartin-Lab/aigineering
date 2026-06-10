@@ -241,6 +241,26 @@ def test_demo_command_exists():
         assert "Demo completed" in result.output
 
 
+def test_run_llm_worker_requires_model():
+    """aig run --worker llm fails before network use when model is missing."""
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        result = runner.invoke(cli, ["run", "test", "--worker", "llm"])
+
+        assert result.exit_code != 0
+        assert "--model is required" in result.output
+
+
+def test_demo_llm_worker_requires_model():
+    """aig demo --worker llm fails before network use when model is missing."""
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        result = runner.invoke(cli, ["demo", "test", "--worker", "llm"])
+
+        assert result.exit_code != 0
+        assert "--model is required" in result.output
+
+
 def test_replay_valid_session():
     """aig run → aig replay <session_id> shows replay output with consistency."""
     runner = CliRunner()
