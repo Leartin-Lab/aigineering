@@ -25,7 +25,12 @@ class SessionStore:
             self._dir.mkdir(parents=True, exist_ok=True)
 
     def _file_path(self, session_id: str) -> Path:
-        return self._dir / f"session_{session_id}.json"
+        filename = (
+            f"{session_id}.json"
+            if session_id.startswith("session_")
+            else f"session_{session_id}.json"
+        )
+        return self._dir / filename
 
     def create_session(self, session: Session) -> None:
         """Persist *session* to ``session_<id>.json``."""

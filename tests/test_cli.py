@@ -96,6 +96,42 @@ def test_run_creates_trace_file():
                     assert "contract_id" in data, f"Missing contract_id in {fp}"
 
 
+def test_run_persists_assets_contracts_and_session_manifest():
+    """aig run persists trace, asset/contract store, and session manifest under one session id."""
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        result = runner.invoke(cli, ["run", "test"])
+
+        assert result.exit_code == 0
+
+        trace_files = sorted(Path(".aig/traces").glob("session_*.jsonl"))
+        session_files = sorted(Path(".aig/sessions").glob("session_*.json"))
+        assert len(trace_files) == 1
+        assert len(session_files) == 1
+
+        session_id = trace_files[0].stem
+        assert session_files[0].stem == session_id
+
+        assets_path = Path(".aig/store/assets.jsonl")
+        contracts_path = Path(".aig/store/contracts.jsonl")
+        assert assets_path.exists()
+        assert contracts_path.exists()
+
+        asset_rows = [
+            json.loads(line)
+            for line in assets_path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        contract_rows = [
+            json.loads(line)
+            for line in contracts_path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+
+        assert any(row["name"] == "final_report" for row in asset_rows)
+        assert any(row["name"] == "build_report" for row in contract_rows)
+
+
 def test_trace_reads_from_latest_file():
     """aig trace reads and displays entries from a pre-existing session file."""
     runner = CliRunner()

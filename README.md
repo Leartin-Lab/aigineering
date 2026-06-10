@@ -64,12 +64,12 @@ This is an early proof-of-concept demonstrating the core invariant: **undeclared
 - Mock worker demo (built-in `build_report` scenario)
 - CLI: `aig demo`, `aig run`, `aig trace`, `aig audit`, `aig replay`, `aig session`
 - JSONL persistent trace (`.aig/traces/`) with atomic append
+- JSONL persistent asset/contract store (`.aig/store/`)
 - Session manifest (`.aig/sessions/`) with trace linkage
 - Full replay from persisted runtime state with consistency validation
 
 **Not yet implemented (see ROADMAP.md):**
 - Real LLM integration
-- Persistent asset/contract store (`.aig/store/`) via JSONL
 - MCP / Skills / Tools
 - Multi-contract orchestration
 - Distributed runtime

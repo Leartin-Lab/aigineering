@@ -13,7 +13,7 @@ from aigineering.core.engine import Engine
 from aigineering.core.ids import asset_id, contract_id
 from aigineering.core.replay import replay_all, replay_session
 from aigineering.core.session import SessionStore
-from aigineering.core.store import MemoryStore
+from aigineering.core.store import JsonLStore, MemoryStore, StoreProtocol
 from aigineering.core.trace import JsonLTraceStore, MemoryTraceStore, TraceStoreProtocol
 from aigineering.agent.mock import MockWorker
 from aigineering.protocol.types import Asset, Contract, Session, TraceEntry
@@ -22,6 +22,20 @@ from aigineering.protocol.types import Asset, Contract, Session, TraceEntry
 def _get_trace_dir() -> Path:
     """Return the trace directory (created lazily on first write)."""
     return Path(".aig/traces")
+
+
+def _get_store_dir() -> Path:
+    """Return the persistent asset/contract store directory."""
+    return Path(".aig/store")
+
+
+def _persistent_store() -> JsonLStore:
+    """Create the default local persistent store."""
+    store_dir = _get_store_dir()
+    return JsonLStore(
+        str(store_dir / "assets.jsonl"),
+        str(store_dir / "contracts.jsonl"),
+    )
 
 
 def _session_id() -> str:
@@ -91,9 +105,9 @@ def _contract_json(
 
 def _asset_names_for(
     asset_ids: list[str],
-    resolver: MemoryStore | dict[str, str],
+    resolver: StoreProtocol | dict[str, str],
 ) -> list[str]:
-    """Resolve asset IDs to names via a MemoryStore or an id→name dict."""
+    """Resolve asset IDs to names via a store or an id→name dict."""
     if isinstance(resolver, dict):
         return [resolver.get(aid, aid) for aid in asset_ids]
     return [
@@ -153,9 +167,11 @@ def _find_trace_for_session(
 def _run_demo(
     goal: str,
     trace_store: TraceStoreProtocol | None = None,
-) -> tuple[MemoryStore, TraceStoreProtocol, Contract]:
+    store: StoreProtocol | None = None,
+) -> tuple[StoreProtocol, TraceStoreProtocol, Contract]:
     """Run the build_report hallucination containment demo."""
-    store = MemoryStore()
+    if store is None:
+        store = MemoryStore()
     if trace_store is None:
         trace_store = MemoryTraceStore()
     worker = MockWorker()
@@ -245,9 +261,14 @@ def cli() -> None:
 @click.argument("goal")
 def run(goal: str) -> None:
     """Execute a demo contract and persist the trace to JSONL."""
-    trace_path = _get_trace_dir() / f"{_session_id()}.jsonl"
+    session_id = _session_id()
+    trace_path = _get_trace_dir() / f"{session_id}.jsonl"
     jsonl_store = JsonLTraceStore(str(trace_path))
-    store, trace_store, contract = _run_demo(goal, trace_store=jsonl_store)
+    store, trace_store, contract = _run_demo(
+        goal,
+        trace_store=jsonl_store,
+        store=_persistent_store(),
+    )
     entries = trace_store.get_by_contract(contract.id)
     if not entries:
         click.echo("No trace entries recorded.")
@@ -275,7 +296,6 @@ def run(goal: str) -> None:
     click.echo(f"Trace saved to {trace_path}")
 
     # ── Session manifest ───────────────────────────────────────────────────
-    session_id = _session_id()
     contract_ids = [c.id for c in store.get_all_contracts()]
     asset_ids = [a.id for a in store.get_all_assets()]
     trace_ids = [e.id for e in jsonl_store.get_all()]
@@ -413,7 +433,7 @@ def _print_reverse_lineage(
     asset_id_val: str,
     asset_name: str,
     trace_store: TraceStoreProtocol,
-    resolver: MemoryStore | dict[str, str],
+    resolver: StoreProtocol | dict[str, str],
 ) -> None:
     lineage_entries = trace_store.get_reverse_lineage(asset_id_val)
     if not lineage_entries:
@@ -445,7 +465,7 @@ def _print_reverse_lineage(
 def _follow_parents(
     entry: TraceEntry,
     trace_store: TraceStoreProtocol,
-    resolver: MemoryStore | dict[str, str],
+    resolver: StoreProtocol | dict[str, str],
     indent: str,
     max_depth: int = 5,
 ) -> None:

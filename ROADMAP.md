@@ -15,11 +15,14 @@
 - [x] Atomic append and reload for trace entries
 - [x] `aig trace` reads latest persisted trace
 - [x] `aig audit` resolves accepted asset names from persisted projection trace
+- [x] Projection/commit separation with pure `ProjectionResult`
+- [x] Structured rejection categories and projection status
+- [x] Boundary regression pack
+- [x] Persistent asset/contract store (`.aig/store/*.jsonl`)
+- [x] Session manifest (`.aig/sessions/*.json`)
+- [x] JSONL trace reload beyond latest-session CLI reads via `--session`
+- [x] `aig replay` (from persisted session + trace)
 - [ ] SQLiteStore (single-file persistence)
-- [ ] Persistent asset/contract store
-- [ ] Session manifest
-- [ ] JSONL trace export/import beyond latest-session CLI reads
-- [ ] `aig replay` (from trace store)
 - [ ] `aig retry --contract` (incremental retry)
 - [ ] `aig trace --tree` / `aig trace --dag`
 
