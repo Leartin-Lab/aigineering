@@ -73,9 +73,9 @@ This is an early proof-of-concept demonstrating the core invariant: **undeclared
 - Deterministic provenance signatures (`signed_by`, `signature`)
 - Worker protocol interface for candidate-producing execution environments
 - Worker-produced assets use explicit worker provenance, independent of the mock demo
+- OpenAI-compatible LLM worker for chat-completions endpoints
 
 **Not yet implemented (see ROADMAP.md):**
-- Real LLM integration
 - MCP / Skills / Tools
 - Multi-contract orchestration
 - Distributed runtime

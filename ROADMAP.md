@@ -34,7 +34,7 @@
 
 ## v0.3 — Real LLM & Protocol
 
-- [ ] OpenAI-compatible LLM worker
+- [x] OpenAI-compatible LLM worker
 - [ ] `/exec` / `/plan` / `/replan` / `/tool` protocol parsing
 - [ ] Prompt builder
 - [ ] Method subtask semantics
