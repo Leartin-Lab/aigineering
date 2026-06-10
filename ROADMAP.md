@@ -1,6 +1,6 @@
 # Aigineering Roadmap
 
-## v0.1 — Hallucination Containment MVP (Current)
+## v0.1 — Hallucination Containment MVP
 
 - [x] Deterministic SHA-256 content-addressed IDs
 - [x] Asset / Contract / Candidate / TraceEntry data models
@@ -9,10 +9,16 @@
 - [x] Mock worker demo
 - [x] `aig run`, `aig trace`, `aig audit` CLI
 
-## v0.2 — Persistence & Replay
+## v0.2 — Persistence & Replay (Current)
 
+- [x] JSONL persistent trace (`.aig/traces/session_*.jsonl`)
+- [x] Atomic append and reload for trace entries
+- [x] `aig trace` reads latest persisted trace
+- [x] `aig audit` resolves accepted asset names from persisted projection trace
 - [ ] SQLiteStore (single-file persistence)
-- [ ] JSONL trace export/import
+- [ ] Persistent asset/contract store
+- [ ] Session manifest
+- [ ] JSONL trace export/import beyond latest-session CLI reads
 - [ ] `aig replay` (from trace store)
 - [ ] `aig retry --contract` (incremental retry)
 - [ ] `aig trace --tree` / `aig trace --dag`

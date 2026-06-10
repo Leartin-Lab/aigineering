@@ -55,12 +55,13 @@ This is an early proof-of-concept demonstrating the core invariant: **undeclared
 - Rejected candidate recording in trace (with rejection reasons)
 - Parse-error and duplicate-output rejection
 - Mock worker demo (built-in `build_report` scenario)
-- CLI: `aig run`, `aig trace`, `aig audit` (demo-only; persistence in v0.2)
+- CLI: `aig run`, `aig trace`, `aig audit` for the built-in demo
 - JSONL persistent trace (`.aig/traces/`) with atomic append
 
 **Not yet implemented (see ROADMAP.md):**
 - Real LLM integration
 - Persistent asset/contract store (currently in-memory)
+- Session manifest and full replay from persisted runtime state
 - MCP / Skills / Tools
 - Multi-contract orchestration
 - Distributed runtime
