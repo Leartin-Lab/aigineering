@@ -26,6 +26,7 @@ class StoreProtocol(Protocol):
     def add_contract(self, contract: Contract) -> None: ...
     def get_contract(self, contract_id: str) -> Optional[Contract]: ...
     def get_all_contracts(self) -> list[Contract]: ...
+    def get_assets_by_contract(self, contract_id: str) -> list[Asset]: ...
 
 
 class MemoryStore:
@@ -99,9 +100,15 @@ class JsonLStore:
                     origin=data.get("origin", "system"),
                 )
                 self.assets[asset.id] = asset
-                self._name_index.setdefault(asset.name, []).append(asset.id)
-                if asset.created_by:
-                    self._created_by_index.setdefault(asset.created_by, []).append(asset.id)
+        self._rebuild_indexes()
+
+    def _rebuild_indexes(self) -> None:
+        self._name_index.clear()
+        self._created_by_index.clear()
+        for asset in self.assets.values():
+            self._name_index.setdefault(asset.name, []).append(asset.id)
+            if asset.created_by:
+                self._created_by_index.setdefault(asset.created_by, []).append(asset.id)
 
     def _load_contracts(self) -> None:
         if not os.path.exists(self._contracts_path):
@@ -139,6 +146,17 @@ class JsonLStore:
     def add_asset(self, asset: Asset) -> None:
         line = json.dumps(asset_to_dict(asset), ensure_ascii=False) + "\n"
         self._write_jsonl_line(self._assets_path, line)
+        # If ID already exists, remove old index entries before overwriting
+        existing = self.assets.get(asset.id)
+        if existing is not None:
+            if existing.name in self._name_index:
+                self._name_index[existing.name] = [
+                    aid for aid in self._name_index[existing.name] if aid != asset.id
+                ]
+            if existing.created_by and existing.created_by in self._created_by_index:
+                self._created_by_index[existing.created_by] = [
+                    aid for aid in self._created_by_index[existing.created_by] if aid != asset.id
+                ]
         self.assets[asset.id] = asset
         self._name_index.setdefault(asset.name, []).append(asset.id)
         if asset.created_by:
