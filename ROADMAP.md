@@ -37,7 +37,8 @@
 - [x] OpenAI-compatible LLM worker
 - [x] Prompt builder
 - [x] `/exec` / `/plan` / `/replan` / `/tool` protocol parsing
-- [ ] Method subtask semantics
+- [x] Method action to system sub-contract semantics
+- [ ] Engine method sub-contract scheduling
 - [ ] Contract expansion for tool calls
 
 ## v0.4 — MCP, Skills, GC, PyPI
