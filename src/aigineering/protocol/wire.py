@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from aigineering.protocol.types import Asset, Candidate, Contract, TraceEntry
+from aigineering.protocol.types import Asset, Candidate, Contract, Session, TraceEntry
 
 
 def asset_to_canonical(asset: Asset) -> str:
@@ -108,3 +108,29 @@ def candidate_to_dict(candidate: Candidate) -> dict[str, Any]:
         "raw_output": candidate.raw_output,
         "parsed_action": candidate.parsed_action,
     }
+
+
+def session_to_dict(session: Session) -> dict[str, Any]:
+    return {
+        "id": session.id,
+        "root_contract_id": session.root_contract_id,
+        "contract_ids": session.contract_ids,
+        "asset_ids": session.asset_ids,
+        "trace_ids": session.trace_ids,
+        "config_snapshot": session.config_snapshot,
+        "worker_snapshot": session.worker_snapshot,
+        "created_at": session.created_at,
+    }
+
+
+def session_from_dict(data: dict[str, Any]) -> Session:
+    return Session(
+        id=data.get("id", ""),
+        root_contract_id=data.get("root_contract_id", ""),
+        contract_ids=data.get("contract_ids", []),
+        asset_ids=data.get("asset_ids", []),
+        trace_ids=data.get("trace_ids", []),
+        config_snapshot=data.get("config_snapshot", {}),
+        worker_snapshot=data.get("worker_snapshot", {}),
+        created_at=data.get("created_at", ""),
+    )
