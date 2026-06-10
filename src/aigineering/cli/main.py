@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import time
+from pathlib import Path
 from typing import Optional
 
 import click
@@ -10,9 +12,45 @@ import click
 from aigineering.core.engine import Engine
 from aigineering.core.ids import asset_id, contract_id
 from aigineering.core.store import MemoryStore
-from aigineering.core.trace import TraceStore
+from aigineering.core.trace import JsonLTraceStore, MemoryTraceStore, TraceStoreProtocol
 from aigineering.agent.mock import MockWorker
 from aigineering.protocol.types import Asset, Contract, TraceEntry
+
+
+def _get_trace_dir() -> Path:
+    """Return the trace directory (created lazily on first write)."""
+    return Path(".aig/traces")
+
+
+def _session_id() -> str:
+    """Return a nanosecond-timestamp session identifier to avoid same-second collisions."""
+    return f"session_{time.time_ns()}"
+
+
+def _latest_session_file() -> Optional[Path]:
+    """Return the newest session_*.jsonl file in the trace dir, or None."""
+    trace_dir = _get_trace_dir()
+    if not trace_dir.exists():
+        return None
+    files = sorted(
+        trace_dir.glob("session_*.jsonl"),
+        key=lambda p: (p.stat().st_mtime_ns, p.name),
+        reverse=True,
+    )
+    return files[0] if files else None
+
+
+def _build_asset_name_map(entries: list[TraceEntry]) -> dict[str, str]:
+    """Build an asset-id → asset-name mapping from projection entries."""
+    name_map: dict[str, str] = {}
+    for entry in entries:
+        if entry.event_type == "projection":
+            names = entry.accepted_asset_names or []
+            frags = entry.accepted_fragments or []
+            for i, aid in enumerate(frags):
+                if i < len(names):
+                    name_map[aid] = names[i]
+    return name_map
 
 
 def _asset_json(
@@ -49,17 +87,27 @@ def _contract_json(
     )
 
 
-def _asset_names_for(asset_ids: list[str], store: MemoryStore) -> list[str]:
+def _asset_names_for(
+    asset_ids: list[str],
+    resolver: MemoryStore | dict[str, str],
+) -> list[str]:
+    """Resolve asset IDs to names via a MemoryStore or an id→name dict."""
+    if isinstance(resolver, dict):
+        return [resolver.get(aid, aid) for aid in asset_ids]
     return [
-        (store.get_asset(aid).name if store.get_asset(aid) else aid)
+        (resolver.get_asset(aid).name if resolver.get_asset(aid) else aid)
         for aid in asset_ids
     ]
 
 
-def _run_demo(goal: str) -> tuple[MemoryStore, TraceStore, Contract]:
+def _run_demo(
+    goal: str,
+    trace_store: TraceStoreProtocol | None = None,
+) -> tuple[MemoryStore, TraceStoreProtocol, Contract]:
     """Run the build_report hallucination containment demo."""
     store = MemoryStore()
-    trace_store = TraceStore()
+    if trace_store is None:
+        trace_store = MemoryTraceStore()
     worker = MockWorker()
     raw_output = (
         f"final_report: Report content for goal '{goal}'\n"
@@ -102,6 +150,42 @@ def _run_demo(goal: str) -> tuple[MemoryStore, TraceStore, Contract]:
     return store, trace_store, contract
 
 
+# ---------------------------------------------------------------------------
+# _resolve_asset_from_trace helpers (JSONL mode — no MemoryStore needed)
+# ---------------------------------------------------------------------------
+
+def _resolve_asset_by_id(
+    asset_id_val: str,
+    trace_store: TraceStoreProtocol,
+    name_map: dict[str, str],
+) -> tuple[Optional[str], Optional[str]]:
+    """Return (id, name) if asset_id_val matches an accepted fragment id."""
+    lineage = trace_store.get_reverse_lineage(asset_id_val)
+    if lineage:
+        return asset_id_val, name_map.get(asset_id_val, asset_id_val)
+    return None, None
+
+
+def _resolve_asset_by_name(
+    asset_name: str,
+    trace_store: TraceStoreProtocol,
+) -> tuple[Optional[str], Optional[str]]:
+    """Return (id, name) for the first projection entry whose
+    accepted_asset_names contains *asset_name*."""
+    for entry in trace_store.get_all():
+        if entry.event_type == "projection":
+            names = entry.accepted_asset_names or []
+            frags = entry.accepted_fragments or []
+            for i, name in enumerate(names):
+                if name == asset_name and i < len(frags):
+                    return frags[i], name
+    return None, None
+
+
+# ---------------------------------------------------------------------------
+# Click commands
+# ---------------------------------------------------------------------------
+
 @click.group()
 def cli() -> None:
     """aig — Aigineering ACM runtime CLI."""
@@ -110,8 +194,10 @@ def cli() -> None:
 @cli.command()
 @click.argument("goal")
 def run(goal: str) -> None:
-    """Execute a demo contract and display the commitment boundary result."""
-    store, trace_store, contract = _run_demo(goal)
+    """Execute a demo contract and persist the trace to JSONL."""
+    trace_path = _get_trace_dir() / f"{_session_id()}.jsonl"
+    jsonl_store = JsonLTraceStore(str(trace_path))
+    store, trace_store, contract = _run_demo(goal, trace_store=jsonl_store)
     entries = trace_store.get_by_contract(contract.id)
     if not entries:
         click.echo("No trace entries recorded.")
@@ -136,25 +222,40 @@ def run(goal: str) -> None:
         elif entry.event_type == "complete":
             click.echo("✓ contract complete")
 
+    click.echo(f"Trace saved to {trace_path}")
+
 
 @cli.command()
 @click.option("--contract", "contract_filter", default=None, help="Filter by contract ID")
 def trace(contract_filter: Optional[str]) -> None:
-    """Show the built-in demo trace timeline, including rejected fragments.
-    
-    Note: Currently runs the demo inline. Persisted trace coming in v0.2.
-    """
-    _, trace_store, _ = _run_demo("demo")
-    entries = (
-        trace_store.get_by_contract(contract_filter)
-        if contract_filter
-        else trace_store.get_all()
-    )
-    if not entries:
-        click.echo("No trace entries found.")
-        return
-    for entry in entries:
-        _print_timeline_entry(entry)
+    """Show the trace timeline from the latest session (or demo fallback)."""
+    latest = _latest_session_file()
+    if latest is not None:
+        jsonl_store = JsonLTraceStore(str(latest))
+        entries = (
+            jsonl_store.get_by_contract(contract_filter)
+            if contract_filter
+            else jsonl_store.get_all()
+        )
+        if not entries:
+            click.echo("No trace entries found.")
+            return
+        for entry in entries:
+            _print_timeline_entry(entry)
+    else:
+        click.echo("No trace sessions found. Running demo…")
+        click.echo("[note: persisted trace is now available — use `aig run` first]")
+        _, trace_store, _ = _run_demo("demo")
+        entries = (
+            trace_store.get_by_contract(contract_filter)
+            if contract_filter
+            else trace_store.get_all()
+        )
+        if not entries:
+            click.echo("No trace entries found.")
+            return
+        for entry in entries:
+            _print_timeline_entry(entry)
 
 
 def _print_timeline_entry(entry: TraceEntry) -> None:
@@ -185,10 +286,52 @@ def audit(
     asset_id_filter: Optional[str],
     asset_name_filter: Optional[str],
 ) -> None:
-    """Show the built-in demo lineage from an asset back to activation.
-    
-    Note: Currently runs the demo inline. Persisted audit coming in v0.2.
-    """
+    """Show lineage from an asset back to activation (from latest session or demo)."""
+    latest = _latest_session_file()
+
+    # ── JSONL path ────────────────────────────────────────────────────────
+    if latest is not None:
+        jsonl_store = JsonLTraceStore(str(latest))
+        all_entries = jsonl_store.get_all()
+        name_map = _build_asset_name_map(all_entries)
+
+        target_id: Optional[str] = None
+        target_name: Optional[str] = None
+
+        if asset_id_filter:
+            # Try direct ID first
+            target_id, target_name = _resolve_asset_by_id(
+                asset_id_filter, jsonl_store, name_map,
+            )
+            if target_id is None:
+                # Fallback: treat as name
+                target_id, target_name = _resolve_asset_by_name(
+                    asset_id_filter, jsonl_store,
+                )
+            if target_id is None:
+                click.echo(f"No asset found with id or name '{asset_id_filter}'")
+                return
+        elif asset_name_filter:
+            target_id, target_name = _resolve_asset_by_name(
+                asset_name_filter, jsonl_store,
+            )
+            if target_id is None:
+                click.echo(f"No asset found with name '{asset_name_filter}'")
+                return
+        else:
+            click.echo("Provide --asset <id> or --asset-name <name>")
+            return
+
+        if not target_id:
+            click.echo("Could not determine target asset.")
+            return
+
+        _print_reverse_lineage(
+            target_id, target_name or target_id, jsonl_store, name_map,
+        )
+        return
+
+    # ── Demo fallback (original MemoryStore path) ─────────────────────────
     store, trace_store, _ = _run_demo("demo")
 
     target_id: Optional[str] = None
@@ -225,7 +368,10 @@ def audit(
 
 
 def _print_reverse_lineage(
-    asset_id_val: str, asset_name: str, trace_store: TraceStore, store: MemoryStore
+    asset_id_val: str,
+    asset_name: str,
+    trace_store: TraceStoreProtocol,
+    resolver: MemoryStore | dict[str, str],
 ) -> None:
     lineage_entries = trace_store.get_reverse_lineage(asset_id_val)
     if not lineage_entries:
@@ -238,16 +384,20 @@ def _print_reverse_lineage(
         indent = "  "
         if entry.event_type == "projection":
             click.echo(f"{indent}← projection from candidate by {entry.worker_id or 'worker'}")
-            _follow_parents(entry, trace_store, store, indent + "  ")
+            _follow_parents(entry, trace_store, resolver, indent + "  ")
         elif entry.event_type == "disclosure":
-            names = _asset_names_for(entry.disclosed_assets, store)
+            names = _asset_names_for(entry.disclosed_assets, resolver)
             click.echo(f"{indent}← disclosure: {names}")
         elif entry.event_type == "activation":
             click.echo(f"{indent}← activation: conditions met")
 
 
 def _follow_parents(
-    entry: TraceEntry, trace_store: TraceStore, store: MemoryStore, indent: str, max_depth: int = 5
+    entry: TraceEntry,
+    trace_store: TraceStoreProtocol,
+    resolver: MemoryStore | dict[str, str],
+    indent: str,
+    max_depth: int = 5,
 ) -> None:
     current = entry
     for _ in range(max_depth):
@@ -261,7 +411,7 @@ def _follow_parents(
         if not parent:
             break
         if parent.event_type == "disclosure":
-            names = _asset_names_for(parent.disclosed_assets, store)
+            names = _asset_names_for(parent.disclosed_assets, resolver)
             click.echo(f"{indent}← disclosure: {names}")
         elif parent.event_type == "activation":
             click.echo(f"{indent}← activation: conditions met")
