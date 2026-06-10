@@ -384,6 +384,13 @@ def _print_reverse_lineage(
         indent = "  "
         if entry.event_type == "projection":
             click.echo(f"{indent}← projection from candidate by {entry.worker_id or 'worker'}")
+            if entry.accepted_fragments:
+                accepted_names = entry.accepted_asset_names or ["?"] * len(entry.accepted_fragments)
+                for aid, aname in zip(entry.accepted_fragments, accepted_names):
+                    click.echo(f"{indent}  ✓ accepted: {aname} ({aid})")
+            if entry.rejected_fragments:
+                for r in entry.rejected_fragments:
+                    click.echo(f"{indent}  ✗ rejected: {r}")
             _follow_parents(entry, trace_store, resolver, indent + "  ")
         elif entry.event_type == "disclosure":
             names = _asset_names_for(entry.disclosed_assets, resolver)

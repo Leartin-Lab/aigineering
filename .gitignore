@@ -31,3 +31,4 @@ htmlcov/
 *.sqlite
 .internal-docs/
 .aig/
+.omo/
