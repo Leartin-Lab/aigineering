@@ -18,6 +18,8 @@ class Asset:
     trust_tier: str = "untrusted"
     minted_by: str = ""
     source_uri: str = ""
+    signed_by: str = ""
+    signature: str = ""
     promptable: bool = True
     disclosure_view: str = "original"
 

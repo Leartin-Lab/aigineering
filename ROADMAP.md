@@ -25,6 +25,7 @@
 - [x] Label-based asset injection with placeholder assets
 - [x] Asset disclosure policy for non-promptable assets
 - [x] Asset provenance metadata (`origin`, `trust_tier`, `minted_by`, `source_uri`)
+- [x] Deterministic provenance signatures (`signed_by`, `signature`)
 - [ ] SQLiteStore (single-file persistence)
 - [ ] `aig retry --contract` (incremental retry)
 - [ ] `aig trace --tree` / `aig trace --dag`

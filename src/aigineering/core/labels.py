@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from typing import Protocol
 
 from aigineering.core.ids import asset_id
+from aigineering.core.provenance import sign_asset
 from aigineering.protocol.types import Asset, Contract
 from aigineering.protocol.wire import asset_to_canonical
 
@@ -83,7 +84,9 @@ def resolve_contract_labels(
     for label_name in contract.labels:
         label = labels.get(label_name)
         if label is None:
-            placeholder = _placeholder_asset(label_name, f"_label_missing_{label_name}")
+            placeholder = sign_asset(
+                _placeholder_asset(label_name, f"_label_missing_{label_name}")
+            )
             store.add_asset(placeholder)
             if placeholder.id not in seen_ids:
                 placeholders.append(placeholder)
@@ -94,7 +97,7 @@ def resolve_contract_labels(
         for asset_name in label.assets:
             matches = store.get_assets_by_name(asset_name)
             if not matches:
-                placeholder = _placeholder_asset(label.name, asset_name)
+                placeholder = sign_asset(_placeholder_asset(label.name, asset_name))
                 store.add_asset(placeholder)
                 matches = [placeholder]
                 placeholders.append(placeholder)

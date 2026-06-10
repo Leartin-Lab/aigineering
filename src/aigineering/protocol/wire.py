@@ -18,6 +18,7 @@ def asset_to_canonical(asset: Asset) -> str:
         "trust_tier": asset.trust_tier,
         "minted_by": asset.minted_by,
         "source_uri": asset.source_uri,
+        "signed_by": asset.signed_by,
         "promptable": asset.promptable,
         "disclosure_view": asset.disclosure_view,
     }
@@ -35,6 +36,8 @@ def asset_to_dict(asset: Asset) -> dict[str, Any]:
         "trust_tier": asset.trust_tier,
         "minted_by": asset.minted_by,
         "source_uri": asset.source_uri,
+        "signed_by": asset.signed_by,
+        "signature": asset.signature,
         "promptable": asset.promptable,
         "disclosure_view": asset.disclosure_view,
     }

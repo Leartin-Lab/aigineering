@@ -70,6 +70,7 @@ This is an early proof-of-concept demonstrating the core invariant: **undeclared
 - Label-based asset injection with traceable `label_resolved` events
 - Asset disclosure policy (`promptable=False` assets remain stored but are not disclosed)
 - Asset provenance metadata (`origin`, `trust_tier`, `minted_by`, `source_uri`)
+- Deterministic provenance signatures (`signed_by`, `signature`)
 
 **Not yet implemented (see ROADMAP.md):**
 - Real LLM integration

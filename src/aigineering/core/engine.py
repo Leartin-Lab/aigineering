@@ -10,6 +10,7 @@ from aigineering.core.activation import check_activation
 from aigineering.core.disclosure import compute_disclosure
 from aigineering.core.labels import Label, resolve_contract_labels
 from aigineering.core.projection import project_candidate
+from aigineering.core.provenance import sign_asset
 from aigineering.core.store import StoreProtocol
 from aigineering.core.trace import MemoryTraceStore, TraceStoreProtocol
 from aigineering.protocol.types import Asset, Candidate, Contract, ProjectionResult
@@ -63,7 +64,7 @@ class Engine:
             )
 
     def add_asset(self, asset: Asset) -> None:
-        self._store.add_asset(asset)
+        self._store.add_asset(sign_asset(asset))
 
     def _add_trace(self, contract_id: str, event_type: str, **kwargs: object) -> None:
         parent_id = self._contract_last_entry.get(contract_id)
@@ -72,7 +73,7 @@ class Engine:
 
     def _commit(self, result: ProjectionResult) -> None:
         for asset in result.accepted_assets:
-            self._store.add_asset(asset)
+            self._store.add_asset(sign_asset(asset))
 
     def run(self) -> None:
         while True:

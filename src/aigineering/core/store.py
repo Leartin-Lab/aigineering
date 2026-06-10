@@ -101,6 +101,8 @@ class JsonLStore:
                     trust_tier=data.get("trust_tier", "untrusted"),
                     minted_by=data.get("minted_by", ""),
                     source_uri=data.get("source_uri", ""),
+                    signed_by=data.get("signed_by", ""),
+                    signature=data.get("signature", ""),
                     promptable=data.get("promptable", True),
                     disclosure_view=data.get("disclosure_view", "original"),
                 )
