@@ -88,6 +88,7 @@ This is an early proof-of-concept demonstrating the core invariant: **undeclared
 - Parent resume from completed method assets without output shortcutting
 - CLI worker selection for mock and OpenAI-compatible LLM workers
 - End-to-end LLM protocol tests for tool use and protected-output rejection
+- Planner result expansion into non-system child contracts
 - CLI trace rendering for method scheduling events
 - Tool registry with serializable `ToolSpec` and private handlers
 

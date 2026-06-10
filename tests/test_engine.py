@@ -358,3 +358,60 @@ def test_tool_observation_resumes_parent_without_satisfying_output():
     assert len(resumed) == 1
     assert resumed[0].relation_type == "tool"
     assert resumed[0].relation_target != contract.id
+
+
+def test_plan_result_expands_child_contracts_without_system_authority():
+    plan_content = json.dumps(
+        {
+            "contracts": [
+                {
+                    "name": "draft",
+                    "description": "Draft the report.",
+                    "inputs": ["source"],
+                    "outputs": ["draft_report"],
+                    "activation": "source",
+                    "budget": 2,
+                    "tool_scope": ["lookup"],
+                    "labels": ["research"],
+                }
+            ]
+        },
+        sort_keys=True,
+    )
+    worker = SequenceWorker(
+        [
+            '/plan {"reason": "split work"}',
+            f'/exec {{"outputs": {{"_plan_result_contract_parent": {json.dumps(plan_content)}}}}}',
+            "",
+        ]
+    )
+    store = MemoryStore()
+    trace_store = TraceStore()
+    contract = Contract(
+        id="contract_parent",
+        name="root",
+        outputs=["report"],
+        activation="",
+        budget=5,
+        tool_scope=["lookup"],
+        labels=["research"],
+    )
+    engine = Engine(store, worker, trace_store)
+    engine.add_contract(contract)
+
+    engine.run()
+
+    planned = [
+        c for c in store.get_all_contracts()
+        if c.parent_id == contract.id and c.name == "draft"
+    ]
+    assert len(planned) == 1
+    assert planned[0].origin == "plan"
+    assert planned[0].outputs == ["draft_report"]
+    assert planned[0].tool_scope == ["lookup"]
+    assert planned[0].labels == ["research"]
+
+    expanded = trace_store.get_by_event_type("contracts_expanded")
+    assert len(expanded) == 1
+    assert expanded[0].relation_type == "plan"
+    assert expanded[0].relation_target == planned[0].id

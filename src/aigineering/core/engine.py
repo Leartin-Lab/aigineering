@@ -10,7 +10,7 @@ from aigineering.core.activation import check_activation
 from aigineering.core.disclosure import compute_disclosure
 from aigineering.core.labels import Label, resolve_contract_labels
 from aigineering.core.methods import method_contract
-from aigineering.core.ids import asset_id
+from aigineering.core.ids import asset_id, contract_id
 from aigineering.core.projection import project_candidate
 from aigineering.core.provenance import sign_asset
 from aigineering.core.store import StoreProtocol
@@ -18,6 +18,7 @@ from aigineering.core.trace import MemoryTraceStore, TraceStoreProtocol
 from aigineering.core.tools import ToolRegistry
 from aigineering.protocol.actions import ActionParseError, WorkerAction, parse_action
 from aigineering.protocol.types import Asset, Candidate, Contract, ProjectionResult
+from aigineering.protocol.wire import contract_to_canonical
 
 _logger = logging.getLogger(__name__)
 
@@ -369,6 +370,33 @@ class Engine:
             relation_target=contract.id,
             budget_remaining=self._budget.get(parent_id, 0),
         )
+        self._expand_plan_result(contract, method_assets)
+
+    def _expand_plan_result(
+        self,
+        method_contract: Contract,
+        method_assets: list[Asset],
+    ) -> None:
+        if _method_payload(method_contract).get("method") != "plan":
+            return
+
+        created: list[str] = []
+        for asset in method_assets:
+            if not asset.name.startswith("_plan_result_"):
+                continue
+            for child in _contracts_from_plan_asset(asset, method_contract.parent_id):
+                if self._store.get_contract(child.id) is None:
+                    self.add_contract(child)
+                    created.append(child.id)
+
+        if created and method_contract.parent_id is not None:
+            self._add_trace(
+                method_contract.parent_id,
+                "contracts_expanded",
+                relation_type="plan",
+                relation_target=",".join(created),
+                budget_remaining=self._budget.get(method_contract.parent_id, 0),
+            )
 
 
 def _parse_method_action(candidate: Candidate) -> WorkerAction | None:
@@ -428,3 +456,59 @@ def _system_asset(
         source_uri=source_uri,
         promptable=promptable,
     )
+
+
+def _contracts_from_plan_asset(
+    asset: Asset,
+    parent_id: str | None,
+) -> list[Contract]:
+    try:
+        payload = json.loads(asset.content)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(payload, dict):
+        return []
+
+    raw_contracts = payload.get("contracts", [])
+    if not isinstance(raw_contracts, list):
+        return []
+
+    contracts: list[Contract] = []
+    for raw in raw_contracts:
+        if not isinstance(raw, dict):
+            continue
+        contract = Contract(
+            id="",
+            parent_id=parent_id,
+            name=str(raw.get("name", "")),
+            description=str(raw.get("description", "")),
+            inputs=_string_list(raw.get("inputs", [])),
+            outputs=_string_list(raw.get("outputs", [])),
+            activation=str(raw.get("activation", "")),
+            budget=int(raw.get("budget", 1) or 1),
+            tool_scope=_string_list(raw.get("tool_scope", [])),
+            labels=_string_list(raw.get("labels", [])),
+            origin="plan",
+        )
+        contracts.append(
+            Contract(
+                id=contract_id(contract_to_canonical(contract)),
+                parent_id=contract.parent_id,
+                name=contract.name,
+                description=contract.description,
+                inputs=contract.inputs,
+                outputs=contract.outputs,
+                activation=contract.activation,
+                budget=contract.budget,
+                tool_scope=contract.tool_scope,
+                labels=contract.labels,
+                origin=contract.origin,
+            )
+        )
+    return contracts
+
+
+def _string_list(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, str)]
