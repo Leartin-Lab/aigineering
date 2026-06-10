@@ -43,6 +43,7 @@
 
 ## v0.4 — MCP, Skills, GC, PyPI
 
+- [x] Tool registry with serializable specs and private handlers
 - [ ] MCP function call → contract expansion
 - [ ] Skill loading
 - [ ] Label-injected skill assets

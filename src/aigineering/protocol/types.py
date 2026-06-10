@@ -47,6 +47,13 @@ class Candidate:
 
 
 @dataclass(frozen=True)
+class ToolSpec:
+    name: str
+    description: str = ""
+    input_schema: dict = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class TraceEntry:
     id: str
     parent_id: Optional[str] = None
