@@ -44,6 +44,7 @@
 - [x] System authority for declared reserved method outputs
 - [x] Tool method execution with call and observation assets
 - [x] Parent resume from method observations
+- [x] End-to-end LLM protocol boundary tests
 - [ ] Contract expansion for planner outputs
 
 ## v0.4 — MCP, Skills, GC, PyPI
