@@ -10,7 +10,7 @@ from aigineering.core.disclosure import compute_disclosure
 from aigineering.core.projection import project_candidate
 from aigineering.core.store import MemoryStore
 from aigineering.core.trace import MemoryTraceStore, TraceStoreProtocol
-from aigineering.protocol.types import Asset, Candidate, Contract
+from aigineering.protocol.types import Asset, Candidate, Contract, ProjectionResult
 
 _logger = logging.getLogger(__name__)
 
@@ -54,6 +54,10 @@ class Engine:
         entry = self._trace.new_entry(contract_id, event_type, parent_id=parent_id, **kwargs)
         self._contract_last_entry[contract_id] = entry.id
 
+    def _commit(self, result: ProjectionResult) -> None:
+        for asset in result.accepted_assets:
+            self._store.add_asset(asset)
+
     def run(self) -> None:
         while True:
             available_names: set[str] = {
@@ -88,9 +92,18 @@ class Engine:
 
                 candidate: Candidate = self._worker.invoke(contract, scope)
 
-                accepted, rejected = project_candidate(
-                    contract, candidate, self._store
-                )
+                result = project_candidate(contract, candidate)
+                self._commit(result)
+                accepted = result.accepted_assets
+                rejected_dicts = [
+                    {
+                        "name": r.name,
+                        "content": r.content,
+                        "reject_reason": r.reject_reason,
+                        "category": r.category.value,
+                    }
+                    for r in result.rejected_candidates
+                ]
 
                 self._add_trace(
                     contract.id,
@@ -98,13 +111,13 @@ class Engine:
                     disclosed_assets=[a.id for a in scope],
                     worker_id=candidate.worker_id,
                     candidate_raw=candidate.raw_output,
-                    accepted_fragments=[a.id for a in accepted],
-                    accepted_asset_names=[a.name for a in accepted],
+                    accepted_fragments=[a.id for a in result.accepted_assets],
+                    accepted_asset_names=[a.name for a in result.accepted_assets],
                     rejected_fragments=[
-                        f"{r['name']}: {r.get('reject_reason', 'rejected')}"
-                        for r in rejected
+                        f"{r['name']}: {r['reject_reason']}"
+                        for r in rejected_dicts
                     ],
-                    authority_result=len(rejected) == 0,
+                    authority_result=len(rejected_dicts) == 0,
                     budget_remaining=self._resolve_budget(contract),
                 )
 
