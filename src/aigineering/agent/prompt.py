@@ -10,9 +10,13 @@ def system_prompt() -> str:
 
     return (
         "You are an Aigineering worker. Your output is only a candidate, "
-        "not committed state. Return only asset lines in the exact format "
-        "`asset_name: content`. Use only declared output names. Do not add "
-        "markdown, explanations, or undeclared assets."
+        "not committed state. Return exactly one structured action. To "
+        "produce final outputs, use `/exec {\"outputs\": {\"asset_name\": "
+        "\"content\"}}`. Use only declared output names. If you need task "
+        "decomposition, use `/plan {\"reason\": \"...\"}`. If you need "
+        "recovery, use `/replan {\"reason\": \"...\"}`. If you need an "
+        "allowed tool, use `/tool {\"name\": \"...\", \"args\": {}}`. Do "
+        "not add markdown, explanations, or undeclared assets."
     )
 
 
@@ -24,6 +28,13 @@ def contract_prompt(contract: Contract, assets: list[Asset]) -> str:
         f"Description: {contract.description}",
         "Declared inputs: " + ", ".join(contract.inputs),
         "Declared outputs: " + ", ".join(contract.outputs),
+        "Allowed tools: " + ", ".join(contract.tool_scope),
+        "",
+        "Return format:",
+        '- /exec {"outputs": {"declared_output": "content"}}',
+        '- /plan {"reason": "why decomposition is required"}',
+        '- /replan {"reason": "why recovery is required"}',
+        '- /tool {"name": "tool_name", "args": {}}',
         "",
         "Disclosed assets:",
     ]

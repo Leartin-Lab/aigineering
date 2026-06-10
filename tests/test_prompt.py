@@ -9,6 +9,10 @@ def test_system_prompt_preserves_candidate_boundary():
 
     assert "candidate" in prompt
     assert "not committed state" in prompt
+    assert "/exec" in prompt
+    assert "/plan" in prompt
+    assert "/replan" in prompt
+    assert "/tool" in prompt
     assert "declared output names" in prompt
 
 
@@ -19,6 +23,7 @@ def test_contract_prompt_renders_declared_scope():
         description="Write a report.",
         inputs=["evidence"],
         outputs=["report"],
+        tool_scope=["search"],
     )
     prompt = contract_prompt(
         contract,
@@ -28,4 +33,6 @@ def test_contract_prompt_renders_declared_scope():
     assert "Contract name: write_report" in prompt
     assert "Declared inputs: evidence" in prompt
     assert "Declared outputs: report" in prompt
+    assert "Allowed tools: search" in prompt
+    assert '/exec {"outputs": {"declared_output": "content"}}' in prompt
     assert "- evidence: observed" in prompt
