@@ -4,10 +4,11 @@ import json
 
 from aigineering.core.store import MemoryStore
 from aigineering.core.engine import Engine
+from aigineering.core.tools import ToolRegistry
 from aigineering.core.trace import TraceStore
 from aigineering.agent.mock import MockWorker
 from aigineering.core.ids import asset_id, contract_id
-from aigineering.protocol.types import Asset, Contract
+from aigineering.protocol.types import Asset, Contract, ToolSpec
 
 
 def _asset_canonical(name: str, content: str) -> str:
@@ -242,3 +243,65 @@ def test_method_scheduling_deduplicates_by_child_contract_id():
     children = [c for c in store.get_all_contracts() if c.parent_id == contract.id]
     assert len(children) == 2
     assert {c.id for c in children} != {first_children[0].id}
+
+
+def test_tool_method_executes_registry_and_commits_observation():
+    store = MemoryStore()
+    trace_store = TraceStore()
+    worker = MockWorker({"root": '/tool {"name": "lookup", "args": {"key": "x"}}'})
+    tools = ToolRegistry()
+    tools.register(ToolSpec(name="lookup"), lambda args: f"value:{args['key']}")
+    contract = Contract(
+        id="contract_parent",
+        name="root",
+        outputs=["report"],
+        activation="",
+        budget=5,
+        tool_scope=["lookup"],
+    )
+    engine = Engine(store, worker, trace_store, tools=tools)
+    engine.add_contract(contract)
+
+    engine.run()
+
+    assert store.get_assets_by_name("report") == []
+    call_assets = [
+        asset for asset in store.get_all_assets()
+        if asset.name.startswith("_tool_call_")
+    ]
+    obs_assets = store.get_assets_by_name(f"_tool_obs_{contract.id}")
+    assert len(call_assets) == 1
+    assert call_assets[0].promptable is False
+    assert len(obs_assets) == 1
+    assert obs_assets[0].origin == "system"
+    assert "value:x" in obs_assets[0].content
+
+    tool_events = trace_store.get_by_event_type("tool_executed")
+    assert len(tool_events) == 1
+    assert tool_events[0].relation_target == "lookup"
+    assert tool_events[0].authority_result == "accepted"
+
+
+def test_tool_method_records_error_observation_for_out_of_scope_tool():
+    store = MemoryStore()
+    trace_store = TraceStore()
+    worker = MockWorker({"root": '/tool {"name": "lookup", "args": {"key": "x"}}'})
+    tools = ToolRegistry()
+    tools.register(ToolSpec(name="lookup"), lambda args: "value")
+    contract = Contract(
+        id="contract_parent",
+        name="root",
+        activation="",
+        budget=5,
+        tool_scope=[],
+    )
+    engine = Engine(store, worker, trace_store, tools=tools)
+    engine.add_contract(contract)
+
+    engine.run()
+
+    obs_assets = store.get_assets_by_name(f"_tool_obs_{contract.id}")
+    assert len(obs_assets) == 1
+    assert "not in contract.tool_scope" in obs_assets[0].content
+    tool_events = trace_store.get_by_event_type("tool_executed")
+    assert tool_events[0].authority_result == "rejected"

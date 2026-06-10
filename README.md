@@ -80,6 +80,7 @@ This is an early proof-of-concept demonstrating the core invariant: **undeclared
 - Engine scheduling for method actions without direct parent state mutation
 - System method context assets and reserved-output authority for method sub-contracts
 - Method scheduling deduplication by deterministic child contract identity
+- Tool method execution with `_tool_call_*` and `_tool_obs_*` system assets
 - CLI trace rendering for method scheduling events
 - Tool registry with serializable `ToolSpec` and private handlers
 
