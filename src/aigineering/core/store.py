@@ -57,6 +57,9 @@ class MemoryStore:
     def get_all_contracts(self) -> list[Contract]:
         return list(self.contracts.values())
 
+    def get_assets_by_contract(self, contract_id: str) -> list[Asset]:
+        return [a for a in self.assets.values() if a.created_by == contract_id]
+
 
 class JsonLStore:
     """Persistent JSONL store for Assets and Contracts — one JSON object per line."""
