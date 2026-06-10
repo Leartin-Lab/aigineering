@@ -69,7 +69,7 @@ This is an early proof-of-concept demonstrating the core invariant: **undeclared
 
 **Not yet implemented (see ROADMAP.md):**
 - Real LLM integration
-- Persistent asset/contract store (currently in-memory)
+- Persistent asset/contract store (`.aig/store/`) via JSONL
 - MCP / Skills / Tools
 - Multi-contract orchestration
 - Distributed runtime
