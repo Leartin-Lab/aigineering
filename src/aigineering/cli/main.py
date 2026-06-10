@@ -379,6 +379,11 @@ def _print_timeline_entry(entry: TraceEntry) -> None:
                 tagged.append(f"[{cat}] {rest}")
             parts.append(f"REJECTED: {tagged}")
         click.echo(f"{prefix}← {' | '.join(parts)}")
+    elif entry.event_type == "method_scheduled":
+        method = entry.relation_type or "method"
+        target = entry.relation_target or "(unknown)"
+        worker = entry.worker_id or "worker"
+        click.echo(f"{prefix}← /{method} scheduled {target} by {worker}")
     elif entry.event_type == "complete":
         click.echo(f"{prefix}← outputs satisfied")
 

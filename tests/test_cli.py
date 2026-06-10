@@ -154,6 +154,31 @@ def test_trace_reads_from_latest_file():
         assert "contract enabled" in result.output
 
 
+def test_trace_displays_method_scheduled_event():
+    """aig trace displays method decisions as first-class audit events."""
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        entry = TraceEntry(
+            id="method_1",
+            contract_id="contract_1",
+            event_type="method_scheduled",
+            worker_id="mock_worker",
+            relation_type="plan",
+            relation_target="contract_child",
+            timestamp="2025-01-01T00:00:00",
+        )
+        _write_trace_entries(
+            Path(".aig/traces/session_test.jsonl"),
+            [entry],
+        )
+
+        result = runner.invoke(cli, ["trace"])
+
+        assert result.exit_code == 0
+        assert "method_scheduled" in result.output
+        assert "/plan scheduled contract_child by mock_worker" in result.output
+
+
 def test_audit_resolves_from_jsonl():
     """aig audit resolves asset by name from JSONL and shows lineage."""
     runner = CliRunner()
