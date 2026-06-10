@@ -86,3 +86,15 @@ class ProjectionResult:
     raw_candidate: str = ""
     status: ProjectionStatus = ProjectionStatus.REJECTED
     authority_policy: Optional[dict] = None
+
+
+@dataclass(frozen=True)
+class Session:
+    id: str
+    root_contract_id: str = ""
+    contract_ids: list[str] = field(default_factory=list)
+    asset_ids: list[str] = field(default_factory=list)
+    trace_ids: list[str] = field(default_factory=list)
+    config_snapshot: dict = field(default_factory=dict)
+    worker_snapshot: dict = field(default_factory=dict)
+    created_at: str = ""
