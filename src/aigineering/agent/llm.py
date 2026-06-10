@@ -8,6 +8,7 @@ from collections.abc import Callable, Mapping
 from typing import Any
 from urllib import request
 
+from aigineering.agent.prompt import contract_prompt, system_prompt
 from aigineering.protocol.types import Asset, Candidate, Contract
 
 Transport = Callable[
@@ -48,10 +49,10 @@ class LLMWorker:
             "model": self.model,
             "temperature": 0,
             "messages": [
-                {"role": "system", "content": _system_prompt()},
+                {"role": "system", "content": system_prompt()},
                 {
                     "role": "user",
-                    "content": _contract_prompt(contract, disclosed_assets),
+                    "content": contract_prompt(contract, disclosed_assets),
                 },
             ],
         }
@@ -83,29 +84,6 @@ class LLMWorker:
         if self._transport is not None:
             return self._transport(url, headers, payload)
         return _post_json(url, headers, payload, timeout=self._timeout)
-
-
-def _system_prompt() -> str:
-    return (
-        "You are an Aigineering worker. Your output is only a candidate, "
-        "not committed state. Return only asset lines in the exact format "
-        "`asset_name: content`. Use only declared output names. Do not add "
-        "markdown, explanations, or undeclared assets."
-    )
-
-
-def _contract_prompt(contract: Contract, assets: list[Asset]) -> str:
-    lines = [
-        f"Contract name: {contract.name}",
-        f"Description: {contract.description}",
-        "Declared inputs: " + ", ".join(contract.inputs),
-        "Declared outputs: " + ", ".join(contract.outputs),
-        "",
-        "Disclosed assets:",
-    ]
-    for asset in assets:
-        lines.append(f"- {asset.name}: {asset.content}")
-    return "\n".join(lines)
 
 
 def _extract_message_content(response: Mapping[str, object]) -> str:

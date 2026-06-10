@@ -74,6 +74,7 @@ This is an early proof-of-concept demonstrating the core invariant: **undeclared
 - Worker protocol interface for candidate-producing execution environments
 - Worker-produced assets use explicit worker provenance, independent of the mock demo
 - OpenAI-compatible LLM worker for chat-completions endpoints
+- Reusable worker prompt builder that preserves the candidate/fact boundary
 
 **Not yet implemented (see ROADMAP.md):**
 - MCP / Skills / Tools
