@@ -179,6 +179,46 @@ def test_trace_displays_method_scheduled_event():
         assert "/plan scheduled contract_child by mock_worker" in result.output
 
 
+def test_trace_displays_method_runtime_events():
+    """aig trace displays tool execution, resume, and expansion events."""
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        entries = [
+            TraceEntry(
+                id="tool_1",
+                contract_id="contract_tool",
+                event_type="tool_executed",
+                accepted_asset_names=["_tool_call_x", "_tool_obs_x"],
+                relation_target="lookup",
+                authority_result="accepted",
+            ),
+            TraceEntry(
+                id="resume_1",
+                contract_id="contract_parent",
+                event_type="method_resumed",
+                disclosed_assets=["asset_obs"],
+                relation_type="tool",
+            ),
+            TraceEntry(
+                id="expand_1",
+                contract_id="contract_parent",
+                event_type="contracts_expanded",
+                relation_target="contract_child",
+            ),
+        ]
+        _write_trace_entries(
+            Path(".aig/traces/session_test.jsonl"),
+            entries,
+        )
+
+        result = runner.invoke(cli, ["trace"])
+
+        assert result.exit_code == 0
+        assert "lookup accepted" in result.output
+        assert "parent resumed after /tool" in result.output
+        assert "planner expanded contracts: contract_child" in result.output
+
+
 def test_audit_resolves_from_jsonl():
     """aig audit resolves asset by name from JSONL and shows lineage."""
     runner = CliRunner()

@@ -427,6 +427,18 @@ def _print_timeline_entry(entry: TraceEntry) -> None:
         target = entry.relation_target or "(unknown)"
         worker = entry.worker_id or "worker"
         click.echo(f"{prefix}← /{method} scheduled {target} by {worker}")
+    elif entry.event_type == "tool_executed":
+        tool = entry.relation_target or "tool"
+        status = entry.authority_result or "unknown"
+        assets = entry.accepted_asset_names or []
+        click.echo(f"{prefix}← {tool} {status}: {assets}")
+    elif entry.event_type == "method_resumed":
+        method = entry.relation_type or "method"
+        assets = entry.disclosed_assets or []
+        click.echo(f"{prefix}← parent resumed after /{method}: {assets}")
+    elif entry.event_type == "contracts_expanded":
+        targets = entry.relation_target or ""
+        click.echo(f"{prefix}← planner expanded contracts: {targets}")
     elif entry.event_type == "complete":
         click.echo(f"{prefix}← outputs satisfied")
 
