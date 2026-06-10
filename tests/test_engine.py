@@ -215,3 +215,30 @@ def test_method_action_schedules_subcontract_without_projection():
     assert len(scheduled) == 1
     assert scheduled[0].relation_type == "plan"
     assert scheduled[0].relation_target == child_contracts[0].id
+
+
+def test_method_scheduling_deduplicates_by_child_contract_id():
+    store = MemoryStore()
+    trace_store = TraceStore()
+    worker = MockWorker({"root": '/tool {"name": "search", "args": {"q": "a"}}'})
+    contract = Contract(
+        id="contract_parent",
+        name="root",
+        activation="",
+        budget=5,
+        tool_scope=["search"],
+    )
+    engine = Engine(store, worker, trace_store)
+    engine.add_contract(contract)
+
+    engine.run()
+    first_children = [c for c in store.get_all_contracts() if c.parent_id == contract.id]
+    assert len(first_children) == 1
+
+    engine._suspended.clear()
+    worker.set_output("root", '/tool {"name": "search", "args": {"q": "b"}}')
+    engine.run()
+
+    children = [c for c in store.get_all_contracts() if c.parent_id == contract.id]
+    assert len(children) == 2
+    assert {c.id for c in children} != {first_children[0].id}

@@ -79,6 +79,7 @@ This is an early proof-of-concept demonstrating the core invariant: **undeclared
 - System method sub-contract builder for `/plan`, `/replan`, and `/tool`
 - Engine scheduling for method actions without direct parent state mutation
 - System method context assets and reserved-output authority for method sub-contracts
+- Method scheduling deduplication by deterministic child contract identity
 - CLI trace rendering for method scheduling events
 - Tool registry with serializable `ToolSpec` and private handlers
 

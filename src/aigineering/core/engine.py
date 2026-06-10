@@ -50,7 +50,7 @@ class Engine:
         self._budget: dict[str, int] = {}
         self._completed: set[str] = set()
         self._suspended: set[str] = set()
-        self._method_scheduled: set[tuple[str, str]] = set()
+        self._method_scheduled: set[str] = set()
         self._contract_last_entry: dict[str, str] = {}  # contract_id → last trace entry id
 
     def add_contract(self, contract: Contract) -> None:
@@ -201,12 +201,11 @@ class Engine:
         action: WorkerAction,
         candidate: Candidate,
     ) -> None:
-        key = (contract.id, action.type)
         child = method_contract(contract, action)
-        if key not in self._method_scheduled:
+        if child.id not in self._method_scheduled:
             self.add_contract(child)
             self._create_method_context_asset(contract, action, child)
-            self._method_scheduled.add(key)
+            self._method_scheduled.add(child.id)
 
         self._add_trace(
             contract.id,
