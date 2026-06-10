@@ -100,6 +100,18 @@ def _asset_names_for(
     ]
 
 
+def _parse_rejected_fragment(rf: str) -> tuple[str, str]:
+    """Parse a rejected_fragment string to extract category and display text.
+
+    Format: "[category] name: reason" or legacy "name: reason".
+    Returns (category, rest_of_text).
+    """
+    if rf.startswith("[") and "]" in rf:
+        end = rf.index("]")
+        return rf[1:end], rf[end + 1:].strip()
+    return "unknown", rf
+
+
 def _run_demo(
     goal: str,
     trace_store: TraceStoreProtocol | None = None,
@@ -273,7 +285,11 @@ def _print_timeline_entry(entry: TraceEntry) -> None:
         if accepted:
             parts.append(f"accepted: {accepted}")
         if rejected:
-            parts.append(f"REJECTED: {rejected}")
+            tagged: list[str] = []
+            for r in rejected:
+                cat, rest = _parse_rejected_fragment(r)
+                tagged.append(f"[{cat}] {rest}")
+            parts.append(f"REJECTED: {tagged}")
         click.echo(f"{prefix}← {' | '.join(parts)}")
     elif entry.event_type == "complete":
         click.echo(f"{prefix}← outputs satisfied")
@@ -390,7 +406,8 @@ def _print_reverse_lineage(
                     click.echo(f"{indent}  ✓ accepted: {aname} ({aid})")
             if entry.rejected_fragments:
                 for r in entry.rejected_fragments:
-                    click.echo(f"{indent}  ✗ rejected: {r}")
+                    cat, rest = _parse_rejected_fragment(r)
+                    click.echo(f"{indent}  ✗ rejected [{cat}]: {rest}")
             _follow_parents(entry, trace_store, resolver, indent + "  ")
         elif entry.event_type == "disclosure":
             names = _asset_names_for(entry.disclosed_assets, resolver)

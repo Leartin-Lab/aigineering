@@ -28,7 +28,7 @@ def create_entry(
     accepted_asset_names: Optional[list[str]] = None,
     rejected_fragments: Optional[list[str]] = None,
     authority_policy: Optional[str] = None,
-    authority_result: Optional[bool] = None,
+    authority_result: Optional[str] = None,
     budget_remaining: int = 0,
 ) -> TraceEntry:
     entry_id = trace_entry_id(

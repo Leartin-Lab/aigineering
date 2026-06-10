@@ -51,7 +51,7 @@ class TraceEntry:
     accepted_asset_names: list[str] = field(default_factory=list)
     rejected_fragments: list[str] = field(default_factory=list)
     authority_policy: Optional[str] = None
-    authority_result: Optional[bool] = None
+    authority_result: Optional[str] = None
     budget_remaining: int = 0
     relation_type: Optional[str] = None
     relation_target: Optional[str] = None

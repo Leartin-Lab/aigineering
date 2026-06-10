@@ -92,8 +92,9 @@ def test_hallucinated_output_cannot_become_runtime_fact():
     assert any("citation_summary" in r for r in projection.rejected_fragments), (
         "citation_summary should appear in rejected_fragments"
     )
-    assert projection.authority_result is False, (
-        "authority_result should be False because citation_summary was rejected"
+    assert projection.authority_result == "partial", (
+        "authority_result should be 'partial' because citation_summary was rejected "
+        "but final_report was accepted"
     )
 
     # 4. Trace has all expected event types

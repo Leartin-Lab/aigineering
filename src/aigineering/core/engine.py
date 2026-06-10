@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 
@@ -114,10 +115,15 @@ class Engine:
                     accepted_fragments=[a.id for a in result.accepted_assets],
                     accepted_asset_names=[a.name for a in result.accepted_assets],
                     rejected_fragments=[
-                        f"{r['name']}: {r['reject_reason']}"
+                        f"[{r['category']}] {r['name']}: {r['reject_reason']}"
                         for r in rejected_dicts
                     ],
-                    authority_result=len(rejected_dicts) == 0,
+                    authority_result=result.status.value,
+                    authority_policy=(
+                        json.dumps(result.authority_policy, sort_keys=True)
+                        if result.authority_policy is not None
+                        else None
+                    ),
                     budget_remaining=self._resolve_budget(contract),
                 )
 
