@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import Optional
 
 
@@ -55,3 +56,32 @@ class TraceEntry:
     relation_type: Optional[str] = None
     relation_target: Optional[str] = None
     timestamp: str = ""
+
+
+class RejectionCategory(Enum):
+    PARSE_ERROR = "parse_error"
+    AUTHORITY_REJECTION = "authority_rejection"
+    DUPLICATE_REJECTION = "duplicate_rejection"
+    PROTECTED_NAME_REJECTION = "protected_name_rejection"
+
+
+class ProjectionStatus(Enum):
+    ACCEPTED = "accepted"
+    PARTIAL = "partial"
+    REJECTED = "rejected"
+
+
+@dataclass(frozen=True)
+class RejectedCandidate:
+    name: str
+    content: str
+    reject_reason: str
+    category: RejectionCategory = RejectionCategory.AUTHORITY_REJECTION
+
+
+@dataclass(frozen=True)
+class ProjectionResult:
+    accepted_assets: list[Asset] = field(default_factory=list)
+    rejected_candidates: list[RejectedCandidate] = field(default_factory=list)
+    raw_candidate: str = ""
+    status: ProjectionStatus = ProjectionStatus.REJECTED
