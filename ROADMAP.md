@@ -26,6 +26,7 @@
 - [x] Asset disclosure policy for non-promptable assets
 - [x] Asset provenance metadata (`origin`, `trust_tier`, `minted_by`, `source_uri`)
 - [x] Deterministic provenance signatures (`signed_by`, `signature`)
+- [x] Worker protocol interface
 - [ ] SQLiteStore (single-file persistence)
 - [ ] `aig retry --contract` (incremental retry)
 - [ ] `aig trace --tree` / `aig trace --dag`

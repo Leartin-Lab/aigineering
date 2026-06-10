@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any
 
+from aigineering.agent.worker import Worker
 from aigineering.core.activation import check_activation
 from aigineering.core.disclosure import compute_disclosure
 from aigineering.core.labels import Label, resolve_contract_labels
@@ -35,7 +35,7 @@ class Engine:
     def __init__(
         self,
         store: StoreProtocol,
-        worker: Any,
+        worker: Worker,
         trace_store: TraceStoreProtocol | None = None,
         labels: dict[str, Label] | None = None,
     ) -> None:

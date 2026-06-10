@@ -71,6 +71,7 @@ This is an early proof-of-concept demonstrating the core invariant: **undeclared
 - Asset disclosure policy (`promptable=False` assets remain stored but are not disclosed)
 - Asset provenance metadata (`origin`, `trust_tier`, `minted_by`, `source_uri`)
 - Deterministic provenance signatures (`signed_by`, `signature`)
+- Worker protocol interface for candidate-producing execution environments
 
 **Not yet implemented (see ROADMAP.md):**
 - Real LLM integration
