@@ -36,7 +36,7 @@
 
 - [x] OpenAI-compatible LLM worker
 - [x] Prompt builder
-- [ ] `/exec` / `/plan` / `/replan` / `/tool` protocol parsing
+- [x] `/exec` / `/plan` / `/replan` / `/tool` protocol parsing
 - [ ] Method subtask semantics
 - [ ] Contract expansion for tool calls
 

@@ -75,6 +75,7 @@ This is an early proof-of-concept demonstrating the core invariant: **undeclared
 - Worker-produced assets use explicit worker provenance, independent of the mock demo
 - OpenAI-compatible LLM worker for chat-completions endpoints
 - Reusable worker prompt builder that preserves the candidate/fact boundary
+- Structured `/exec`, `/plan`, `/replan`, and `/tool` action parser
 
 **Not yet implemented (see ROADMAP.md):**
 - MCP / Skills / Tools

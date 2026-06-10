@@ -91,6 +91,34 @@ def test_multiple_rejection_categories():
     assert RejectionCategory.PARSE_ERROR in categories
 
 
+def test_projection_accepts_exec_action_outputs():
+    contract = Contract(id="c1", outputs=["report"])
+    candidate = Candidate(
+        worker_id="w",
+        raw_output='/exec {"outputs": {"report": "ok"}}',
+    )
+
+    result = project_candidate(contract, candidate)
+
+    assert result.status == ProjectionStatus.ACCEPTED
+    assert result.accepted_assets[0].name == "report"
+    assert result.accepted_assets[0].content == "ok"
+
+
+def test_projection_rejects_non_exec_actions_as_outputs():
+    contract = Contract(id="c1", outputs=["report"])
+    candidate = Candidate(
+        worker_id="w",
+        raw_output='/plan {"reason": "need decomposition"}',
+    )
+
+    result = project_candidate(contract, candidate)
+
+    assert result.status == ProjectionStatus.REJECTED
+    assert result.accepted_assets == []
+    assert result.rejected_candidates[0].name == "/plan"
+
+
 def test_immutability():
     import dataclasses
     result = ProjectionResult(status=ProjectionStatus.REJECTED)
