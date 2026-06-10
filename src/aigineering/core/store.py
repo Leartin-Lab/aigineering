@@ -98,6 +98,9 @@ class JsonLStore:
                     content_type=data.get("content_type", "text"),
                     created_by=data.get("created_by", ""),
                     origin=data.get("origin", "system"),
+                    trust_tier=data.get("trust_tier", "untrusted"),
+                    minted_by=data.get("minted_by", ""),
+                    source_uri=data.get("source_uri", ""),
                     promptable=data.get("promptable", True),
                     disclosure_view=data.get("disclosure_view", "original"),
                 )

@@ -15,6 +15,9 @@ class Asset:
     content_type: str = "text"
     created_by: str = ""
     origin: str = "system"
+    trust_tier: str = "untrusted"
+    minted_by: str = ""
+    source_uri: str = ""
     promptable: bool = True
     disclosure_view: str = "original"
 

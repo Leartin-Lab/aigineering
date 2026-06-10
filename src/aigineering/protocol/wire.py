@@ -15,6 +15,9 @@ def asset_to_canonical(asset: Asset) -> str:
         "content_type": asset.content_type,
         "created_by": asset.created_by,
         "origin": asset.origin,
+        "trust_tier": asset.trust_tier,
+        "minted_by": asset.minted_by,
+        "source_uri": asset.source_uri,
         "promptable": asset.promptable,
         "disclosure_view": asset.disclosure_view,
     }
@@ -29,6 +32,9 @@ def asset_to_dict(asset: Asset) -> dict[str, Any]:
         "content_type": asset.content_type,
         "created_by": asset.created_by,
         "origin": asset.origin,
+        "trust_tier": asset.trust_tier,
+        "minted_by": asset.minted_by,
+        "source_uri": asset.source_uri,
         "promptable": asset.promptable,
         "disclosure_view": asset.disclosure_view,
     }

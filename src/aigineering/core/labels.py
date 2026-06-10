@@ -51,6 +51,8 @@ def _placeholder_asset(label_name: str, asset_name: str) -> Asset:
         content=content,
         content_type="application/json",
         origin="label_placeholder",
+        trust_tier="untrusted",
+        minted_by="label_resolver",
     )
     return Asset(
         id=asset_id(asset_to_canonical(draft)),
@@ -58,6 +60,8 @@ def _placeholder_asset(label_name: str, asset_name: str) -> Asset:
         content=draft.content,
         content_type=draft.content_type,
         origin=draft.origin,
+        trust_tier=draft.trust_tier,
+        minted_by=draft.minted_by,
     )
 
 

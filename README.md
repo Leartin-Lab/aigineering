@@ -69,6 +69,7 @@ This is an early proof-of-concept demonstrating the core invariant: **undeclared
 - Full replay from persisted runtime state with consistency validation
 - Label-based asset injection with traceable `label_resolved` events
 - Asset disclosure policy (`promptable=False` assets remain stored but are not disclosed)
+- Asset provenance metadata (`origin`, `trust_tier`, `minted_by`, `source_uri`)
 
 **Not yet implemented (see ROADMAP.md):**
 - Real LLM integration

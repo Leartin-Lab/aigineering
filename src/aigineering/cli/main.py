@@ -75,12 +75,17 @@ def _asset_json(
     content_type: str = "text",
     created_by: str = "",
     origin: str = "human",
+    trust_tier: str = "human",
+    minted_by: str = "",
+    source_uri: str = "",
     promptable: bool = True,
     disclosure_view: str = "original",
 ) -> str:
     return json.dumps(
         {"name": name, "content": content, "content_type": content_type,
          "created_by": created_by, "origin": origin,
+         "trust_tier": trust_tier, "minted_by": minted_by,
+         "source_uri": source_uri,
          "promptable": promptable, "disclosure_view": disclosure_view},
         sort_keys=True, ensure_ascii=False,
     )
@@ -192,10 +197,14 @@ def _run_demo(
     data_file = Asset(
         id=asset_id(data_canonical), name="data_file",
         content="Sample data for report generation",
+        origin="human",
+        trust_tier="human",
     )
     citation_db = Asset(
         id=asset_id(citation_canonical), name="citation_db",
         content="Sample citation database",
+        origin="human",
+        trust_tier="human",
     )
 
     contract_canonical = _contract_json(
