@@ -11,6 +11,7 @@ import click
 
 from aigineering.core.engine import Engine
 from aigineering.core.ids import asset_id, contract_id
+from aigineering.core.replay import replay_all, replay_session
 from aigineering.core.session import SessionStore
 from aigineering.core.store import MemoryStore
 from aigineering.core.trace import JsonLTraceStore, MemoryTraceStore, TraceStoreProtocol
@@ -111,6 +112,42 @@ def _parse_rejected_fragment(rf: str) -> tuple[str, str]:
         end = rf.index("]")
         return rf[1:end], rf[end + 1:].strip()
     return "unknown", rf
+
+
+def _find_trace_for_session(
+    session_id: str,
+    sessions_dir: str = ".aig/sessions",
+    traces_dir: str = ".aig/traces",
+) -> tuple[Optional[JsonLTraceStore], Optional[list[TraceEntry]]]:
+    """Find the trace file matching a session manifest."""
+    session_store = SessionStore(sessions_dir=sessions_dir)
+    session = session_store.get_session(session_id)
+    if session is None:
+        return None, None
+
+    trace_dir = Path(traces_dir)
+    trace_id_set = set(session.trace_ids)
+
+    # Try direct match first
+    direct_path = trace_dir / f"{session_id}.jsonl"
+    if direct_path.exists():
+        store = JsonLTraceStore(str(direct_path))
+        return store, store.get_all()
+
+    # Search all trace files for matching entries
+    if trace_dir.exists() and trace_id_set:
+        for fp in sorted(
+            trace_dir.glob("session_*.jsonl"),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        ):
+            candidate = JsonLTraceStore(str(fp))
+            candidate_ids = {e.id for e in candidate.get_all()}
+            if trace_id_set <= candidate_ids or trace_id_set & candidate_ids:
+                entries = candidate.get_all()
+                return candidate, entries
+
+    return None, None
 
 
 def _run_demo(
@@ -255,35 +292,36 @@ def run(goal: str) -> None:
 
 @cli.command()
 @click.option("--contract", "contract_filter", default=None, help="Filter by contract ID")
-def trace(contract_filter: Optional[str]) -> None:
-    """Show the trace timeline from the latest session (or demo fallback)."""
-    latest = _latest_session_file()
-    if latest is not None:
-        jsonl_store = JsonLTraceStore(str(latest))
-        entries = (
-            jsonl_store.get_by_contract(contract_filter)
-            if contract_filter
-            else jsonl_store.get_all()
-        )
-        if not entries:
-            click.echo("No trace entries found.")
+@click.option("--session", "session_id", default=None, help="Read from a specific session ID")
+def trace(contract_filter: Optional[str], session_id: Optional[str]) -> None:
+    """Show the trace timeline from the latest session."""
+    if session_id is not None:
+        jsonl_store, entries = _find_trace_for_session(session_id)
+        if jsonl_store is None:
+            click.echo(f"Session '{session_id}' not found.")
             return
-        for entry in entries:
-            _print_timeline_entry(entry)
     else:
-        click.echo("No trace sessions found. Running demo…")
-        click.echo("[note: persisted trace is now available — use `aig run` first]")
-        _, trace_store, _ = _run_demo("demo")
-        entries = (
-            trace_store.get_by_contract(contract_filter)
-            if contract_filter
-            else trace_store.get_all()
-        )
-        if not entries:
-            click.echo("No trace entries found.")
-            return
-        for entry in entries:
-            _print_timeline_entry(entry)
+        latest = _latest_session_file()
+        if latest is not None:
+            jsonl_store = JsonLTraceStore(str(latest))
+            entries = (
+                jsonl_store.get_by_contract(contract_filter)
+                if contract_filter
+                else jsonl_store.get_all()
+            )
+        else:
+            jsonl_store = None
+            entries = []
+
+    if jsonl_store is None or not entries:
+        click.echo("No sessions found. Use 'aig run <goal>' or 'aig demo'.")
+        return
+
+    if contract_filter:
+        entries = jsonl_store.get_by_contract(contract_filter)
+
+    for entry in entries:
+        _print_timeline_entry(entry)
 
 
 def _print_timeline_entry(entry: TraceEntry) -> None:
@@ -314,80 +352,50 @@ def _print_timeline_entry(entry: TraceEntry) -> None:
 @cli.command()
 @click.option("--asset", "asset_id_filter", default=None, help="Asset ID to trace")
 @click.option("--asset-name", "asset_name_filter", default=None, help="Asset name to trace")
+@click.option("--session", "session_id", default=None, help="Read from a specific session ID")
 def audit(
     asset_id_filter: Optional[str],
     asset_name_filter: Optional[str],
+    session_id: Optional[str],
 ) -> None:
-    """Show lineage from an asset back to activation (from latest session or demo)."""
-    latest = _latest_session_file()
-
-    # ── JSONL path ────────────────────────────────────────────────────────
-    if latest is not None:
-        jsonl_store = JsonLTraceStore(str(latest))
-        all_entries = jsonl_store.get_all()
-        name_map = _build_asset_name_map(all_entries)
-
-        target_id: Optional[str] = None
-        target_name: Optional[str] = None
-
-        if asset_id_filter:
-            # Try direct ID first
-            target_id, target_name = _resolve_asset_by_id(
-                asset_id_filter, jsonl_store, name_map,
-            )
-            if target_id is None:
-                # Fallback: treat as name
-                target_id, target_name = _resolve_asset_by_name(
-                    asset_id_filter, jsonl_store,
-                )
-            if target_id is None:
-                click.echo(f"No asset found with id or name '{asset_id_filter}'")
-                return
-        elif asset_name_filter:
-            target_id, target_name = _resolve_asset_by_name(
-                asset_name_filter, jsonl_store,
-            )
-            if target_id is None:
-                click.echo(f"No asset found with name '{asset_name_filter}'")
-                return
+    """Show lineage from an asset back to activation (from latest session)."""
+    if session_id is not None:
+        jsonl_store, all_entries = _find_trace_for_session(session_id)
+        if jsonl_store is None:
+            click.echo(f"Session '{session_id}' not found.")
+            return
+    else:
+        latest = _latest_session_file()
+        if latest is not None:
+            jsonl_store = JsonLTraceStore(str(latest))
+            all_entries = jsonl_store.get_all()
         else:
-            click.echo("Provide --asset <id> or --asset-name <name>")
+            click.echo("No sessions found. Use 'aig run <goal>' or 'aig demo'.")
             return
 
-        if not target_id:
-            click.echo("Could not determine target asset.")
-            return
-
-        _print_reverse_lineage(
-            target_id, target_name or target_id, jsonl_store, name_map,
-        )
-        return
-
-    # ── Demo fallback (original MemoryStore path) ─────────────────────────
-    store, trace_store, _ = _run_demo("demo")
+    name_map = _build_asset_name_map(all_entries)
 
     target_id: Optional[str] = None
     target_name: Optional[str] = None
 
     if asset_id_filter:
-        asset = store.get_asset(asset_id_filter)
-        if asset:
-            target_id = asset_id_filter
-            target_name = asset.name
-        else:
-            matches = store.get_assets_by_name(asset_id_filter)
-            if not matches:
-                click.echo(f"No asset found with id or name '{asset_id_filter}'")
-                return
-            target_id = matches[0].id
-            target_name = matches[0].name
+        target_id, target_name = _resolve_asset_by_id(
+            asset_id_filter, jsonl_store, name_map,
+        )
+        if target_id is None:
+            target_id, target_name = _resolve_asset_by_name(
+                asset_id_filter, jsonl_store,
+            )
+        if target_id is None:
+            click.echo(f"No asset found with id or name '{asset_id_filter}'")
+            return
     elif asset_name_filter:
-        matches = store.get_assets_by_name(asset_name_filter)
-        if not matches:
+        target_id, target_name = _resolve_asset_by_name(
+            asset_name_filter, jsonl_store,
+        )
+        if target_id is None:
             click.echo(f"No asset found with name '{asset_name_filter}'")
             return
-        target_id = matches[0].id
-        target_name = matches[0].name
     else:
         click.echo("Provide --asset <id> or --asset-name <name>")
         return
@@ -396,7 +404,9 @@ def audit(
         click.echo("Could not determine target asset.")
         return
 
-    _print_reverse_lineage(target_id, target_name or target_id, trace_store, store)
+    _print_reverse_lineage(
+        target_id, target_name or target_id, jsonl_store, name_map,
+    )
 
 
 def _print_reverse_lineage(
@@ -458,6 +468,93 @@ def _follow_parents(
         elif parent.event_type == "projection":
             click.echo(f"{indent}← projection from candidate by {parent.worker_id or 'worker'}")
         current = parent
+
+
+@cli.command()
+@click.argument("session_id", required=False)
+@click.option("--all", "replay_all_flag", is_flag=True, default=False, help="Replay all stored sessions")
+def replay(session_id: Optional[str], replay_all_flag: bool) -> None:
+    """Replay a session from persisted data and validate consistency."""
+    if replay_all_flag:
+        results = replay_all()
+        if not results:
+            click.echo("No sessions found.")
+            return
+        for r in results:
+            _print_replay_result(r)
+            click.echo("")
+        return
+
+    if not session_id:
+        click.echo("Usage: aig replay <session_id>  or  aig replay --all")
+        return
+
+    result = replay_session(session_id)
+    if "error" in result:
+        click.echo(result["error"])
+        return
+
+    _print_replay_result(result)
+
+
+def _print_replay_result(result: dict) -> None:
+    session = result.get("session")
+    if session is None:
+        return
+
+    click.echo(f"Session: {session.id}")
+    click.echo(f"  Root contract: {session.root_contract_id}")
+    click.echo(f"  Created: {session.created_at}")
+
+    entries = result.get("entries", [])
+    by_event = result.get("by_event", {})
+
+    click.echo(f"  Trace entries: {len(entries)}")
+    for event_type in sorted(by_event):
+        click.echo(f"    {event_type}: {len(by_event[event_type])}")
+
+    accepted = result.get("accepted_count", 0)
+    rejected = result.get("rejected_count", 0)
+    click.echo(f"  Accepted fragments: {accepted}")
+    click.echo(f"  Rejected fragments: {rejected}")
+
+    consistent = result.get("consistent", False)
+    if consistent:
+        click.echo(f"  Consistency: ✓ no duplicate asset IDs")
+    else:
+        duplicates = result.get("duplicate_ids", [])
+        click.echo(f"  Consistency: ✗ duplicate asset IDs: {duplicates}")
+
+    click.echo("")
+    click.echo("  Timeline:")
+    for entry in entries:
+        marker = "✓" if entry.event_type in ("activation", "complete") else "→"
+        if entry.event_type == "projection":
+            if entry.rejected_fragments and not entry.accepted_fragments:
+                marker = "✗"
+        click.echo(f"    {marker} [{entry.event_type}]", nl=False)
+        if entry.event_type == "activation":
+            click.echo(f" contract activated (budget: {entry.budget_remaining})")
+        elif entry.event_type == "disclosure":
+            worker = entry.worker_id or "worker"
+            assets = entry.disclosed_assets or []
+            click.echo(f" {assets} → {worker}")
+        elif entry.event_type == "projection":
+            accepted = len(entry.accepted_fragments)
+            rejected_count = len(entry.rejected_fragments)
+            click.echo(f" +{accepted} accepted, -{rejected_count} rejected")
+        elif entry.event_type == "complete":
+            click.echo(f" outputs satisfied")
+
+
+@cli.command()
+@click.argument("goal")
+def demo(goal: str) -> None:
+    """Run a quick demo with the given goal (quickstart experience)."""
+    store, trace_store, contract = _run_demo(goal)
+    click.echo(f"Demo completed for goal: '{goal}'")
+    click.echo(f"  Contract: {contract.name}")
+    click.echo(f"  Assets: {[a.name for a in store.get_all_assets()]}")
 
 
 @cli.group()
