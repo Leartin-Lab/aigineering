@@ -99,3 +99,19 @@ def test_tool_obs_names_rejected():
         acc, rej, _ = check_authority(contract, [{"name": name, "content": "x"}])
         assert len(rej) == 1
         assert rej[0]["category"] == "protected_name_rejection"
+
+
+def test_system_contract_can_mint_declared_reserved_output():
+    contract = Contract(
+        id="system_contract",
+        outputs=["_plan_result_parent"],
+        origin="system",
+    )
+
+    acc, rej, _ = check_authority(
+        contract,
+        [{"name": "_plan_result_parent", "content": "plan"}],
+    )
+
+    assert acc == [{"name": "_plan_result_parent", "content": "plan"}]
+    assert rej == []

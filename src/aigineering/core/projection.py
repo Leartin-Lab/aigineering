@@ -23,6 +23,15 @@ def project_candidate(
     candidate: Candidate,
 ) -> ProjectionResult:
     fragments, parse_rejected = _parse_candidate_fragments(candidate)
+    if not fragments and not parse_rejected:
+        parse_rejected.append(
+            RejectedCandidate(
+                name="(empty)",
+                content="",
+                reject_reason="worker produced no candidate fragments",
+                category=RejectionCategory.PARSE_ERROR,
+            )
+        )
 
     # Reject duplicate names with conflicting content: reject ALL for that name
     seen_names: dict[str, str] = {}  # name → first content

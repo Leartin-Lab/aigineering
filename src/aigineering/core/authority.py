@@ -61,7 +61,7 @@ def check_authority(
             category = "authority_rejection"
 
         for prefix in RESERVED_PREFIXES:
-            if name.startswith(prefix):
+            if name.startswith(prefix) and contract.origin != "system":
                 reasons.append(
                     f"asset '{name}' starts with reserved prefix '{prefix}'"
                 )

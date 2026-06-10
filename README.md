@@ -78,6 +78,7 @@ This is an early proof-of-concept demonstrating the core invariant: **undeclared
 - Structured `/exec`, `/plan`, `/replan`, and `/tool` action parser
 - System method sub-contract builder for `/plan`, `/replan`, and `/tool`
 - Engine scheduling for method actions without direct parent state mutation
+- System method context assets and reserved-output authority for method sub-contracts
 - CLI trace rendering for method scheduling events
 - Tool registry with serializable `ToolSpec` and private handlers
 

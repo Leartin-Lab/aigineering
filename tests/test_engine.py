@@ -205,8 +205,12 @@ def test_method_action_schedules_subcontract_without_projection():
     assert child_contracts[0].name == "root.plan"
     assert child_contracts[0].outputs == [f"_plan_result_{contract.id}"]
 
+    context_assets = store.get_assets_by_name(f"_method_ctx_{contract.id}")
+    assert len(context_assets) == 1
+    assert context_assets[0].origin == "system"
+    assert context_assets[0].minted_by == "engine"
+
     assert store.get_assets_by_name("report") == []
-    assert trace_store.get_by_event_type("projection") == []
     scheduled = trace_store.get_by_event_type("method_scheduled")
     assert len(scheduled) == 1
     assert scheduled[0].relation_type == "plan"

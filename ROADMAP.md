@@ -39,6 +39,8 @@
 - [x] `/exec` / `/plan` / `/replan` / `/tool` protocol parsing
 - [x] Method action to system sub-contract semantics
 - [x] Engine method sub-contract scheduling
+- [x] Method context assets for scheduled sub-contracts
+- [x] System authority for declared reserved method outputs
 - [ ] Contract expansion for tool calls
 
 ## v0.4 — MCP, Skills, GC, PyPI

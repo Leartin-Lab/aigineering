@@ -10,6 +10,7 @@ from aigineering.core.activation import check_activation
 from aigineering.core.disclosure import compute_disclosure
 from aigineering.core.labels import Label, resolve_contract_labels
 from aigineering.core.methods import method_contract
+from aigineering.core.ids import asset_id
 from aigineering.core.projection import project_candidate
 from aigineering.core.provenance import sign_asset
 from aigineering.core.store import StoreProtocol
@@ -204,6 +205,7 @@ class Engine:
         child = method_contract(contract, action)
         if key not in self._method_scheduled:
             self.add_contract(child)
+            self._create_method_context_asset(contract, action, child)
             self._method_scheduled.add(key)
 
         self._add_trace(
@@ -215,6 +217,35 @@ class Engine:
             relation_target=child.id,
             budget_remaining=self._resolve_budget(contract),
         )
+
+    def _create_method_context_asset(
+        self,
+        contract: Contract,
+        action: WorkerAction,
+        child: Contract,
+    ) -> None:
+        name = f"_method_ctx_{contract.id}"
+        content = json.dumps(
+            {
+                "method": action.type,
+                "parent_contract_id": contract.id,
+                "child_contract_id": child.id,
+                "payload": action.payload,
+            },
+            sort_keys=True,
+            ensure_ascii=False,
+        )
+        asset = Asset(
+            id=asset_id(content),
+            name=name,
+            content=content,
+            created_by=contract.id,
+            origin="system",
+            trust_tier="system",
+            minted_by="engine",
+            promptable=True,
+        )
+        self._store.add_asset(sign_asset(asset))
 
 
 def _parse_method_action(candidate: Candidate) -> WorkerAction | None:
