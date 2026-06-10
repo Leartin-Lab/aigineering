@@ -47,6 +47,7 @@ class TraceEntry:
     worker_id: Optional[str] = None
     candidate_raw: Optional[str] = None
     accepted_fragments: list[str] = field(default_factory=list)
+    accepted_asset_names: list[str] = field(default_factory=list)
     rejected_fragments: list[str] = field(default_factory=list)
     authority_policy: Optional[str] = None
     authority_result: Optional[bool] = None

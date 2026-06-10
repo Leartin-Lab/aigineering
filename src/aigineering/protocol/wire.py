@@ -70,6 +70,7 @@ def trace_entry_to_dict(entry: TraceEntry) -> dict[str, Any]:
         "worker_id": entry.worker_id,
         "candidate_raw": entry.candidate_raw,
         "accepted_fragments": entry.accepted_fragments,
+        "accepted_asset_names": entry.accepted_asset_names,
         "rejected_fragments": entry.rejected_fragments,
         "authority_policy": entry.authority_policy,
         "authority_result": entry.authority_result,
@@ -78,6 +79,27 @@ def trace_entry_to_dict(entry: TraceEntry) -> dict[str, Any]:
         "relation_target": entry.relation_target,
         "timestamp": entry.timestamp,
     }
+
+
+def trace_entry_from_dict(data: dict[str, Any]) -> TraceEntry:
+    return TraceEntry(
+        id=data.get("id", ""),
+        parent_id=data.get("parent_id"),
+        contract_id=data.get("contract_id", ""),
+        event_type=data.get("event_type", ""),
+        disclosed_assets=data.get("disclosed_assets", []),
+        worker_id=data.get("worker_id"),
+        candidate_raw=data.get("candidate_raw"),
+        accepted_fragments=data.get("accepted_fragments", []),
+        accepted_asset_names=data.get("accepted_asset_names", []),
+        rejected_fragments=data.get("rejected_fragments", []),
+        authority_policy=data.get("authority_policy"),
+        authority_result=data.get("authority_result"),
+        budget_remaining=data.get("budget_remaining", 0),
+        relation_type=data.get("relation_type"),
+        relation_target=data.get("relation_target"),
+        timestamp=data.get("timestamp", ""),
+    )
 
 
 def candidate_to_dict(candidate: Candidate) -> dict[str, Any]:
