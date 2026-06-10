@@ -129,6 +129,7 @@ class JsonLStore:
                     activation=data.get("activation", ""),
                     budget=data.get("budget", 0),
                     tool_scope=data.get("tool_scope", []),
+                    labels=data.get("labels", []),
                     origin=data.get("origin", "human"),
                 )
                 self.contracts[contract.id] = contract

@@ -40,6 +40,7 @@ def contract_to_canonical(contract: Contract) -> str:
         "activation": contract.activation,
         "budget": contract.budget,
         "tool_scope": sorted(contract.tool_scope),
+        "labels": sorted(contract.labels),
         "origin": contract.origin,
     }
     return json.dumps(d, sort_keys=True, ensure_ascii=False)
@@ -56,6 +57,7 @@ def contract_to_dict(contract: Contract) -> dict[str, Any]:
         "activation": contract.activation,
         "budget": contract.budget,
         "tool_scope": contract.tool_scope,
+        "labels": contract.labels,
         "origin": contract.origin,
     }
 

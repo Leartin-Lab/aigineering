@@ -1,0 +1,106 @@
+"""Label resolution for declarative asset injection."""
+
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass, field
+from typing import Protocol
+
+from aigineering.core.ids import asset_id
+from aigineering.protocol.types import Asset, Contract
+from aigineering.protocol.wire import asset_to_canonical
+
+
+class StoreLike(Protocol):
+    def add_asset(self, asset: Asset) -> None: ...
+    def get_assets_by_name(self, name: str) -> list[Asset]: ...
+
+
+@dataclass(frozen=True)
+class Label:
+    """Declarative rule that injects asset references into a contract context."""
+
+    name: str
+    assets: list[str] = field(default_factory=list)
+    description: str = ""
+
+
+@dataclass(frozen=True)
+class LabelResolution:
+    """Result of resolving labels against the current asset store."""
+
+    label_names: list[str]
+    injected_assets: list[Asset]
+    placeholder_assets: list[Asset]
+
+
+def _placeholder_asset(label_name: str, asset_name: str) -> Asset:
+    content = json.dumps(
+        {
+            "placeholder": True,
+            "label": label_name,
+            "asset": asset_name,
+            "reason": "label dependency was not present in the asset store",
+        },
+        sort_keys=True,
+        ensure_ascii=False,
+    )
+    draft = Asset(
+        id="",
+        name=asset_name,
+        content=content,
+        content_type="application/json",
+        origin="label_placeholder",
+    )
+    return Asset(
+        id=asset_id(asset_to_canonical(draft)),
+        name=draft.name,
+        content=draft.content,
+        content_type=draft.content_type,
+        origin=draft.origin,
+    )
+
+
+def resolve_contract_labels(
+    contract: Contract,
+    labels: dict[str, Label],
+    store: StoreLike,
+) -> LabelResolution:
+    """Resolve contract labels into context assets.
+
+    Labels do not execute work and do not grant authority. They only inject
+    asset references into the contract-local context. Missing dependencies are
+    represented as placeholder assets so the runtime can trace the gap.
+    """
+    injected: list[Asset] = []
+    placeholders: list[Asset] = []
+    seen_ids: set[str] = set()
+
+    for label_name in contract.labels:
+        label = labels.get(label_name)
+        if label is None:
+            placeholder = _placeholder_asset(label_name, f"_label_missing_{label_name}")
+            store.add_asset(placeholder)
+            if placeholder.id not in seen_ids:
+                placeholders.append(placeholder)
+                injected.append(placeholder)
+                seen_ids.add(placeholder.id)
+            continue
+
+        for asset_name in label.assets:
+            matches = store.get_assets_by_name(asset_name)
+            if not matches:
+                placeholder = _placeholder_asset(label.name, asset_name)
+                store.add_asset(placeholder)
+                matches = [placeholder]
+                placeholders.append(placeholder)
+            for asset in matches:
+                if asset.id not in seen_ids:
+                    injected.append(asset)
+                    seen_ids.add(asset.id)
+
+    return LabelResolution(
+        label_names=list(contract.labels),
+        injected_assets=injected,
+        placeholder_assets=placeholders,
+    )

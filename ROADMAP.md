@@ -22,6 +22,7 @@
 - [x] Session manifest (`.aig/sessions/*.json`)
 - [x] JSONL trace reload beyond latest-session CLI reads via `--session`
 - [x] `aig replay` (from persisted session + trace)
+- [x] Label-based asset injection with placeholder assets
 - [ ] SQLiteStore (single-file persistence)
 - [ ] `aig retry --contract` (incremental retry)
 - [ ] `aig trace --tree` / `aig trace --dag`
@@ -38,7 +39,7 @@
 
 - [ ] MCP function call → contract expansion
 - [ ] Skill loading
-- [ ] Label/context injection
+- [ ] Label-injected skill assets
 - [ ] GC: audit closure + reflog + tombstone
 - [ ] PyPI publish
 - [ ] Interactive REPL (`aig repl`)

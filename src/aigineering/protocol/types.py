@@ -28,6 +28,7 @@ class Contract:
     activation: str = ""
     budget: int = 0
     tool_scope: list[str] = field(default_factory=list)
+    labels: list[str] = field(default_factory=list)
     origin: str = "human"
 
 

@@ -30,6 +30,8 @@ def create_entry(
     authority_policy: Optional[str] = None,
     authority_result: Optional[str] = None,
     budget_remaining: int = 0,
+    relation_type: Optional[str] = None,
+    relation_target: Optional[str] = None,
 ) -> TraceEntry:
     entry_id = trace_entry_id(
         contract_id=contract_id,
@@ -51,6 +53,8 @@ def create_entry(
         authority_policy=authority_policy,
         authority_result=authority_result,
         budget_remaining=budget_remaining,
+        relation_type=relation_type,
+        relation_target=relation_target,
         timestamp=now_iso(),
     )
 

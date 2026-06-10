@@ -92,13 +92,15 @@ def _contract_json(
     description: str = "",
     budget: int = 0,
     tool_scope: Optional[list[str]] = None,
+    labels: Optional[list[str]] = None,
     origin: str = "human",
 ) -> str:
     return json.dumps(
         {"parent_id": parent_id, "name": name, "description": description,
          "inputs": sorted(inputs), "outputs": sorted(outputs),
          "activation": activation, "budget": budget,
-         "tool_scope": sorted(tool_scope or []), "origin": origin},
+         "tool_scope": sorted(tool_scope or []), "labels": sorted(labels or []),
+         "origin": origin},
         sort_keys=True, ensure_ascii=False,
     )
 
