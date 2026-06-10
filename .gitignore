@@ -29,3 +29,5 @@ htmlcov/
 # Project
 *.db
 *.sqlite
+.internal-docs/
+.aig/

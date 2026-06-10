@@ -56,10 +56,11 @@ This is an early proof-of-concept demonstrating the core invariant: **undeclared
 - Parse-error and duplicate-output rejection
 - Mock worker demo (built-in `build_report` scenario)
 - CLI: `aig run`, `aig trace`, `aig audit` (demo-only; persistence in v0.2)
+- JSONL persistent trace (`.aig/traces/`) with atomic append
 
 **Not yet implemented (see ROADMAP.md):**
 - Real LLM integration
-- Persistent trace (currently demo runs inline)
+- Persistent asset/contract store (currently in-memory)
 - MCP / Skills / Tools
 - Multi-contract orchestration
 - Distributed runtime
