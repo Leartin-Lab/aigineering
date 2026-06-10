@@ -77,6 +77,7 @@ This is an early proof-of-concept demonstrating the core invariant: **undeclared
 - Reusable worker prompt builder that preserves the candidate/fact boundary
 - Structured `/exec`, `/plan`, `/replan`, and `/tool` action parser
 - System method sub-contract builder for `/plan`, `/replan`, and `/tool`
+- Engine scheduling for method actions without direct parent state mutation
 
 **Not yet implemented (see ROADMAP.md):**
 - MCP / Skills / Tools

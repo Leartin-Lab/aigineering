@@ -174,3 +174,40 @@ def test_parse_rejection_recorded_in_trace():
     proj = projections[0]
     assert len(proj.accepted_fragments) == 1
     assert "no colon" in str(proj.rejected_fragments).lower()
+
+
+def test_method_action_schedules_subcontract_without_projection():
+    store = MemoryStore()
+    trace_store = TraceStore()
+    worker = MockWorker({"root": '/plan {"reason": "split work"}'})
+    input_asset = Asset(
+        id=asset_id(_asset_canonical("x", "y")),
+        name="x",
+        content="y",
+    )
+    contract = Contract(
+        id=contract_id(_contract_canonical("root", ["x"], ["report"], "x")),
+        name="root",
+        inputs=["x"],
+        outputs=["report"],
+        activation="x",
+        budget=5,
+    )
+
+    engine = Engine(store, worker, trace_store)
+    engine.add_contract(contract)
+    engine.add_asset(input_asset)
+    engine.run()
+
+    contracts = store.get_all_contracts()
+    child_contracts = [c for c in contracts if c.parent_id == contract.id]
+    assert len(child_contracts) == 1
+    assert child_contracts[0].name == "root.plan"
+    assert child_contracts[0].outputs == [f"_plan_result_{contract.id}"]
+
+    assert store.get_assets_by_name("report") == []
+    assert trace_store.get_by_event_type("projection") == []
+    scheduled = trace_store.get_by_event_type("method_scheduled")
+    assert len(scheduled) == 1
+    assert scheduled[0].relation_type == "plan"
+    assert scheduled[0].relation_target == child_contracts[0].id

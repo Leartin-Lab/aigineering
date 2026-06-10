@@ -9,10 +9,12 @@ from aigineering.agent.worker import Worker
 from aigineering.core.activation import check_activation
 from aigineering.core.disclosure import compute_disclosure
 from aigineering.core.labels import Label, resolve_contract_labels
+from aigineering.core.methods import method_contract
 from aigineering.core.projection import project_candidate
 from aigineering.core.provenance import sign_asset
 from aigineering.core.store import StoreProtocol
 from aigineering.core.trace import MemoryTraceStore, TraceStoreProtocol
+from aigineering.protocol.actions import ActionParseError, WorkerAction, parse_action
 from aigineering.protocol.types import Asset, Candidate, Contract, ProjectionResult
 
 _logger = logging.getLogger(__name__)
@@ -46,6 +48,8 @@ class Engine:
         self._label_context: dict[str, list[Asset]] = {}
         self._budget: dict[str, int] = {}
         self._completed: set[str] = set()
+        self._suspended: set[str] = set()
+        self._method_scheduled: set[tuple[str, str]] = set()
         self._contract_last_entry: dict[str, str] = {}  # contract_id → last trace entry id
 
     def add_contract(self, contract: Contract) -> None:
@@ -85,6 +89,7 @@ class Engine:
                 c
                 for c in self._store.get_all_contracts()
                 if c.id not in self._completed
+                and c.id not in self._suspended
                 and self._resolve_budget(c) > 0
                 and _safe_check_activation(c.activation, available_names)
             ]
@@ -108,6 +113,13 @@ class Engine:
                 )
 
                 candidate: Candidate = self._worker.invoke(contract, scope)
+                action = _parse_method_action(candidate)
+                if action is not None:
+                    self._schedule_method_contract(contract, action, candidate)
+                    remaining = self._resolve_budget(contract)
+                    self._budget[contract.id] = max(0, remaining - 1)
+                    self._suspended.add(contract.id)
+                    break
 
                 result = project_candidate(contract, candidate)
                 self._commit(result)
@@ -181,3 +193,45 @@ class Engine:
             if not any(a.created_by == contract.id for a in matching):
                 return False
         return True
+
+    def _schedule_method_contract(
+        self,
+        contract: Contract,
+        action: WorkerAction,
+        candidate: Candidate,
+    ) -> None:
+        key = (contract.id, action.type)
+        child = method_contract(contract, action)
+        if key not in self._method_scheduled:
+            self.add_contract(child)
+            self._method_scheduled.add(key)
+
+        self._add_trace(
+            contract.id,
+            "method_scheduled",
+            worker_id=candidate.worker_id,
+            candidate_raw=candidate.raw_output,
+            relation_type=action.type,
+            relation_target=child.id,
+            budget_remaining=self._resolve_budget(contract),
+        )
+
+
+def _parse_method_action(candidate: Candidate) -> WorkerAction | None:
+    parsed = candidate.parsed_action
+    if isinstance(parsed, dict) and parsed.get("type") in {"plan", "replan", "tool"}:
+        return WorkerAction(
+            type=parsed["type"],
+            outputs=dict(parsed.get("outputs", {})),
+            payload=dict(parsed.get("payload", {})),
+        )
+
+    if not candidate.raw_output.strip().startswith("/"):
+        return None
+    try:
+        action = parse_action(candidate.raw_output)
+    except (ActionParseError, json.JSONDecodeError):
+        return None
+    if action.type in {"plan", "replan", "tool"}:
+        return action
+    return None
