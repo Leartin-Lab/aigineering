@@ -85,3 +85,4 @@ class ProjectionResult:
     rejected_candidates: list[RejectedCandidate] = field(default_factory=list)
     raw_candidate: str = ""
     status: ProjectionStatus = ProjectionStatus.REJECTED
+    authority_policy: Optional[dict] = None

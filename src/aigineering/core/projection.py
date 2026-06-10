@@ -117,15 +117,19 @@ def project_candidate(
         )
         accepted_assets.append(asset)
 
-    # Convert authority-rejected dicts to RejectedCandidate objects
+    _cat_map = {
+        "authority_rejection": RejectionCategory.AUTHORITY_REJECTION,
+        "protected_name_rejection": RejectionCategory.PROTECTED_NAME_REJECTION,
+    }
     all_rejected: list[RejectedCandidate] = list(parse_rejected)
     for r in authority_rejected_dicts:
+        raw_cat = r.get("category", "authority_rejection")
         all_rejected.append(
             RejectedCandidate(
                 name=r["name"],
                 content=r["content"],
                 reject_reason=r["reject_reason"],
-                category=RejectionCategory.AUTHORITY_REJECTION,
+                category=_cat_map.get(raw_cat, RejectionCategory.AUTHORITY_REJECTION),
             )
         )
 
@@ -142,4 +146,5 @@ def project_candidate(
         rejected_candidates=all_rejected,
         raw_candidate=candidate.raw_output,
         status=status,
+        authority_policy=authority_policy,
     )
