@@ -2,10 +2,17 @@
 
 from __future__ import annotations
 
+import json
+import logging
+import os
+from pathlib import Path
 from typing import Optional, Protocol, runtime_checkable
 
 from aigineering.core.ids import now_iso, trace_entry_id
 from aigineering.protocol.types import TraceEntry
+from aigineering.protocol.wire import trace_entry_from_dict, trace_entry_to_dict
+
+_logger = logging.getLogger(__name__)
 
 
 def create_entry(
@@ -105,6 +112,86 @@ class MemoryTraceStore:
     def get_reverse_lineage(self, asset_id: str) -> list[TraceEntry]:
         results: list[TraceEntry] = []
         for entry in self.entries:
+            if asset_id in entry.accepted_fragments:
+                results.append(entry)
+        return results
+
+
+class JsonLTraceStore:
+    """Persistent JSONL trace store — one JSON object per line."""
+
+    def __init__(self, file_path: str) -> None:
+        self._file_path = file_path
+        self._entries: list[TraceEntry] = []
+        self._seq: int = 0
+        parent = Path(file_path).parent
+        if str(parent) and not parent.exists():
+            parent.mkdir(parents=True, exist_ok=True)
+        self._entries = self._load_existing()
+        self._seq = len(self._entries)
+
+    @property
+    def sequence(self) -> int:
+        return self._seq
+
+    def _load_existing(self) -> list[TraceEntry]:
+        if not os.path.exists(self._file_path):
+            return []
+        entries: list[TraceEntry] = []
+        with open(self._file_path, "r", encoding="utf-8") as f:
+            for line in f:
+                stripped = line.strip()
+                if stripped:
+                    entries.append(trace_entry_from_dict(json.loads(stripped)))
+        return entries
+
+    def _write_line(self, entry: TraceEntry) -> None:
+        line = json.dumps(trace_entry_to_dict(entry), ensure_ascii=False) + "\n"
+        with open(self._file_path, "a", encoding="utf-8") as f:
+            f.write(line)
+            f.flush()
+            try:
+                os.fsync(f.fileno())
+            except OSError:
+                _logger.warning("fsync failed for %s", self._file_path)
+
+    def append(self, entry: TraceEntry) -> None:
+        self._write_line(entry)
+        self._entries.append(entry)
+        self._seq += 1
+
+    def new_entry(
+        self,
+        contract_id: str,
+        event_type: str,
+        **kwargs: object,
+    ) -> TraceEntry:
+        if kwargs.get("parent_id") is None:
+            for e in reversed(self._entries):
+                if e.contract_id == contract_id:
+                    kwargs["parent_id"] = e.id
+                    break
+        entry = create_entry(
+            contract_id=contract_id,
+            event_type=event_type,
+            sequence=self._seq,
+            **kwargs,  # type: ignore[arg-type]
+        )
+        self.append(entry)
+        return entry
+
+    def get_by_contract(self, contract_id: str) -> list[TraceEntry]:
+        return [e for e in self._entries if e.contract_id == contract_id]
+
+    def get_by_event_type(self, event_type: str) -> list[TraceEntry]:
+        return [e for e in self._entries if e.event_type == event_type]
+
+    def get_all(self) -> list[TraceEntry]:
+        return list(self._entries)
+
+    def get_reverse_lineage(self, asset_id: str) -> list[TraceEntry]:
+        results: list[TraceEntry] = []
+        for entry in self._entries:
             if asset_id in entry.accepted_fragments:
                 results.append(entry)
         return results
