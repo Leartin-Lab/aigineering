@@ -167,6 +167,8 @@ class Engine:
                 seen.add(asset.id)
                 scope.append(asset)
         for asset in self._label_context.get(contract.id, []):
+            if not asset.promptable:
+                continue
             if asset.id not in seen:
                 seen.add(asset.id)
                 scope.append(asset)

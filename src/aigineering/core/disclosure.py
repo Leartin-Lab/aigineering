@@ -21,6 +21,8 @@ def compute_disclosure(contract: Contract, store: StoreLike) -> list[Asset]:
 
     for input_name in contract.inputs:
         for asset in store.get_assets_by_name(input_name):
+            if not asset.promptable:
+                continue
             if asset.id not in seen:
                 seen.add(asset.id)
                 result.append(asset)

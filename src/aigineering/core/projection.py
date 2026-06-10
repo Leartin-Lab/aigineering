@@ -103,6 +103,8 @@ def project_candidate(
                 "content_type": "text",
                 "created_by": contract.id,
                 "origin": "mock",
+                "promptable": True,
+                "disclosure_view": "original",
             },
             sort_keys=True,
             ensure_ascii=False,
@@ -114,6 +116,8 @@ def project_candidate(
             content_type="text",
             created_by=contract.id,
             origin="mock",
+            promptable=True,
+            disclosure_view="original",
         )
         accepted_assets.append(asset)
 

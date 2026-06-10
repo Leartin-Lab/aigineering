@@ -15,6 +15,8 @@ def asset_to_canonical(asset: Asset) -> str:
         "content_type": asset.content_type,
         "created_by": asset.created_by,
         "origin": asset.origin,
+        "promptable": asset.promptable,
+        "disclosure_view": asset.disclosure_view,
     }
     return json.dumps(d, sort_keys=True, ensure_ascii=False)
 
@@ -27,6 +29,8 @@ def asset_to_dict(asset: Asset) -> dict[str, Any]:
         "content_type": asset.content_type,
         "created_by": asset.created_by,
         "origin": asset.origin,
+        "promptable": asset.promptable,
+        "disclosure_view": asset.disclosure_view,
     }
 
 

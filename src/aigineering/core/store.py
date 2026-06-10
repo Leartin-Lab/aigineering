@@ -98,6 +98,8 @@ class JsonLStore:
                     content_type=data.get("content_type", "text"),
                     created_by=data.get("created_by", ""),
                     origin=data.get("origin", "system"),
+                    promptable=data.get("promptable", True),
+                    disclosure_view=data.get("disclosure_view", "original"),
                 )
                 self.assets[asset.id] = asset
         self._rebuild_indexes()

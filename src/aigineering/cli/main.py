@@ -75,10 +75,13 @@ def _asset_json(
     content_type: str = "text",
     created_by: str = "",
     origin: str = "human",
+    promptable: bool = True,
+    disclosure_view: str = "original",
 ) -> str:
     return json.dumps(
         {"name": name, "content": content, "content_type": content_type,
-         "created_by": created_by, "origin": origin},
+         "created_by": created_by, "origin": origin,
+         "promptable": promptable, "disclosure_view": disclosure_view},
         sort_keys=True, ensure_ascii=False,
     )
 

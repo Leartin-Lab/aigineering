@@ -68,6 +68,7 @@ This is an early proof-of-concept demonstrating the core invariant: **undeclared
 - Session manifest (`.aig/sessions/`) with trace linkage
 - Full replay from persisted runtime state with consistency validation
 - Label-based asset injection with traceable `label_resolved` events
+- Asset disclosure policy (`promptable=False` assets remain stored but are not disclosed)
 
 **Not yet implemented (see ROADMAP.md):**
 - Real LLM integration

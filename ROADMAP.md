@@ -23,6 +23,7 @@
 - [x] JSONL trace reload beyond latest-session CLI reads via `--session`
 - [x] `aig replay` (from persisted session + trace)
 - [x] Label-based asset injection with placeholder assets
+- [x] Asset disclosure policy for non-promptable assets
 - [ ] SQLiteStore (single-file persistence)
 - [ ] `aig retry --contract` (incremental retry)
 - [ ] `aig trace --tree` / `aig trace --dag`

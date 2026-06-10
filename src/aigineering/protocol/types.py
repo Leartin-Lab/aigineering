@@ -15,6 +15,8 @@ class Asset:
     content_type: str = "text"
     created_by: str = ""
     origin: str = "system"
+    promptable: bool = True
+    disclosure_view: str = "original"
 
 
 @dataclass(frozen=True)
