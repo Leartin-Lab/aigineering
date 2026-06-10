@@ -72,6 +72,7 @@ This is an early proof-of-concept demonstrating the core invariant: **undeclared
 - Asset provenance metadata (`origin`, `trust_tier`, `minted_by`, `source_uri`)
 - Deterministic provenance signatures (`signed_by`, `signature`)
 - Worker protocol interface for candidate-producing execution environments
+- Worker-produced assets use explicit worker provenance, independent of the mock demo
 
 **Not yet implemented (see ROADMAP.md):**
 - Real LLM integration
