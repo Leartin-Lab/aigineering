@@ -11,10 +11,11 @@ import click
 
 from aigineering.core.engine import Engine
 from aigineering.core.ids import asset_id, contract_id
+from aigineering.core.session import SessionStore
 from aigineering.core.store import MemoryStore
 from aigineering.core.trace import JsonLTraceStore, MemoryTraceStore, TraceStoreProtocol
 from aigineering.agent.mock import MockWorker
-from aigineering.protocol.types import Asset, Contract, TraceEntry
+from aigineering.protocol.types import Asset, Contract, Session, TraceEntry
 
 
 def _get_trace_dir() -> Path:
@@ -236,6 +237,21 @@ def run(goal: str) -> None:
 
     click.echo(f"Trace saved to {trace_path}")
 
+    # ── Session manifest ───────────────────────────────────────────────────
+    session_id = _session_id()
+    contract_ids = [c.id for c in store.get_all_contracts()]
+    asset_ids = [a.id for a in store.get_all_assets()]
+    trace_ids = [e.id for e in jsonl_store.get_all()]
+    session = Session(
+        id=session_id,
+        root_contract_id=contract.id,
+        contract_ids=contract_ids,
+        asset_ids=asset_ids,
+        trace_ids=trace_ids,
+    )
+    session_store = SessionStore()
+    session_store.create_session(session)
+
 
 @cli.command()
 @click.option("--contract", "contract_filter", default=None, help="Filter by contract ID")
@@ -442,6 +458,42 @@ def _follow_parents(
         elif parent.event_type == "projection":
             click.echo(f"{indent}← projection from candidate by {parent.worker_id or 'worker'}")
         current = parent
+
+
+@cli.group()
+def session() -> None:
+    """Manage session manifests."""
+
+
+@session.command("ls")
+def session_ls() -> None:
+    """List sessions with id and created_at."""
+    store = SessionStore()
+    sessions = store.list_sessions()
+    if not sessions:
+        click.echo("No sessions found.")
+        return
+    for s in sessions:
+        click.echo(f"{s.id}  {s.created_at}")
+
+
+@session.command("show")
+@click.argument("session_id")
+def session_show(session_id: str) -> None:
+    """Show full session manifest."""
+    store = SessionStore()
+    s = store.get_session(session_id)
+    if s is None:
+        click.echo(f"Session '{session_id}' not found.")
+        return
+    click.echo(f"id:                {s.id}")
+    click.echo(f"root_contract_id:  {s.root_contract_id}")
+    click.echo(f"contract_ids:      {s.contract_ids}")
+    click.echo(f"asset_ids:         {s.asset_ids}")
+    click.echo(f"trace_ids:         {s.trace_ids}")
+    click.echo(f"config_snapshot:   {s.config_snapshot}")
+    click.echo(f"worker_snapshot:   {s.worker_snapshot}")
+    click.echo(f"created_at:        {s.created_at}")
 
 
 def main() -> None:
