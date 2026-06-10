@@ -160,11 +160,48 @@ def test_audit_resolves_from_jsonl():
         assert "projection from candidate" in result.output
 
 
-def test_trace_no_sessions_runs_demo_fallback():
-    """aig trace falls back to the in-memory demo when no session files exist."""
+def test_trace_no_sessions_shows_error():
+    """aig trace shows clear error when no sessions exist (no demo fallback)."""
     runner = CliRunner()
     with runner.isolated_filesystem():
         result = runner.invoke(cli, ["trace"])
 
         assert result.exit_code == 0
-        assert "No trace sessions found" in result.output
+        assert "No sessions found" in result.output
+
+
+def test_demo_command_exists():
+    """aig demo <goal> runs and exits 0 (preserves quickstart)."""
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        result = runner.invoke(cli, ["demo", "test"])
+
+        assert result.exit_code == 0
+        assert "Demo completed" in result.output
+
+
+def test_replay_valid_session():
+    """aig run → aig replay <session_id> shows replay output with consistency."""
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        run_result = runner.invoke(cli, ["run", "test"])
+        assert run_result.exit_code == 0
+
+        # Find the session ID
+        ls_result = runner.invoke(cli, ["session", "ls"])
+        assert ls_result.exit_code == 0
+        # session_ls prints "id  created_at", take the first session_id
+        lines = ls_result.output.strip().split("\n")
+        assert len(lines) >= 1
+        # The first line should look like "session_<timestamp>  <iso_date>"
+        session_id = lines[0].split()[0]
+        assert session_id.startswith("session_")
+
+        # Replay the session
+        replay_result = runner.invoke(cli, ["replay", session_id])
+        assert replay_result.exit_code == 0
+        assert "Session:" in replay_result.output
+        assert session_id in replay_result.output
+        assert "Trace entries:" in replay_result.output
+        assert "Consistency:" in replay_result.output
+        assert "Timeline:" in replay_result.output
