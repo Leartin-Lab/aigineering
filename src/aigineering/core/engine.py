@@ -9,7 +9,7 @@ from aigineering.core.activation import check_activation
 from aigineering.core.disclosure import compute_disclosure
 from aigineering.core.projection import project_candidate
 from aigineering.core.store import MemoryStore
-from aigineering.core.trace import TraceStore
+from aigineering.core.trace import MemoryTraceStore, TraceStoreProtocol
 from aigineering.protocol.types import Asset, Candidate, Contract
 
 _logger = logging.getLogger(__name__)
@@ -33,11 +33,11 @@ class Engine:
         self,
         store: MemoryStore,
         worker: Any,
-        trace_store: TraceStore | None = None,
+        trace_store: TraceStoreProtocol | None = None,
     ) -> None:
         self._store = store
         self._worker = worker
-        self._trace = trace_store if trace_store is not None else TraceStore()
+        self._trace = trace_store if trace_store is not None else MemoryTraceStore()
         self._budget: dict[str, int] = {}
         self._completed: set[str] = set()
         self._contract_last_entry: dict[str, str] = {}  # contract_id → last trace entry id
@@ -99,6 +99,7 @@ class Engine:
                     worker_id=candidate.worker_id,
                     candidate_raw=candidate.raw_output,
                     accepted_fragments=[a.id for a in accepted],
+                    accepted_asset_names=[a.name for a in accepted],
                     rejected_fragments=[
                         f"{r['name']}: {r.get('reject_reason', 'rejected')}"
                         for r in rejected
