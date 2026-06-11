@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from aigineering.core.ids import hash_asset_content, hash_contract
+from aigineering.core.ids import hash_asset_content, hash_asset_definition, hash_contract
 from aigineering.protocol.actions import WorkerAction
 from aigineering.protocol.types import Asset, Contract
 
@@ -95,6 +95,8 @@ def system_asset(
         id=hash_asset_content(name, content),
         name=name,
         content=content,
+        definition_hash=hash_asset_definition(name),
+        content_hash=hash_asset_content(name, content),
         created_by=created_by,
         origin="system",
         trust_tier="system",

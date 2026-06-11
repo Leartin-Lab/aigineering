@@ -27,6 +27,8 @@ class StoreProtocol(Protocol):
     def get_contract(self, contract_id: str) -> Optional[Contract]: ...
     def get_all_contracts(self) -> list[Contract]: ...
     def get_assets_by_contract(self, contract_id: str) -> list[Asset]: ...
+    def get_assets_by_definition(self, def_hash: str) -> list[Asset]: ...
+    def get_latest_asset(self, def_hash: str) -> Optional[Asset]: ...
 
 
 class MemoryStore:
@@ -60,6 +62,16 @@ class MemoryStore:
 
     def get_assets_by_contract(self, contract_id: str) -> list[Asset]:
         return [a for a in self.assets.values() if a.created_by == contract_id]
+
+    def get_assets_by_definition(self, def_hash: str) -> list[Asset]:
+        return [a for a in self.assets.values() if a.definition_hash == def_hash]
+
+    def get_latest_asset(self, def_hash: str) -> Optional[Asset]:
+        latest: Optional[Asset] = None
+        for asset in self.assets.values():
+            if asset.definition_hash == def_hash:
+                latest = asset
+        return latest
 
 
 class JsonLStore:
@@ -103,6 +115,8 @@ class JsonLStore:
                     source_uri=data.get("source_uri", ""),
                     signed_by=data.get("signed_by", ""),
                     signature=data.get("signature", ""),
+                    definition_hash=data.get("definition_hash", ""),
+                    content_hash=data.get("content_hash", ""),
                     promptable=data.get("promptable", True),
                     disclosure_view=data.get("disclosure_view", "original"),
                     keep_flag=data.get("keep_flag", False),
@@ -189,6 +203,16 @@ class JsonLStore:
     def get_assets_by_contract(self, contract_id: str) -> list[Asset]:
         ids = self._created_by_index.get(contract_id, [])
         return [self.assets[aid] for aid in ids if aid in self.assets]
+
+    def get_assets_by_definition(self, def_hash: str) -> list[Asset]:
+        return [a for a in self.assets.values() if a.definition_hash == def_hash]
+
+    def get_latest_asset(self, def_hash: str) -> Optional[Asset]:
+        latest: Optional[Asset] = None
+        for asset in self.assets.values():
+            if asset.definition_hash == def_hash:
+                latest = asset
+        return latest
 
     def add_contract(self, contract: Contract) -> None:
         line = json.dumps(contract_to_dict(contract), ensure_ascii=False) + "\n"

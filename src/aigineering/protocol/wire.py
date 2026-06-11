@@ -38,6 +38,8 @@ def asset_to_dict(asset: Asset) -> dict[str, Any]:
         "source_uri": asset.source_uri,
         "signed_by": asset.signed_by,
         "signature": asset.signature,
+        "definition_hash": asset.definition_hash,
+        "content_hash": asset.content_hash,
         "promptable": asset.promptable,
         "disclosure_view": asset.disclosure_view,
         "keep_flag": asset.keep_flag,

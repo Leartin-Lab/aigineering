@@ -6,7 +6,7 @@ import json
 from collections.abc import Mapping
 
 from aigineering.core.authority import check_authority
-from aigineering.core.ids import hash_asset_content
+from aigineering.core.ids import hash_asset_content, hash_asset_definition
 from aigineering.protocol.actions import (
     ActionParseError,
     WorkerAction,
@@ -76,6 +76,8 @@ def project_candidate(
             id=hash_asset_content(a["name"], a["content"]),
             name=a["name"],
             content=a["content"],
+            definition_hash=hash_asset_definition(a["name"]),
+            content_hash=hash_asset_content(a["name"], a["content"]),
             content_type="text",
             created_by=contract.id,
             origin="worker",

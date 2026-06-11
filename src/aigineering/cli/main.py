@@ -10,7 +10,7 @@ from typing import Optional
 import click
 
 from aigineering.core.engine import Engine
-from aigineering.core.ids import hash_asset_content, hash_contract
+from aigineering.core.ids import hash_asset_content, hash_asset_definition, hash_contract
 from aigineering.core.replay import replay_all, replay_session
 from aigineering.core.session import SessionStore
 from aigineering.core.store import JsonLStore, MemoryStore, StoreProtocol
@@ -156,6 +156,8 @@ def _run_demo(
         id=hash_asset_content("data_file", "Sample data for report generation"),
         name="data_file",
         content="Sample data for report generation",
+        definition_hash=hash_asset_definition("data_file"),
+        content_hash=hash_asset_content("data_file", "Sample data for report generation"),
         origin="human",
         trust_tier="human",
     )
@@ -163,6 +165,8 @@ def _run_demo(
         id=hash_asset_content("citation_db", "Sample citation database"),
         name="citation_db",
         content="Sample citation database",
+        definition_hash=hash_asset_definition("citation_db"),
+        content_hash=hash_asset_content("citation_db", "Sample citation database"),
         origin="human",
         trust_tier="human",
     )

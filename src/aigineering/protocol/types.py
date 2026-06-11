@@ -23,6 +23,8 @@ class Asset:
     signature: str = ""
     promptable: bool = True
     disclosure_view: str = "original"
+    definition_hash: str = ""
+    content_hash: str = ""
     keep_flag: bool = False
     tombstoned: bool = False
     tombstoned_at: Optional[str] = None
