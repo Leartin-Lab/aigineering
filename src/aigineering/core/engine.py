@@ -235,18 +235,22 @@ class Engine:
         action: WorkerAction,
         candidate: Candidate,
     ) -> None:
-        """Dispatch a method action through the registry or inline fallback."""
+        """Dispatch a method action through the registry or inline fallback.
+
+        When a handler is registered and returns True, the handler owns the
+        scheduling.  Otherwise the engine uses the default inline scheduling.
+        Budget decrement and parent suspension always run.
+        """
         handler = None
         if self._method_registry is not None:
             handler = self._method_registry.get(action.type)
 
+        handled = False
         if handler is not None and handler.can_handle(action.type):
-            handler.handle_method(self, contract, action.type, candidate)
+            handled = handler.handle_method(self, contract, action.type, candidate)
 
-        # Always run the default scheduling (backward-compat and safety net).
-        # In v0.3.4+ the handler will own the scheduling, but for v0.3.3 the
-        # engine still drives the lifecycle.
-        self._schedule_method_contract(contract, action, candidate)
+        if not handled:
+            self._schedule_method_contract(contract, action, candidate)
 
         remaining = self._resolve_budget(contract)
         self._budget[contract.id] = max(0, remaining - 1)

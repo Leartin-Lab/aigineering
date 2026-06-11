@@ -180,10 +180,9 @@ def test_engine_dispatches_to_registry():
     # Engine still does its lifecycle — parent is suspended
     assert contract.id in engine._suspended
 
-    # A child contract was created (default scheduling still runs in v0.3.3)
+    # Handler returned True → no default scheduling (handler owns scheduling)
     child_contracts = [c for c in store.get_all_contracts() if c.parent_id == contract.id]
-    assert len(child_contracts) == 1
-    assert child_contracts[0].name == "root.plan"
+    assert len(child_contracts) == 0
 
 
 def test_engine_falls_back_without_registry():
@@ -252,13 +251,12 @@ def test_engine_dispatches_tool_method():
     assert called_contract.id == contract.id
     assert called_action_type == "tool"
 
-    # Child contract was created (default scheduling ran)
+    # Handler returned True → handler owns scheduling, no child created
     child_contracts = [c for c in store.get_all_contracts() if c.parent_id == contract.id]
-    assert len(child_contracts) == 1
-
-    # Tool executed via the system method path
+    assert len(child_contracts) == 0
+    # No system method path either (handler owns lifecycle)
     tool_events = trace_store.get_by_event_type("tool_executed")
-    assert len(tool_events) == 1
+    assert len(tool_events) == 0
 
 
 def test_handler_swap_works():
