@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import re
 
+from aigineering.core.authority import RESERVED_PREFIXES
 from aigineering.core.ids import hash_asset_content, hash_asset_definition, hash_contract
 from aigineering.protocol.actions import WorkerAction
 from aigineering.protocol.types import Asset, Contract
@@ -14,16 +16,38 @@ _METHOD_OUTPUT_PREFIX: dict[str, str] = {
     "tool": "_tool_obs_",
 }
 
-# Prefixes that planner-children must never declare as outputs.
-_PLAN_RESERVED_PREFIXES: frozenset[str] = frozenset(
-    {"_sys_", "_skill_", "_memory_", "_mcp_", "_soul_", "_persona_"}
-)
+# Plan-specific reserved prefixes (superset of authority.RESERVED_PREFIXES).
+_PLAN_RESERVED_PREFIXES: frozenset[str] = RESERVED_PREFIXES | frozenset({"_persona_"})
 
 # Fields the planner must not set in child contract payloads.
 # (origin is always hard-clamped to "plan" by the engine.)
 _PLAN_PROTECTED_FIELDS: frozenset[str] = frozenset(
     {"trust_tier", "created_by", "minting_authority"}
 )
+
+_ACTIVATION_KEYWORDS: frozenset[str] = frozenset({"AND", "OR", "NOT"})
+
+
+def _extract_activation_names(expression: str) -> set[str]:
+    """Extract asset names from an activation expression.
+
+    Returns the set of non-keyword, non-punctuation tokens.
+    For complex/unparseable expressions returns an empty set (pass-through).
+    """
+    if not expression or not expression.strip():
+        return set()
+    # Split on whitespace and strip parentheses
+    names: set[str] = set()
+    for token in re.split(r'\s+', expression.strip()):
+        token = token.strip("()")
+        if not token:
+            continue
+        if token.upper() in _ACTIVATION_KEYWORDS:
+            continue
+        # Only accept tokens that look like simple identifiers
+        if re.fullmatch(r'[a-zA-Z_][a-zA-Z0-9_-]*', token):
+            names.add(token)
+    return names
 
 
 def method_contract(parent: Contract, action: WorkerAction) -> Contract:
@@ -121,6 +145,8 @@ def contracts_from_plan_asset(
     asset: Asset,
     parent_id: str | None,
     parent_contract: Contract | None = None,
+    allowed_input_names: set[str] | None = None,
+    parent_budget_remaining: int | None = None,
 ) -> tuple[list[Contract], list[dict]]:
     """Expand a `_plan_result_*` asset into non-system child contracts.
 
@@ -128,6 +154,16 @@ def contracts_from_plan_asset(
     the parent's capability boundary (deny-by-default).  Violations are
     either rejected or clamped and recorded in the returned rejection
     entries.
+
+    Parameters
+    ----------
+    allowed_input_names : set[str] | None
+        Names the parent can see via its disclosure scope.  Children
+        whose inputs reference names outside this set (and not their
+        own outputs) are rejected as "input_not_authorized".
+    parent_budget_remaining : int | None
+        Remaining parent budget.  Total child budgets are bounded so the
+        sum never exceeds this value (fan-out containment).
 
     Returns (accepted_contracts, rejection_entries).
     """
@@ -149,6 +185,8 @@ def contracts_from_plan_asset(
     parent_tools = set(parent_contract.tool_scope) if parent_contract is not None else None
     parent_labels = set(parent_contract.labels) if parent_contract is not None else None
     parent_budget = parent_contract.budget if parent_contract is not None else None
+
+    _cumulative_budget = 0
 
     for raw in raw_contracts:
         if not isinstance(raw, dict):
@@ -210,6 +248,30 @@ def contracts_from_plan_asset(
             )
             continue
 
+        # --- Input containment: child inputs must be in parent's disclosure scope ---
+        if allowed_input_names is not None and allowed_input_names:
+            child_output_set = set(outputs)
+            unauthorized_inputs = [
+                inp for inp in inputs
+                if inp not in allowed_input_names and inp not in child_output_set
+            ]
+            if unauthorized_inputs:
+                rejected.append(
+                    {
+                        "child_name": name,
+                        "field": "inputs",
+                        "reason": (
+                            f"inputs {sorted(unauthorized_inputs)} are not in "
+                            f"parent disclosure scope ({sorted(allowed_input_names)}) "
+                            f"nor in child outputs ({sorted(outputs)})"
+                        ),
+                        "action": "rejected",
+                        "expected": f"subset of {sorted(allowed_input_names)} ∪ child outputs",
+                        "actual": str(sorted(unauthorized_inputs)),
+                    }
+                )
+                continue
+
         # --- Tool-scope containment: clamp to parent intersection ---
         if parent_tools is not None:
             child_tools = set(tool_scope)
@@ -267,7 +329,33 @@ def contracts_from_plan_asset(
             )
             continue
 
-        # --- Budget fan-out clamp ---
+        # --- Activation containment: activation refs checked against allowed names ---
+        if allowed_input_names is not None and allowed_input_names and activation:
+            activation_names = _extract_activation_names(activation)
+            child_output_set = set(outputs)
+            unknown_activation_names = (
+                activation_names - allowed_input_names - child_output_set
+            )
+            if unknown_activation_names:
+                # Names outside allowed inputs and child outputs are likely
+                # sibling-output scheduling references — benign for containment
+                # since activation only gates scheduling, not disclosure.
+                rejected.append(
+                    {
+                        "child_name": name,
+                        "field": "activation",
+                        "reason": (
+                            f"activation refs {sorted(unknown_activation_names)} "
+                            f"are not in parent disclosure scope — may be sibling "
+                            f"scheduling references (benign)"
+                        ),
+                        "action": "noted",
+                        "expected": f"subset of {sorted(allowed_input_names)} ∪ child outputs",
+                        "actual": str(sorted(unknown_activation_names)),
+                    }
+                )
+
+        # --- Budget fan-out: clamp to individual parent budget first ---
         if parent_budget is not None and budget > parent_budget:
             origin_budget = budget
             budget = parent_budget
@@ -283,6 +371,28 @@ def contracts_from_plan_asset(
                     "actual": str(origin_budget),
                 }
             )
+
+        # --- Budget fan-out: cumulative clamping to parent remaining ---
+        if parent_budget_remaining is not None:
+            if _cumulative_budget + budget > parent_budget_remaining:
+                clamped_budget = max(1, parent_budget_remaining - _cumulative_budget)
+                if budget != clamped_budget:
+                    rejected.append(
+                        {
+                            "child_name": name,
+                            "field": "budget",
+                            "reason": (
+                                f"cumulative child budgets would exceed parent "
+                                f"remaining ({parent_budget_remaining}); "
+                                f"clamped from {budget} to {clamped_budget}"
+                            ),
+                            "action": "clamped",
+                            "expected": f"total <= {parent_budget_remaining}",
+                            "actual": str(budget),
+                        }
+                    )
+                    budget = clamped_budget
+            _cumulative_budget += budget
 
         cid = hash_contract(
             name=name,

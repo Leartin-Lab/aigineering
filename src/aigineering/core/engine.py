@@ -384,16 +384,47 @@ class Engine:
         if method_payload(method_contract).get("method") != "plan":
             return
 
+        parent_id = method_contract.parent_id
+
+        # --- Fail-closed: if parent_id is set but parent is not in store,
+        #     do NOT expand at all (no validation = error, not no-validation). ---
         parent_contract: Contract | None = None
-        if method_contract.parent_id is not None:
-            parent_contract = self._store.get_contract(method_contract.parent_id)
+        if parent_id is not None:
+            parent_contract = self._store.get_contract(parent_id)
+            if parent_contract is None:
+                self._add_trace(
+                    parent_id,
+                    "containment_rejected",
+                    relation_type="plan",
+                    relation_target="parent_not_found",
+                    rejected_fragments=[
+                        "[rejected] parent_not_found: "
+                        f"parent contract {parent_id} not in store — "
+                        "plan expansion abort (fail-closed)"
+                    ],
+                    authority_result="rejected",
+                    budget_remaining=0,
+                )
+                return
+
+        # Compute parent's disclosure scope for input/activation containment.
+        allowed_input_names: set[str] | None = None
+        parent_budget_remaining: int | None = None
+        if parent_contract is not None:
+            scope = compute_disclosure(parent_contract, self._store)
+            allowed_input_names = {a.name for a in scope}
+            parent_budget_remaining = self._resolve_budget(parent_contract)
 
         created: list[str] = []
         for asset in method_assets:
             if not asset.name.startswith("_plan_result_"):
                 continue
             children, rejections = contracts_from_plan_asset(
-                asset, method_contract.parent_id, parent_contract=parent_contract,
+                asset,
+                parent_id,
+                parent_contract=parent_contract,
+                allowed_input_names=allowed_input_names,
+                parent_budget_remaining=parent_budget_remaining,
             )
             for child in children:
                 if self._store.get_contract(child.id) is None:
@@ -401,7 +432,7 @@ class Engine:
                     created.append(child.id)
             for entry in rejections:
                 self._add_trace(
-                    method_contract.parent_id,
+                    parent_id,
                     "containment_rejected",
                     relation_type="plan",
                     relation_target=(
@@ -412,16 +443,16 @@ class Engine:
                         f"{entry.get('field','?')}: {entry.get('reason','')}"
                     ],
                     authority_result=entry.get("action", "rejected"),
-                    budget_remaining=self._budget.get(method_contract.parent_id, 0),
+                    budget_remaining=self._budget.get(parent_id, 0),
                 )
 
-        if created and method_contract.parent_id is not None:
+        if created and parent_id is not None:
             self._add_trace(
-                method_contract.parent_id,
+                parent_id,
                 "contracts_expanded",
                 relation_type="plan",
                 relation_target=",".join(created),
-                budget_remaining=self._budget.get(method_contract.parent_id, 0),
+                budget_remaining=self._budget.get(parent_id, 0),
             )
 
 
