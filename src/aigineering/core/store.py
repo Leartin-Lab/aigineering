@@ -122,6 +122,7 @@ class JsonLStore:
                     keep_flag=data.get("keep_flag", False),
                     tombstoned=data.get("tombstoned", False),
                     tombstoned_at=data.get("tombstoned_at"),
+                    lineage_id=data.get("lineage_id", ""),
                 )
                 self.assets[asset.id] = asset
         self._rebuild_indexes()

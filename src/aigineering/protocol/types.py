@@ -28,6 +28,7 @@ class Asset:
     keep_flag: bool = False
     tombstoned: bool = False
     tombstoned_at: Optional[str] = None
+    lineage_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -117,6 +118,18 @@ class RejectedCandidate:
     content: str
     reject_reason: str
     category: RejectionCategory = RejectionCategory.AUTHORITY_REJECTION
+
+
+@dataclass(frozen=True)
+class ReplacementClaim:
+    id: str
+    source_asset_id: str
+    replacement_asset_id: str
+    definition_hash: str
+    claim_type: str
+    signed_by: str = ""
+    signature: str = ""
+    lineage_id: str = ""
 
 
 @dataclass(frozen=True)

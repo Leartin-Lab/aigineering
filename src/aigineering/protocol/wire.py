@@ -45,6 +45,7 @@ def asset_to_dict(asset: Asset) -> dict[str, Any]:
         "keep_flag": asset.keep_flag,
         "tombstoned": asset.tombstoned,
         "tombstoned_at": asset.tombstoned_at,
+        "lineage_id": asset.lineage_id,
     }
 
 
