@@ -6,7 +6,7 @@ import json
 from collections.abc import Mapping
 
 from aigineering.core.authority import check_authority
-from aigineering.core.ids import asset_id
+from aigineering.core.ids import hash_asset_content
 from aigineering.protocol.actions import (
     ActionParseError,
     WorkerAction,
@@ -72,24 +72,8 @@ def project_candidate(
     accepted_assets: list[Asset] = []
 
     for a in accepted_dicts:
-        canonical_str = json.dumps(
-            {
-                "name": a["name"],
-                "content": a["content"],
-                "content_type": "text",
-                "created_by": contract.id,
-                "origin": "worker",
-                "trust_tier": "untrusted",
-                "minted_by": candidate.worker_id,
-                "source_uri": "",
-                "promptable": True,
-                "disclosure_view": "original",
-            },
-            sort_keys=True,
-            ensure_ascii=False,
-        )
         asset = Asset(
-            id=asset_id(canonical_str),
+            id=hash_asset_content(a["name"], a["content"]),
             name=a["name"],
             content=a["content"],
             content_type="text",

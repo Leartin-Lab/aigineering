@@ -7,7 +7,7 @@ from aigineering.core.engine import Engine
 from aigineering.core.tools import ToolRegistry
 from aigineering.core.trace import TraceStore
 from aigineering.agent.mock import MockWorker
-from aigineering.core.ids import asset_id, contract_id
+from aigineering.core.ids import hash_asset_content, hash_contract
 from aigineering.protocol.types import Asset, Contract, ToolSpec
 
 
@@ -23,23 +23,6 @@ class SequenceWorker:
         raw_output = self._outputs.pop(0) if self._outputs else ""
         from aigineering.protocol.types import Candidate
         return Candidate(worker_id=self.worker_id, raw_output=raw_output)
-
-
-def _asset_canonical(name: str, content: str) -> str:
-    return json.dumps(
-        {"name": name, "content": content, "content_type": "text",
-         "created_by": "", "origin": "human"},
-        sort_keys=True, ensure_ascii=False,
-    )
-
-
-def _contract_canonical(name: str, inputs: list[str], outputs: list[str], activation: str) -> str:
-    return json.dumps(
-        {"parent_id": None, "name": name, "description": "",
-         "inputs": sorted(inputs), "outputs": sorted(outputs),
-         "activation": activation, "budget": 5, "tool_scope": [], "origin": "human"},
-        sort_keys=True, ensure_ascii=False,
-    )
 
 
 def test_hallucinated_output_cannot_become_runtime_fact():
@@ -58,20 +41,20 @@ def test_hallucinated_output_cannot_become_runtime_fact():
 
     # Input assets
     data_file = Asset(
-        id=asset_id(_asset_canonical("data_file", "Sample data")),
+        id=hash_asset_content("data_file", "Sample data"),
         name="data_file", content="Sample data",
     )
     citation_db = Asset(
-        id=asset_id(_asset_canonical("citation_db", "Sample citations")),
+        id=hash_asset_content("citation_db", "Sample citations"),
         name="citation_db", content="Sample citations",
     )
 
     # Contract with only final_report as declared output
     contract = Contract(
-        id=contract_id(_contract_canonical(
-            "build_report", ["data_file", "citation_db"],
-            ["final_report"], "data_file AND citation_db",
-        )),
+        id=hash_contract(
+            "build_report", "", ["data_file", "citation_db"],
+            ["final_report"], "data_file AND citation_db", 5, [], [], "human",
+        ),
         name="build_report",
         inputs=["data_file", "citation_db"],
         outputs=["final_report"],
@@ -131,13 +114,13 @@ def test_duplicate_conflicting_outputs_are_all_rejected():
     worker.set_output("test", "final_report: version A\nfinal_report: version B")
 
     input_asset = Asset(
-        id=asset_id(_asset_canonical("x", "y")),
+        id=hash_asset_content("x", "y"),
         name="x", content="y",
     )
     contract = Contract(
-        id=contract_id(_contract_canonical(
-            "test", ["x"], ["final_report"], "x",
-        )),
+        id=hash_contract(
+            "test", "", ["x"], ["final_report"], "x", 5, [], [], "human",
+        ),
         name="test", inputs=["x"], outputs=["final_report"],
         activation="x", budget=5,
     )
@@ -169,13 +152,13 @@ def test_parse_rejection_recorded_in_trace():
     worker.set_output("test", "valid: content\nthis line has no colon\n# comment")
 
     input_asset = Asset(
-        id=asset_id(_asset_canonical("x", "y")),
+        id=hash_asset_content("x", "y"),
         name="x", content="y",
     )
     contract = Contract(
-        id=contract_id(_contract_canonical(
-            "test", ["x"], ["valid"], "x",
-        )),
+        id=hash_contract(
+            "test", "", ["x"], ["valid"], "x", 5, [], [], "human",
+        ),
         name="test", inputs=["x"], outputs=["valid"],
         activation="x", budget=5,
     )
@@ -196,12 +179,14 @@ def test_method_action_schedules_subcontract_without_projection():
     trace_store = TraceStore()
     worker = MockWorker({"root": '/plan {"reason": "split work"}'})
     input_asset = Asset(
-        id=asset_id(_asset_canonical("x", "y")),
+        id=hash_asset_content("x", "y"),
         name="x",
         content="y",
     )
     contract = Contract(
-        id=contract_id(_contract_canonical("root", ["x"], ["report"], "x")),
+        id=hash_contract(
+            "root", "", ["x"], ["report"], "x", 5, [], [], "human",
+        ),
         name="root",
         inputs=["x"],
         outputs=["report"],

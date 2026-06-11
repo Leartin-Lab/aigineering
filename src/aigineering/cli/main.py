@@ -10,7 +10,7 @@ from typing import Optional
 import click
 
 from aigineering.core.engine import Engine
-from aigineering.core.ids import asset_id, contract_id
+from aigineering.core.ids import hash_asset_content, hash_contract
 from aigineering.core.replay import replay_all, replay_session
 from aigineering.core.session import SessionStore
 from aigineering.core.store import JsonLStore, MemoryStore, StoreProtocol
@@ -68,50 +68,6 @@ def _build_asset_name_map(entries: list[TraceEntry]) -> dict[str, str]:
                 if i < len(names):
                     name_map[aid] = names[i]
     return name_map
-
-
-def _asset_json(
-    name: str,
-    content: str,
-    content_type: str = "text",
-    created_by: str = "",
-    origin: str = "human",
-    trust_tier: str = "human",
-    minted_by: str = "",
-    source_uri: str = "",
-    promptable: bool = True,
-    disclosure_view: str = "original",
-) -> str:
-    return json.dumps(
-        {"name": name, "content": content, "content_type": content_type,
-         "created_by": created_by, "origin": origin,
-         "trust_tier": trust_tier, "minted_by": minted_by,
-         "source_uri": source_uri,
-         "promptable": promptable, "disclosure_view": disclosure_view},
-        sort_keys=True, ensure_ascii=False,
-    )
-
-
-def _contract_json(
-    name: str,
-    inputs: list[str],
-    outputs: list[str],
-    activation: str,
-    parent_id: Optional[str] = None,
-    description: str = "",
-    budget: int = 0,
-    tool_scope: Optional[list[str]] = None,
-    labels: Optional[list[str]] = None,
-    origin: str = "human",
-) -> str:
-    return json.dumps(
-        {"parent_id": parent_id, "name": name, "description": description,
-         "inputs": sorted(inputs), "outputs": sorted(outputs),
-         "activation": activation, "budget": budget,
-         "tool_scope": sorted(tool_scope or []), "labels": sorted(labels or []),
-         "origin": origin},
-        sort_keys=True, ensure_ascii=False,
-    )
 
 
 def _asset_names_for(
@@ -196,33 +152,36 @@ def _run_demo(
         )
         worker.set_output("build_report", raw_output)
 
-    data_canonical = _asset_json("data_file", "Sample data for report generation")
-    citation_canonical = _asset_json("citation_db", "Sample citation database")
-
     data_file = Asset(
-        id=asset_id(data_canonical), name="data_file",
+        id=hash_asset_content("data_file", "Sample data for report generation"),
+        name="data_file",
         content="Sample data for report generation",
         origin="human",
         trust_tier="human",
     )
     citation_db = Asset(
-        id=asset_id(citation_canonical), name="citation_db",
+        id=hash_asset_content("citation_db", "Sample citation database"),
+        name="citation_db",
         content="Sample citation database",
         origin="human",
         trust_tier="human",
     )
 
-    contract_canonical = _contract_json(
+    contract = Contract(
+        id=hash_contract(
+            name="build_report",
+            description=f"Build a report for goal: {goal}",
+            inputs=["data_file", "citation_db"],
+            outputs=["final_report"],
+            activation="data_file AND citation_db",
+            budget=5,
+            tool_scope=[],
+            labels=[],
+            origin="human",
+        ),
         name="build_report",
-        description=f"Build a report for goal: {goal}",
         inputs=["data_file", "citation_db"],
         outputs=["final_report"],
-        activation="data_file AND citation_db",
-        budget=5,
-    )
-    contract = Contract(
-        id=contract_id(contract_canonical), name="build_report",
-        inputs=["data_file", "citation_db"], outputs=["final_report"],
         activation="data_file AND citation_db",
         budget=5,
     )

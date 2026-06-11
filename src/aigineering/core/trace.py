@@ -8,7 +8,7 @@ import os
 from pathlib import Path
 from typing import Optional, Protocol, runtime_checkable
 
-from aigineering.core.ids import now_iso, trace_entry_id
+from aigineering.core.ids import now_iso, hash_event
 from aigineering.protocol.types import TraceEntry
 from aigineering.protocol.wire import trace_entry_from_dict, trace_entry_to_dict
 
@@ -33,7 +33,7 @@ def create_entry(
     relation_type: Optional[str] = None,
     relation_target: Optional[str] = None,
 ) -> TraceEntry:
-    entry_id = trace_entry_id(
+    entry_id = hash_event(
         contract_id=contract_id,
         event_type=event_type,
         sequence=sequence,

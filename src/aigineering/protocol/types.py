@@ -23,6 +23,9 @@ class Asset:
     signature: str = ""
     promptable: bool = True
     disclosure_view: str = "original"
+    keep_flag: bool = False
+    tombstoned: bool = False
+    tombstoned_at: Optional[str] = None
 
 
 @dataclass(frozen=True)

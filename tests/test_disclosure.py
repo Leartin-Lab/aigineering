@@ -3,12 +3,11 @@
 from aigineering.agent.mock import MockWorker
 from aigineering.core.disclosure import compute_disclosure
 from aigineering.core.engine import Engine
-from aigineering.core.ids import asset_id, contract_id
+from aigineering.core.ids import hash_asset_content, hash_contract
 from aigineering.core.labels import Label
 from aigineering.core.store import MemoryStore
 from aigineering.core.trace import TraceStore
 from aigineering.protocol.types import Asset, Contract
-from aigineering.protocol.wire import asset_to_canonical, contract_to_canonical
 
 
 def _asset(
@@ -18,15 +17,8 @@ def _asset(
     promptable: bool = True,
     disclosure_view: str = "original",
 ) -> Asset:
-    draft = Asset(
-        id="",
-        name=name,
-        content=content,
-        promptable=promptable,
-        disclosure_view=disclosure_view,
-    )
     return Asset(
-        id=asset_id(asset_to_canonical(draft)),
+        id=hash_asset_content(name, content),
         name=name,
         content=content,
         promptable=promptable,
@@ -35,8 +27,21 @@ def _asset(
 
 
 def _contract(**kwargs) -> Contract:
-    draft = Contract(id="", **kwargs)
-    return Contract(id=contract_id(contract_to_canonical(draft)), **kwargs)
+    contract = Contract(id="", **kwargs)
+    return Contract(
+        id=hash_contract(
+            name=contract.name,
+            description=contract.description,
+            inputs=list(contract.inputs),
+            outputs=list(contract.outputs),
+            activation=contract.activation,
+            budget=contract.budget,
+            tool_scope=list(contract.tool_scope),
+            labels=list(contract.labels),
+            origin=contract.origin,
+        ),
+        **kwargs,
+    )
 
 
 def test_non_promptable_input_asset_is_not_disclosed():

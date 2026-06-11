@@ -40,6 +40,9 @@ def asset_to_dict(asset: Asset) -> dict[str, Any]:
         "signature": asset.signature,
         "promptable": asset.promptable,
         "disclosure_view": asset.disclosure_view,
+        "keep_flag": asset.keep_flag,
+        "tombstoned": asset.tombstoned,
+        "tombstoned_at": asset.tombstoned_at,
     }
 
 

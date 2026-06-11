@@ -33,7 +33,7 @@ def test_create_entry():
     entry = create_entry("contract_1", "activation")
     assert entry.contract_id == "contract_1"
     assert entry.event_type == "activation"
-    assert entry.id.startswith("trace_")
+    assert entry.id.startswith("event:")
     assert entry.timestamp != ""
 
 

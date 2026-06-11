@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from aigineering.core.ids import hash_content
+from aigineering.core.ids import compute_content_hash
 from aigineering.protocol.types import Asset
 from aigineering.protocol.wire import asset_to_canonical
 
@@ -22,7 +22,7 @@ def provenance_signature(asset: Asset, signed_by: str | None = None) -> str:
     """
     signer = signed_by or default_signer(asset)
     payload = f"{asset_to_canonical(replace(asset, signed_by=signer, signature=''))}|signed_by={signer}"
-    return f"asig_{hash_content(payload)}"
+    return f"asig_{compute_content_hash(payload)}"
 
 
 def sign_asset(asset: Asset, signed_by: str | None = None) -> Asset:

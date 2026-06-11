@@ -105,6 +105,9 @@ class JsonLStore:
                     signature=data.get("signature", ""),
                     promptable=data.get("promptable", True),
                     disclosure_view=data.get("disclosure_view", "original"),
+                    keep_flag=data.get("keep_flag", False),
+                    tombstoned=data.get("tombstoned", False),
+                    tombstoned_at=data.get("tombstoned_at"),
                 )
                 self.assets[asset.id] = asset
         self._rebuild_indexes()
