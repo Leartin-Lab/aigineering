@@ -55,9 +55,9 @@ aig replay <session_id>   # replay a session
 
 ---
 
-## Status: v0.3.0 Pre-Alpha
+## Status: v0.3.1 Pre-Alpha
 
-This is an early proof-of-concept demonstrating the core invariant: **undeclared outputs cannot become runtime facts.** The v0.3.0 milestone adds a minimal real-worker protocol loop: an OpenAI-compatible worker can emit structured `/exec`, `/plan`, `/replan`, and `/tool` actions; tool calls execute through runtime-owned system assets; parent tasks resume from method observations without allowing those observations to shortcut declared outputs.
+This is an early proof-of-concept demonstrating the core invariant: **undeclared outputs cannot become runtime facts.** The v0.3.1 milestone hardens data models with immutable containers, typed canonical hashing, dual-hash asset identity, replacement claims, and retention fields.
 
 **Currently implemented:**
 - Deterministic SHA-256 content-addressed IDs
