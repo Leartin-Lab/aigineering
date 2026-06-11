@@ -57,7 +57,7 @@ aig replay <session_id>   # replay a session
 
 ## Status: v0.4.0 Pre-Alpha
 
-This is an early proof-of-concept demonstrating the core invariant: **undeclared outputs cannot become runtime facts.** The v0.3.1 milestone hardens data models with immutable containers, typed canonical hashing, dual-hash asset identity, replacement claims, and retention fields.
+This is an early proof-of-concept demonstrating the core invariant: **undeclared outputs cannot become runtime facts.** The v0.4.0 milestone delivers Strong Protocolization + Partial Infrastructure: immutable data models, capability containment, method-first extensibility, SQLite durable storage, recoverable engine state, worker pull protocol, and a modular JSON CLI.
 
 **Currently implemented:**
 - Deterministic SHA-256 content-addressed IDs
