@@ -55,7 +55,7 @@ aig replay <session_id>   # replay a session
 
 ---
 
-## Status: v0.4.5 Pre-Alpha
+## Status: v0.4.6 Pre-Alpha
 
 This is an early proof-of-concept demonstrating the core invariant: **undeclared outputs cannot become runtime facts.** The v0.4.0 milestone delivers Strong Protocolization + Partial Infrastructure: immutable data models, capability containment, method-first extensibility, SQLite durable storage, recoverable engine state, worker pull protocol, and a modular JSON CLI.
 
