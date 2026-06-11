@@ -1,27 +1,37 @@
 # Aigineering Roadmap
 
-## v0.1 — Hallucination Containment MVP
+## Status
+
+Aigineering is a pre-alpha Zero Trust Agent Runtime. The current `v0.3.0`
+milestone proves the core runtime loop:
+
+```text
+Contract -> Worker/Sub-agent -> Candidate -> Projection/Method -> Asset/Trace
+```
+
+The project is ready for early open-source review and single-node experiments.
+It is not production-ready yet.
+
+## v0.1 - Hallucination Containment MVP
 
 - [x] Deterministic SHA-256 content-addressed IDs
 - [x] Asset / Contract / Candidate / TraceEntry data models
-- [x] Candidate-to-fact boundary (authority gate)
+- [x] Candidate-to-fact boundary
+- [x] Declared-output authority gate
+- [x] Reserved runtime name rejection
 - [x] Rejected candidate recording in trace
 - [x] Mock worker demo
 - [x] `aig run`, `aig trace`, `aig audit` CLI
 
-## v0.2 — Persistence & Replay
+## v0.2 - Persistence, Replay, and Provenance
 
 - [x] JSONL persistent trace (`.aig/traces/session_*.jsonl`)
-- [x] Atomic append and reload for trace entries
-- [x] `aig trace` reads latest persisted trace
-- [x] `aig audit` resolves accepted asset names from persisted projection trace
+- [x] Persistent asset/contract store (`.aig/store/*.jsonl`)
+- [x] Session manifest (`.aig/sessions/*.json`)
+- [x] `aig replay` from persisted sessions
 - [x] Projection/commit separation with pure `ProjectionResult`
 - [x] Structured rejection categories and projection status
 - [x] Boundary regression pack
-- [x] Persistent asset/contract store (`.aig/store/*.jsonl`)
-- [x] Session manifest (`.aig/sessions/*.json`)
-- [x] JSONL trace reload beyond latest-session CLI reads via `--session`
-- [x] `aig replay` (from persisted session + trace)
 - [x] Label-based asset injection with placeholder assets
 - [x] Asset disclosure policy for non-promptable assets
 - [x] Asset provenance metadata (`origin`, `trust_tier`, `minted_by`, `source_uri`)
@@ -29,38 +39,70 @@
 - [x] Replay-time verification for deterministic provenance signatures
 - [x] Worker protocol interface
 - [x] Worker-origin provenance for projected assets
-- [ ] SQLiteStore (single-file persistence)
-- [ ] `aig retry --contract` (incremental retry)
-- [ ] `aig trace --tree` / `aig trace --dag`
 
-## v0.3 — Real LLM & Protocol (Current)
+## v0.3 - Real Worker and Structured Protocol
 
 - [x] OpenAI-compatible LLM worker
 - [x] CLI worker selection for mock and LLM workers
-- [x] Prompt builder
-- [x] `/exec` / `/plan` / `/replan` / `/tool` protocol parsing
-- [x] Method action to system sub-contract semantics
-- [x] Engine method sub-contract scheduling
+- [x] Prompt builder aligned with structured actions
+- [x] `/exec` / `/plan` / `/replan` / `/tool` parsing
+- [x] Method actions as system sub-contracts
 - [x] Method context assets for scheduled sub-contracts
 - [x] System authority for declared reserved method outputs
-- [x] Tool method execution with call and observation assets
+- [x] Tool execution through `_tool_call_*` and `_tool_obs_*` assets
 - [x] Parent resume from method observations
-- [x] End-to-end LLM protocol boundary tests
-- [x] Contract expansion for planner outputs
+- [x] Planner result expansion into non-system child contracts
+- [x] End-to-end fake-LLM protocol boundary tests
+- [x] CLI trace rendering for method scheduling, tool execution, resume, and expansion
 
-## v0.4 — MCP, Skills, GC, PyPI (Next)
+## v0.4 - Production Foundation
 
-- [x] Tool registry with serializable specs and private handlers
-- [ ] MCP function call → contract expansion
-- [ ] Skill loading
+Focus: make the single-node runtime durable, resumable, and safer.
+
+- [ ] SQLiteStore or equivalent single-file durable store
+- [ ] Resumable engine state for completed/suspended contracts, budgets, and method context
+- [ ] Crash recovery from persisted assets/contracts/traces/session manifest
+- [ ] Real cryptographic signer/verifier interface
+- [ ] Trust policy over signer, origin, trust tier, labels, tool scope, and reserved prefixes
+- [ ] `aig retry --contract`
+- [ ] `aig trace --tree` / `aig trace --dag` as views, not runtime truth
+- [ ] CLI split into smaller command modules
+
+## v0.5 - Ecosystem Integration
+
+Focus: connect the runtime to agent/tool ecosystems without weakening the boundary.
+
+- [ ] MCP function call -> method/tool contract expansion
+- [ ] MCP descriptor assets
+- [ ] Skill loading as assets
 - [ ] Label-injected skill assets
-- [ ] GC: audit closure + reflog + tombstone
-- [ ] PyPI publish
+- [ ] Capability assets for tools, MCP, memory, and persona modules
 - [ ] Interactive REPL (`aig repl`)
+- [ ] API/server surface over core runtime
+- [ ] PyPI publish after API stabilizes
 
-## v0.5+ — Distributed & Production
+## v0.6 - Asset Management and Evaluation
 
-- [ ] Distributed runtime (multi-node)
-- [ ] Capability assets (skills, MCP, memory, SOUL)
+- [ ] Semantic asset catalog
+- [ ] Prefix search and tag filtering
+- [ ] Lineage bundles
+- [ ] GC: audit closure, keep flags, reflog, tombstones
+- [ ] Replacement claims instead of asset mutation
 - [ ] Real-world LLM benchmarks
-- [ ] Production hardening
+- [ ] AEST-style benchmark suite
+
+## v0.7+ - Distributed and Production Hardening
+
+- [ ] Full-hash distributed identity
+- [ ] Worker registry and heartbeat
+- [ ] Worker leases and stale-worker detection
+- [ ] Concurrent execution and transactional store guarantees
+- [ ] Fuzz tests for protocol, authority, and replay
+- [ ] Deployment docs and security model
+
+## Non-Goals for Early Releases
+
+- A generic prompt harness
+- A static DAG workflow engine
+- A hidden multi-agent swarm scheduler
+- Direct mutation of runtime facts by workers, tools, or sub-agents
