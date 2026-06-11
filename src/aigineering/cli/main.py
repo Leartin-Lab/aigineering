@@ -18,6 +18,7 @@ from aigineering.core.trace import JsonLTraceStore, MemoryTraceStore, TraceStore
 from aigineering.agent.llm import LLMWorker
 from aigineering.agent.mock import MockWorker
 from aigineering.protocol.types import Asset, Contract, Session, TraceEntry
+from aigineering.protocol.wire import session_to_dict, trace_entry_to_dict
 
 
 def _get_trace_dir() -> Path:
@@ -246,6 +247,109 @@ def _resolve_asset_by_name(
 
 
 # ---------------------------------------------------------------------------
+# JSON output helpers
+# ---------------------------------------------------------------------------
+
+
+def _redact_sealed(data: dict) -> dict:
+    """Return a copy of *data* with sealed fields redacted.
+
+    Removes ``config_snapshot`` and ``worker_snapshot`` entirely so API keys
+    are never leaked into JSON output.
+    """
+    return {k: v for k, v in data.items() if k not in ("config_snapshot", "worker_snapshot")}
+
+
+def _output_json(payload: object) -> None:
+    """Write *payload* as indented JSON to stdout."""
+    click.echo(json.dumps(payload, ensure_ascii=False, indent=2, default=str))
+
+
+def _output_run_json(
+    contract_id: str,
+    trace_ids: list[str],
+    session_id: str,
+    entries: list[TraceEntry],
+) -> None:
+    status = "complete" if entries and any(
+        e.event_type == "complete" for e in entries
+    ) else "incomplete"
+    _output_json({
+        "contract_id": contract_id,
+        "session_id": session_id,
+        "trace_ids": trace_ids,
+        "status": status,
+    })
+
+
+def _output_trace_json(entries: list[TraceEntry]) -> None:
+    payload = [
+        trace_entry_to_dict(e) for e in entries
+    ]
+    _output_json(payload)
+
+
+def _output_audit_json(
+    asset_id: str,
+    asset_name: str,
+    lineage: list[TraceEntry],
+) -> None:
+    _output_json({
+        "asset_id": asset_id,
+        "asset_name": asset_name,
+        "lineage": [trace_entry_to_dict(e) for e in lineage],
+    })
+
+
+def _output_replay_json(result: dict) -> None:
+    session = result.get("session")
+    entries = result.get("entries", [])
+    payload: dict = {
+        "session": (
+            _redact_sealed(session_to_dict(session))
+            if session is not None else None
+        ),
+        "entries": [trace_entry_to_dict(e) for e in entries],
+        "accepted_count": result.get("accepted_count", 0),
+        "rejected_count": result.get("rejected_count", 0),
+        "consistent": result.get("consistent", False),
+    }
+    by_event = result.get("by_event", {})
+    if by_event:
+        payload["by_event"] = {
+            k: len(v) for k, v in by_event.items()
+        }
+    duplicates = result.get("duplicate_ids")
+    if duplicates:
+        payload["duplicate_ids"] = duplicates
+    _output_json(payload)
+
+
+def _build_replay_json_result(result: dict) -> dict:
+    session = result.get("session")
+    entries = result.get("entries", [])
+    payload: dict = {
+        "session": (
+            _redact_sealed(session_to_dict(session))
+            if session is not None else None
+        ),
+        "entries": [trace_entry_to_dict(e) for e in entries],
+        "accepted_count": result.get("accepted_count", 0),
+        "rejected_count": result.get("rejected_count", 0),
+        "consistent": result.get("consistent", False),
+    }
+    by_event = result.get("by_event", {})
+    if by_event:
+        payload["by_event"] = {
+            k: len(v) for k, v in by_event.items()
+        }
+    duplicates = result.get("duplicate_ids")
+    if duplicates:
+        payload["duplicate_ids"] = duplicates
+    return payload
+
+
+# ---------------------------------------------------------------------------
 # Click commands
 # ---------------------------------------------------------------------------
 
@@ -271,11 +375,16 @@ def cli() -> None:
     show_default=True,
     help="OpenAI-compatible base URL when --worker llm.",
 )
+@click.option(
+    "--json", "json_output", is_flag=True, default=False,
+    help="Output machine-readable JSON instead of human-readable text.",
+)
 def run(
     goal: str,
     worker_kind: str,
     model: Optional[str],
     base_url: str,
+    json_output: bool,
 ) -> None:
     """Execute a demo contract and persist the trace to JSONL."""
     session_id = _session_id()
@@ -290,6 +399,30 @@ def run(
         base_url=base_url,
     )
     entries = trace_store.get_by_contract(contract.id)
+    trace_ids = [e.id for e in jsonl_store.get_all()]
+
+    # ── Session manifest ───────────────────────────────────────────────────
+    contract_ids = [c.id for c in store.get_all_contracts()]
+    asset_ids = [a.id for a in store.get_all_assets()]
+    session = Session(
+        id=session_id,
+        root_contract_id=contract.id,
+        contract_ids=contract_ids,
+        asset_ids=asset_ids,
+        trace_ids=trace_ids,
+    )
+    session_store = SessionStore()
+    session_store.create_session(session)
+
+    if json_output:
+        _output_run_json(
+            contract_id=contract.id,
+            trace_ids=trace_ids,
+            session_id=session_id,
+            entries=entries,
+        )
+        return
+
     if not entries:
         click.echo("No trace entries recorded.")
         return
@@ -315,30 +448,27 @@ def run(
 
     click.echo(f"Trace saved to {trace_path}")
 
-    # ── Session manifest ───────────────────────────────────────────────────
-    contract_ids = [c.id for c in store.get_all_contracts()]
-    asset_ids = [a.id for a in store.get_all_assets()]
-    trace_ids = [e.id for e in jsonl_store.get_all()]
-    session = Session(
-        id=session_id,
-        root_contract_id=contract.id,
-        contract_ids=contract_ids,
-        asset_ids=asset_ids,
-        trace_ids=trace_ids,
-    )
-    session_store = SessionStore()
-    session_store.create_session(session)
-
 
 @cli.command()
 @click.option("--contract", "contract_filter", default=None, help="Filter by contract ID")
 @click.option("--session", "session_id", default=None, help="Read from a specific session ID")
-def trace(contract_filter: Optional[str], session_id: Optional[str]) -> None:
+@click.option(
+    "--json", "json_output", is_flag=True, default=False,
+    help="Output machine-readable JSON instead of human-readable text.",
+)
+def trace(
+    contract_filter: Optional[str],
+    session_id: Optional[str],
+    json_output: bool,
+) -> None:
     """Show the trace timeline from the latest session."""
     if session_id is not None:
         jsonl_store, entries = _find_trace_for_session(session_id)
         if jsonl_store is None:
-            click.echo(f"Session '{session_id}' not found.")
+            if json_output:
+                _output_json({"error": f"Session '{session_id}' not found."})
+            else:
+                click.echo(f"Session '{session_id}' not found.")
             return
     else:
         latest = _latest_session_file()
@@ -354,11 +484,18 @@ def trace(contract_filter: Optional[str], session_id: Optional[str]) -> None:
             entries = []
 
     if jsonl_store is None or not entries:
-        click.echo("No sessions found. Use 'aig run <goal>' or 'aig demo'.")
+        if json_output:
+            _output_json([])
+        else:
+            click.echo("No sessions found. Use 'aig run <goal>' or 'aig demo'.")
         return
 
     if contract_filter:
         entries = jsonl_store.get_by_contract(contract_filter)
+
+    if json_output:
+        _output_trace_json(entries)
+        return
 
     for entry in entries:
         _print_timeline_entry(entry)
@@ -410,16 +547,24 @@ def _print_timeline_entry(entry: TraceEntry) -> None:
 @click.option("--asset", "asset_id_filter", default=None, help="Asset ID to trace")
 @click.option("--asset-name", "asset_name_filter", default=None, help="Asset name to trace")
 @click.option("--session", "session_id", default=None, help="Read from a specific session ID")
+@click.option(
+    "--json", "json_output", is_flag=True, default=False,
+    help="Output machine-readable JSON instead of human-readable text.",
+)
 def audit(
     asset_id_filter: Optional[str],
     asset_name_filter: Optional[str],
     session_id: Optional[str],
+    json_output: bool,
 ) -> None:
     """Show lineage from an asset back to activation (from latest session)."""
     if session_id is not None:
         jsonl_store, all_entries = _find_trace_for_session(session_id)
         if jsonl_store is None:
-            click.echo(f"Session '{session_id}' not found.")
+            if json_output:
+                _output_json({"error": f"Session '{session_id}' not found."})
+            else:
+                click.echo(f"Session '{session_id}' not found.")
             return
     else:
         latest = _latest_session_file()
@@ -427,7 +572,10 @@ def audit(
             jsonl_store = JsonLTraceStore(str(latest))
             all_entries = jsonl_store.get_all()
         else:
-            click.echo("No sessions found. Use 'aig run <goal>' or 'aig demo'.")
+            if json_output:
+                _output_json({"error": "No sessions found."})
+            else:
+                click.echo("No sessions found. Use 'aig run <goal>' or 'aig demo'.")
             return
 
     name_map = _build_asset_name_map(all_entries)
@@ -444,21 +592,47 @@ def audit(
                 asset_id_filter, jsonl_store,
             )
         if target_id is None:
-            click.echo(f"No asset found with id or name '{asset_id_filter}'")
+            msg = f"No asset found with id or name '{asset_id_filter}'"
+            if json_output:
+                _output_json({"error": msg})
+            else:
+                click.echo(msg)
             return
     elif asset_name_filter:
         target_id, target_name = _resolve_asset_by_name(
             asset_name_filter, jsonl_store,
         )
         if target_id is None:
-            click.echo(f"No asset found with name '{asset_name_filter}'")
+            msg = f"No asset found with name '{asset_name_filter}'"
+            if json_output:
+                _output_json({"error": msg})
+            else:
+                click.echo(msg)
             return
     else:
-        click.echo("Provide --asset <id> or --asset-name <name>")
+        msg = "Provide --asset <id> or --asset-name <name>"
+        if json_output:
+            _output_json({"error": msg})
+        else:
+            click.echo(msg)
         return
 
     if not target_id:
-        click.echo("Could not determine target asset.")
+        msg = "Could not determine target asset."
+        if json_output:
+            _output_json({"error": msg})
+        else:
+            click.echo(msg)
+        return
+
+    lineage_entries = jsonl_store.get_reverse_lineage(target_id)
+
+    if json_output:
+        _output_audit_json(
+            asset_id=target_id,
+            asset_name=target_name or target_id,
+            lineage=lineage_entries,
+        )
         return
 
     _print_reverse_lineage(
@@ -530,12 +704,26 @@ def _follow_parents(
 @cli.command()
 @click.argument("session_id", required=False)
 @click.option("--all", "replay_all_flag", is_flag=True, default=False, help="Replay all stored sessions")
-def replay(session_id: Optional[str], replay_all_flag: bool) -> None:
+@click.option(
+    "--json", "json_output", is_flag=True, default=False,
+    help="Output machine-readable JSON instead of human-readable text.",
+)
+def replay(
+    session_id: Optional[str],
+    replay_all_flag: bool,
+    json_output: bool,
+) -> None:
     """Replay a session from persisted data and validate consistency."""
     if replay_all_flag:
         results = replay_all()
         if not results:
-            click.echo("No sessions found.")
+            if json_output:
+                _output_json([])
+            else:
+                click.echo("No sessions found.")
+            return
+        if json_output:
+            _output_json([_build_replay_json_result(r) for r in results])
             return
         for r in results:
             _print_replay_result(r)
@@ -543,12 +731,22 @@ def replay(session_id: Optional[str], replay_all_flag: bool) -> None:
         return
 
     if not session_id:
-        click.echo("Usage: aig replay <session_id>  or  aig replay --all")
+        if json_output:
+            _output_json({"error": "Usage: aig replay <session_id>  or  aig replay --all"})
+        else:
+            click.echo("Usage: aig replay <session_id>  or  aig replay --all")
         return
 
     result = replay_session(session_id)
     if "error" in result:
-        click.echo(result["error"])
+        if json_output:
+            _output_json({"error": result["error"]})
+        else:
+            click.echo(result["error"])
+        return
+
+    if json_output:
+        _output_replay_json(result)
         return
 
     _print_replay_result(result)
@@ -645,10 +843,20 @@ def session() -> None:
 
 
 @session.command("ls")
-def session_ls() -> None:
+@click.option(
+    "--json", "json_output", is_flag=True, default=False,
+    help="Output machine-readable JSON instead of human-readable text.",
+)
+def session_ls(json_output: bool) -> None:
     """List sessions with id and created_at."""
     store = SessionStore()
     sessions = store.list_sessions()
+    if json_output:
+        payload = [
+            _redact_sealed(session_to_dict(s)) for s in sessions
+        ]
+        _output_json(payload)
+        return
     if not sessions:
         click.echo("No sessions found.")
         return
