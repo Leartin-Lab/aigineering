@@ -77,7 +77,7 @@ class PlanMethodHandler:
                     authority_result="rejected",
                     budget_remaining=0,
                 )
-                return False
+                return True  # handled (fail-closed), prevent fallback duplication
 
         # Compute parent's disclosure scope for input/activation containment.
         allowed_input_names: set[str] | None = None

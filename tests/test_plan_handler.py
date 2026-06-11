@@ -358,3 +358,52 @@ def test_handler_satisfies_protocol():
     assert callable(handler.can_handle)
     assert callable(handler.handle_method)
     assert callable(handler.handle_completion)
+
+
+def test_legacy_handler_without_handle_completion_falls_back():
+    """A handler without handle_completion must not crash the engine.
+
+    Pre-v0.3.4 handlers only implement can_handle + handle_method.
+    When a plan method contract completes, the engine must gracefully
+    fall back to _expand_plan_result instead of crashing with
+    AttributeError on the missing handle_completion method.
+    """
+    registry = MethodRegistry()
+
+    class LegacyHandler:
+        def can_handle(self, action_type: str) -> bool:
+            return action_type == "plan"
+
+        def handle_method(self, engine, contract, action_type, candidate) -> bool:
+            engine._schedule_method_contract(contract, _parse_method_action(candidate), candidate)
+            return True
+
+    registry.register("plan", LegacyHandler())
+
+    plan_content = json.dumps(
+        {"contracts": [{"name": "draft", "inputs": [], "outputs": ["draft_out"]}]},
+        sort_keys=True,
+    )
+    worker = SequenceWorker([
+        '/plan {"reason": "split"}',
+        f'/exec {{"outputs": {{"_plan_result_contract_parent": {json.dumps(plan_content)}}}}}',
+        "",
+    ])
+    store = MemoryStore()
+    trace_store = TraceStore()
+    contract = Contract(
+        id="contract_parent", name="root", outputs=["report"],
+        activation="", budget=5, tool_scope=[], labels=[],
+    )
+    engine = Engine(store, worker, trace_store, method_registry=registry)
+    engine.add_contract(contract)
+    # Must not raise AttributeError
+    engine.run()
+    # Fallback expansion created the child (legacy handler's handle_method also
+    # created the method sub-contract, so we check for "draft" specifically)
+    children = [c for c in store.get_all_contracts() if c.parent_id == contract.id]
+    draft = [c for c in children if c.name == "draft"]
+    assert len(draft) == 1
+
+
+from aigineering.core.engine import _parse_method_action
