@@ -401,7 +401,15 @@ class Engine:
             relation_target=contract.id,
             budget_remaining=self._budget.get(parent_id, 0),
         )
-        self._expand_plan_result(contract, method_assets)
+
+        expanded = False
+        method_type = method_payload(contract).get("method")
+        if self._method_registry is not None and isinstance(method_type, str):
+            handler = self._method_registry.get(method_type)
+            if handler is not None:
+                expanded = handler.handle_completion(self, contract, method_assets)
+        if not expanded:
+            self._expand_plan_result(contract, method_assets)
 
     def _expand_plan_result(
         self,

@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
     from aigineering.core.engine import Engine
-    from aigineering.protocol.types import Candidate, Contract
+    from aigineering.protocol.types import Asset, Candidate, Contract
 
 
 class MethodHandler(Protocol):
@@ -27,6 +27,20 @@ class MethodHandler(Protocol):
 
         Return True if the method was handled (and parent should be suspended).
         Return False to let the engine use default scheduling behavior.
+        """
+        ...
+
+    def handle_completion(
+        self,
+        engine: Engine,
+        contract: Contract,
+        method_assets: list[Asset],
+    ) -> bool:
+        """Handle method contract completion. Return True if expansion was performed.
+
+        Called by :meth:`Engine._resume_parent_from_method` when a system
+        method contract completes.  The handler may expand plan results,
+        process tool observations, etc.
         """
         ...
 
