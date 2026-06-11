@@ -2,7 +2,7 @@
 
 import pytest
 
-from aigineering.protocol.actions import ActionParseError, parse_action
+from aigineering.protocol.actions import ActionParseError, action_from_dict, parse_action
 
 
 def test_parse_exec_action_outputs_wrapper():
@@ -30,3 +30,17 @@ def test_parse_method_actions_as_payload_only():
 def test_reject_unsupported_action():
     with pytest.raises(ActionParseError, match="unsupported"):
         parse_action('/mutate {"state": "done"}')
+
+
+def test_action_from_dict_validates_exec_outputs():
+    action = action_from_dict(
+        {"type": "exec", "outputs": {"report": "ok"}}
+    )
+
+    assert action.type == "exec"
+    assert action.outputs == {"report": "ok"}
+
+
+def test_action_from_dict_rejects_non_string_output_content():
+    with pytest.raises(ActionParseError, match="content"):
+        action_from_dict({"type": "exec", "outputs": {"report": 123}})

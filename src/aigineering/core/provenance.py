@@ -30,3 +30,11 @@ def sign_asset(asset: Asset, signed_by: str | None = None) -> Asset:
     signer = signed_by or default_signer(asset)
     signature = provenance_signature(asset, signed_by=signer)
     return replace(asset, signed_by=signer, signature=signature)
+
+
+def verify_asset_signature(asset: Asset) -> bool:
+    """Return whether *asset* has a valid deterministic provenance seal."""
+
+    if not asset.signed_by or not asset.signature:
+        return False
+    return asset.signature == provenance_signature(asset, signed_by=asset.signed_by)

@@ -1,7 +1,13 @@
 """Tests for asset provenance metadata."""
 
 from aigineering.core.projection import project_candidate
-from aigineering.core.provenance import provenance_signature, sign_asset
+from dataclasses import replace
+
+from aigineering.core.provenance import (
+    provenance_signature,
+    sign_asset,
+    verify_asset_signature,
+)
 from aigineering.core.store import JsonLStore
 from aigineering.protocol.types import Asset, Candidate, Contract
 
@@ -92,3 +98,37 @@ def test_jsonl_store_roundtrips_asset_signature(tmp_path):
     loaded = reopened.get_asset("asset_1")
     assert loaded == signed
     assert loaded.signature == signed.signature
+
+
+def test_verify_asset_signature_accepts_signed_asset():
+    signed = sign_asset(
+        Asset(
+            id="asset_1",
+            name="evidence",
+            content="observed",
+            minted_by="tool_worker",
+        )
+    )
+
+    assert verify_asset_signature(signed) is True
+
+
+def test_verify_asset_signature_rejects_tampered_asset():
+    signed = sign_asset(
+        Asset(
+            id="asset_1",
+            name="evidence",
+            content="observed",
+            minted_by="tool_worker",
+        )
+    )
+
+    tampered = replace(signed, content="changed")
+
+    assert verify_asset_signature(tampered) is False
+
+
+def test_verify_asset_signature_rejects_unsigned_asset():
+    asset = Asset(id="asset_1", name="evidence", content="observed")
+
+    assert verify_asset_signature(asset) is False

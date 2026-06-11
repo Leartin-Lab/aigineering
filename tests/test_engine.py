@@ -232,10 +232,17 @@ def test_method_action_schedules_subcontract_without_projection():
     assert scheduled[0].relation_target == child_contracts[0].id
 
 
-def test_method_scheduling_deduplicates_by_child_contract_id():
+def test_method_scheduling_uses_child_contract_identity():
     store = MemoryStore()
     trace_store = TraceStore()
-    worker = MockWorker({"root": '/tool {"name": "search", "args": {"q": "a"}}'})
+    worker = SequenceWorker([
+        '/tool {"name": "search", "args": {"q": "a"}}',
+        '/tool {"name": "search", "args": {"q": "b"}}',
+        "",
+        "",
+    ])
+    tools = ToolRegistry()
+    tools.register(ToolSpec(name="search"), lambda args: f"value:{args['q']}")
     contract = Contract(
         id="contract_parent",
         name="root",
@@ -243,20 +250,14 @@ def test_method_scheduling_deduplicates_by_child_contract_id():
         budget=5,
         tool_scope=["search"],
     )
-    engine = Engine(store, worker, trace_store)
+    engine = Engine(store, worker, trace_store, tools=tools)
     engine.add_contract(contract)
 
-    engine.run()
-    first_children = [c for c in store.get_all_contracts() if c.parent_id == contract.id]
-    assert len(first_children) == 1
-
-    engine._suspended.clear()
-    worker.set_output("root", '/tool {"name": "search", "args": {"q": "b"}}')
     engine.run()
 
     children = [c for c in store.get_all_contracts() if c.parent_id == contract.id]
     assert len(children) == 2
-    assert {c.id for c in children} != {first_children[0].id}
+    assert len({c.id for c in children}) == 2
 
 
 def test_tool_method_executes_registry_and_commits_observation():
@@ -415,3 +416,45 @@ def test_plan_result_expands_child_contracts_without_system_authority():
     assert len(expanded) == 1
     assert expanded[0].relation_type == "plan"
     assert expanded[0].relation_target == planned[0].id
+
+
+def test_plan_result_bad_budget_defaults_without_crashing():
+    plan_content = json.dumps(
+        {
+            "contracts": [
+                {
+                    "name": "draft",
+                    "outputs": ["draft_report"],
+                    "budget": "not-a-number",
+                }
+            ]
+        },
+        sort_keys=True,
+    )
+    worker = SequenceWorker(
+        [
+            '/plan {"reason": "split work"}',
+            f'/exec {{"outputs": {{"_plan_result_contract_parent": {json.dumps(plan_content)}}}}}',
+            "",
+        ]
+    )
+    store = MemoryStore()
+    trace_store = TraceStore()
+    contract = Contract(
+        id="contract_parent",
+        name="root",
+        outputs=["report"],
+        activation="",
+        budget=5,
+    )
+    engine = Engine(store, worker, trace_store)
+    engine.add_contract(contract)
+
+    engine.run()
+
+    planned = [
+        c for c in store.get_all_contracts()
+        if c.parent_id == contract.id and c.name == "draft"
+    ]
+    assert len(planned) == 1
+    assert planned[0].budget == 1

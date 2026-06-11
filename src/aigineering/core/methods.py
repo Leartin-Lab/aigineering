@@ -133,7 +133,7 @@ def contracts_from_plan_asset(
             inputs=_string_list(raw.get("inputs", [])),
             outputs=_string_list(raw.get("outputs", [])),
             activation=str(raw.get("activation", "")),
-            budget=int(raw.get("budget", 1) or 1),
+            budget=_positive_int(raw.get("budget", 1), default=1),
             tool_scope=_string_list(raw.get("tool_scope", [])),
             labels=_string_list(raw.get("labels", [])),
             origin="plan",
@@ -160,3 +160,11 @@ def _string_list(value: object) -> list[str]:
     if not isinstance(value, list):
         return []
     return [item for item in value if isinstance(item, str)]
+
+
+def _positive_int(value: object, default: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return parsed if parsed > 0 else default

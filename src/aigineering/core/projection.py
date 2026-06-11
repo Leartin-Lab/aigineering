@@ -6,7 +6,12 @@ import json
 
 from aigineering.core.authority import check_authority
 from aigineering.core.ids import asset_id
-from aigineering.protocol.actions import ActionParseError, WorkerAction, parse_action
+from aigineering.protocol.actions import (
+    ActionParseError,
+    WorkerAction,
+    action_from_dict,
+    parse_action,
+)
 from aigineering.protocol.types import (
     Asset,
     Candidate,
@@ -135,13 +140,17 @@ def _parse_candidate_fragments(
 ) -> tuple[list[dict], list[RejectedCandidate]]:
     parsed = candidate.parsed_action
     if isinstance(parsed, dict) and isinstance(parsed.get("type"), str):
-        return _fragments_from_action(
-            WorkerAction(
-                type=parsed["type"],
-                outputs=dict(parsed.get("outputs", {})),
-                payload=dict(parsed.get("payload", {})),
-            )
-        )
+        try:
+            return _fragments_from_action(action_from_dict(parsed))
+        except ActionParseError as e:
+            return [], [
+                RejectedCandidate(
+                    name="(action)",
+                    content=str(parsed)[:120],
+                    reject_reason=str(e),
+                    category=RejectionCategory.PARSE_ERROR,
+                )
+            ]
 
     if candidate.raw_output.strip().startswith("/"):
         try:

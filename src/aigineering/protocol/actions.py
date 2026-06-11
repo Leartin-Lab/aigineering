@@ -41,6 +41,27 @@ def parse_action(raw_output: str) -> WorkerAction:
     return WorkerAction(type=action_type, payload=dict(payload))
 
 
+def action_from_dict(data: Mapping[str, Any]) -> WorkerAction:
+    """Validate and convert a pre-parsed action dictionary."""
+
+    action_type = data.get("type")
+    if not isinstance(action_type, str):
+        raise ActionParseError("worker action type must be a string")
+    if action_type not in _SUPPORTED_ACTIONS:
+        raise ActionParseError(f"unsupported worker action '/{action_type}'")
+
+    if action_type == "exec":
+        raw_outputs = data.get("outputs", {})
+        if not isinstance(raw_outputs, Mapping):
+            raise ActionParseError("/exec outputs must be a JSON object")
+        return WorkerAction(type=action_type, outputs=_parse_exec_outputs(raw_outputs))
+
+    payload = data.get("payload", {})
+    if not isinstance(payload, Mapping):
+        raise ActionParseError(f"/{action_type} payload must be a JSON object")
+    return WorkerAction(type=action_type, payload=dict(payload))
+
+
 def _parse_payload(body: str) -> Mapping[str, Any]:
     if not body:
         return {}

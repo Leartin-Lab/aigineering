@@ -55,9 +55,9 @@ aig replay <session_id>   # replay a session
 
 ---
 
-## Status: Pre-Alpha
+## Status: v0.3.0 Pre-Alpha
 
-This is an early proof-of-concept demonstrating the core invariant: **undeclared outputs cannot become runtime facts.**
+This is an early proof-of-concept demonstrating the core invariant: **undeclared outputs cannot become runtime facts.** The v0.3.0 milestone adds a minimal real-worker protocol loop: an OpenAI-compatible worker can emit structured `/exec`, `/plan`, `/replan`, and `/tool` actions; tool calls execute through runtime-owned system assets; parent tasks resume from method observations without allowing those observations to shortcut declared outputs.
 
 **Currently implemented:**
 - Deterministic SHA-256 content-addressed IDs
@@ -75,6 +75,7 @@ This is an early proof-of-concept demonstrating the core invariant: **undeclared
 - Asset disclosure policy (`promptable=False` assets remain stored but are not disclosed)
 - Asset provenance metadata (`origin`, `trust_tier`, `minted_by`, `source_uri`)
 - Deterministic provenance signatures (`signed_by`, `signature`)
+- Replay-time verification for deterministic provenance signatures
 - Worker protocol interface for candidate-producing execution environments
 - Worker-produced assets use explicit worker provenance, independent of the mock demo
 - OpenAI-compatible LLM worker for chat-completions endpoints

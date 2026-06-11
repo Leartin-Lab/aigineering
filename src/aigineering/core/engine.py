@@ -20,7 +20,12 @@ from aigineering.core.provenance import sign_asset
 from aigineering.core.store import StoreProtocol
 from aigineering.core.trace import MemoryTraceStore, TraceStoreProtocol
 from aigineering.core.tools import ToolRegistry
-from aigineering.protocol.actions import ActionParseError, WorkerAction, parse_action
+from aigineering.protocol.actions import (
+    ActionParseError,
+    WorkerAction,
+    action_from_dict,
+    parse_action,
+)
 from aigineering.protocol.types import Asset, Candidate, Contract, ProjectionResult
 
 _logger = logging.getLogger(__name__)
@@ -400,11 +405,10 @@ class Engine:
 def _parse_method_action(candidate: Candidate) -> WorkerAction | None:
     parsed = candidate.parsed_action
     if isinstance(parsed, dict) and parsed.get("type") in {"plan", "replan", "tool"}:
-        return WorkerAction(
-            type=parsed["type"],
-            outputs=dict(parsed.get("outputs", {})),
-            payload=dict(parsed.get("payload", {})),
-        )
+        try:
+            return action_from_dict(parsed)
+        except ActionParseError:
+            return None
 
     if not candidate.raw_output.strip().startswith("/"):
         return None

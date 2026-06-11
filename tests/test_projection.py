@@ -130,6 +130,21 @@ def test_empty_candidate_output_is_rejected():
     assert result.rejected_candidates[0].name == "(empty)"
 
 
+def test_projection_rejects_invalid_parsed_action_outputs():
+    contract = Contract(id="c1", outputs=["report"])
+    candidate = Candidate(
+        worker_id="w",
+        raw_output="",
+        parsed_action={"type": "exec", "outputs": {"report": 123}},
+    )
+
+    result = project_candidate(contract, candidate)
+
+    assert result.status == ProjectionStatus.REJECTED
+    assert result.accepted_assets == []
+    assert result.rejected_candidates[0].name == "(action)"
+
+
 def test_immutability():
     import dataclasses
     result = ProjectionResult(status=ProjectionStatus.REJECTED)

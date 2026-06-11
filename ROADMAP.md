@@ -9,7 +9,7 @@
 - [x] Mock worker demo
 - [x] `aig run`, `aig trace`, `aig audit` CLI
 
-## v0.2 — Persistence & Replay (Current)
+## v0.2 — Persistence & Replay
 
 - [x] JSONL persistent trace (`.aig/traces/session_*.jsonl`)
 - [x] Atomic append and reload for trace entries
@@ -26,13 +26,14 @@
 - [x] Asset disclosure policy for non-promptable assets
 - [x] Asset provenance metadata (`origin`, `trust_tier`, `minted_by`, `source_uri`)
 - [x] Deterministic provenance signatures (`signed_by`, `signature`)
+- [x] Replay-time verification for deterministic provenance signatures
 - [x] Worker protocol interface
 - [x] Worker-origin provenance for projected assets
 - [ ] SQLiteStore (single-file persistence)
 - [ ] `aig retry --contract` (incremental retry)
 - [ ] `aig trace --tree` / `aig trace --dag`
 
-## v0.3 — Real LLM & Protocol
+## v0.3 — Real LLM & Protocol (Current)
 
 - [x] OpenAI-compatible LLM worker
 - [x] CLI worker selection for mock and LLM workers
@@ -47,7 +48,7 @@
 - [x] End-to-end LLM protocol boundary tests
 - [x] Contract expansion for planner outputs
 
-## v0.4 — MCP, Skills, GC, PyPI
+## v0.4 — MCP, Skills, GC, PyPI (Next)
 
 - [x] Tool registry with serializable specs and private handlers
 - [ ] MCP function call → contract expansion
