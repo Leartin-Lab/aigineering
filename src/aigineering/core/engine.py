@@ -502,6 +502,117 @@ class Engine:
             )
 
 
+    # ── State persistence / recovery ──────────────────────────────────
+
+    def save_state(self) -> dict:
+        """Serialize engine runtime state for recovery."""
+        return {
+            "budget": dict(self._budget),
+            "completed": list(self._completed),
+            "suspended": list(self._suspended),
+            "method_scheduled": list(self._method_scheduled),
+            "method_context": {
+                k: [a.id for a in v] for k, v in self._method_context.items()
+            },
+            "label_context": {
+                k: [a.id for a in v] for k, v in self._label_context.items()
+            },
+            "contract_last_entry": dict(self._contract_last_entry),
+        }
+
+    @classmethod
+    def restore(
+        cls,
+        store: StoreProtocol,
+        worker: Worker,
+        state: dict,
+        trace_store: TraceStoreProtocol | None = None,
+        labels: dict[str, Label] | None = None,
+        tools: ToolRegistry | None = None,
+        method_registry: MethodRegistry | None = None,
+    ) -> "Engine":
+        """Restore engine from serialized state."""
+        engine = cls(store, worker, trace_store, labels, tools, method_registry)
+        engine._budget = state["budget"]
+        engine._completed = set(state["completed"])
+        engine._suspended = set(state["suspended"])
+        engine._method_scheduled = set(state["method_scheduled"])
+        engine._method_context = {
+            k: [a for aid in ids if (a := store.get_asset(aid)) is not None]
+            for k, ids in state["method_context"].items()
+        }
+        engine._label_context = {
+            k: [a for aid in ids if (a := store.get_asset(aid)) is not None]
+            for k, ids in state["label_context"].items()
+        }
+        engine._contract_last_entry = state["contract_last_entry"]
+        return engine
+
+    @classmethod
+    def restore_from_store(
+        cls,
+        store: StoreProtocol,
+        worker: Worker,
+        trace_store: TraceStoreProtocol,
+        labels: dict[str, Label] | None = None,
+        tools: ToolRegistry | None = None,
+        method_registry: MethodRegistry | None = None,
+    ) -> "Engine":
+        """Reconstruct engine state from store records and trace events."""
+        engine = cls(store, worker, trace_store, labels, tools, method_registry)
+
+        # Count activations per contract for budget derivation
+        activation_counts: dict[str, int] = {}
+
+        for entry in trace_store.get_all():
+            cid = entry.contract_id
+
+            if entry.event_type == "activation":
+                activation_counts[cid] = activation_counts.get(cid, 0) + 1
+
+            elif entry.event_type == "complete":
+                engine._completed.add(cid)
+                engine._suspended.discard(cid)
+
+            elif entry.event_type == "method_scheduled":
+                engine._suspended.add(cid)
+                if entry.relation_target:
+                    engine._method_scheduled.add(entry.relation_target)
+
+            elif entry.event_type == "method_resumed":
+                engine._suspended.discard(cid)
+                # Reconstruct method context from disclosed_assets
+                assets: list[Asset] = []
+                for aid in entry.disclosed_assets:
+                    asset = store.get_asset(aid)
+                    if asset is not None:
+                        assets.append(asset)
+                if assets:
+                    engine._method_context.setdefault(cid, []).extend(assets)
+
+            elif entry.event_type == "label_resolved":
+                # Reconstruct label context from disclosed_assets
+                assets = []
+                for aid in entry.disclosed_assets:
+                    asset = store.get_asset(aid)
+                    if asset is not None:
+                        assets.append(asset)
+                if assets:
+                    engine._label_context[cid] = assets
+
+            # Track last entry per contract for contract_last_entry
+            engine._contract_last_entry[cid] = entry.id
+
+        # Derive budget from contracts and activation counts
+        for contract in store.get_all_contracts():
+            cid = contract.id
+            initial = max(contract.budget, 1)
+            consumed = activation_counts.get(cid, 0)
+            engine._budget[cid] = max(0, initial - consumed)
+
+        return engine
+
+
 def _parse_method_action(candidate: Candidate) -> WorkerAction | None:
     parsed = candidate.parsed_action
     if isinstance(parsed, Mapping) and parsed.get("type") in {"plan", "replan", "tool"}:
