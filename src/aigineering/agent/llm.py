@@ -7,6 +7,7 @@ import logging
 import os
 import time
 import urllib.error
+import urllib.request
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
