@@ -14,6 +14,17 @@ _METHOD_OUTPUT_PREFIX: dict[str, str] = {
     "tool": "_tool_obs_",
 }
 
+# Prefixes that planner-children must never declare as outputs.
+_PLAN_RESERVED_PREFIXES: frozenset[str] = frozenset(
+    {"_sys_", "_skill_", "_memory_", "_mcp_", "_soul_", "_persona_"}
+)
+
+# Fields the planner must not set in child contract payloads.
+# (origin is always hard-clamped to "plan" by the engine.)
+_PLAN_PROTECTED_FIELDS: frozenset[str] = frozenset(
+    {"trust_tier", "created_by", "minting_authority"}
+)
+
 
 def method_contract(parent: Contract, action: WorkerAction) -> Contract:
     """Create a system-owned method sub-contract from a parsed action."""
@@ -109,25 +120,57 @@ def system_asset(
 def contracts_from_plan_asset(
     asset: Asset,
     parent_id: str | None,
-) -> list[Contract]:
-    """Expand a `_plan_result_*` asset into non-system child contracts."""
+    parent_contract: Contract | None = None,
+) -> tuple[list[Contract], list[dict]]:
+    """Expand a `_plan_result_*` asset into non-system child contracts.
+
+    When *parent_contract* is provided every child is validated against
+    the parent's capability boundary (deny-by-default).  Violations are
+    either rejected or clamped and recorded in the returned rejection
+    entries.
+
+    Returns (accepted_contracts, rejection_entries).
+    """
 
     try:
         payload = json.loads(asset.content)
     except json.JSONDecodeError:
-        return []
+        return [], []
     if not isinstance(payload, dict):
-        return []
+        return [], []
 
     raw_contracts = payload.get("contracts", [])
     if not isinstance(raw_contracts, list):
-        return []
+        return [], []
 
-    contracts: list[Contract] = []
+    accepted: list[Contract] = []
+    rejected: list[dict] = []
+
+    parent_tools = set(parent_contract.tool_scope) if parent_contract is not None else None
+    parent_labels = set(parent_contract.labels) if parent_contract is not None else None
+    parent_budget = parent_contract.budget if parent_contract is not None else None
+
     for raw in raw_contracts:
         if not isinstance(raw, dict):
             continue
+
         name = str(raw.get("name", ""))
+
+        # --- Deny-by-default: protected fields ---
+        if _PLAN_PROTECTED_FIELDS & set(raw.keys()):
+            found = sorted(_PLAN_PROTECTED_FIELDS & set(raw.keys()))
+            rejected.append(
+                {
+                    "child_name": name,
+                    "field": ",".join(found),
+                    "reason": f"planner cannot set {found}",
+                    "action": "rejected",
+                    "expected": "absent",
+                    "actual": f"present ({found})",
+                }
+            )
+            continue
+
         description = str(raw.get("description", ""))
         inputs = _string_list(raw.get("inputs", []))
         outputs = _string_list(raw.get("outputs", []))
@@ -136,6 +179,110 @@ def contracts_from_plan_asset(
         tool_scope = _string_list(raw.get("tool_scope", []))
         labels = _string_list(raw.get("labels", []))
         origin = "plan"
+
+        if parent_contract is None:
+            # Backward-compatible path: no validation
+            cid = hash_contract(
+                name=name,
+                description=description,
+                inputs=inputs,
+                outputs=outputs,
+                activation=activation,
+                budget=budget,
+                tool_scope=tool_scope,
+                labels=labels,
+                origin=origin,
+            )
+            accepted.append(
+                Contract(
+                    id=cid,
+                    parent_id=parent_id,
+                    name=name,
+                    description=description,
+                    inputs=inputs,
+                    outputs=outputs,
+                    activation=activation,
+                    budget=budget,
+                    tool_scope=tool_scope,
+                    labels=labels,
+                    origin=origin,
+                )
+            )
+            continue
+
+        # --- Tool-scope containment: clamp to parent intersection ---
+        if parent_tools is not None:
+            child_tools = set(tool_scope)
+            if not child_tools.issubset(parent_tools):
+                original_scope = sorted(tool_scope)
+                tool_scope = sorted(child_tools & parent_tools)
+                rejected.append(
+                    {
+                        "child_name": name,
+                        "field": "tool_scope",
+                        "reason": (
+                            f"tool_scope {original_scope} is not a subset "
+                            f"of parent {sorted(parent_tools)}"
+                        ),
+                        "action": "clamped",
+                        "expected": f"subset of {sorted(parent_tools)}",
+                        "actual": str(original_scope),
+                    }
+                )
+
+        # --- Label containment: reject if not subset ---
+        if parent_labels is not None and not set(labels).issubset(parent_labels):
+            rejected.append(
+                {
+                    "child_name": name,
+                    "field": "labels",
+                    "reason": (
+                        f"labels {sorted(labels)} are not a subset "
+                        f"of parent {sorted(parent_labels)}"
+                    ),
+                    "action": "rejected",
+                    "expected": f"subset of {sorted(parent_labels)}",
+                    "actual": str(sorted(labels)),
+                }
+            )
+            continue
+
+        # --- Protected output check ---
+        violated_outputs = [
+            o for o in outputs
+            if any(o.startswith(p) for p in _PLAN_RESERVED_PREFIXES)
+        ]
+        if violated_outputs:
+            rejected.append(
+                {
+                    "child_name": name,
+                    "field": "outputs",
+                    "reason": (
+                        f"outputs {violated_outputs} use reserved prefixes"
+                    ),
+                    "action": "rejected",
+                    "expected": f"no prefix in {sorted(_PLAN_RESERVED_PREFIXES)}",
+                    "actual": str(violated_outputs),
+                }
+            )
+            continue
+
+        # --- Budget fan-out clamp ---
+        if parent_budget is not None and budget > parent_budget:
+            origin_budget = budget
+            budget = parent_budget
+            rejected.append(
+                {
+                    "child_name": name,
+                    "field": "budget",
+                    "reason": (
+                        f"budget {origin_budget} exceeds parent budget {parent_budget}"
+                    ),
+                    "action": "clamped",
+                    "expected": f"<= {parent_budget}",
+                    "actual": str(origin_budget),
+                }
+            )
 
         cid = hash_contract(
             name=name,
@@ -148,7 +295,7 @@ def contracts_from_plan_asset(
             labels=labels,
             origin=origin,
         )
-        contracts.append(
+        accepted.append(
             Contract(
                 id=cid,
                 parent_id=parent_id,
@@ -163,7 +310,7 @@ def contracts_from_plan_asset(
                 origin=origin,
             )
         )
-    return contracts
+    return accepted, rejected
 
 
 def _string_list(value: object) -> list[str]:

@@ -384,14 +384,36 @@ class Engine:
         if method_payload(method_contract).get("method") != "plan":
             return
 
+        parent_contract: Contract | None = None
+        if method_contract.parent_id is not None:
+            parent_contract = self._store.get_contract(method_contract.parent_id)
+
         created: list[str] = []
         for asset in method_assets:
             if not asset.name.startswith("_plan_result_"):
                 continue
-            for child in contracts_from_plan_asset(asset, method_contract.parent_id):
+            children, rejections = contracts_from_plan_asset(
+                asset, method_contract.parent_id, parent_contract=parent_contract,
+            )
+            for child in children:
                 if self._store.get_contract(child.id) is None:
                     self.add_contract(child)
                     created.append(child.id)
+            for entry in rejections:
+                self._add_trace(
+                    method_contract.parent_id,
+                    "containment_rejected",
+                    relation_type="plan",
+                    relation_target=(
+                        f"{entry.get('child_name','?')}:{entry.get('field','?')}"
+                    ),
+                    rejected_fragments=[
+                        f"[{entry.get('action','rejected')}] "
+                        f"{entry.get('field','?')}: {entry.get('reason','')}"
+                    ],
+                    authority_result=entry.get("action", "rejected"),
+                    budget_remaining=self._budget.get(method_contract.parent_id, 0),
+                )
 
         if created and method_contract.parent_id is not None:
             self._add_trace(
