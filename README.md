@@ -55,7 +55,7 @@ aig replay <session_id>   # replay a session
 
 ---
 
-## Status: v0.3.8 Pre-Alpha
+## Status: v0.3.9 Pre-Alpha
 
 This is an early proof-of-concept demonstrating the core invariant: **undeclared outputs cannot become runtime facts.** The v0.3.1 milestone hardens data models with immutable containers, typed canonical hashing, dual-hash asset identity, replacement claims, and retention fields.
 
