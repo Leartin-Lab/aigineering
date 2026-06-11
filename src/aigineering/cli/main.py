@@ -13,12 +13,18 @@ from aigineering.core.engine import Engine
 from aigineering.core.ids import hash_asset_content, hash_asset_definition, hash_contract
 from aigineering.core.replay import replay_all, replay_session
 from aigineering.core.session import SessionStore
+from aigineering.core.disclosure import compute_disclosure
+from aigineering.core.idempotency_store import IdempotencyStore
 from aigineering.core.store import JsonLStore, MemoryStore, StoreProtocol
+from aigineering.core.submit import SubmitConflictError, submit_candidate
+from aigineering.core.sufficiency import check_sufficiency
 from aigineering.core.trace import JsonLTraceStore, MemoryTraceStore, TraceStoreProtocol
 from aigineering.agent.llm import LLMWorker
 from aigineering.agent.mock import MockWorker
+from aigineering.protocol.envelope import CandidateEnvelope
+from aigineering.protocol.package import WorkerPackage
 from aigineering.protocol.types import Asset, Contract, Session, TraceEntry
-from aigineering.protocol.wire import session_to_dict, trace_entry_to_dict
+from aigineering.protocol.wire import asset_to_dict, contract_to_dict, session_to_dict, trace_entry_to_dict
 
 
 def _get_trace_dir() -> Path:
@@ -835,6 +841,185 @@ def demo(
     click.echo(f"Demo completed for goal: '{goal}'")
     click.echo(f"  Contract: {contract.name}")
     click.echo(f"  Assets: {[a.name for a in store.get_all_assets()]}")
+
+
+@cli.command()
+@click.option("--contract", "contract_id", required=True, help="Contract ID to check readiness for")
+@click.option(
+    "--json", "json_output", is_flag=True, default=False,
+    help="Output machine-readable JSON instead of human-readable text.",
+)
+def readiness(
+    contract_id: str,
+    json_output: bool,
+) -> None:
+    """Check contract readiness and produce a sufficiency report."""
+    store = _persistent_store()
+    contract = store.get_contract(contract_id)
+    if contract is None:
+        if json_output:
+            _output_json({"error": f"Contract '{contract_id}' not found."})
+        else:
+            click.echo(f"Contract '{contract_id}' not found.")
+        return
+
+    report = check_sufficiency(contract, store)
+
+    if json_output:
+        _output_json(report)
+        return
+
+    click.echo(f"Readiness report for contract '{contract.name}' ({contract.id}):")
+    click.echo(f"  Recommendation: {report['recommendation']}")
+    click.echo(f"  Sufficient:      {report['sufficiency_ok']}")
+    if report["missing_inputs"]:
+        click.echo(f"  Missing inputs:  {report['missing_inputs']}")
+    if report["stale_assets"]:
+        click.echo(f"  Stale assets:    {report['stale_assets']}")
+    if report["version_conflicts"]:
+        click.echo(f"  Version conflicts:")
+        for vc in report["version_conflicts"]:
+            click.echo(f"    def_hash={vc['definition_hash']} names={vc['names']}")
+    if report["trust_gaps"]:
+        click.echo(f"  Trust gaps:      {report['trust_gaps']}")
+    if report["signature_gaps"]:
+        click.echo(f"  Signature gaps:  {report['signature_gaps']}")
+
+
+# ---------------------------------------------------------------------------
+# Worker commands
+# ---------------------------------------------------------------------------
+
+
+def _get_idempotency_path() -> str:
+    """Return the path to the idempotency store JSONL file."""
+    return str(_get_store_dir() / "idempotency.jsonl")
+
+
+@cli.group()
+def worker() -> None:
+    """Operational worker commands for contract execution."""
+
+
+@worker.command("package")
+@click.option("--contract", "contract_id", required=True, help="Contract ID to build package for")
+@click.option(
+    "--json", "json_output", is_flag=True, default=False,
+    help="Output machine-readable JSON instead of human-readable text.",
+)
+def worker_package(contract_id: str, json_output: bool) -> None:
+    """Create a WorkerPackage for a contract from the durable store."""
+    store = _persistent_store()
+    contract = store.get_contract(contract_id)
+    if contract is None:
+        if json_output:
+            _output_json({"error": f"Contract '{contract_id}' not found."})
+        else:
+            click.echo(f"Contract '{contract_id}' not found.")
+        return
+
+    scope = compute_disclosure(contract, store)
+    pkg = WorkerPackage(
+        contract_id=contract.id,
+        contract=contract_to_dict(contract),
+        disclosed_assets=tuple(asset_to_dict(a) for a in scope),
+        method_context_assets=(),
+        tool_scope=contract.tool_scope,
+        budget_remaining=contract.budget,
+    )
+
+    if json_output:
+        result = json.loads(pkg.to_json())
+        _output_json(result)
+        return
+
+    click.echo(pkg.to_json())
+
+
+@worker.command("submit")
+@click.option("--json", "envelope_json", required=True, help="CandidateEnvelope JSON string")
+@click.option(
+    "--idempotency-key",
+    default=None,
+    help="Idempotency key for deduplication",
+)
+def worker_submit(envelope_json: str, idempotency_key: Optional[str]) -> None:
+    """Submit a candidate envelope for projection and commitment.
+
+    ENVELOPE_JSON must be a valid CandidateEnvelope serialized as JSON.
+    Output is always JSON.
+    """
+    try:
+        envelope = CandidateEnvelope.from_json(envelope_json)
+    except (ValueError, json.JSONDecodeError) as e:
+        _output_json({"error": f"Invalid envelope: {e}"})
+        return
+
+    store = _persistent_store()
+
+    if store.get_contract(envelope.contract_id) is None:
+        _output_json({"error": f"Contract '{envelope.contract_id}' not found."})
+        return
+
+    idem_path = _get_idempotency_path()
+    idem = IdempotencyStore(idem_path)
+
+    # Use a per-contract trace file for operational submissions
+    trace_dir = _get_trace_dir()
+    trace_path = str(trace_dir / f"worker_{envelope.contract_id}.jsonl")
+    trace_store = JsonLTraceStore(trace_path)
+
+    try:
+        result = submit_candidate(
+            envelope=envelope,
+            store=store,
+            trace_store=trace_store,
+            idempotency_store=idem,
+            idempotency_key=idempotency_key or "",
+        )
+    except SubmitConflictError as e:
+        _output_json({"error": str(e), "status": "conflict"})
+        return
+
+    # Redact sealed config from result
+    result = _redact_sealed(result)
+    _output_json(result)
+
+
+@cli.command()
+@click.option(
+    "--definition-hash", "def_hash", required=True,
+    help="Definition hash (def:<hex>) to verify content hashes for.",
+)
+@click.option(
+    "--json", "json_output", is_flag=True, default=False,
+    help="Output machine-readable JSON instead of human-readable text.",
+)
+def verify(def_hash: str, json_output: bool) -> None:
+    """Batch-verify content hashes for all assets under a definition hash."""
+    store = _persistent_store()
+    result = batch_verify_definition(store, def_hash)
+
+    if json_output:
+        _output_json(result)
+        return
+
+    click.echo(f"Definition: {def_hash}")
+    click.echo(f"  Pass: {result['pass_count']}  Fail: {result['fail_count']}")
+    for r in result["results"]:
+        status = "✓" if r["valid"] else "✗"
+        click.echo(f"  {status} {r['asset_id']}")
+        if not r["valid"]:
+            if r.get("expected_content_hash") != r.get("content_hash"):
+                click.echo(
+                    f"    content_hash mismatch: "
+                    f"stored={r['content_hash']} expected={r['expected_content_hash']}"
+                )
+            if r.get("expected_definition_hash") != r.get("definition_hash"):
+                click.echo(
+                    f"    definition_hash mismatch: "
+                    f"stored={r['definition_hash']} expected={r['expected_definition_hash']}"
+                )
 
 
 @cli.group()
