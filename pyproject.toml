@@ -1,6 +1,6 @@
 [project]
 name = "aigineering"
-version = "0.3.14"
+version = "0.3.16"
 description = "Agent Runtime — structural hallucination containment for LLM-based agents"
 requires-python = ">=3.11"
 license = "MIT"
