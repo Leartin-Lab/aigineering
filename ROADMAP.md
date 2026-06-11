@@ -64,11 +64,13 @@ Focus: make the single-node runtime durable, resumable, and safer.
 - [x] SQLiteStore or equivalent single-file durable store
 - [x] Resumable engine state for completed/suspended contracts, budgets, and method context
 - [x] Crash recovery from persisted assets/contracts/traces/session manifest
-- [ ] Real cryptographic signer/verifier interface
-- [ ] Trust policy over signer, origin, trust tier, labels, tool scope, and reserved prefixes
-- [x] `aig retry --contract`
 - [x] `aig trace --tree` / `aig trace --dag` as views, not runtime truth
 - [x] CLI split into smaller command modules
+
+### Deferred to v0.4.x
+
+- [ ] Real cryptographic signer/verifier interface
+- [ ] Trust policy over signer, origin, trust tier, labels, tool scope, and reserved prefixes
 
 ## v0.5 - Ecosystem Integration
 
