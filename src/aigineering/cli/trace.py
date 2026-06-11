@@ -158,7 +158,7 @@ def _build_contract_tree(
 
     Parent→child relationships are derived from method_scheduled and
     contracts_expanded events.  This is a pure projection — no runtime truth
-    is stored, it is computed on the fly from trace entries.
+    is stored, it is computed on the fly from trace entries every time.
     """
     by_contract: dict[str, list[TraceEntry]] = {}
     for e in entries:
@@ -185,33 +185,79 @@ def _build_contract_tree(
                 children.append(_build_node(child_cid))
         return {"contract_id": cid, "entries": node_entries, "children": children}
 
+    def _collect_ids(node: dict) -> set[str]:
+        ids = {node["contract_id"]}
+        for child in node.get("children", []):
+            ids |= _collect_ids(child)
+        return ids
+
     tree: dict[str, dict] = {}
+    existing_ids: set[str] = set()
     for root_id in sorted(roots):
-        tree[root_id] = _build_node(root_id)
+        node = _build_node(root_id)
+        tree[root_id] = node
+        existing_ids |= _collect_ids(node)
     for child_id in child_parent:
-        if child_id not in roots and child_id not in tree:
+        if child_id not in roots and child_id not in existing_ids:
             tree[child_id] = _build_node(child_id)
     return tree
 
 
 def _print_trace_tree(entries: list[TraceEntry]) -> None:
-    """Print a hierarchical tree view derived from trace entries."""
+    """Print a hierarchical tree view with tree-drawing characters.
+
+    Uses ``|   `` vertical bars and ``├──`` / ``└──`` branch markers.
+    Shows accepted/rejected asset counts per contract and the full
+    parent→child→method→tool chain.
+    """
     tree = _build_contract_tree(entries)
 
-    def _print_node(contract_id: str, node: dict, indent: int) -> None:
-        prefix = "  " * indent
-        click.echo(f"{prefix}contract: {contract_id}")
-        for e in node.get("entries", []):
-            label = _entry_short_label(e)
-            click.echo(f"{prefix}  [{e.event_type}] {label}")
-        for child in node.get("children", []):
-            _print_node(child["contract_id"], child, indent + 1)
+    def _contract_counts(node_entries: list[TraceEntry]) -> tuple[int, int]:
+        """Return (accepted_count, rejected_count) for a contract's entries."""
+        accepted = 0
+        rejected = 0
+        for e in node_entries:
+            if e.event_type == "projection":
+                accepted += len(e.accepted_fragments or [])
+                rejected += len(e.rejected_fragments or [])
+        return accepted, rejected
 
-    for cid, node in tree.items():
-        if node.get("entries"):
-            _print_node(cid, node, 0)
-        elif node.get("children"):
-            _print_node(cid, node, 0)
+    def _print_node(
+        contract_id: str,
+        node: dict,
+        indent_prefix: str,
+        is_last: bool,
+    ) -> None:
+        node_entries: list[TraceEntry] = node.get("entries", [])
+        children: list[dict] = node.get("children", [])
+        acc, rej = _contract_counts(node_entries)
+        counts = f" (accepted: {acc}, rejected: {rej})" if acc or rej else ""
+
+        branch = "└── " if is_last else "├── "
+        click.echo(f"{indent_prefix}{branch}contract: {contract_id}{counts}")
+
+        entry_indent = indent_prefix + ("    " if is_last else "│   ")
+        for e in node_entries:
+            label = _entry_short_label(e)
+            click.echo(f"{entry_indent}[{e.event_type}] {label}")
+
+        for i, child in enumerate(children):
+            child_is_last = (i == len(children) - 1)
+            _print_node(
+                child["contract_id"],
+                child,
+                entry_indent,
+                child_is_last,
+            )
+
+    def _has_content(node: dict) -> bool:
+        return bool(node.get("entries")) or bool(node.get("children"))
+
+    top_level = [(cid, n) for cid, n in tree.items() if _has_content(n)]
+
+    for i, (cid, node) in enumerate(top_level):
+        is_last = (i == len(top_level) - 1)
+        _print_node(cid, node, "", is_last)
 
 
 def _entry_short_label(entry: TraceEntry) -> str:
@@ -281,17 +327,84 @@ def _build_contract_dag(
     return edges
 
 
+def _contract_status_map(entries: list[TraceEntry]) -> dict[str, str]:
+    """Derive contract status from trace entries (pure projection).
+
+    Status is determined from trace events only:
+      - completed: contract has a ``complete`` event
+      - suspended: contract scheduled a method but has not yet resumed
+      - active: contract has events but no ``complete`` (still in progress)
+    """
+    by_contract: dict[str, list[TraceEntry]] = {}
+    for e in entries:
+        by_contract.setdefault(e.contract_id, []).append(e)
+
+    status: dict[str, str] = {}
+    for cid, evts in by_contract.items():
+        has_complete = any(e.event_type == "complete" for e in evts)
+        if has_complete:
+            status[cid] = "completed"
+            continue
+        has_scheduled = any(e.event_type == "method_scheduled" for e in evts)
+        has_resumed = any(e.event_type == "method_resumed" for e in evts)
+        if has_scheduled and not has_resumed:
+            status[cid] = "suspended"
+        else:
+            status[cid] = "active"
+    return status
+
+
 def _print_trace_dag(entries: list[TraceEntry]) -> None:
-    """Print a graph edge view connecting parent→child contracts."""
+    """Print a Mermaid flowchart showing the contract dependency graph.
+
+    Nodes are color-coded by status derived from trace events:
+      - completed: green (#90EE90)
+      - suspended: yellow (#FFD700)
+      - active: blue (#87CEEB)
+
+    Edges show the relation type (plan, tool, expanded, etc).
+    This is a pure projection — computed on the fly every time.
+    """
     edges = _build_contract_dag(entries)
+    status = _contract_status_map(entries)
 
     if not edges:
         click.echo("(no parent→child contract edges found)")
         return
 
-    click.echo("Contract DAG edges:")
+    all_contract_ids: set[str] = set()
+    for parent, _rel, child in edges:
+        all_contract_ids.add(parent)
+        all_contract_ids.add(child)
+
+    lines: list[str] = []
+    lines.append("```mermaid")
+    lines.append("flowchart TD")
+
+    for cid in sorted(all_contract_ids):
+        st = status.get(cid, "active")
+        safe_id = cid.replace(":", "_").replace("-", "_").replace("/", "_")
+        label = cid if len(cid) <= 40 else cid[:37] + "..."
+        lines.append(f"    {safe_id}[\"{label}<br/>{st}\"]")
+
     for parent, rel, child in edges:
-        click.echo(f"  {parent}  —[{rel}]→  {child}")
+        safe_parent = parent.replace(":", "_").replace("-", "_").replace("/", "_")
+        safe_child = child.replace(":", "_").replace("-", "_").replace("/", "_")
+        lines.append(f"    {safe_parent} -->|\"{rel}\"| {safe_child}")
+
+    lines.append("")
+    lines.append("    classDef completed fill:#90EE90,stroke:#333")
+    lines.append("    classDef suspended fill:#FFD700,stroke:#333")
+    lines.append("    classDef active fill:#87CEEB,stroke:#333")
+    lines.append("")
+
+    for cid in sorted(all_contract_ids):
+        st = status.get(cid, "active")
+        safe_id = cid.replace(":", "_").replace("-", "_").replace("/", "_")
+        lines.append(f"    class {safe_id} {st}")
+
+    lines.append("```")
+    click.echo("\n".join(lines))
 
 
 # ---------------------------------------------------------------------------

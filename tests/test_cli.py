@@ -497,7 +497,7 @@ def test_trace_tree_view():
 
 
 def test_trace_dag_view():
-    """aig trace --dag shows graph edges connecting parent→child contracts."""
+    """aig trace --dag outputs valid Mermaid flowchart with color-coded nodes."""
     runner = CliRunner()
     with runner.isolated_filesystem():
         entries = [
@@ -526,13 +526,19 @@ def test_trace_dag_view():
         assert result.exit_code == 0
 
         output = result.output
-        assert "Contract DAG edges:" in output
+        assert "```mermaid" in output
+        assert "flowchart TD" in output
         assert "contract_A" in output
         assert "contract_B" in output
         assert "contract_C" in output
         assert "contract_D" in output
         assert "plan" in output
         assert "expanded" in output
+        assert "classDef completed" in output
+        assert "classDef suspended" in output
+        assert "classDef active" in output
+        assert "suspended" in output
+        assert "active" in output
 
 
 def test_trace_dag_empty():
@@ -603,3 +609,386 @@ def test_views_are_derived_not_stored_truth():
         assert result_tree_v2.exit_code == 0
         assert "contract: contract_root" in result_tree_v2.output
         assert "contract: contract_beta" in result_tree_v2.output
+
+
+# ---------------------------------------------------------------------------
+# v0.4.6 — enhanced tree and DAG projection tests
+# ---------------------------------------------------------------------------
+
+def test_trace_tree_hierarchy():
+    """Tree view uses proper tree-drawing characters and nested indent levels.
+
+    Root contracts at indent 0.  Children indented with ``│   `` prefix.
+    Branch characters ``├──`` and ``└──`` used for node headers.
+    """
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        entries = [
+            TraceEntry(
+                id="evt_root_act",
+                contract_id="root_contract",
+                event_type="activation",
+                timestamp="2025-01-01T00:00:00",
+            ),
+            TraceEntry(
+                id="evt_root_proj",
+                parent_id="evt_root_act",
+                contract_id="root_contract",
+                event_type="projection",
+                accepted_fragments=["frag_root"],
+                accepted_asset_names=["root_output"],
+                worker_id="worker",
+                timestamp="2025-01-01T00:00:01",
+            ),
+            TraceEntry(
+                id="evt_method_1",
+                parent_id="evt_root_proj",
+                contract_id="root_contract",
+                event_type="method_scheduled",
+                worker_id="worker",
+                relation_type="plan",
+                relation_target="child_contract",
+                timestamp="2025-01-01T00:00:02",
+            ),
+            TraceEntry(
+                id="evt_method_2",
+                parent_id="evt_root_proj",
+                contract_id="root_contract",
+                event_type="method_scheduled",
+                worker_id="worker",
+                relation_type="tool",
+                relation_target="child_tool",
+                timestamp="2025-01-01T00:00:03",
+            ),
+            TraceEntry(
+                id="evt_child_act",
+                contract_id="child_contract",
+                event_type="activation",
+                timestamp="2025-01-01T00:00:04",
+            ),
+            TraceEntry(
+                id="evt_child_proj",
+                parent_id="evt_child_act",
+                contract_id="child_contract",
+                event_type="projection",
+                accepted_fragments=["frag_child"],
+                accepted_asset_names=["child_output"],
+                worker_id="worker",
+                timestamp="2025-01-01T00:00:05",
+            ),
+            TraceEntry(
+                id="evt_tool_act",
+                contract_id="child_tool",
+                event_type="activation",
+                timestamp="2025-01-01T00:00:06",
+            ),
+            TraceEntry(
+                id="evt_tool_proj",
+                parent_id="evt_tool_act",
+                contract_id="child_tool",
+                event_type="projection",
+                accepted_fragments=["frag_tool"],
+                accepted_asset_names=["tool_output"],
+                worker_id="worker",
+                timestamp="2025-01-01T00:00:07",
+            ),
+        ]
+        _write_trace_entries(
+            Path(".aig/traces/session_hierarchy.jsonl"),
+            entries,
+        )
+
+        result = runner.invoke(cli, ["trace", "--tree"])
+        assert result.exit_code == 0
+
+        output = result.output
+        lines = output.split("\n")
+
+        root_lines = [l for l in lines if "contract: root_contract" in l]
+        child_lines = [l for l in lines if "contract: child_contract" in l]
+        tool_lines = [l for l in lines if "contract: child_tool" in l]
+        assert len(root_lines) == 1, f"root_contract should appear once, got {root_lines}"
+        assert len(child_lines) == 1, f"child_contract should appear once, got {child_lines}"
+        assert len(tool_lines) == 1, f"child_tool should appear once, got {tool_lines}"
+
+        root_line = root_lines[0]
+        child_line = child_lines[0]
+        tool_line = tool_lines[0]
+
+        root_indent = len(root_line) - len(root_line.lstrip())
+        child_indent = len(child_line) - len(child_line.lstrip())
+        tool_indent = len(tool_line) - len(tool_line.lstrip())
+        assert child_indent > root_indent, (
+            f"child ({child_indent}) must be deeper than root ({root_indent})"
+        )
+        assert tool_indent >= child_indent, (
+            f"tool ({tool_indent}) must be at least as deep as child ({child_indent})"
+        )
+
+        assert "├──" in root_line or "└──" in root_line
+        assert "├──" in child_line or "└──" in child_line
+        assert "├──" in tool_line or "└──" in tool_line
+
+        assert "│   " in output
+
+
+def test_trace_tree_shows_method_chain():
+    """Tree view reveals plan→tool chain with method and tool events visible."""
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        entries = [
+            TraceEntry(
+                id="evt_parent_act",
+                contract_id="contract_parent",
+                event_type="activation",
+                timestamp="2025-01-01T00:00:00",
+            ),
+            TraceEntry(
+                id="evt_parent_disc",
+                parent_id="evt_parent_act",
+                contract_id="contract_parent",
+                event_type="disclosure",
+                disclosed_assets=["input_data"],
+                worker_id="worker",
+                timestamp="2025-01-01T00:00:01",
+            ),
+            TraceEntry(
+                id="evt_parent_proj",
+                parent_id="evt_parent_disc",
+                contract_id="contract_parent",
+                event_type="projection",
+                accepted_fragments=["frag_out"],
+                accepted_asset_names=["parent_output"],
+                worker_id="worker",
+                timestamp="2025-01-01T00:00:02",
+            ),
+            TraceEntry(
+                id="evt_method_plan",
+                parent_id="evt_parent_proj",
+                contract_id="contract_parent",
+                event_type="method_scheduled",
+                worker_id="worker",
+                relation_type="plan",
+                relation_target="contract_plan",
+                timestamp="2025-01-01T00:00:03",
+            ),
+            TraceEntry(
+                id="evt_plan_act",
+                contract_id="contract_plan",
+                event_type="activation",
+                timestamp="2025-01-01T00:00:04",
+            ),
+            TraceEntry(
+                id="evt_plan_proj",
+                parent_id="evt_plan_act",
+                contract_id="contract_plan",
+                event_type="projection",
+                accepted_fragments=["plan_frag"],
+                accepted_asset_names=["plan_output"],
+                worker_id="worker",
+                timestamp="2025-01-01T00:00:05",
+            ),
+            TraceEntry(
+                id="evt_method_tool",
+                parent_id="evt_plan_proj",
+                contract_id="contract_plan",
+                event_type="method_scheduled",
+                worker_id="worker",
+                relation_type="tool",
+                relation_target="contract_tool",
+                timestamp="2025-01-01T00:00:06",
+            ),
+            TraceEntry(
+                id="evt_tool_act",
+                contract_id="contract_tool",
+                event_type="activation",
+                timestamp="2025-01-01T00:00:07",
+            ),
+            TraceEntry(
+                id="evt_tool_exec",
+                parent_id="evt_tool_act",
+                contract_id="contract_tool",
+                event_type="tool_executed",
+                relation_target="search",
+                authority_result="ok",
+                accepted_asset_names=["search_result"],
+                timestamp="2025-01-01T00:00:08",
+            ),
+            TraceEntry(
+                id="evt_tool_complete",
+                parent_id="evt_tool_exec",
+                contract_id="contract_tool",
+                event_type="complete",
+                timestamp="2025-01-01T00:00:09",
+            ),
+            TraceEntry(
+                id="evt_method_resume",
+                parent_id="evt_tool_complete",
+                contract_id="contract_plan",
+                event_type="method_resumed",
+                relation_type="tool",
+                timestamp="2025-01-01T00:00:10",
+            ),
+        ]
+        _write_trace_entries(
+            Path(".aig/traces/session_chain.jsonl"),
+            entries,
+        )
+
+        result = runner.invoke(cli, ["trace", "--tree"])
+        assert result.exit_code == 0
+
+        output = result.output
+        assert "contract: contract_parent" in output
+        assert "contract: contract_plan" in output
+        assert "contract: contract_tool" in output
+
+        assert "/plan" in output
+        assert "/tool" in output
+        assert "tool_executed" in output
+        assert "search" in output
+        assert "method_resumed" in output
+        assert "complete" in output
+
+        lines = output.split("\n")
+        parent_line = [l for l in lines if "contract: contract_parent" in l]
+        plan_line = [l for l in lines if "contract: contract_plan" in l]
+        tool_line = [l for l in lines if "contract: contract_tool" in l]
+        assert len(parent_line) == 1
+        assert len(plan_line) == 1
+        assert len(tool_line) == 1
+
+        parent_indent = len(parent_line[0]) - len(parent_line[0].lstrip())
+        plan_indent = len(plan_line[0]) - len(plan_line[0].lstrip())
+        tool_indent = len(tool_line[0]) - len(tool_line[0].lstrip())
+        assert plan_indent > parent_indent
+        assert tool_indent > plan_indent
+
+        assert "(accepted:" in output
+        assert "rejected:" in output
+
+
+def test_views_regenerated_not_cached():
+    """Same trace entries always produce the same DAG output — views are pure projections.
+
+    Running --dag twice over the same file must yield identical output.
+    """
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        entries = [
+            TraceEntry(
+                id="evt_1",
+                contract_id="contract_X",
+                event_type="method_scheduled",
+                relation_type="plan",
+                relation_target="contract_Y",
+                timestamp="2025-01-01T00:00:00",
+            ),
+            TraceEntry(
+                id="evt_2",
+                contract_id="contract_Y",
+                event_type="activation",
+                timestamp="2025-01-01T00:00:01",
+            ),
+            TraceEntry(
+                id="evt_3",
+                parent_id="evt_2",
+                contract_id="contract_Y",
+                event_type="complete",
+                timestamp="2025-01-01T00:00:02",
+            ),
+        ]
+        _write_trace_entries(
+            Path(".aig/traces/session_cached.jsonl"),
+            entries,
+        )
+
+        result1 = runner.invoke(cli, ["trace", "--dag"])
+        result2 = runner.invoke(cli, ["trace", "--dag"])
+        assert result1.exit_code == 0
+        assert result2.exit_code == 0
+        assert result1.output == result2.output, (
+            "DAG view must be deterministic — same trace → same output"
+        )
+
+        result_tree1 = runner.invoke(cli, ["trace", "--tree"])
+        result_tree2 = runner.invoke(cli, ["trace", "--tree"])
+        assert result_tree1.exit_code == 0
+        assert result_tree2.exit_code == 0
+        assert result_tree1.output == result_tree2.output, (
+            "Tree view must be deterministic — same trace → same output"
+        )
+
+
+def test_dag_output_valid_format():
+    """DAG output is valid Mermaid flowchart syntax.
+
+    Checks structural elements: fenced code block, flowchart directive,
+    node definitions, edge syntax, class definitions, class applications.
+    """
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        entries = [
+            TraceEntry(
+                id="evt_a",
+                contract_id="alpha",
+                event_type="method_scheduled",
+                relation_type="plan",
+                relation_target="beta",
+                timestamp="2025-01-01T00:00:00",
+            ),
+            TraceEntry(
+                id="evt_b",
+                contract_id="alpha",
+                event_type="method_resumed",
+                relation_type="plan",
+                timestamp="2025-01-01T00:00:01",
+            ),
+            TraceEntry(
+                id="evt_c",
+                contract_id="beta",
+                event_type="activation",
+                timestamp="2025-01-01T00:00:02",
+            ),
+            TraceEntry(
+                id="evt_d",
+                parent_id="evt_c",
+                contract_id="beta",
+                event_type="complete",
+                timestamp="2025-01-01T00:00:03",
+            ),
+        ]
+        _write_trace_entries(
+            Path(".aig/traces/session_valid_dag.jsonl"),
+            entries,
+        )
+
+        result = runner.invoke(cli, ["trace", "--dag"])
+        assert result.exit_code == 0
+
+        output = result.output
+
+        assert "```mermaid" in output
+        assert "flowchart TD" in output
+
+        import re
+        node_defs = re.findall(r'^\s{4}(\w+)\["', output, re.MULTILINE)
+        assert "alpha" in node_defs
+        assert "beta" in node_defs
+
+        edge_pattern = re.findall(r'^\s{4}(\w+) -->\|', output, re.MULTILINE)
+        assert len(edge_pattern) >= 1
+        assert "alpha" in edge_pattern
+
+        assert "classDef completed" in output
+        assert "classDef suspended" in output
+        assert "classDef active" in output
+
+        assert "class alpha " in output
+        assert "class beta " in output
+
+        assert "completed" in output or "suspended" in output or "active" in output
+
+        assert "fill:#90EE90" in output
+        assert "fill:#FFD700" in output
+        assert "fill:#87CEEB" in output
