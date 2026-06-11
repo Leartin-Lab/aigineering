@@ -7,7 +7,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
-_SUPPORTED_ACTIONS = {"exec", "plan", "replan", "tool"}
+_SUPPORTED_ACTIONS = {"exec", "plan", "replan", "tool", "retry"}
 
 
 class ActionParseError(ValueError):

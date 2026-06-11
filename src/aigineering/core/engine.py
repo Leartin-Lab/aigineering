@@ -47,6 +47,9 @@ def _safe_check_activation(expression: str, available_names: set[str]) -> bool:
 
 
 class Engine:
+    # Rough token estimate: ~4 chars per token for English text.
+    _CHARS_PER_TOKEN = 4
+
     def __init__(
         self,
         store: StoreProtocol,
@@ -55,6 +58,7 @@ class Engine:
         labels: dict[str, Label] | None = None,
         tools: ToolRegistry | None = None,
         method_registry: MethodRegistry | None = None,
+        context_size_limit: int | None = None,
     ) -> None:
         self._store = store
         self._worker = worker
@@ -62,6 +66,7 @@ class Engine:
         self._labels = labels if labels is not None else {}
         self._tools = tools
         self._method_registry = method_registry
+        self._context_size_limit = context_size_limit  # None = no limit
         self._label_context: dict[str, list[Asset]] = {}
         self._method_context: dict[str, list[Asset]] = {}
         self._budget: dict[str, int] = {}
@@ -129,6 +134,9 @@ class Engine:
                     disclosed_assets=[a.id for a in scope],
                     budget_remaining=self._resolve_budget(contract),
                 )
+
+                if self._check_context_overflow(contract, scope):
+                    break
 
                 if self._run_system_method(contract):
                     remaining = self._resolve_budget(contract)
@@ -301,6 +309,51 @@ class Engine:
             created_by=contract.id,
         )
         self._store.add_asset(sign_asset(asset))
+
+    def _estimate_context_tokens(self, scope: list[Asset]) -> int:
+        total_chars = sum(len(a.content) for a in scope)
+        return total_chars // self._CHARS_PER_TOKEN
+
+    def _check_context_overflow(
+        self, contract: Contract, scope: list[Asset]
+    ) -> bool:
+        # System method contracts are internally managed — never overflow.
+        if contract.origin == "system":
+            return False
+
+        if self._context_size_limit is None:
+            return False
+
+        estimated_tokens = self._estimate_context_tokens(scope)
+        if estimated_tokens <= self._context_size_limit:
+            return False
+
+        self._add_trace(
+            contract.id,
+            "context_overflow",
+            disclosed_assets=[a.id for a in scope],
+            relation_type="replan",
+            relation_target="context_size_exceeded",
+            rejected_fragments=[
+                f"[replan_recommended] context size {estimated_tokens} "
+                f"exceeds limit {self._context_size_limit} — replan recommended"
+            ],
+            budget_remaining=self._resolve_budget(contract),
+        )
+
+        from aigineering.protocol.types import Candidate
+        from aigineering.protocol.actions import WorkerAction
+
+        action = WorkerAction(
+            type="replan",
+            payload={"reason": f"context overflow ({estimated_tokens} tokens)"},
+        )
+        candidate = Candidate(
+            worker_id="engine",
+            raw_output=f'/replan {{"reason": "context overflow ({estimated_tokens} tokens)"}}',
+        )
+        self._dispatch_method(contract, action, candidate)
+        return True
 
     def _run_system_method(self, contract: Contract) -> bool:
         method = method_payload(contract)
@@ -530,9 +583,11 @@ class Engine:
         labels: dict[str, Label] | None = None,
         tools: ToolRegistry | None = None,
         method_registry: MethodRegistry | None = None,
+        context_size_limit: int | None = None,
     ) -> "Engine":
         """Restore engine from serialized state."""
-        engine = cls(store, worker, trace_store, labels, tools, method_registry)
+        engine = cls(store, worker, trace_store, labels, tools, method_registry,
+                     context_size_limit=context_size_limit)
         engine._budget = state["budget"]
         engine._completed = set(state["completed"])
         engine._suspended = set(state["suspended"])
@@ -557,9 +612,11 @@ class Engine:
         labels: dict[str, Label] | None = None,
         tools: ToolRegistry | None = None,
         method_registry: MethodRegistry | None = None,
+        context_size_limit: int | None = None,
     ) -> "Engine":
         """Reconstruct engine state from store records and trace events."""
-        engine = cls(store, worker, trace_store, labels, tools, method_registry)
+        engine = cls(store, worker, trace_store, labels, tools, method_registry,
+                     context_size_limit=context_size_limit)
 
         # Count activations per contract for budget derivation
         activation_counts: dict[str, int] = {}
@@ -615,7 +672,7 @@ class Engine:
 
 def _parse_method_action(candidate: Candidate) -> WorkerAction | None:
     parsed = candidate.parsed_action
-    if isinstance(parsed, Mapping) and parsed.get("type") in {"plan", "replan", "tool"}:
+    if isinstance(parsed, Mapping) and parsed.get("type") in {"plan", "replan", "tool", "retry"}:
         try:
             return action_from_dict(parsed)
         except ActionParseError:
@@ -627,6 +684,6 @@ def _parse_method_action(candidate: Candidate) -> WorkerAction | None:
         action = parse_action(candidate.raw_output)
     except (ActionParseError, json.JSONDecodeError):
         return None
-    if action.type in {"plan", "replan", "tool"}:
+    if action.type in {"plan", "replan", "tool", "retry"}:
         return action
     return None
