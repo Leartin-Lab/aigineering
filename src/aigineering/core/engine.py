@@ -18,6 +18,7 @@ from aigineering.core.methods import (
 )
 from aigineering.core.projection import project_candidate
 from aigineering.core.provenance import sign_asset
+from aigineering.core.method_registry import MethodRegistry
 from aigineering.core.store import StoreProtocol
 from aigineering.core.trace import MemoryTraceStore, TraceStoreProtocol
 from aigineering.core.tools import ToolRegistry
@@ -53,12 +54,14 @@ class Engine:
         trace_store: TraceStoreProtocol | None = None,
         labels: dict[str, Label] | None = None,
         tools: ToolRegistry | None = None,
+        method_registry: MethodRegistry | None = None,
     ) -> None:
         self._store = store
         self._worker = worker
         self._trace = trace_store if trace_store is not None else MemoryTraceStore()
         self._labels = labels if labels is not None else {}
         self._tools = tools
+        self._method_registry = method_registry
         self._label_context: dict[str, list[Asset]] = {}
         self._method_context: dict[str, list[Asset]] = {}
         self._budget: dict[str, int] = {}
@@ -143,10 +146,7 @@ class Engine:
                 candidate: Candidate = self._worker.invoke(contract, scope)
                 action = _parse_method_action(candidate)
                 if action is not None:
-                    self._schedule_method_contract(contract, action, candidate)
-                    remaining = self._resolve_budget(contract)
-                    self._budget[contract.id] = max(0, remaining - 1)
-                    self._suspended.add(contract.id)
+                    self._dispatch_method(contract, action, candidate)
                     break
 
                 result = project_candidate(contract, candidate)
@@ -228,6 +228,29 @@ class Engine:
             if not any(a.created_by == contract.id for a in matching):
                 return False
         return True
+
+    def _dispatch_method(
+        self,
+        contract: Contract,
+        action: WorkerAction,
+        candidate: Candidate,
+    ) -> None:
+        """Dispatch a method action through the registry or inline fallback."""
+        handler = None
+        if self._method_registry is not None:
+            handler = self._method_registry.get(action.type)
+
+        if handler is not None and handler.can_handle(action.type):
+            handler.handle_method(self, contract, action.type, candidate)
+
+        # Always run the default scheduling (backward-compat and safety net).
+        # In v0.3.4+ the handler will own the scheduling, but for v0.3.3 the
+        # engine still drives the lifecycle.
+        self._schedule_method_contract(contract, action, candidate)
+
+        remaining = self._resolve_budget(contract)
+        self._budget[contract.id] = max(0, remaining - 1)
+        self._suspended.add(contract.id)
 
     def _schedule_method_contract(
         self,
