@@ -44,12 +44,18 @@ class Contract:
     tool_scope: tuple[str, ...] = field(default_factory=tuple)
     labels: tuple[str, ...] = field(default_factory=tuple)
     origin: str = "human"
+    sensitive_input_policy: Optional[MappingProxyType] = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "inputs", tuple(self.inputs))
         object.__setattr__(self, "outputs", tuple(self.outputs))
         object.__setattr__(self, "tool_scope", tuple(self.tool_scope))
         object.__setattr__(self, "labels", tuple(self.labels))
+        if self.sensitive_input_policy is not None:
+            object.__setattr__(
+                self, "sensitive_input_policy",
+                MappingProxyType(dict(self.sensitive_input_policy)),
+            )
 
 
 @dataclass(frozen=True)

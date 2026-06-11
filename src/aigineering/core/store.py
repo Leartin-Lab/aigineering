@@ -156,6 +156,7 @@ class JsonLStore:
                     tool_scope=data.get("tool_scope", []),
                     labels=data.get("labels", []),
                     origin=data.get("origin", "human"),
+                    sensitive_input_policy=data.get("sensitive_input_policy"),
                 )
                 self.contracts[contract.id] = contract
 

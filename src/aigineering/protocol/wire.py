@@ -78,6 +78,11 @@ def contract_to_dict(contract: Contract) -> dict[str, Any]:
         "tool_scope": contract.tool_scope,
         "labels": contract.labels,
         "origin": contract.origin,
+        "sensitive_input_policy": (
+            dict(contract.sensitive_input_policy)
+            if contract.sensitive_input_policy is not None
+            else None
+        ),
     }
 
 
