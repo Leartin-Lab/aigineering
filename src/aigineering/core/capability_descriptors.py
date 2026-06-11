@@ -239,3 +239,73 @@ def create_persona_descriptor(
         "sealed_config_ref": "",
     }
     return _build_descriptor_asset("persona", name, disclosed, trust_tier)
+
+
+_PROVIDER_NAME_PREFIX = "_provider_config_"
+
+
+def create_provider_config_snapshot(
+    provider_name: str,
+    base_url: str,
+    model: str,
+    timeout: float = 60.0,
+    max_retries: int = 3,
+    capabilities: tuple[str, ...] = (),
+    trust_tier: str = "configured",
+) -> Asset:
+    """Create a traceable provider config snapshot asset.
+
+    API keys are **never** included in the asset content.  The caller is
+    expected to store the API key externally (environment variable, secret
+    manager, …).
+
+    Parameters
+    ----------
+    provider_name : str
+        Logical provider name (e.g. ``"openai"``, ``"vllm_local"``).
+    base_url : str
+        Base URL of the chat-completions endpoint.
+    model : str
+        Model identifier (e.g. ``"gpt-4.1-mini"``).
+    timeout : float
+        Request timeout in seconds (default ``60.0``).
+    max_retries : int
+        Maximum retry count for transient errors (default ``3``).
+    capabilities : tuple[str, ...]
+        Provider capabilities (e.g. ``("json_schema", "tool_calling", "streaming")``).
+    trust_tier : str
+        Trust tier for the provider config (default ``"configured"``).
+
+    Returns
+    -------
+    Asset
+        Signed descriptor Asset named ``_provider_config_{provider_name}``.
+    """
+    asset_name = f"{_PROVIDER_NAME_PREFIX}{provider_name}"
+
+    disclosed_content: dict[str, Any] = {
+        "provider_name": provider_name,
+        "base_url": base_url,
+        "model": model,
+        "timeout": timeout,
+        "max_retries": max_retries,
+        "capabilities": sorted(capabilities),
+        "sealed_config_ref": "",
+    }
+
+    content_str = json.dumps(disclosed_content, sort_keys=True, ensure_ascii=False)
+    c_hash = compute_content_hash(content_str)
+
+    asset = Asset(
+        id=f"cap:{c_hash}",
+        name=asset_name,
+        content=content_str,
+        content_type="application/json",
+        definition_hash=hash_asset_definition(asset_name),
+        content_hash=hash_asset_content(asset_name, content_str),
+        origin="capability_registry",
+        trust_tier=trust_tier,
+        minted_by="capability_registry",
+        source_uri=f"provider://{provider_name}",
+    )
+    return sign_asset(asset)
