@@ -80,7 +80,7 @@ def test_authority_policy_returned():
     )
     assert "declared_outputs" in policy
     assert "reserved_prefixes" in policy
-    assert policy["declared_outputs"] == ["report"]
+    assert policy["declared_outputs"] == ("report",)
     assert len(policy["reserved_prefixes"]) == len(RESERVED_PREFIXES)
 
 

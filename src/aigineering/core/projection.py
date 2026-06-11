@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 
 from aigineering.core.authority import check_authority
 from aigineering.core.ids import asset_id
@@ -139,7 +140,7 @@ def _parse_candidate_fragments(
     candidate: Candidate,
 ) -> tuple[list[dict], list[RejectedCandidate]]:
     parsed = candidate.parsed_action
-    if isinstance(parsed, dict) and isinstance(parsed.get("type"), str):
+    if isinstance(parsed, Mapping) and isinstance(parsed.get("type"), str):
         try:
             return _fragments_from_action(action_from_dict(parsed))
         except ActionParseError as e:

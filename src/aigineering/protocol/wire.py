@@ -118,10 +118,11 @@ def trace_entry_from_dict(data: dict[str, Any]) -> TraceEntry:
 
 
 def candidate_to_dict(candidate: Candidate) -> dict[str, Any]:
+    parsed = candidate.parsed_action
     return {
         "worker_id": candidate.worker_id,
         "raw_output": candidate.raw_output,
-        "parsed_action": candidate.parsed_action,
+        "parsed_action": dict(parsed) if parsed is not None else None,
     }
 
 
@@ -132,8 +133,8 @@ def session_to_dict(session: Session) -> dict[str, Any]:
         "contract_ids": session.contract_ids,
         "asset_ids": session.asset_ids,
         "trace_ids": session.trace_ids,
-        "config_snapshot": session.config_snapshot,
-        "worker_snapshot": session.worker_snapshot,
+        "config_snapshot": dict(session.config_snapshot),
+        "worker_snapshot": dict(session.worker_snapshot),
         "created_at": session.created_at,
     }
 

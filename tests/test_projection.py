@@ -115,7 +115,7 @@ def test_projection_rejects_non_exec_actions_as_outputs():
     result = project_candidate(contract, candidate)
 
     assert result.status == ProjectionStatus.REJECTED
-    assert result.accepted_assets == []
+    assert result.accepted_assets == ()
     assert result.rejected_candidates[0].name == "/plan"
 
 
@@ -126,7 +126,7 @@ def test_empty_candidate_output_is_rejected():
     result = project_candidate(contract, candidate)
 
     assert result.status == ProjectionStatus.REJECTED
-    assert result.accepted_assets == []
+    assert result.accepted_assets == ()
     assert result.rejected_candidates[0].name == "(empty)"
 
 
@@ -141,7 +141,7 @@ def test_projection_rejects_invalid_parsed_action_outputs():
     result = project_candidate(contract, candidate)
 
     assert result.status == ProjectionStatus.REJECTED
-    assert result.accepted_assets == []
+    assert result.accepted_assets == ()
     assert result.rejected_candidates[0].name == "(action)"
 
 

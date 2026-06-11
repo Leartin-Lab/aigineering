@@ -218,7 +218,7 @@ def test_method_action_schedules_subcontract_without_projection():
     child_contracts = [c for c in contracts if c.parent_id == contract.id]
     assert len(child_contracts) == 1
     assert child_contracts[0].name == "root.plan"
-    assert child_contracts[0].outputs == [f"_plan_result_{contract.id}"]
+    assert child_contracts[0].outputs == (f"_plan_result_{contract.id}",)
 
     context_assets = store.get_assets_by_name(f"_method_ctx_{contract.id}")
     assert len(context_assets) == 1
@@ -408,9 +408,9 @@ def test_plan_result_expands_child_contracts_without_system_authority():
     ]
     assert len(planned) == 1
     assert planned[0].origin == "plan"
-    assert planned[0].outputs == ["draft_report"]
-    assert planned[0].tool_scope == ["lookup"]
-    assert planned[0].labels == ["research"]
+    assert planned[0].outputs == ("draft_report",)
+    assert planned[0].tool_scope == ("lookup",)
+    assert planned[0].labels == ("research",)
 
     expanded = trace_store.get_by_event_type("contracts_expanded")
     assert len(expanded) == 1

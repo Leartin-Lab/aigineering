@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Optional
+from types import MappingProxyType
+from typing import Any, Optional
 
 
 @dataclass(frozen=True)
@@ -30,27 +31,40 @@ class Contract:
     parent_id: Optional[str] = None
     name: str = ""
     description: str = ""
-    inputs: list[str] = field(default_factory=list)
-    outputs: list[str] = field(default_factory=list)
+    inputs: tuple[str, ...] = field(default_factory=tuple)
+    outputs: tuple[str, ...] = field(default_factory=tuple)
     activation: str = ""
     budget: int = 0
-    tool_scope: list[str] = field(default_factory=list)
-    labels: list[str] = field(default_factory=list)
+    tool_scope: tuple[str, ...] = field(default_factory=tuple)
+    labels: tuple[str, ...] = field(default_factory=tuple)
     origin: str = "human"
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "inputs", tuple(self.inputs))
+        object.__setattr__(self, "outputs", tuple(self.outputs))
+        object.__setattr__(self, "tool_scope", tuple(self.tool_scope))
+        object.__setattr__(self, "labels", tuple(self.labels))
 
 
 @dataclass(frozen=True)
 class Candidate:
     worker_id: str
     raw_output: str
-    parsed_action: Optional[dict] = None
+    parsed_action: Optional[MappingProxyType] = None
+
+    def __post_init__(self) -> None:
+        if self.parsed_action is not None:
+            object.__setattr__(self, "parsed_action", MappingProxyType(self.parsed_action))
 
 
 @dataclass(frozen=True)
 class ToolSpec:
     name: str
     description: str = ""
-    input_schema: dict = field(default_factory=dict)
+    input_schema: MappingProxyType = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "input_schema", MappingProxyType(self.input_schema))
 
 
 @dataclass(frozen=True)
@@ -59,18 +73,24 @@ class TraceEntry:
     parent_id: Optional[str] = None
     contract_id: str = ""
     event_type: str = ""
-    disclosed_assets: list[str] = field(default_factory=list)
+    disclosed_assets: tuple[str, ...] = field(default_factory=tuple)
     worker_id: Optional[str] = None
     candidate_raw: Optional[str] = None
-    accepted_fragments: list[str] = field(default_factory=list)
-    accepted_asset_names: list[str] = field(default_factory=list)
-    rejected_fragments: list[str] = field(default_factory=list)
+    accepted_fragments: tuple[str, ...] = field(default_factory=tuple)
+    accepted_asset_names: tuple[str, ...] = field(default_factory=tuple)
+    rejected_fragments: tuple[str, ...] = field(default_factory=tuple)
     authority_policy: Optional[str] = None
     authority_result: Optional[str] = None
     budget_remaining: int = 0
     relation_type: Optional[str] = None
     relation_target: Optional[str] = None
     timestamp: str = ""
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "disclosed_assets", tuple(self.disclosed_assets))
+        object.__setattr__(self, "accepted_fragments", tuple(self.accepted_fragments))
+        object.__setattr__(self, "accepted_asset_names", tuple(self.accepted_asset_names))
+        object.__setattr__(self, "rejected_fragments", tuple(self.rejected_fragments))
 
 
 class RejectionCategory(Enum):
@@ -96,20 +116,33 @@ class RejectedCandidate:
 
 @dataclass(frozen=True)
 class ProjectionResult:
-    accepted_assets: list[Asset] = field(default_factory=list)
-    rejected_candidates: list[RejectedCandidate] = field(default_factory=list)
+    accepted_assets: tuple[Asset, ...] = field(default_factory=tuple)
+    rejected_candidates: tuple[RejectedCandidate, ...] = field(default_factory=tuple)
     raw_candidate: str = ""
     status: ProjectionStatus = ProjectionStatus.REJECTED
-    authority_policy: Optional[dict] = None
+    authority_policy: Optional[MappingProxyType] = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "accepted_assets", tuple(self.accepted_assets))
+        object.__setattr__(self, "rejected_candidates", tuple(self.rejected_candidates))
+        if self.authority_policy is not None:
+            object.__setattr__(self, "authority_policy", MappingProxyType(self.authority_policy))
 
 
 @dataclass(frozen=True)
 class Session:
     id: str
     root_contract_id: str = ""
-    contract_ids: list[str] = field(default_factory=list)
-    asset_ids: list[str] = field(default_factory=list)
-    trace_ids: list[str] = field(default_factory=list)
-    config_snapshot: dict = field(default_factory=dict)
-    worker_snapshot: dict = field(default_factory=dict)
+    contract_ids: tuple[str, ...] = field(default_factory=tuple)
+    asset_ids: tuple[str, ...] = field(default_factory=tuple)
+    trace_ids: tuple[str, ...] = field(default_factory=tuple)
+    config_snapshot: MappingProxyType = field(default_factory=dict)
+    worker_snapshot: MappingProxyType = field(default_factory=dict)
     created_at: str = ""
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "contract_ids", tuple(self.contract_ids))
+        object.__setattr__(self, "asset_ids", tuple(self.asset_ids))
+        object.__setattr__(self, "trace_ids", tuple(self.trace_ids))
+        object.__setattr__(self, "config_snapshot", MappingProxyType(self.config_snapshot))
+        object.__setattr__(self, "worker_snapshot", MappingProxyType(self.worker_snapshot))

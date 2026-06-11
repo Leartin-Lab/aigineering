@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Mapping
 
 from aigineering.agent.worker import Worker
 from aigineering.core.activation import check_activation
@@ -175,7 +176,7 @@ class Engine:
                     ],
                     authority_result=result.status.value,
                     authority_policy=(
-                        json.dumps(result.authority_policy, sort_keys=True)
+                        json.dumps(dict(result.authority_policy), sort_keys=True)
                         if result.authority_policy is not None
                         else None
                     ),
@@ -404,7 +405,7 @@ class Engine:
 
 def _parse_method_action(candidate: Candidate) -> WorkerAction | None:
     parsed = candidate.parsed_action
-    if isinstance(parsed, dict) and parsed.get("type") in {"plan", "replan", "tool"}:
+    if isinstance(parsed, Mapping) and parsed.get("type") in {"plan", "replan", "tool"}:
         try:
             return action_from_dict(parsed)
         except ActionParseError:
