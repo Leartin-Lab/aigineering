@@ -63,10 +63,13 @@ class Candidate:
     worker_id: str
     raw_output: str
     parsed_action: Optional[MappingProxyType] = None
+    metadata: Optional[MappingProxyType] = None
 
     def __post_init__(self) -> None:
         if self.parsed_action is not None:
             object.__setattr__(self, "parsed_action", MappingProxyType(dict(self.parsed_action)))
+        if self.metadata is not None:
+            object.__setattr__(self, "metadata", MappingProxyType(dict(self.metadata)))
 
 
 @dataclass(frozen=True)
