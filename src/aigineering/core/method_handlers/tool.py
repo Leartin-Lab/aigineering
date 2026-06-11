@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING
 
+from aigineering.agent.tool_worker import ToolWorker
 from aigineering.core.methods import method_payload, system_asset
 from aigineering.core.provenance import sign_asset
 
@@ -92,11 +93,16 @@ class ToolMethodHandler:
         elif engine._tools is None:
             error = "no ToolRegistry configured"
         else:
-            try:
-                result = engine._tools.run(tool_name, args if isinstance(args, dict) else {})
-                ok = True
-            except Exception as e:  # pragma: no cover - exact handler errors vary
-                error = str(e)
+            worker = ToolWorker(engine._tools)
+            candidate = worker.invoke(
+                tool_name,
+                args if isinstance(args, dict) else {},
+                contract.id,
+            )
+            obs = json.loads(candidate.raw_output)
+            ok = obs.get("ok", False)
+            result = obs.get("result", "")
+            error = obs.get("error", "")
 
         obs_name = contract.outputs[0] if contract.outputs else f"_tool_obs_{contract.id}"
         obs_content = json.dumps(
