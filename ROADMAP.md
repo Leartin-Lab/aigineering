@@ -2,15 +2,17 @@
 
 ## Status
 
-Aigineering is a pre-alpha Zero Trust Agent Runtime. The current `v0.3.0`
-milestone proves the core runtime loop:
+Aigineering is a pre-alpha Zero Trust Agent Runtime. The current `v0.4.0`
+milestone delivers "Strong Protocolization + Partial Infrastructure":
+a protocolized, method-first, single-node runtime with transactional
+durability, recoverable state, and capability containment.
 
 ```text
 Contract -> Worker/Sub-agent -> Candidate -> Projection/Method -> Asset/Trace
 ```
 
-The project is ready for early open-source review and single-node experiments.
-It is not production-ready yet.
+The project has completed Waves 0–3 of its development plan and is ready for
+broader single-machine experiments. It is not production-ready yet.
 
 ## v0.1 - Hallucination Containment MVP
 
@@ -59,14 +61,14 @@ It is not production-ready yet.
 
 Focus: make the single-node runtime durable, resumable, and safer.
 
-- [ ] SQLiteStore or equivalent single-file durable store
-- [ ] Resumable engine state for completed/suspended contracts, budgets, and method context
-- [ ] Crash recovery from persisted assets/contracts/traces/session manifest
+- [x] SQLiteStore or equivalent single-file durable store
+- [x] Resumable engine state for completed/suspended contracts, budgets, and method context
+- [x] Crash recovery from persisted assets/contracts/traces/session manifest
 - [ ] Real cryptographic signer/verifier interface
 - [ ] Trust policy over signer, origin, trust tier, labels, tool scope, and reserved prefixes
-- [ ] `aig retry --contract`
-- [ ] `aig trace --tree` / `aig trace --dag` as views, not runtime truth
-- [ ] CLI split into smaller command modules
+- [x] `aig retry --contract`
+- [x] `aig trace --tree` / `aig trace --dag` as views, not runtime truth
+- [x] CLI split into smaller command modules
 
 ## v0.5 - Ecosystem Integration
 
