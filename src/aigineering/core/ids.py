@@ -145,6 +145,15 @@ def hash_claim(
     return f"claim:{compute_content_hash(canonical)}"
 
 
+def hash_retry(original_contract_id: str) -> str:
+    """Deterministic retry contract identity (``retry:`` tag).
+
+    Derived from the original contract id so retrying the same contract
+    always produces the same retry contract id.
+    """
+    return f"retry:{compute_content_hash(original_contract_id + ':retry')}"
+
+
 # ---------------------------------------------------------------------------
 # Convenience wrappers (backward-compatible signatures)
 # ---------------------------------------------------------------------------

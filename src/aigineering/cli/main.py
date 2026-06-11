@@ -10,7 +10,7 @@ from typing import Optional
 import click
 
 from aigineering.core.engine import Engine
-from aigineering.core.ids import hash_asset_content, hash_asset_definition, hash_contract
+from aigineering.core.ids import hash_asset_content, hash_asset_definition, hash_contract, hash_retry
 from aigineering.core.replay import replay_all, replay_session
 from aigineering.core.session import SessionStore
 from aigineering.core.activation import check_activation
@@ -463,10 +463,20 @@ def run(
     "--json", "json_output", is_flag=True, default=False,
     help="Output machine-readable JSON instead of human-readable text.",
 )
+@click.option(
+    "--tree", "tree_output", is_flag=True, default=False,
+    help="Show hierarchical parent→child→method→tool chain view.",
+)
+@click.option(
+    "--dag", "dag_output", is_flag=True, default=False,
+    help="Show graph edges connecting parent→child contracts.",
+)
 def trace(
     contract_filter: Optional[str],
     session_id: Optional[str],
     json_output: bool,
+    tree_output: bool,
+    dag_output: bool,
 ) -> None:
     """Show the trace timeline from the latest session."""
     if session_id is not None:
@@ -504,8 +514,155 @@ def trace(
         _output_trace_json(entries)
         return
 
+    if tree_output:
+        _print_trace_tree(entries)
+        return
+
+    if dag_output:
+        _print_trace_dag(entries)
+        return
+
     for entry in entries:
         _print_timeline_entry(entry)
+
+
+def _build_contract_tree(
+    entries: list[TraceEntry],
+) -> dict[str, dict]:
+    """Build a projection tree from trace entries: {contract_id: {entry, children}}.
+
+    Parent→child relationships are derived from method_scheduled and
+    contracts_expanded events.  This is a pure projection — no runtime truth
+    is stored, it is computed on the fly from trace entries.
+    """
+    by_contract: dict[str, list[TraceEntry]] = {}
+    for e in entries:
+        by_contract.setdefault(e.contract_id, []).append(e)
+
+    child_parent: dict[str, str] = {}
+    for e in entries:
+        if e.event_type == "method_scheduled" and e.relation_target:
+            child_parent[e.relation_target] = e.contract_id
+        elif e.event_type == "contracts_expanded" and e.relation_target:
+            for child_id in e.relation_target.replace(",", " ").split():
+                child_id = child_id.strip()
+                if child_id:
+                    child_parent[child_id] = e.contract_id
+
+    all_contract_ids = set(by_contract.keys())
+    roots = all_contract_ids - set(child_parent.keys())
+
+    def _build_node(cid: str) -> dict:
+        node_entries = by_contract.get(cid, [])
+        children = []
+        for child_cid, parent_cid in child_parent.items():
+            if parent_cid == cid:
+                children.append(_build_node(child_cid))
+        return {"contract_id": cid, "entries": node_entries, "children": children}
+
+    tree: dict[str, dict] = {}
+    for root_id in sorted(roots):
+        tree[root_id] = _build_node(root_id)
+    for child_id in child_parent:
+        if child_id not in roots and child_id not in tree:
+            tree[child_id] = _build_node(child_id)
+    return tree
+
+
+def _print_trace_tree(entries: list[TraceEntry]) -> None:
+    """Print a hierarchical tree view derived from trace entries."""
+    tree = _build_contract_tree(entries)
+
+    def _print_node(contract_id: str, node: dict, indent: int) -> None:
+        prefix = "  " * indent
+        click.echo(f"{prefix}contract: {contract_id}")
+        for e in node.get("entries", []):
+            label = _entry_short_label(e)
+            click.echo(f"{prefix}  [{e.event_type}] {label}")
+        for child in node.get("children", []):
+            _print_node(child["contract_id"], child, indent + 1)
+
+    for cid, node in tree.items():
+        if node.get("entries"):
+            _print_node(cid, node, 0)
+        elif node.get("children"):
+            _print_node(cid, node, 0)
+
+
+def _entry_short_label(entry: TraceEntry) -> str:
+    """Return a compact label for a trace entry."""
+    if entry.event_type == "activation":
+        return "contract activated"
+    elif entry.event_type == "disclosure":
+        assets = entry.disclosed_assets or []
+        return f"→ {list(assets)} to {entry.worker_id or 'worker'}"
+    elif entry.event_type == "projection":
+        accepted = entry.accepted_fragments or []
+        rejected = entry.rejected_fragments or []
+        parts = []
+        if accepted:
+            parts.append(f"accepted {list(accepted)}")
+        if rejected:
+            parts.append(f"rejected {len(rejected)}")
+        return " | ".join(parts) if parts else "no output"
+    elif entry.event_type == "method_scheduled":
+        method = entry.relation_type or "method"
+        target = entry.relation_target or "(unknown)"
+        return f"/{method} → {target}"
+    elif entry.event_type == "tool_executed":
+        tool = entry.relation_target or "tool"
+        status = entry.authority_result or "unknown"
+        return f"{tool} ({status})"
+    elif entry.event_type == "method_resumed":
+        method = entry.relation_type or "method"
+        return f"resumed after /{method}"
+    elif entry.event_type == "contracts_expanded":
+        target = entry.relation_target or ""
+        return f"expanded → {target}"
+    elif entry.event_type == "complete":
+        return "complete"
+    return ""
+
+
+def _build_contract_dag(
+    entries: list[TraceEntry],
+) -> list[tuple[str, str, str]]:
+    """Derive parent→child contract edges from trace entries.
+
+    Returns list of (parent_contract_id, relation, child_contract_id).
+    This is a pure projection — no runtime truth is stored.
+    """
+    edges: list[tuple[str, str, str]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for e in entries:
+        if e.event_type == "method_scheduled" and e.relation_target:
+            edge = (e.contract_id, e.relation_type or "method", e.relation_target)
+            if edge not in seen:
+                edges.append(edge)
+                seen.add(edge)
+        elif e.event_type == "contracts_expanded" and e.relation_target:
+            for child_id in e.relation_target.replace(",", " ").split():
+                child_id = child_id.strip()
+                if child_id:
+                    edge = (e.contract_id, "expanded", child_id)
+                    if edge not in seen:
+                        edges.append(edge)
+                        seen.add(edge)
+
+    return edges
+
+
+def _print_trace_dag(entries: list[TraceEntry]) -> None:
+    """Print a graph edge view connecting parent→child contracts."""
+    edges = _build_contract_dag(entries)
+
+    if not edges:
+        click.echo("(no parent→child contract edges found)")
+        return
+
+    click.echo("Contract DAG edges:")
+    for parent, rel, child in edges:
+        click.echo(f"  {parent}  —[{rel}]→  {child}")
 
 
 def _print_timeline_entry(entry: TraceEntry) -> None:
@@ -1102,6 +1259,53 @@ def verify(def_hash: str, json_output: bool) -> None:
                     f"    definition_hash mismatch: "
                     f"stored={r['definition_hash']} expected={r['expected_definition_hash']}"
                 )
+
+
+@cli.command()
+@click.option("--contract", "contract_id", required=True, help="Original contract ID to retry.")
+@click.option(
+    "--json", "json_output", is_flag=True, default=False,
+    help="Output machine-readable JSON instead of human-readable text.",
+)
+def retry(
+    contract_id: str,
+    json_output: bool,
+) -> None:
+    """Method-first retry: create a new contract from an existing one with deterministic retry ID."""
+    store = _persistent_store()
+    original = store.get_contract(contract_id)
+    if original is None:
+        if json_output:
+            _output_json({"error": f"Contract '{contract_id}' not found."})
+        else:
+            click.echo(f"Contract '{contract_id}' not found.")
+        return
+
+    retry_id = hash_retry(contract_id)
+    retry_contract = Contract(
+        id=retry_id,
+        parent_id=original.parent_id,
+        name=original.name,
+        description=original.description,
+        inputs=original.inputs,
+        outputs=original.outputs,
+        activation=original.activation,
+        budget=original.budget,
+        tool_scope=original.tool_scope,
+        labels=original.labels,
+        origin=original.origin,
+        sensitive_input_policy=original.sensitive_input_policy,
+    )
+    store.add_contract(retry_contract)
+
+    if json_output:
+        _output_json({
+            "original_contract_id": contract_id,
+            "retry_contract_id": retry_id,
+        })
+    else:
+        click.echo(f"Retry contract created: {retry_id}")
+        click.echo(f"  Original: {contract_id}")
 
 
 @cli.group()

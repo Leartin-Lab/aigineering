@@ -6,6 +6,7 @@ from pathlib import Path
 from click.testing import CliRunner
 
 from aigineering.cli.main import cli
+from aigineering.core.ids import hash_retry
 from aigineering.protocol.types import TraceEntry
 from aigineering.protocol.wire import trace_entry_to_dict
 
@@ -326,3 +327,279 @@ def test_replay_valid_session():
         assert "Trace entries:" in replay_result.output
         assert "Consistency:" in replay_result.output
         assert "Timeline:" in replay_result.output
+
+
+# ---------------------------------------------------------------------------
+# v0.3.18 — retry, trace --tree, trace --dag
+# ---------------------------------------------------------------------------
+
+def test_retry_creates_deterministic_contract():
+    """aig retry --contract <id> creates a contract with deterministic retry ID."""
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        run_result = runner.invoke(cli, ["run", "test"])
+        assert run_result.exit_code == 0
+
+        contracts_path = Path(".aig/store/contracts.jsonl")
+        contract_rows = [
+            json.loads(line)
+            for line in contracts_path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        build_report = [r for r in contract_rows if r["name"] == "build_report"][0]
+        original_id = build_report["id"]
+
+        result1 = runner.invoke(cli, ["retry", "--contract", original_id])
+        assert result1.exit_code == 0
+        assert "Retry contract created:" in result1.output
+        retry_id_1 = result1.output.strip().split("\n")[0].split(": ")[-1].strip()
+
+        result2 = runner.invoke(cli, ["retry", "--contract", original_id])
+        assert result2.exit_code == 0
+        retry_id_2 = result2.output.strip().split("\n")[0].split(": ")[-1].strip()
+
+        assert retry_id_1 == retry_id_2
+        assert retry_id_1.startswith("retry:")
+        assert retry_id_1 == hash_retry(original_id)
+
+        expected_id = hash_retry(original_id)
+        assert retry_id_1 == expected_id
+
+        stored = [
+            json.loads(line)
+            for line in contracts_path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        retry_ids_in_store = [r["id"] for r in stored if r["id"].startswith("retry:")]
+        assert expected_id in retry_ids_in_store
+
+
+def test_retry_json_output():
+    """aig retry --contract <id> --json returns deterministic retry ID in JSON."""
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        run_result = runner.invoke(cli, ["run", "test"])
+        assert run_result.exit_code == 0
+
+        contracts_path = Path(".aig/store/contracts.jsonl")
+        contract_rows = [
+            json.loads(line)
+            for line in contracts_path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        original_id = [r for r in contract_rows if r["name"] == "build_report"][0]["id"]
+
+        result = runner.invoke(cli, ["retry", "--contract", original_id, "--json"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["original_contract_id"] == original_id
+        assert data["retry_contract_id"].startswith("retry:")
+        assert data["retry_contract_id"] == hash_retry(original_id)
+
+
+def test_retry_contract_not_found():
+    """aig retry --contract <nonexistent> reports error."""
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        result = runner.invoke(cli, ["retry", "--contract", "nonexistent"])
+        assert result.exit_code == 0
+        assert "not found" in result.output
+
+
+def test_trace_tree_view():
+    """aig trace --tree shows hierarchical parent→child→method→tool chain."""
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        parent_activation = TraceEntry(
+            id="evt_parent_act",
+            contract_id="contract_parent",
+            event_type="activation",
+            timestamp="2025-01-01T00:00:00",
+        )
+        parent_disclosure = TraceEntry(
+            id="evt_parent_disc",
+            parent_id="evt_parent_act",
+            contract_id="contract_parent",
+            event_type="disclosure",
+            disclosed_assets=["input_asset"],
+            worker_id="mock_worker",
+            timestamp="2025-01-01T00:00:01",
+        )
+        parent_projection = TraceEntry(
+            id="evt_parent_proj",
+            parent_id="evt_parent_disc",
+            contract_id="contract_parent",
+            event_type="projection",
+            accepted_fragments=["frag_parent"],
+            accepted_asset_names=["parent_output"],
+            worker_id="mock_worker",
+            timestamp="2025-01-01T00:00:02",
+        )
+        method_scheduled = TraceEntry(
+            id="evt_method",
+            parent_id="evt_parent_proj",
+            contract_id="contract_parent",
+            event_type="method_scheduled",
+            worker_id="mock_worker",
+            relation_type="plan",
+            relation_target="contract_child",
+            timestamp="2025-01-01T00:00:03",
+        )
+        child_activation = TraceEntry(
+            id="evt_child_act",
+            contract_id="contract_child",
+            event_type="activation",
+            timestamp="2025-01-01T00:00:04",
+        )
+        child_disclosure = TraceEntry(
+            id="evt_child_disc",
+            parent_id="evt_child_act",
+            contract_id="contract_child",
+            event_type="disclosure",
+            disclosed_assets=["parent_output"],
+            worker_id="mock_worker",
+            timestamp="2025-01-01T00:00:05",
+        )
+        child_projection = TraceEntry(
+            id="evt_child_proj",
+            parent_id="evt_child_disc",
+            contract_id="contract_child",
+            event_type="projection",
+            accepted_fragments=["frag_child"],
+            accepted_asset_names=["child_output"],
+            worker_id="mock_worker",
+            timestamp="2025-01-01T00:00:06",
+        )
+
+        _write_trace_entries(
+            Path(".aig/traces/session_tree.jsonl"),
+            [
+                parent_activation, parent_disclosure, parent_projection,
+                method_scheduled,
+                child_activation, child_disclosure, child_projection,
+            ],
+        )
+
+        result = runner.invoke(cli, ["trace", "--tree"])
+        assert result.exit_code == 0
+
+        output = result.output
+        assert "contract: contract_parent" in output
+        assert "contract: contract_child" in output
+        lines = output.split("\n")
+        parent_line = [l for l in lines if "contract: contract_parent" in l]
+        child_line = [l for l in lines if "contract: contract_child" in l]
+        assert parent_line
+        assert child_line
+        parent_indent = len(parent_line[0]) - len(parent_line[0].lstrip())
+        child_indent = len(child_line[0]) - len(child_line[0].lstrip())
+        assert child_indent > parent_indent
+
+
+def test_trace_dag_view():
+    """aig trace --dag shows graph edges connecting parent→child contracts."""
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        entries = [
+            TraceEntry(
+                id="evt_1",
+                contract_id="contract_A",
+                event_type="method_scheduled",
+                relation_type="plan",
+                relation_target="contract_B",
+                timestamp="2025-01-01T00:00:00",
+            ),
+            TraceEntry(
+                id="evt_2",
+                contract_id="contract_B",
+                event_type="contracts_expanded",
+                relation_target="contract_C contract_D",
+                timestamp="2025-01-01T00:00:01",
+            ),
+        ]
+        _write_trace_entries(
+            Path(".aig/traces/session_dag.jsonl"),
+            entries,
+        )
+
+        result = runner.invoke(cli, ["trace", "--dag"])
+        assert result.exit_code == 0
+
+        output = result.output
+        assert "Contract DAG edges:" in output
+        assert "contract_A" in output
+        assert "contract_B" in output
+        assert "contract_C" in output
+        assert "contract_D" in output
+        assert "plan" in output
+        assert "expanded" in output
+
+
+def test_trace_dag_empty():
+    """aig trace --dag with no edges shows informative message."""
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        entry = TraceEntry(
+            id="evt_1",
+            contract_id="contract_solo",
+            event_type="activation",
+            timestamp="2025-01-01T00:00:00",
+        )
+        _write_trace_entries(
+            Path(".aig/traces/session_solo.jsonl"),
+            [entry],
+        )
+
+        result = runner.invoke(cli, ["trace", "--dag"])
+        assert result.exit_code == 0
+        assert "no parent→child contract edges found" in result.output
+
+
+def test_views_are_derived_not_stored_truth():
+    """Tree and DAG views are pure projections over trace entries.
+
+    There is no separate DAG storage — changing trace entries changes the
+    view output.  Both --tree and --dag are computed on the fly from the
+    same JSONL trace file.
+    """
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        entries_v1 = [
+            TraceEntry(
+                id="evt_v1",
+                contract_id="contract_root",
+                event_type="method_scheduled",
+                relation_type="plan",
+                relation_target="contract_alpha",
+                timestamp="2025-01-01T00:00:00",
+            ),
+        ]
+        trace_path = Path(".aig/traces/session_derived.jsonl")
+        _write_trace_entries(trace_path, entries_v1)
+
+        result_v1 = runner.invoke(cli, ["trace", "--dag"])
+        assert result_v1.exit_code == 0
+        assert "contract_alpha" in result_v1.output
+        assert "contract_beta" not in result_v1.output
+
+        entries_v2 = [
+            TraceEntry(
+                id="evt_v2",
+                contract_id="contract_root",
+                event_type="method_scheduled",
+                relation_type="plan",
+                relation_target="contract_beta",
+                timestamp="2025-01-01T00:00:00",
+            ),
+        ]
+        _write_trace_entries(trace_path, entries_v2)
+
+        result_v2 = runner.invoke(cli, ["trace", "--dag"])
+        assert result_v2.exit_code == 0
+        assert "contract_beta" in result_v2.output
+        assert "contract_alpha" not in result_v2.output
+
+        result_tree_v2 = runner.invoke(cli, ["trace", "--tree"])
+        assert result_tree_v2.exit_code == 0
+        assert "contract: contract_root" in result_tree_v2.output
+        assert "contract: contract_beta" in result_tree_v2.output
