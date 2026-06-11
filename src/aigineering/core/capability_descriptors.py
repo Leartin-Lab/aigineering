@@ -99,6 +99,9 @@ def create_mcp_descriptor(
     name: str,
     source_uri: str,
     trust_tier: str = "untrusted",
+    tool_name: str = "",
+    input_schema: dict[str, Any] | None = None,
+    output_schema: dict[str, Any] | None = None,
 ) -> Asset:
     """Create a capability descriptor Asset for an MCP (Model Context Protocol).
 
@@ -113,19 +116,33 @@ def create_mcp_descriptor(
         URI identifying the MCP endpoint (e.g. ``"mcp://filesystem"``).
     trust_tier : str
         Trust tier for the MCP (default ``"untrusted"``).
+    tool_name : str
+        Optional specific tool name within the MCP server
+        (e.g. ``"search.query"``).  When empty, the descriptor covers
+        the whole server.
+    input_schema : dict or None
+        Optional JSON Schema for the tool's input parameters.
+    output_schema : dict or None
+        Optional JSON Schema for the tool's output.
 
     Returns
     -------
     Asset
         Signed descriptor Asset named ``_mcp_{name}``.
     """
-    disclosed = {
+    disclosed: dict[str, Any] = {
         "kind": "mcp",
         "name": name,
         "version": "0.1.0",
         "source_uri": source_uri,
         "sealed_config_ref": "",
     }
+    if tool_name:
+        disclosed["tool_name"] = tool_name
+    if input_schema is not None:
+        disclosed["input_schema"] = input_schema
+    if output_schema is not None:
+        disclosed["output_schema"] = output_schema
     return _build_descriptor_asset("mcp", name, disclosed, trust_tier, source_uri)
 
 
