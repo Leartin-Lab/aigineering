@@ -739,3 +739,277 @@ def test_tool_calls_go_through_method_dispatch_e2e():
     obs_assets = store.get_assets_by_name("_tool_obs_contract_native_tool")
     assert len(obs_assets) == 1
     assert "value:x" in obs_assets[0].content
+
+
+# ---------------------------------------------------------------------------
+# Edge-case reliability tests (v0.4.5)
+# ---------------------------------------------------------------------------
+
+def test_timeout_triggers_retry_with_backoff():
+    """socket.timeout triggers retry with increasing backoff delays."""
+    import socket
+
+    delays: list[float] = []
+    call_count = [0]
+    orig_sleep = time.sleep
+
+    def fake_sleep(seconds):
+        delays.append(seconds)
+
+    def transport(url, headers, payload):
+        call_count[0] += 1
+        raise socket.timeout("connection timed out")
+
+    worker = LLMWorker(
+        model="test-model",
+        transport=transport,
+        max_retries=2,
+        retry_backoff=2.0,
+    )
+    try:
+        time.sleep = fake_sleep  # type: ignore[assignment]
+        with pytest.raises(ProviderError) as exc:
+            worker.invoke(_min_contract(), [])
+    finally:
+        time.sleep = orig_sleep  # type: ignore[assignment]
+
+    assert exc.value.status_code == 0
+    # 1 initial call + 2 retries = 3 attempts
+    assert call_count[0] == 3
+    # Backoff: 2^1 = 2, 2^2 = 4
+    assert delays == [2.0, 4.0]
+
+
+def test_429_rate_limit_retries_with_exponential_delay():
+    """429 rate-limit retries with exponential delay: 2s, 4s, 8s."""
+    delays: list[float] = []
+    orig_sleep = time.sleep
+
+    def fake_sleep(seconds):
+        delays.append(seconds)
+
+    def transport(url, headers, payload):
+        raise ProviderError(429, "rate limit exceeded")
+
+    worker = LLMWorker(
+        model="test-model",
+        transport=transport,
+        max_retries=3,
+        retry_backoff=2.0,
+    )
+    try:
+        time.sleep = fake_sleep  # type: ignore[assignment]
+        with pytest.raises(ProviderError):
+            worker.invoke(_min_contract(), [])
+    finally:
+        time.sleep = orig_sleep  # type: ignore[assignment]
+
+    assert delays == [2.0, 4.0, 8.0]
+
+
+def test_5xx_transient_retries_up_to_max():
+    """503 transient errors retry exactly max_retries times before giving up."""
+    call_count = [0]
+
+    def transport(url, headers, payload):
+        call_count[0] += 1
+        raise ProviderError(503, "service unavailable")
+
+    worker = LLMWorker(model="test-model", transport=transport, max_retries=3)
+
+    with pytest.raises(ProviderError) as exc:
+        worker.invoke(_min_contract(), [])
+
+    assert exc.value.status_code == 503
+    # 1 initial + 3 retries = 4 total attempts
+    assert call_count[0] == 4
+
+
+def test_malformed_structured_output_handled():
+    """LLM returns a response missing message content — graceful error, not crash."""
+    def transport(url, headers, payload):
+        # Response has choices but no message with content
+        return {"choices": [{"index": 0, "finish_reason": "stop"}]}
+
+    worker = LLMWorker(model="test-model", transport=transport)
+
+    with pytest.raises(ValueError, match="missing.*(message content|choices)"):
+        worker.invoke(_min_contract(), [])
+
+
+def test_malformed_response_empty_choices_handled():
+    """Empty choices list raises ValueError gracefully."""
+    def transport(url, headers, payload):
+        return {"choices": []}
+
+    worker = LLMWorker(model="test-model", transport=transport)
+
+    with pytest.raises(ValueError, match="missing.*(message content|choices)"):
+        worker.invoke(_min_contract(), [])
+
+
+def test_malformed_response_no_choices_key():
+    """Missing choices key raises ValueError gracefully."""
+    def transport(url, headers, payload):
+        return {"data": "some unexpected structure"}
+
+    worker = LLMWorker(model="test-model", transport=transport)
+
+    with pytest.raises(ValueError, match="missing.*choices"):
+        worker.invoke(_min_contract(), [])
+
+
+def test_provider_tool_call_mapping_preserves_authority():
+    """Tool calls go through /tool format, preserving name and args exactly."""
+    def transport(url, headers, payload):
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "tool_calls": [
+                            {
+                                "id": "call_xyz",
+                                "type": "function",
+                                "function": {
+                                    "name": "read_file",
+                                    "arguments": '{"path": "/etc/passwd", "mode": "r"}',
+                                },
+                            }
+                        ],
+                    }
+                }
+            ],
+        }
+
+    worker = LLMWorker(model="test-model", transport=transport)
+    candidate = worker.invoke(_min_contract(), [])
+
+    # Must start with /tool to go through method dispatch, not direct
+    assert candidate.raw_output.startswith("/tool ")
+    body = json.loads(candidate.raw_output.removeprefix("/tool ").strip())
+    assert body["name"] == "read_file"
+    assert body["args"] == {"path": "/etc/passwd", "mode": "r"}
+
+    # parsed_action must have correct authority structure
+    assert candidate.parsed_action is not None
+    assert candidate.parsed_action["type"] == "tool"
+    assert candidate.parsed_action["payload"]["name"] == "read_file"
+    assert candidate.parsed_action["payload"]["args"]["path"] == "/etc/passwd"
+
+
+def test_multiple_tool_calls_in_one_response():
+    """Multiple tool_calls in one response → only the first is used for the action."""
+    def transport(url, headers, payload):
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "tool_calls": [
+                            {
+                                "id": "call_first",
+                                "type": "function",
+                                "function": {
+                                    "name": "search",
+                                    "arguments": '{"q": "first"}',
+                                },
+                            },
+                            {
+                                "id": "call_second",
+                                "type": "function",
+                                "function": {
+                                    "name": "lookup",
+                                    "arguments": '{"key": "second"}',
+                                },
+                            },
+                            {
+                                "id": "call_third",
+                                "type": "function",
+                                "function": {
+                                    "name": "fetch",
+                                    "arguments": '{"url": "third"}',
+                                },
+                            },
+                        ],
+                    }
+                }
+            ],
+        }
+
+    worker = LLMWorker(model="test-model", transport=transport)
+    candidate = worker.invoke(_min_contract(), [])
+
+    # Only the first tool call is mapped
+    assert candidate.raw_output.startswith("/tool ")
+    body = json.loads(candidate.raw_output.removeprefix("/tool ").strip())
+    assert body["name"] == "search"
+    assert body["args"] == {"q": "first"}
+
+    # parsed_action reflects only first tool call
+    assert candidate.parsed_action is not None
+    assert candidate.parsed_action["type"] == "tool"
+    assert candidate.parsed_action["payload"]["name"] == "search"
+
+
+def test_no_api_key_leaked_in_error_messages():
+    """Error messages must not contain the API key string under any failure path."""
+    api_key = "sk-test-secret-key-aigineering-2025"
+
+    # Scenario 1: ProviderError raised by transport
+    def transport_provider_error(url, headers, payload):
+        raise ProviderError(503, "backend overloaded — safe message")
+
+    worker = LLMWorker(
+        model="test-model",
+        api_key=api_key,
+        transport=transport_provider_error,
+        max_retries=1,
+    )
+    with pytest.raises(ProviderError) as exc:
+        worker.invoke(_min_contract(), [])
+    assert api_key not in str(exc.value)
+    assert api_key not in str(exc.value.__cause__ or "")
+
+    # Scenario 2: TimeoutError raised by transport
+    def transport_timeout(url, headers, payload):
+        raise TimeoutError("request timed out")
+
+    worker2 = LLMWorker(
+        model="test-model",
+        api_key=api_key,
+        transport=transport_timeout,
+        max_retries=0,
+    )
+    with pytest.raises(ProviderError) as exc:
+        worker2.invoke(_min_contract(), [])
+    assert api_key not in str(exc.value)
+    assert api_key not in str(exc.value.__cause__ or "")
+
+    # Scenario 3: OSError raised by transport
+    def transport_oserror(url, headers, payload):
+        raise OSError("connection reset by peer")
+
+    worker3 = LLMWorker(
+        model="test-model",
+        api_key=api_key,
+        transport=transport_oserror,
+        max_retries=0,
+    )
+    with pytest.raises(ProviderError) as exc:
+        worker3.invoke(_min_contract(), [])
+    assert api_key not in str(exc.value)
+    assert api_key not in str(exc.value.__cause__ or "")
+
+    # Scenario 4: non-retryable error
+    def transport_400(url, headers, payload):
+        raise ProviderError(400, "bad request — check your payload")
+
+    worker4 = LLMWorker(
+        model="test-model",
+        api_key=api_key,
+        transport=transport_400,
+        max_retries=1,
+    )
+    with pytest.raises(ProviderError) as exc:
+        worker4.invoke(_min_contract(), [])
+    assert api_key not in str(exc.value)
+    assert api_key not in str(exc.value.__cause__ or "")
