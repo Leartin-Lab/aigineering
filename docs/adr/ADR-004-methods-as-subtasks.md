@@ -1,6 +1,6 @@
 # ADR-004: Methods as Subtasks
 
-**Status**: Accepted (future implementation)  
+**Status**: Accepted  
 **Date**: 2026-06-02
 
 ## Context
@@ -16,4 +16,6 @@ Aigineering treats method requests (`/plan`, `/replan`, `/fail`) as **explicit m
 - No hidden state mutations — all method decisions are explicit contracts with traceable results
 - Worker cannot trigger invisible restructuring of the task graph
 - Method requests become first-class auditable events
-- Note: This is accepted architecture but will be implemented in a future milestone (v0.3+), not in the v0.1 MVP
+- In v0.3, `/plan`, `/replan`, and `/tool` are represented as system method
+  contracts. Future method handlers should keep the same auditable ingress while
+  moving feature-specific behavior out of the engine core.
