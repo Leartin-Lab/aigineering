@@ -139,3 +139,14 @@ class TestLineageId:
         # Verify canonical includes identity fields
         assert '"name"' in canonical
         assert '"content"' in canonical
+
+    def test_invalid_claim_type_raises_value_error(self) -> None:
+        """claim_type='banana' raises ValueError."""
+        with pytest.raises(ValueError, match="Invalid claim_type"):
+            ReplacementClaim(
+                id=hash_claim("src", "rep", "banana"),
+                source_asset_id="src",
+                replacement_asset_id="rep",
+                definition_hash="def:test",
+                claim_type="banana",
+            )
