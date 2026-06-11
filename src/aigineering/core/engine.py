@@ -307,6 +307,13 @@ class Engine:
         if contract.origin != "system" or method.get("method") != "tool":
             return False
 
+        # Tool handler takes priority when registered.
+        if self._method_registry is not None:
+            handler = self._method_registry.get("tool")
+            if handler is not None and handler.can_handle("tool"):
+                return handler.handle_completion(self, contract, [])
+
+        # Fallback: inline tool execution (backward compat).
         payload = method.get("payload", {})
         tool_name = payload.get("name") if isinstance(payload, dict) else None
         args = payload.get("args", {}) if isinstance(payload, dict) else {}
