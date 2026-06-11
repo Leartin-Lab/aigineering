@@ -347,3 +347,134 @@ def test_submit_rejected_preserves_trace():
         with open(trace_file) as f:
             lines = [line for line in f if line.strip()]
         assert len(lines) >= 1
+
+
+# ---------------------------------------------------------------------------
+# Worker next tests
+# ---------------------------------------------------------------------------
+
+
+def test_worker_next_returns_package():
+    """aig worker next --json returns a WorkerPackage for a ready contract."""
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        store = JsonLStore(".aig/store/assets.jsonl", ".aig/store/contracts.jsonl")
+        contract, asset = _seed_contract_with_asset(store)
+
+        result = runner.invoke(cli, ["worker", "next", "--json"])
+
+        assert result.exit_code == 0, f"stderr: {result.output}"
+
+        data = json.loads(result.output)
+        # Should return a package, not null
+        assert data is not None
+        assert data["contract_id"] == contract.id
+        assert isinstance(data["contract"], dict)
+        assert data["contract"]["name"] == "test_contract"
+        assert isinstance(data["disclosed_assets"], list)
+        assert len(data["disclosed_assets"]) == 1
+        assert data["disclosed_assets"][0]["name"] == "input1"
+        assert data["budget_remaining"] == contract.budget
+
+        # Round-trip deserialization
+        pkg = WorkerPackage.from_json(json.dumps(data))
+        assert pkg.contract_id == contract.id
+
+
+def test_worker_next_null_when_idle():
+    """aig worker next --json returns null when no ready contracts exist."""
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        # No contracts in store → null
+        result = runner.invoke(cli, ["worker", "next", "--json"])
+        assert result.exit_code == 0
+
+        data = json.loads(result.output)
+        assert data is None
+
+
+def test_worker_next_skips_completed_contract():
+    """worker next does not return a contract whose outputs are all satisfied."""
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        store = JsonLStore(".aig/store/assets.jsonl", ".aig/store/contracts.jsonl")
+        contract, asset = _seed_contract_with_asset(store)
+
+        # Submit once to satisfy the output
+        envelope_json = _valid_envelope_json(contract.id)
+        runner.invoke(cli, ["worker", "submit", "--json", envelope_json])
+
+        # Now next should return null (contract completed)
+        result = runner.invoke(cli, ["worker", "next", "--json"])
+        assert result.exit_code == 0
+
+        data = json.loads(result.output)
+        assert data is None
+
+
+def test_worker_next_submit_full_cycle():
+    """Full cycle: next → submit → trace entries include projection and complete."""
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        store = JsonLStore(".aig/store/assets.jsonl", ".aig/store/contracts.jsonl")
+        contract, asset = _seed_contract_with_asset(store)
+
+        # ── Step 1: worker next — get a package ─────────────────────────
+        result = runner.invoke(cli, ["worker", "next", "--json"])
+        assert result.exit_code == 0
+        pkg_data = json.loads(result.output)
+        assert pkg_data is not None
+        assert pkg_data["contract_id"] == contract.id
+
+        # ── Step 2: worker submit — send candidate result ───────────────
+        envelope_json = _valid_envelope_json(contract.id)
+        result = runner.invoke(
+            cli, ["worker", "submit", "--json", envelope_json]
+        )
+        assert result.exit_code == 0
+        submit_data = json.loads(result.output)
+        assert submit_data["status"] == "accepted"
+        assert len(submit_data["accepted_assets"]) == 1
+        assert submit_data["accepted_assets"][0]["name"] == "final_report"
+
+        # ── Step 3: verify trace entries ────────────────────────────────
+        trace_file = Path(".aig/traces") / f"worker_{contract.id}.jsonl"
+        assert trace_file.exists()
+
+        with open(trace_file) as f:
+            lines = [json.loads(line) for line in f if line.strip()]
+
+        event_types = [e["event_type"] for e in lines]
+        assert "projection" in event_types, f"trace events: {event_types}"
+        assert "complete" in event_types, f"trace events: {event_types}"
+
+        # ── Step 4: next after completion returns null ──────────────────
+        result = runner.invoke(cli, ["worker", "next", "--json"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data is None
+
+
+def test_no_push_semantics():
+    """Verify no push_work or dispatch_work functions exist in the codebase."""
+    import os
+
+    src_dir = os.path.join(
+        os.path.dirname(os.path.dirname(__file__)), "src", "aigineering"
+    )
+
+    forbidden = {"push_work", "dispatch_work", "push_contract", "auto_assign"}
+
+    for root, dirs, files in os.walk(src_dir):
+        # Skip __pycache__
+        dirs[:] = [d for d in dirs if d != "__pycache__"]
+        for fname in files:
+            if not fname.endswith(".py"):
+                continue
+            fpath = os.path.join(root, fname)
+            with open(fpath, "r") as f:
+                content = f.read()
+            for term in forbidden:
+                assert term not in content, (
+                    f"Found push semantic '{term}' in {fpath}"
+                )

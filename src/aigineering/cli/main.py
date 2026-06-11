@@ -13,10 +13,11 @@ from aigineering.core.engine import Engine
 from aigineering.core.ids import hash_asset_content, hash_asset_definition, hash_contract
 from aigineering.core.replay import replay_all, replay_session
 from aigineering.core.session import SessionStore
+from aigineering.core.activation import check_activation
 from aigineering.core.disclosure import compute_disclosure
 from aigineering.core.idempotency_store import IdempotencyStore
 from aigineering.core.store import JsonLStore, MemoryStore, StoreProtocol
-from aigineering.core.submit import SubmitConflictError, submit_candidate
+from aigineering.core.submit import SubmitConflictError, _all_outputs_satisfied, submit_candidate
 from aigineering.core.sufficiency import check_sufficiency
 from aigineering.core.trace import JsonLTraceStore, MemoryTraceStore, TraceStoreProtocol
 from aigineering.agent.llm import LLMWorker
@@ -934,6 +935,87 @@ def worker_package(contract_id: str, json_output: bool) -> None:
         return
 
     click.echo(pkg.to_json())
+
+
+@worker.command("next")
+@click.option(
+    "--json", "json_output", is_flag=True, default=False,
+    help="Output machine-readable JSON instead of human-readable text.",
+)
+def worker_next(json_output: bool) -> None:
+    """Derive the next ready contract and return a WorkerPackage.
+
+    A contract is ready when:
+      - Its activation expression is satisfied by available assets
+      - Budget remaining > 0
+      - It is not completed (no complete trace event, outputs not all satisfied)
+      - It is not suspended (no outstanding method_scheduled)
+    """
+    store = _persistent_store()
+    available_names = {a.name for a in store.get_all_assets()}
+
+    for contract in store.get_all_contracts():
+        # ── Activation check ────────────────────────────────────────
+        if contract.activation and not check_activation(
+            contract.activation, available_names
+        ):
+            continue
+
+        # ── Trace-based state checks ─────────────────────────────────
+        trace_path = _get_trace_dir() / f"worker_{contract.id}.jsonl"
+        activation_count = 0
+        is_completed = False
+        is_suspended = False
+
+        if trace_path.exists():
+            trace_store = JsonLTraceStore(str(trace_path))
+            for entry in trace_store.get_all():
+                if entry.event_type == "projection":
+                    activation_count += 1
+                elif entry.event_type == "complete":
+                    is_completed = True
+                elif entry.event_type == "method_scheduled":
+                    is_suspended = True
+                elif entry.event_type == "method_resumed":
+                    is_suspended = False
+
+        if is_completed:
+            continue
+
+        if is_suspended:
+            continue
+
+        remaining_budget = contract.budget - activation_count
+        if remaining_budget <= 0:
+            continue
+
+        # ── Outputs-satisfied check ──────────────────────────────────
+        if _all_outputs_satisfied(contract, store):
+            continue
+
+        # ── Build WorkerPackage ──────────────────────────────────────
+        scope = compute_disclosure(contract, store)
+        pkg = WorkerPackage(
+            contract_id=contract.id,
+            contract=contract_to_dict(contract),
+            disclosed_assets=tuple(asset_to_dict(a) for a in scope),
+            method_context_assets=(),
+            tool_scope=contract.tool_scope,
+            budget_remaining=remaining_budget,
+        )
+
+        if json_output:
+            result = json.loads(pkg.to_json())
+            _output_json(result)
+        else:
+            click.echo(pkg.to_json())
+        return
+
+    # No ready contracts
+    if json_output:
+        _output_json(None)
+    else:
+        click.echo("No ready contracts.")
 
 
 @worker.command("submit")

@@ -135,9 +135,30 @@ def submit_candidate(
         "duplicate": False,
     }
 
+    # ── Completion check ────────────────────────────────────────────
+    if _all_outputs_satisfied(contract, store):
+        complete_entry = create_entry(
+            contract_id=contract.id,
+            event_type="complete",
+            sequence=seq + 1,
+            budget_remaining=contract.budget,
+        )
+        trace_store.append(complete_entry)
+        response["complete"] = True
+        response["complete_trace_id"] = complete_entry.id
+
     # ── Store idempotency result ─────────────────────────────────────
     if idempotency_key:
         cached_result = {k: v for k, v in response.items() if k != "duplicate"}
         idem.set(contract.id, idempotency_key, cached_result)
 
     return response
+
+
+def _all_outputs_satisfied(contract: Contract, store: StoreProtocol) -> bool:
+    """Return True when all declared contract outputs exist in the store."""
+    for output_name in contract.outputs:
+        matching = store.get_assets_by_name(output_name)
+        if not any(a.created_by == contract.id for a in matching):
+            return False
+    return True
