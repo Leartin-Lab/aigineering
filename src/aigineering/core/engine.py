@@ -311,7 +311,9 @@ class Engine:
         if self._method_registry is not None:
             handler = self._method_registry.get("tool")
             if handler is not None and handler.can_handle("tool"):
-                return handler.handle_completion(self, contract, [])
+                completion = getattr(handler, "handle_completion", None)
+                if callable(completion) and completion(self, contract, []):
+                    return True
 
         # Fallback: inline tool execution (backward compat).
         payload = method.get("payload", {})
