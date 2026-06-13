@@ -7,6 +7,7 @@ from click.testing import CliRunner
 
 from aigineering.cli.main import cli
 from aigineering.core.ids import hash_retry
+from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.protocol.types import TraceEntry
 from aigineering.protocol.wire import trace_entry_to_dict
 
@@ -113,24 +114,15 @@ def test_run_persists_assets_contracts_and_session_manifest():
         session_id = trace_files[0].stem
         assert session_files[0].stem == session_id
 
-        assets_path = Path(".aig/store/assets.jsonl")
-        contracts_path = Path(".aig/store/contracts.jsonl")
-        assert assets_path.exists()
-        assert contracts_path.exists()
+        store_path = Path(".aig/store.db")
+        assert store_path.exists(), "SQLite store DB must exist"
 
-        asset_rows = [
-            json.loads(line)
-            for line in assets_path.read_text(encoding="utf-8").splitlines()
-            if line.strip()
-        ]
-        contract_rows = [
-            json.loads(line)
-            for line in contracts_path.read_text(encoding="utf-8").splitlines()
-            if line.strip()
-        ]
-
-        assert any(row["name"] == "final_report" for row in asset_rows)
-        assert any(row["name"] == "build_report" for row in contract_rows)
+        store = SQLiteStore(str(store_path))
+        assets = store.get_assets_by_name("final_report")
+        assert len(assets) > 0, "final_report asset must exist in SQLite store"
+        contracts = [c for c in store.get_all_contracts() if c.name == "build_report"]
+        assert len(contracts) > 0, "build_report contract must exist in SQLite store"
+        store.close()
 
 
 def test_trace_reads_from_latest_file():
@@ -340,14 +332,11 @@ def test_retry_creates_deterministic_contract():
         run_result = runner.invoke(cli, ["run", "test"])
         assert run_result.exit_code == 0
 
-        contracts_path = Path(".aig/store/contracts.jsonl")
-        contract_rows = [
-            json.loads(line)
-            for line in contracts_path.read_text(encoding="utf-8").splitlines()
-            if line.strip()
-        ]
-        build_report = [r for r in contract_rows if r["name"] == "build_report"][0]
-        original_id = build_report["id"]
+        store = SQLiteStore(".aig/store.db")
+        contracts = store.get_all_contracts()
+        build_report = next(c for c in contracts if c.name == "build_report")
+        original_id = build_report.id
+        store.close()
 
         result1 = runner.invoke(cli, ["retry", "--contract", original_id])
         assert result1.exit_code == 0
@@ -365,13 +354,10 @@ def test_retry_creates_deterministic_contract():
         expected_id = hash_retry(original_id)
         assert retry_id_1 == expected_id
 
-        stored = [
-            json.loads(line)
-            for line in contracts_path.read_text(encoding="utf-8").splitlines()
-            if line.strip()
-        ]
-        retry_ids_in_store = [r["id"] for r in stored if r["id"].startswith("retry:")]
+        store2 = SQLiteStore(".aig/store.db")
+        retry_ids_in_store = [c.id for c in store2.get_all_contracts() if c.id.startswith("retry:")]
         assert expected_id in retry_ids_in_store
+        store2.close()
 
 
 def test_retry_json_output():
@@ -381,13 +367,10 @@ def test_retry_json_output():
         run_result = runner.invoke(cli, ["run", "test"])
         assert run_result.exit_code == 0
 
-        contracts_path = Path(".aig/store/contracts.jsonl")
-        contract_rows = [
-            json.loads(line)
-            for line in contracts_path.read_text(encoding="utf-8").splitlines()
-            if line.strip()
-        ]
-        original_id = [r for r in contract_rows if r["name"] == "build_report"][0]["id"]
+        store = SQLiteStore(".aig/store.db")
+        contracts = store.get_all_contracts()
+        original_id = next(c.id for c in contracts if c.name == "build_report")
+        store.close()
 
         result = runner.invoke(cli, ["retry", "--contract", original_id, "--json"])
         assert result.exit_code == 0

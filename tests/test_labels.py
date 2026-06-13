@@ -41,8 +41,8 @@ def _contract(**kwargs) -> Contract:
 
 def test_label_injects_existing_asset():
     store = MemoryStore()
-    skill = _asset("_skill_review", "review procedure", origin="skill")
-    store.add_asset(sign_asset(skill))
+    skill = sign_asset(_asset("_skill_review", "review procedure", origin="skill"))
+    store.add_asset(skill)
     contract = _contract(name="review", labels=["reviewer"], outputs=["result"])
 
     result = resolve_contract_labels(

@@ -3,7 +3,7 @@
 Verifies:
   - Key-order stability in canonical JSON
   - Unicode NFC normalization
-  - Typed hash domain prefixes (task:, asset:, def:, lineage:, event:, claim:)
+  - Typed hash domain prefixes (task:, content:, def:, lineage:, event:, claim:)
   - Deterministic contract and asset identity
   - Hash sensitivity to field changes
 """
@@ -122,7 +122,7 @@ def test_typed_hash_domains_contract():
 def test_typed_hash_domains_asset_content():
     aid = hash_asset_content("report", "content")
     assert aid.startswith("content:")
-    assert len(aid) == 6 + 64  # "asset:" + 64 hex chars
+    assert len(aid) == 8 + 64  # "content:" + 64 hex chars
 
 
 def test_typed_hash_domains_asset_definition():

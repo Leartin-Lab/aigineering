@@ -5,6 +5,7 @@ import json
 import pytest
 
 from aigineering.core.ids import hash_claim
+from aigineering.core.provenance import sign_asset
 from aigineering.core.store import JsonLStore, MemoryStore
 from aigineering.protocol.types import Asset, ReplacementClaim
 from aigineering.protocol.wire import asset_to_canonical, asset_to_dict
@@ -90,7 +91,7 @@ class TestLineageId:
         assert asset.lineage_id == ""
 
     def test_lineage_id_persists_memory_store(self):
-        asset = Asset(id="a1", name="test", content="hello", lineage_id="lineage:abc")
+        asset = sign_asset(Asset(id="a1", name="test", content="hello", lineage_id="lineage:abc", origin="test"))
         store = MemoryStore()
         store.add_asset(asset)
         retrieved = store.get_asset("a1")
@@ -101,7 +102,7 @@ class TestLineageId:
         assets_path = tmp_path / "assets.jsonl"
         contracts_path = tmp_path / "contracts.jsonl"
 
-        asset = Asset(id="a1", name="test", content="hello", lineage_id="lineage:abc")
+        asset = sign_asset(Asset(id="a1", name="test", content="hello", lineage_id="lineage:abc", origin="test"))
         store = JsonLStore(str(assets_path), str(contracts_path))
         store.add_asset(asset)
         retrieved = store.get_asset("a1")

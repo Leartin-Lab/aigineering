@@ -205,28 +205,33 @@ def test_trust_gap_triggers_escalate():
 
 
 def test_signature_gap_detection_unsigned():
+    """Store rejects unsigned assets — sufficiency reports missing input."""
     contract = _make_contract(inputs=["unsigned_asset"])
     store = MemoryStore()
-    store.add_asset(_make_asset("unsigned_asset", "data", signed=False))
+
+    with pytest.raises(ValueError, match="missing or invalid canonical seal"):
+        store.add_asset(_make_asset("unsigned_asset", "data", signed=False))
 
     report = check_sufficiency(contract, store)
-
-    assert report["signature_gaps"] == ["unsigned_asset"]
+    assert "unsigned_asset" in report["missing_inputs"]
     assert not report["sufficiency_ok"]
 
 
 def test_signature_gap_detection_invalid():
+    """Store rejects tampered assets — sufficiency reports missing input."""
     from dataclasses import replace
 
     contract = _make_contract(inputs=["tampered"])
     store = MemoryStore()
     signed = _make_asset("tampered", "original", signed=True)
     tampered = replace(signed, content="changed")
-    store.add_asset(tampered)
 
+    with pytest.raises(ValueError, match="missing or invalid canonical seal"):
+        store.add_asset(tampered)
+
+    # The asset was never stored, so sufficiency should show it as missing
     report = check_sufficiency(contract, store)
-
-    assert report["signature_gaps"] == ["tampered"]
+    assert "tampered" in report["missing_inputs"]
 
 
 def test_no_signature_gap_for_validly_signed():
@@ -240,13 +245,15 @@ def test_no_signature_gap_for_validly_signed():
 
 
 def test_signature_gap_triggers_escalate():
+    """Store rejects unsigned — missing input triggers escalate."""
     contract = _make_contract(inputs=["unsigned_asset"])
     store = MemoryStore()
-    store.add_asset(_make_asset("unsigned_asset", "data", signed=False))
+
+    with pytest.raises(ValueError, match="missing or invalid canonical seal"):
+        store.add_asset(_make_asset("unsigned_asset", "data", signed=False))
 
     report = check_sufficiency(contract, store)
-
-    assert report["recommendation"] == "escalate"
+    assert report["recommendation"] == "plan"  # missing inputs → plan
 
 
 # ── Recommendations ──────────────────────────────────────────────────────
@@ -350,10 +357,10 @@ def test_report_is_traceable_asset():
 def test_sufficiency_asset_can_be_stored_and_retrieved():
     contract = _make_contract(inputs=["data_file"])
     store = MemoryStore()
-    store.add_asset(_make_asset("data_file", "data"))
+    store.add_asset(_make_asset("data_file", "data", signed=True))
 
     asset = sufficiency_result_asset(contract, store)
-    store.add_asset(asset)
+    store.add_asset(sign_asset(asset))
 
     retrieved = store.get_asset(asset.id)
     assert retrieved is not None
@@ -401,10 +408,10 @@ def test_tombstoned_asset_not_flagged_as_trust_gap():
 
 
 def test_tombstoned_asset_not_flagged_as_sig_gap():
-    """A tombstoned unsigned asset should be a stale issue, not a sig gap."""
+    """A tombstoned signed asset should be a stale issue, not a sig gap."""
     contract = _make_contract(inputs=["stale_unsigned"])
     store = MemoryStore()
-    store.add_asset(_make_asset("stale_unsigned", "old", signed=False, tombstoned=True))
+    store.add_asset(_make_asset("stale_unsigned", "old", signed=True, tombstoned=True))
 
     report = check_sufficiency(contract, store)
 

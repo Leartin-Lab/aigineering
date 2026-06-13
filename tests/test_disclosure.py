@@ -5,6 +5,7 @@ from aigineering.core.disclosure import compute_disclosure
 from aigineering.core.engine import Engine
 from aigineering.core.ids import hash_asset_content, hash_contract
 from aigineering.core.labels import Label
+from aigineering.core.provenance import sign_asset
 from aigineering.core.store import MemoryStore
 from aigineering.core.trace import TraceStore
 from aigineering.protocol.types import Asset, Contract
@@ -17,13 +18,14 @@ def _asset(
     promptable: bool = True,
     disclosure_view: str = "original",
 ) -> Asset:
-    return Asset(
+    return sign_asset(Asset(
         id=hash_asset_content(name, content),
         name=name,
         content=content,
         promptable=promptable,
         disclosure_view=disclosure_view,
-    )
+        origin="test",
+    ))
 
 
 def _contract(**kwargs) -> Contract:

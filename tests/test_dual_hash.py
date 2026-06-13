@@ -52,6 +52,7 @@ def test_version_chain_lookup(store):
         content=content_v1,
         definition_hash=hash_asset_definition(name),
         content_hash=hash_asset_content(name, content_v1),
+        origin="test",
     )
     asset2 = Asset(
         id=hash_asset_content(name, content_v2),
@@ -59,10 +60,11 @@ def test_version_chain_lookup(store):
         content=content_v2,
         definition_hash=hash_asset_definition(name),
         content_hash=hash_asset_content(name, content_v2),
+        origin="test",
     )
 
-    store.add_asset(asset1)
-    store.add_asset(asset2)
+    store.add_asset(sign_asset(asset1))
+    store.add_asset(sign_asset(asset2))
 
     def_hash = hash_asset_definition(name)
     results = store.get_assets_by_definition(def_hash)
@@ -85,6 +87,7 @@ def test_get_latest_asset(store):
         content=v1,
         definition_hash=hash_asset_definition(name),
         content_hash=hash_asset_content(name, v1),
+        origin="test",
     )
     asset2 = Asset(
         id=hash_asset_content(name, v2),
@@ -92,6 +95,7 @@ def test_get_latest_asset(store):
         content=v2,
         definition_hash=hash_asset_definition(name),
         content_hash=hash_asset_content(name, v2),
+        origin="test",
     )
     asset3 = Asset(
         id=hash_asset_content(name, v3),
@@ -99,11 +103,12 @@ def test_get_latest_asset(store):
         content=v3,
         definition_hash=hash_asset_definition(name),
         content_hash=hash_asset_content(name, v3),
+        origin="test",
     )
 
-    store.add_asset(asset1)
-    store.add_asset(asset2)
-    store.add_asset(asset3)
+    store.add_asset(sign_asset(asset1))
+    store.add_asset(sign_asset(asset2))
+    store.add_asset(sign_asset(asset3))
 
     def_hash = hash_asset_definition(name)
     latest = store.get_latest_asset(def_hash)
@@ -130,8 +135,9 @@ def test_batch_verify_content_hashes(store):
             content=content,
             definition_hash=hash_asset_definition(name),
             content_hash=hash_asset_content(name, content),
+            origin="test",
         )
-        store.add_asset(asset)
+        store.add_asset(sign_asset(asset))
 
     def_hash = hash_asset_definition(name)
     assets = store.get_assets_by_definition(def_hash)
@@ -161,6 +167,7 @@ def test_different_definitions_are_isolated(store):
         content="content a",
         definition_hash=hash_asset_definition(name_a),
         content_hash=hash_asset_content(name_a, "content a"),
+        origin="test",
     )
     asset_b = Asset(
         id=hash_asset_content(name_b, "content b"),
@@ -168,10 +175,11 @@ def test_different_definitions_are_isolated(store):
         content="content b",
         definition_hash=hash_asset_definition(name_b),
         content_hash=hash_asset_content(name_b, "content b"),
+        origin="test",
     )
 
-    store.add_asset(asset_a)
-    store.add_asset(asset_b)
+    store.add_asset(sign_asset(asset_a))
+    store.add_asset(sign_asset(asset_b))
 
     results_a = store.get_assets_by_definition(hash_asset_definition(name_a))
     assert len(results_a) == 1
