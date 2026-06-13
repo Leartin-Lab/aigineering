@@ -8,7 +8,7 @@ from aigineering.core.ids import hash_retry
 from aigineering.protocol.types import Contract
 
 if TYPE_CHECKING:
-    from aigineering.core.engine import Engine
+    from aigineering.core.method_runtime import MethodRuntime
     from aigineering.protocol.types import Asset, Candidate
 
 
@@ -28,7 +28,7 @@ class RetryMethodHandler:
 
     def handle_method(
         self,
-        engine: Engine,
+        runtime: MethodRuntime,
         contract: Contract,
         action_type: str,
         candidate: Candidate,
@@ -40,7 +40,7 @@ class RetryMethodHandler:
         retry_id = hash_retry(contract.id)
 
         # Avoid duplicate creation when retry contract already exists.
-        if engine._store.get_contract(retry_id) is not None:
+        if runtime.get_contract(retry_id) is not None:
             return True
 
         retry_contract = Contract(
@@ -57,21 +57,20 @@ class RetryMethodHandler:
             origin=contract.origin,
             sensitive_input_policy=contract.sensitive_input_policy,
         )
-        engine._store.add_contract(retry_contract)
-        engine._budget[retry_id] = max(retry_contract.budget, 1)
+        runtime.add_contract(retry_contract)
 
-        engine._add_trace(
+        runtime.append_trace(
             contract.id,
             "retry_created",
             relation_type="retry",
             relation_target=retry_id,
-            budget_remaining=engine._resolve_budget(contract),
+            budget_remaining=runtime.resolve_budget(contract.id),
         )
         return True
 
     def handle_completion(
         self,
-        engine: Engine,
+        runtime: MethodRuntime,
         contract: Contract,
         method_assets: list[Asset],
     ) -> bool:

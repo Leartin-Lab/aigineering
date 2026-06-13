@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
-    from aigineering.core.engine import Engine
+    from aigineering.core.method_runtime import MethodRuntime
     from aigineering.protocol.types import Asset, Candidate, Contract
 
 
@@ -18,7 +18,7 @@ class MethodHandler(Protocol):
 
     def handle_method(
         self,
-        engine: Engine,
+        runtime: MethodRuntime,
         contract: Contract,
         action_type: str,
         candidate: Candidate,
@@ -32,7 +32,7 @@ class MethodHandler(Protocol):
 
     def handle_completion(
         self,
-        engine: Engine,
+        runtime: MethodRuntime,
         contract: Contract,
         method_assets: list[Asset],
     ) -> bool:

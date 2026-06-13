@@ -416,9 +416,7 @@ def test_restore_from_store_with_method_scheduling():
 
     assert contract.id in engine2._suspended
     assert engine2._method_scheduled == engine._method_scheduled
-    # Budget recovery correctly counts method_scheduled events as consumption (040 N-P0.2 fix)
-    assert engine2._budget[contract.id] <= contract.budget
-    assert engine2._budget[contract.id] >= 0
+    assert engine2._budget[contract.id] == engine._budget[contract.id]
 
 
 def test_restore_from_store_with_tool_observation():
@@ -447,8 +445,7 @@ def test_restore_from_store_with_tool_observation():
     engine2 = Engine.restore_from_store(store, worker, trace_store, tools=tools)
 
     assert contract.id in engine2._completed
-    # Budget recovery correctly counts method_scheduled events as consumption (040 N-P0.2 fix)
-    assert all(v >= 0 for v in engine2._budget.values())
+    assert engine2._budget == engine._budget
     # Method context should contain the tool observation asset
     assert contract.id in engine2._method_context
     obs_names = [a.name for a in engine2._method_context[contract.id]]

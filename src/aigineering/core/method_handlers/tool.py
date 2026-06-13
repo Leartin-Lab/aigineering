@@ -8,9 +8,10 @@ from typing import TYPE_CHECKING
 from aigineering.agent.tool_worker import ToolWorker
 from aigineering.core.methods import method_payload, system_asset
 from aigineering.core.provenance import sign_asset
+from aigineering.protocol.actions import parse_method_action
 
 if TYPE_CHECKING:
-    from aigineering.core.engine import Engine
+    from aigineering.core.method_runtime import MethodRuntime
     from aigineering.protocol.types import Asset, Candidate, Contract
 
 
@@ -27,22 +28,20 @@ class ToolMethodHandler:
 
     def handle_method(
         self,
-        engine: Engine,
+        runtime: MethodRuntime,
         contract: Contract,
         action_type: str,
         candidate: Candidate,
     ) -> bool:
-        from aigineering.core.engine import _parse_method_action
-
-        action = _parse_method_action(candidate)
+        action = parse_method_action(candidate)
         if action is None:
             return False
-        engine._schedule_method_contract(contract, action, candidate)
+        runtime.schedule_method(contract, action, candidate)
         return True
 
     def handle_completion(
         self,
-        engine: Engine,
+        runtime: MethodRuntime,
         contract: Contract,
         method_assets: list[Asset],
     ) -> bool:
@@ -59,7 +58,7 @@ class ToolMethodHandler:
             return False
 
         call_asset_name = f"_tool_call_{contract.id}"
-        existing = engine._store.get_assets_by_name(call_asset_name)
+        existing = runtime.get_assets_by_name(call_asset_name)
         if existing:
             return True
 
@@ -76,12 +75,6 @@ class ToolMethodHandler:
             sort_keys=True,
             ensure_ascii=False,
         )
-        call_asset = system_asset(
-            name=f"_tool_call_{contract.id}",
-            content=call_content,
-            created_by=contract.id,
-            promptable=False,
-        )
 
         ok = False
         result = ""
@@ -90,10 +83,10 @@ class ToolMethodHandler:
             error = "tool action missing string payload.name"
         elif tool_name not in contract.tool_scope:
             error = f"tool '{tool_name}' is not in contract.tool_scope"
-        elif engine._tools is None:
+        elif runtime.get_tool_registry() is None:
             error = "no ToolRegistry configured"
         else:
-            worker = ToolWorker(engine._tools)
+            worker = ToolWorker(runtime.get_tool_registry())
             candidate = worker.invoke(
                 tool_name,
                 args if isinstance(args, dict) else {},
@@ -115,16 +108,24 @@ class ToolMethodHandler:
             sort_keys=True,
             ensure_ascii=False,
         )
-        obs_asset = system_asset(
-            name=obs_name,
-            content=obs_content,
-            created_by=contract.id,
+
+        # Mint the call system asset (promptable=False — internal artifact)
+        call_asset = runtime.mint_system_asset(
+            call_asset_name,
+            call_content,
+            contract.id,
+            promptable=False,
+        )
+
+        # Mint the observation system asset
+        obs_asset = runtime.mint_system_asset(
+            obs_name,
+            obs_content,
+            contract.id,
             source_uri=f"tool://{tool_name}" if isinstance(tool_name, str) else "",
         )
 
-        engine._store.add_asset(sign_asset(call_asset))
-        engine._store.add_asset(sign_asset(obs_asset))
-        engine._add_trace(
+        runtime.append_trace(
             contract.id,
             "tool_executed",
             accepted_fragments=[call_asset.id, obs_asset.id],
@@ -132,6 +133,6 @@ class ToolMethodHandler:
             authority_result="accepted" if ok else "rejected",
             relation_type="tool",
             relation_target=tool_name if isinstance(tool_name, str) else None,
-            budget_remaining=engine._resolve_budget(contract),
+            budget_remaining=runtime.resolve_budget(contract.id),
         )
         return True

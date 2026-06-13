@@ -375,7 +375,7 @@ def test_legacy_handler_without_handle_completion_falls_back():
             return action_type == "plan"
 
         def handle_method(self, engine, contract, action_type, candidate) -> bool:
-            engine._schedule_method_contract(contract, _parse_method_action(candidate), candidate)
+            engine._schedule_method_contract(contract, parse_method_action(candidate), candidate)
             return True
 
     registry.register("plan", LegacyHandler())
@@ -406,4 +406,4 @@ def test_legacy_handler_without_handle_completion_falls_back():
     assert len(draft) == 1
 
 
-from aigineering.core.engine import _parse_method_action
+from aigineering.protocol.actions import parse_method_action

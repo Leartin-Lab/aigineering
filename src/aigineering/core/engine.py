@@ -19,6 +19,7 @@ from aigineering.core.methods import (
 from aigineering.core.projection import project_candidate
 from aigineering.core.provenance import sign_asset
 from aigineering.core.method_registry import MethodRegistry
+from aigineering.core.method_runtime import MethodRuntime
 from aigineering.core.store import StoreProtocol
 from aigineering.core.trace import MemoryTraceStore, TraceStoreProtocol
 from aigineering.core.tools import ToolRegistry
@@ -27,6 +28,7 @@ from aigineering.protocol.actions import (
     WorkerAction,
     action_from_dict,
     parse_action,
+    parse_method_action,
 )
 from aigineering.protocol.types import Asset, Candidate, Contract, ProjectionResult
 
@@ -152,7 +154,7 @@ class Engine:
                     break
 
                 candidate: Candidate = self._worker.invoke(contract, scope)
-                action = _parse_method_action(candidate)
+                action = parse_method_action(candidate)
                 if action is not None:
                     self._dispatch_method(contract, action, candidate)
                     break
@@ -255,7 +257,15 @@ class Engine:
 
         handled = False
         if handler is not None and handler.can_handle(action.type):
-            handled = handler.handle_method(self, contract, action.type, candidate)
+            runtime = MethodRuntime(
+                store=self._store,
+                trace=self._trace,
+                budget=self._budget,
+                tools=self._tools,
+                suspended=self._suspended,
+                method_scheduled=self._method_scheduled,
+            )
+            handled = handler.handle_method(runtime, contract, action.type, candidate)
 
         if not handled:
             self._schedule_method_contract(contract, action, candidate)
@@ -365,7 +375,7 @@ class Engine:
             handler = self._method_registry.get("tool")
             if handler is not None and handler.can_handle("tool"):
                 completion = getattr(handler, "handle_completion", None)
-                if callable(completion) and completion(self, contract, []):
+                if callable(completion) and completion(_make_runtime(self), contract, []):
                     return True
 
         # Fallback: inline tool execution (backward compat).
@@ -471,7 +481,7 @@ class Engine:
             if handler is not None and handler.can_handle(method_type):
                 completion = getattr(handler, "handle_completion", None)
                 if callable(completion):
-                    expanded = completion(self, contract, method_assets)
+                    expanded = completion(_make_runtime(self), contract, method_assets)
         if not expanded:
             self._expand_plan_result(contract, method_assets)
 
@@ -672,20 +682,13 @@ class Engine:
         return engine
 
 
-def _parse_method_action(candidate: Candidate) -> WorkerAction | None:
-    parsed = candidate.parsed_action
-    if isinstance(parsed, Mapping) and parsed.get("type") in {"plan", "replan", "tool", "retry"}:
-        try:
-            return action_from_dict(parsed)
-        except ActionParseError:
-            return None
-
-    if not candidate.raw_output.strip().startswith("/"):
-        return None
-    try:
-        action = parse_action(candidate.raw_output)
-    except (ActionParseError, json.JSONDecodeError):
-        return None
-    if action.type in {"plan", "replan", "tool", "retry"}:
-        return action
-    return None
+def _make_runtime(engine: Engine) -> MethodRuntime:
+    """Create a MethodRuntime from an Engine instance."""
+    return MethodRuntime(
+        store=engine._store,
+        trace=engine._trace,
+        budget=engine._budget,
+        tools=engine._tools,
+        suspended=engine._suspended,
+        method_scheduled=engine._method_scheduled,
+    )

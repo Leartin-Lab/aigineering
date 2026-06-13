@@ -6,16 +6,17 @@ from typing import TYPE_CHECKING
 
 from aigineering.core.disclosure import compute_disclosure
 from aigineering.core.methods import contracts_from_plan_asset, method_payload
+from aigineering.protocol.actions import parse_method_action
 
 if TYPE_CHECKING:
-    from aigineering.core.engine import Engine
+    from aigineering.core.method_runtime import MethodRuntime
     from aigineering.protocol.types import Asset, Candidate, Contract
 
 
 class ReplanMethodHandler:
     """Handler for ``replan`` method actions.
 
-    ``handle_method`` schedules the replan sub-contract using the engine's
+    ``handle_method`` schedules the replan sub-contract using the runtime's
     built-in scheduler (so the existing tooling / method-contract machinery
     is reused).  ``handle_completion`` performs replan-result expansion
     (revised child-contract creation with containment checks), analogous
@@ -27,22 +28,20 @@ class ReplanMethodHandler:
 
     def handle_method(
         self,
-        engine: Engine,
+        runtime: MethodRuntime,
         contract: Contract,
         action_type: str,
         candidate: Candidate,
     ) -> bool:
-        from aigineering.core.engine import _parse_method_action
-
-        action = _parse_method_action(candidate)
+        action = parse_method_action(candidate)
         if action is None:
             return False
-        engine._schedule_method_contract(contract, action, candidate)
+        runtime.schedule_method(contract, action, candidate)
         return True
 
     def handle_completion(
         self,
-        engine: Engine,
+        runtime: MethodRuntime,
         contract: Contract,
         method_assets: list[Asset],
     ) -> bool:
@@ -61,9 +60,9 @@ class ReplanMethodHandler:
         # do NOT expand at all.
         parent_contract: Contract | None = None
         if parent_id is not None:
-            parent_contract = engine._store.get_contract(parent_id)
+            parent_contract = runtime.get_contract(parent_id)
             if parent_contract is None:
-                engine._add_trace(
+                runtime.append_trace(
                     parent_id,
                     "containment_rejected",
                     relation_type="replan",
@@ -82,9 +81,9 @@ class ReplanMethodHandler:
         allowed_input_names: set[str] | None = None
         parent_budget_remaining: int | None = None
         if parent_contract is not None:
-            scope = compute_disclosure(parent_contract, engine._store)
+            scope = compute_disclosure(parent_contract, runtime.store)
             allowed_input_names = {a.name for a in scope}
-            parent_budget_remaining = engine._resolve_budget(parent_contract)
+            parent_budget_remaining = runtime.resolve_budget(parent_contract.id)
 
         expanded = False
         created: list[str] = []
@@ -100,11 +99,11 @@ class ReplanMethodHandler:
                 parent_budget_remaining=parent_budget_remaining,
             )
             for child in children:
-                if engine._store.get_contract(child.id) is None:
-                    engine.add_contract(child)
+                if runtime.get_contract(child.id) is None:
+                    runtime.add_contract(child)
                     created.append(child.id)
             for entry in rejections:
-                engine._add_trace(
+                runtime.append_trace(
                     parent_id,
                     "containment_rejected",
                     relation_type="replan",
@@ -116,16 +115,16 @@ class ReplanMethodHandler:
                         f"{entry.get('field','?')}: {entry.get('reason','')}"
                     ],
                     authority_result=entry.get("action", "rejected"),
-                    budget_remaining=engine._budget.get(parent_id, 0),
+                    budget_remaining=runtime.resolve_budget(parent_id),
                 )
 
         if created and parent_id is not None:
-            engine._add_trace(
+            runtime.append_trace(
                 parent_id,
                 "contracts_expanded",
                 relation_type="replan",
                 relation_target=",".join(created),
-                budget_remaining=engine._budget.get(parent_id, 0),
+                budget_remaining=runtime.resolve_budget(parent_id),
             )
 
         return expanded
