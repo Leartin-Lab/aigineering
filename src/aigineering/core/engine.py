@@ -619,6 +619,8 @@ class Engine:
                      context_size_limit=context_size_limit)
 
         # Count activations per contract for budget derivation
+        # NOTE: _dispatch_method budget decrements are NOT yet traced (N-P1.1).
+        # Full budget recovery requires Phase B2 budget_consumed trace events.
         activation_counts: dict[str, int] = {}
 
         for entry in trace_store.get_all():
@@ -627,14 +629,14 @@ class Engine:
             if entry.event_type == "activation":
                 activation_counts[cid] = activation_counts.get(cid, 0) + 1
 
-            elif entry.event_type == "complete":
-                engine._completed.add(cid)
-                engine._suspended.discard(cid)
-
             elif entry.event_type == "method_scheduled":
                 engine._suspended.add(cid)
                 if entry.relation_target:
                     engine._method_scheduled.add(entry.relation_target)
+
+            elif entry.event_type == "complete":
+                engine._completed.add(cid)
+                engine._suspended.discard(cid)
 
             elif entry.event_type == "method_resumed":
                 engine._suspended.discard(cid)
