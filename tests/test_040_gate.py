@@ -1022,7 +1022,25 @@ class TestPlanContainment:
         Gate: G6
         Debt: N-P2.13 (methods.py:234-422)
         """
-        pass  # Placeholder — implement after Phase F1
+        from aigineering.core.methods import contracts_from_plan_asset
+        from aigineering.protocol.types import Asset, Contract
+
+        parent = Contract(
+            id="parent-policy", name="parent", description="test",
+            inputs=[], outputs=[], budget=10,
+            sensitive_input_policy={"required_signer": "trusted_signer"},
+        )
+        plan = Asset(
+            id="plan-policy", name="_plan_result_parent-policy",
+            content='{"contracts":[{"name":"child","description":"test","inputs":[],"outputs":[],"budget":5}]}',
+            definition_hash="def:plan", content_hash="content:plan", origin="plan",
+        )
+        children, _ = contracts_from_plan_asset(plan, parent_id=parent.id, parent_contract=parent)
+        assert len(children) == 1, f"Expected 1 child, got {len(children)}"
+        assert children[0].sensitive_input_policy == {"required_signer": "trusted_signer"}, (
+            f"G6/N-P2.13: child must inherit parent's sensitive_input_policy. "
+            f"Got: {children[0].sensitive_input_policy}"
+        )
 
     def test_plan_rejects_empty_child_name(self):
         """Plan must reject child contracts with empty name.
@@ -1030,7 +1048,23 @@ class TestPlanContainment:
         Gate: G6
         Debt: N-P2.16 (methods.py:195)
         """
-        pass  # Placeholder — implement after Phase F1
+        from aigineering.core.methods import contracts_from_plan_asset
+        from aigineering.protocol.types import Asset, Contract
+
+        parent = Contract(
+            id="parent-empty", name="parent", description="test",
+            inputs=[], outputs=[], budget=10,
+        )
+        plan = Asset(
+            id="plan-empty", name="_plan_result_parent-empty",
+            content='{"contracts":[{"name":"","description":"test","inputs":[],"outputs":[],"budget":5}]}',
+            definition_hash="def:plan", content_hash="content:plan", origin="plan",
+        )
+        children, rejections = contracts_from_plan_asset(plan, parent_id=parent.id, parent_contract=parent)
+        assert len(children) == 0, f"G6/N-P2.16: empty-name child must not be accepted. Got: {[c.name for c in children]}"
+        assert any(r.get("field") == "name" for r in rejections), (
+            f"G6/N-P2.16: empty-name rejection must have field='name'. Rejections: {rejections}"
+        )
 
 
 class TestWorkerProtocolFixes:

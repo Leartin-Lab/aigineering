@@ -22,7 +22,7 @@ _PLAN_RESERVED_PREFIXES: frozenset[str] = RESERVED_PREFIXES | frozenset({"_perso
 # Fields the planner must not set in child contract payloads.
 # (origin is always hard-clamped to "plan" by the engine.)
 _PLAN_PROTECTED_FIELDS: frozenset[str] = frozenset(
-    {"trust_tier", "created_by", "minting_authority"}
+    {"trust_tier", "created_by"}
 )
 
 _ACTIVATION_KEYWORDS: frozenset[str] = frozenset({"AND", "OR", "NOT"})
@@ -193,6 +193,16 @@ def contracts_from_plan_asset(
             continue
 
         name = str(raw.get("name", ""))
+        if not name or not name.strip():
+            rejected.append({
+                "child_name": "(empty)",
+                "field": "name",
+                "reason": "child contract name must be non-empty",
+                "action": "rejected",
+                "expected": "non-empty string",
+                "actual": repr(name),
+            })
+            continue
 
         # --- Deny-by-default: protected fields ---
         if _PLAN_PROTECTED_FIELDS & set(raw.keys()):
@@ -433,6 +443,11 @@ def contracts_from_plan_asset(
                 tool_scope=tool_scope,
                 labels=labels,
                 origin=origin,
+                sensitive_input_policy=(
+                    parent_contract.sensitive_input_policy
+                    if parent_contract is not None and parent_contract.sensitive_input_policy
+                    else None
+                ),
             )
         )
     return accepted, rejected
