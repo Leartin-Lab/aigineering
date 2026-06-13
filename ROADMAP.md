@@ -2,10 +2,9 @@
 
 ## Status
 
-Aigineering is a pre-alpha Zero Trust Agent Runtime. The current `v0.4.0`
-milestone delivers "Strong Protocolization + Partial Infrastructure":
-a protocolized, method-first, single-node runtime with transactional
-durability, recoverable state, and capability containment.
+Aigineering is a pre-alpha Zero Trust Agent Runtime. The current `v0.4.x`
+milestone is undergoing **040 production kernel gate validation**.
+Transactional durability, recoverable state, and capability containment are **in progress** — not yet production-complete.
 
 ```text
 Contract -> Worker/Sub-agent -> Candidate -> Projection/Method -> Asset/Trace

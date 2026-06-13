@@ -171,7 +171,7 @@ def test_provenance_metadata():
     # ID and hash fields are computed
     assert snapshot.id.startswith("cap:")
     assert snapshot.definition_hash.startswith("def:")
-    assert snapshot.content_hash.startswith("asset:")
+    assert snapshot.content_hash.startswith("content:")
 
 
 def test_provenance_default_trust_tier():

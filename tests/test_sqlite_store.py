@@ -5,6 +5,7 @@ import sqlite3
 
 import pytest
 
+from aigineering.core.provenance import sign_asset
 from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.core.store import StoreProtocol
 from aigineering.protocol.types import Asset, Contract
@@ -37,7 +38,7 @@ def test_satisfies_store_protocol(store):
 
 def test_crud_asset(store):
     """Add, get, get_by_name, get_all for assets."""
-    asset = Asset(id="a1", name="report", content="hello world")
+    asset = sign_asset(Asset(id="a1", name="report", content="hello world", origin="test"))
     store.add_asset(asset)
 
     assert store.get_asset("a1") == asset
@@ -53,15 +54,15 @@ def test_crud_asset(store):
 
 
 def test_has_asset_named(store):
-    store.add_asset(Asset(id="a1", name="data.json", content="{}"))
+    store.add_asset(sign_asset(Asset(id="a1", name="data.json", content="{}"), signed_by="test"))
     assert store.has_asset_named("data.json") is True
     assert store.has_asset_named("missing") is False
 
 
 def test_get_assets_by_name_multiple(store):
-    store.add_asset(Asset(id="a1", name="report", content="r1"))
-    store.add_asset(Asset(id="a2", name="report", content="r2"))
-    store.add_asset(Asset(id="a3", name="other", content="o1"))
+    store.add_asset(sign_asset(Asset(id="a1", name="report", content="r1"), signed_by="test"))
+    store.add_asset(sign_asset(Asset(id="a2", name="report", content="r2"), signed_by="test"))
+    store.add_asset(sign_asset(Asset(id="a3", name="other", content="o1"), signed_by="test"))
 
     results = store.get_assets_by_name("report")
     assert len(results) == 2
@@ -69,10 +70,10 @@ def test_get_assets_by_name_multiple(store):
 
 
 def test_get_assets_by_contract(store):
-    store.add_asset(Asset(id="a1", name="r1", content="x", created_by="c1"))
-    store.add_asset(Asset(id="a2", name="r2", content="y", created_by="c1"))
-    store.add_asset(Asset(id="a3", name="r3", content="z", created_by="c2"))
-    store.add_asset(Asset(id="a4", name="r4", content="w"))
+    store.add_asset(sign_asset(Asset(id="a1", name="r1", content="x", created_by="c1"), signed_by="test"))
+    store.add_asset(sign_asset(Asset(id="a2", name="r2", content="y", created_by="c1"), signed_by="test"))
+    store.add_asset(sign_asset(Asset(id="a3", name="r3", content="z", created_by="c2"), signed_by="test"))
+    store.add_asset(sign_asset(Asset(id="a4", name="r4", content="w"), signed_by="test"))
 
     results_c1 = store.get_assets_by_contract("c1")
     assert len(results_c1) == 2
@@ -141,12 +142,12 @@ def test_contract_with_tuple_fields(store):
 
 def test_definition_hash_index(store):
     """Query by definition_hash must return matching assets."""
-    store.add_asset(Asset(id="a1", name="v1", content="x",
-                          definition_hash="abc123"))
-    store.add_asset(Asset(id="a2", name="v2", content="y",
-                          definition_hash="def456"))
-    store.add_asset(Asset(id="a3", name="v3", content="z",
-                          definition_hash="abc123"))
+    store.add_asset(sign_asset(Asset(id="a1", name="v1", content="x",
+                          definition_hash="abc123"), signed_by="test"))
+    store.add_asset(sign_asset(Asset(id="a2", name="v2", content="y",
+                          definition_hash="def456"), signed_by="test"))
+    store.add_asset(sign_asset(Asset(id="a3", name="v3", content="z",
+                          definition_hash="abc123"), signed_by="test"))
 
     results = store.get_assets_by_definition("abc123")
     assert len(results) == 2
@@ -162,12 +163,12 @@ def test_definition_hash_index(store):
 
 def test_version_chain(store):
     """get_assets_by_definition and get_latest_asset form a version chain."""
-    store.add_asset(Asset(id="a1", name="doc", content="v1",
-                          definition_hash="abc"))
-    store.add_asset(Asset(id="a2", name="doc", content="v2",
-                          definition_hash="abc"))
-    store.add_asset(Asset(id="a3", name="doc", content="v3",
-                          definition_hash="abc"))
+    store.add_asset(sign_asset(Asset(id="a1", name="doc", content="v1",
+                          definition_hash="abc"), signed_by="test"))
+    store.add_asset(sign_asset(Asset(id="a2", name="doc", content="v2",
+                          definition_hash="abc"), signed_by="test"))
+    store.add_asset(sign_asset(Asset(id="a3", name="doc", content="v3",
+                          definition_hash="abc"), signed_by="test"))
 
     # All three share the same definition_hash
     versions = store.get_assets_by_definition("abc")
@@ -206,10 +207,10 @@ def test_schema_version(store):
 def test_index_coverage_assets(store):
     """EXPLAIN QUERY PLAN must show index usage for indexed asset columns."""
     # Populate with data to give the planner a reason to use indexes
-    store.add_asset(Asset(id="a1", name="alpha", content="x",
+    store.add_asset(sign_asset(Asset(id="a1", name="alpha", content="x",
                           definition_hash="dh1", content_hash="ch1",
                           lineage_id="li1", created_by="cb1",
-                          tombstoned=True))
+                          tombstoned=True), signed_by="test"))
 
     # definition_hash index
     plan = store._conn.execute(
@@ -275,10 +276,11 @@ def test_index_coverage_trace_events(store):
 
 def test_dual_hash_fields(store):
     """definition_hash and content_hash must persist correctly."""
-    asset = Asset(
+    asset = sign_asset(Asset(
         id="a1", name="doc", content="payload",
         definition_hash="dh_abc123", content_hash="ch_def456",
-    )
+        origin="test",
+    ))
     store.add_asset(asset)
 
     fetched = store.get_asset("a1")
@@ -294,17 +296,18 @@ def test_dual_hash_fields(store):
 def test_retention_fields(store):
     """keep_flag and tombstoned must persist correctly."""
     # Default false
-    asset_default = Asset(id="a1", name="live", content="ok")
+    asset_default = sign_asset(Asset(id="a1", name="live", content="ok", origin="test"))
     store.add_asset(asset_default)
     assert store.get_asset("a1").keep_flag is False
     assert store.get_asset("a1").tombstoned is False
     assert store.get_asset("a1").tombstoned_at is None
 
     # Explicit true
-    asset_retained = Asset(
+    asset_retained = sign_asset(Asset(
         id="a2", name="kept", content="important",
         keep_flag=True, tombstoned=True, tombstoned_at="2025-01-01T00:00:00Z",
-    )
+        origin="test",
+    ))
     store.add_asset(asset_retained)
     fetched = store.get_asset("a2")
     assert fetched.keep_flag is True
@@ -318,7 +321,7 @@ def test_retention_fields(store):
 
 def test_lineage_id(store):
     """lineage_id must persist correctly."""
-    asset = Asset(id="a1", name="doc", content="data", lineage_id="lineage_xyz")
+    asset = sign_asset(Asset(id="a1", name="doc", content="data", lineage_id="lineage_xyz", origin="test"))
     store.add_asset(asset)
 
     fetched = store.get_asset("a1")
@@ -326,7 +329,7 @@ def test_lineage_id(store):
     assert fetched.lineage_id == "lineage_xyz"
 
     # Empty lineage_id default
-    asset_no_lineage = Asset(id="a2", name="plain", content="plain")
+    asset_no_lineage = sign_asset(Asset(id="a2", name="plain", content="plain", origin="test"))
     store.add_asset(asset_no_lineage)
     assert store.get_asset("a2").lineage_id == ""
 
@@ -339,7 +342,7 @@ def test_transaction_atomicity(store):
     """SQLite transactions must be atomic — committed data persists,
     uncommitted data does not."""
     # Normal commit path — data persists
-    store.add_asset(Asset(id="a1", name="committed", content="safe"))
+    store.add_asset(sign_asset(Asset(id="a1", name="committed", content="safe"), signed_by="test"))
     assert store.get_asset("a1") is not None
 
     # Simulate an uncommitted write on a separate connection
@@ -351,11 +354,11 @@ def test_transaction_atomicity(store):
 
 def test_insert_or_replace_upsert(store):
     """INSERT OR REPLACE must update an existing asset, not duplicate it."""
-    store.add_asset(Asset(id="a1", name="original", content="v1"))
+    store.add_asset(sign_asset(Asset(id="a1", name="original", content="v1"), signed_by="test"))
     assert len(store.get_all_assets()) == 1
 
     # Insert same ID with different content
-    store.add_asset(Asset(id="a1", name="updated", content="v2"))
+    store.add_asset(sign_asset(Asset(id="a1", name="updated", content="v2"), signed_by="test"))
     assert len(store.get_all_assets()) == 1
 
     updated = store.get_asset("a1")
@@ -405,7 +408,7 @@ def test_file_based_store(tmp_path):
     """SQLiteStore with a file path must persist data across connections."""
     db_path = str(tmp_path / "test.db")
     s1 = SQLiteStore(db_path)
-    s1.add_asset(Asset(id="a1", name="persist", content="data"))
+    s1.add_asset(sign_asset(Asset(id="a1", name="persist", content="data", origin="test")))
     s1.close()
 
     # Re-open — data must survive
@@ -432,5 +435,5 @@ def test_file_based_creates_parent_dirs(tmp_path):
 def test_context_manager():
     """SQLiteStore must support with-statement usage."""
     with SQLiteStore(":memory:") as s:
-        s.add_asset(Asset(id="a1", name="ctx", content="test"))
+        s.add_asset(sign_asset(Asset(id="a1", name="ctx", content="test", origin="test")))
         assert s.get_asset("a1") is not None

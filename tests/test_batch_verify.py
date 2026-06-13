@@ -12,18 +12,14 @@ from aigineering.core.verification import (
     check_sensitive_input_policy,
     verify_replacement_claims,
 )
+from aigineering.core.provenance import sign_asset
 from aigineering.protocol.types import Asset, Contract, ReplacementClaim
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
 def _make_asset(name: str, content: str, **kwargs: object) -> Asset:
-    """Create an Asset with correct definition_hash and content_hash."""
+    """Create a signed Asset with correct definition_hash and content_hash."""
     extra = dict(kwargs)
-    return Asset(
+    asset = Asset(
         id=hash_asset_content(name, content),
         name=name,
         content=content,
@@ -31,17 +27,19 @@ def _make_asset(name: str, content: str, **kwargs: object) -> Asset:
         content_hash=hash_asset_content(name, content),
         **extra,  # type: ignore[arg-type]
     )
+    return sign_asset(asset)
 
 
 def _make_broken_asset(name: str, content: str) -> Asset:
-    """Create an Asset with deliberately wrong content_hash (tampered)."""
-    return Asset(
+    """Create a signed Asset with deliberately wrong content_hash (tampered)."""
+    asset = Asset(
         id=hash_asset_content(name, content),
         name=name,
         content=content,
         definition_hash=hash_asset_definition(name),
-        content_hash="asset:deadbeef00000000000000000000000000000000000000000000000000000000",
+        content_hash="content:deadbeef00000000000000000000000000000000000000000000000000000000",
     )
+    return sign_asset(asset)
 
 
 # ---------------------------------------------------------------------------

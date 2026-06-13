@@ -168,7 +168,7 @@ def test_mcp_descriptor_carries_provenance():
         # ID and hash fields are computed
         assert desc.id.startswith("cap:")
         assert desc.definition_hash.startswith("def:")
-        assert desc.content_hash.startswith("asset:")
+        assert desc.content_hash.startswith("content:")
 
     # Tampered content breaks signature verification
     from dataclasses import replace

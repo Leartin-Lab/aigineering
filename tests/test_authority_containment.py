@@ -50,33 +50,31 @@ def _parent(**overrides: object) -> Contract:
 # ---------------------------------------------------------------------------
 
 
-def test_planner_tool_scope_escalation_clamped():
-    """Parent has tool_scope=['read']; planner emits ['read','write'] → clamped."""
+def test_planner_tool_scope_escalation_rejected():
+    """Parent has tool_scope=['read']; planner emits ['read','write'] → rejected."""
     parent = _parent(tool_scope=["read"])
     asset = _plan_asset([_basic_child(tool_scope=["read", "write"])])
     accepted, rejected = contracts_from_plan_asset(
         asset, parent.id, parent_contract=parent,
     )
 
-    assert len(accepted) == 1
+    assert len(accepted) == 0
     assert len(rejected) == 1
     assert rejected[0]["field"] == "tool_scope"
-    assert rejected[0]["action"] == "clamped"
-    assert accepted[0].tool_scope == ("read",)
+    assert rejected[0]["action"] == "rejected"
 
 
 def test_planner_tool_scope_no_escalation_allowed():
-    """Parent has no tool scope; planner emits non-empty scope → all tools clamped."""
+    """Parent has no tool scope; planner emits non-empty scope → rejected."""
     parent = _parent(tool_scope=[])
     asset = _plan_asset([_basic_child(tool_scope=["write"])])
     accepted, rejected = contracts_from_plan_asset(
         asset, parent.id, parent_contract=parent,
     )
 
-    assert len(accepted) == 1
+    assert len(accepted) == 0
     assert len(rejected) == 1
-    assert rejected[0]["action"] == "clamped"
-    assert accepted[0].tool_scope == ()
+    assert rejected[0]["action"] == "rejected"
 
 
 # ---------------------------------------------------------------------------
@@ -174,7 +172,7 @@ def test_label_superset_blocked():
 
 
 def test_budget_fanout_bounded():
-    """Planner requests budget=100, parent budget=5 → clamped to 5."""
+    """Planner requests budget=100, parent budget=5 → contained to 5."""
     parent = _parent(budget=5)
     asset = _plan_asset([_basic_child(budget=100)])
     accepted, rejected = contracts_from_plan_asset(
@@ -184,7 +182,9 @@ def test_budget_fanout_bounded():
     assert len(accepted) == 1
     assert len(rejected) == 1
     assert rejected[0]["field"] == "budget"
-    assert rejected[0]["action"] == "clamped"
+    assert rejected[0]["action"] == "budget_contained"
+    assert rejected[0].get("requested") == 100
+    assert rejected[0].get("effective") == 5
     assert accepted[0].budget == 5
 
 
@@ -298,22 +298,24 @@ def test_tool_scope_changes_contract_id():
     assert id_a != id_b
 
 
-def test_tool_scope_clamping_changes_identity():
-    """When tool_scope is clamped, the contract ID incorporates the clamped scope."""
-    parent = _parent(tool_scope=["read"])
-    asset = _plan_asset([_basic_child(tool_scope=["read", "write"])])
-    accepted, _ = contracts_from_plan_asset(
+def test_tool_scope_subset_accepted_with_correct_identity():
+    """When tool_scope is a subset of parent scope, child is accepted with its scope."""
+    parent = _parent(tool_scope=["read", "write"])
+    asset = _plan_asset([_basic_child(tool_scope=["read"])])
+    accepted, rejected = contracts_from_plan_asset(
         asset, parent.id, parent_contract=parent,
     )
 
-    clamped_id = accepted[0].id
-    unclamped_id = hash_contract(
+    assert len(accepted) == 1
+    assert len(rejected) == 0
+    assert accepted[0].tool_scope == ("read",)
+    expected_id = hash_contract(
         name="draft", description="Draft the report.",
         inputs=["source"], outputs=["draft_report"],
-        activation="source", budget=2, tool_scope=["read", "write"],
+        activation="source", budget=2, tool_scope=["read"],
         labels=["user"], origin="plan",
     )
-    assert clamped_id != unclamped_id
+    assert accepted[0].id == expected_id
 
 
 # ---------------------------------------------------------------------------

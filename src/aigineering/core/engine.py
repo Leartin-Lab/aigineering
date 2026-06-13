@@ -93,7 +93,10 @@ class Engine:
             )
 
     def add_asset(self, asset: Asset) -> None:
-        self._store.add_asset(sign_asset(asset))
+        signed = sign_asset(asset)
+        if not signed.signed_by:
+            signed = sign_asset(asset, signed_by="engine")
+        self._store.add_asset(signed)
 
     def _add_trace(self, contract_id: str, event_type: str, **kwargs: object) -> None:
         parent_id = self._contract_last_entry.get(contract_id)
@@ -102,7 +105,10 @@ class Engine:
 
     def _commit(self, result: ProjectionResult) -> None:
         for asset in result.accepted_assets:
-            self._store.add_asset(sign_asset(asset))
+            signed = sign_asset(asset)
+            if not signed.signed_by:
+                signed = sign_asset(asset, signed_by="engine")
+            self._store.add_asset(signed)
 
     def run(self) -> None:
         while True:
@@ -212,7 +218,6 @@ class Engine:
             self._add_trace(
                 contract.id,
                 "budget_initialized",
-                budget_initial=self._budget[contract.id],
                 budget_remaining=self._budget[contract.id],
             )
         return self._budget[contract.id]
@@ -283,8 +288,6 @@ class Engine:
             contract.id,
             "budget_consumed",
             relation_type=action.type,
-            budget_requested=consumed,
-            budget_effective=consumed,
             budget_remaining=self._budget[contract.id],
         )
         self._suspended.add(contract.id)

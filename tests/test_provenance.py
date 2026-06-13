@@ -27,14 +27,15 @@ def test_jsonl_store_roundtrips_asset_provenance(tmp_path):
         source_uri="tool://read",
     )
 
-    store.add_asset(asset)
+    store.add_asset(sign_asset(asset))
     reopened = JsonLStore(
         str(tmp_path / "assets.jsonl"),
         str(tmp_path / "contracts.jsonl"),
     )
 
+    signed_asset = sign_asset(asset)
     loaded = reopened.get_asset("asset_1")
-    assert loaded == asset
+    assert loaded == signed_asset
     assert loaded.origin == "tool"
     assert loaded.trust_tier == "observed"
     assert loaded.minted_by == "tool_worker"

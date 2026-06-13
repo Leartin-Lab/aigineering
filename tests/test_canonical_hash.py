@@ -11,6 +11,7 @@ Verifies:
 import json
 import unicodedata
 
+from aigineering.core.provenance import sign_asset
 from aigineering.core.ids import (
     canonical_json,
     compute_content_hash,
@@ -120,7 +121,7 @@ def test_typed_hash_domains_contract():
 
 def test_typed_hash_domains_asset_content():
     aid = hash_asset_content("report", "content")
-    assert aid.startswith("asset:")
+    assert aid.startswith("content:")
     assert len(aid) == 6 + 64  # "asset:" + 64 hex chars
 
 

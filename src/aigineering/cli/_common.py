@@ -17,6 +17,7 @@ from aigineering.core.ids import (
 )
 from aigineering.core.session import SessionStore
 from aigineering.core.store import JsonLStore, MemoryStore, StoreProtocol
+from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.core.trace import JsonLTraceStore, MemoryTraceStore, TraceStoreProtocol
 from aigineering.agent.llm import LLMWorker
 from aigineering.agent.mock import MockWorker
@@ -33,13 +34,9 @@ def _get_store_dir() -> Path:
     return Path(".aig/store")
 
 
-def _persistent_store() -> JsonLStore:
-    """Create the default local persistent store."""
-    store_dir = _get_store_dir()
-    return JsonLStore(
-        str(store_dir / "assets.jsonl"),
-        str(store_dir / "contracts.jsonl"),
-    )
+def _persistent_store() -> SQLiteStore:
+    """Create the default local persistent store (SQLite-backed)."""
+    return SQLiteStore(db_path=".aig/store.db")
 
 
 def _session_id() -> str:

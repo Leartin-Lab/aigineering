@@ -6,6 +6,7 @@ from aigineering.agent.mock import MockWorker
 from aigineering.core.engine import Engine
 from aigineering.core.ids import hash_asset_content, hash_contract
 from aigineering.core.labels import Label, resolve_contract_labels
+from aigineering.core.provenance import sign_asset
 from aigineering.core.store import MemoryStore
 from aigineering.core.trace import TraceStore
 from aigineering.protocol.types import Asset, Contract
@@ -41,7 +42,7 @@ def _contract(**kwargs) -> Contract:
 def test_label_injects_existing_asset():
     store = MemoryStore()
     skill = _asset("_skill_review", "review procedure", origin="skill")
-    store.add_asset(skill)
+    store.add_asset(sign_asset(skill))
     contract = _contract(name="review", labels=["reviewer"], outputs=["result"])
 
     result = resolve_contract_labels(
@@ -78,8 +79,8 @@ def test_engine_discloses_label_injected_assets_and_traces_resolution():
     worker = MockWorker()
     skill = _asset("_skill_review", "review procedure", origin="skill")
     input_asset = _asset("input", "input content")
-    store.add_asset(skill)
-    store.add_asset(input_asset)
+    store.add_asset(sign_asset(skill))
+    store.add_asset(sign_asset(input_asset))
 
     contract = _contract(
         name="review",

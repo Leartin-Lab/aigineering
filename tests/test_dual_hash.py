@@ -2,6 +2,7 @@
 
 import pytest
 
+from aigineering.core.provenance import sign_asset
 from aigineering.core.ids import hash_asset_content, hash_asset_definition
 from aigineering.core.store import JsonLStore, MemoryStore
 from aigineering.protocol.types import Asset
@@ -29,7 +30,7 @@ def test_definition_hash_is_set_on_creation():
     assert asset.definition_hash == hash_asset_definition(name)
     assert asset.content_hash == hash_asset_content(name, content)
     assert asset.definition_hash.startswith("def:")
-    assert asset.content_hash.startswith("asset:")
+    assert asset.content_hash.startswith("content:")
 
 
 def test_definition_hash_backward_compatible_defaults():

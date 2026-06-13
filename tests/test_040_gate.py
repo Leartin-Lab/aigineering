@@ -250,6 +250,7 @@ class TestContextOverflow:
         Debt: D-P0.2 (engine.py:344-355)
         """
         from aigineering.core.engine import Engine
+        from aigineering.core.provenance import sign_asset
         from aigineering.core.trace import MemoryTraceStore
         from aigineering.protocol.types import Contract, Asset
         from aigineering.agent.mock import MockWorker
@@ -278,7 +279,7 @@ class TestContextOverflow:
             origin="user",
         )
         store.add_contract(contract)
-        store.add_asset(huge_asset)
+        store.add_asset(sign_asset(huge_asset))
 
         # Set a small context limit to trigger overflow
         engine._context_size_limit = 100  # ~25 tokens
@@ -607,7 +608,6 @@ class TestTransactionalSubmit:
 
         store = MemoryStore()
 
-        # Create an unsigned asset
         unsigned = Asset(
             id="unsigned-asset",
             name="test-unsigned",
@@ -619,24 +619,12 @@ class TestTransactionalSubmit:
             signature="",
         )
 
-        # Current behavior: store accepts unsigned assets
-        # Required behavior: store must reject unsigned assets
-        try:
+        with pytest.raises(ValueError, match="missing or invalid canonical seal"):
             store.add_asset(unsigned)
-            stored = store.get_asset("unsigned-asset")
-            assert stored is not None
-            # Check if stored asset has a valid seal
-            has_seal = bool(stored.signed_by and stored.signature)
-            if not has_seal:
-                # This is the current broken behavior — store accepted unsigned asset
-                # After repair, store.add_asset() should raise or reject
-                assert False, (
-                    f"G3/N-P1.6: Store accepted unsigned asset. "
-                    f"signed_by='{stored.signed_by}', signature='{stored.signature}'"
-                )
-        except (ValueError, TypeError):
-            # This is the expected behavior after repair
-            pass
+
+        assert store.get_asset("unsigned-asset") is None, (
+            "G3/N-P1.6: Unsigned asset must not be stored after rejection"
+        )
 
     def test_dual_hash_assets_have_typed_def_and_content_hash(self):
         """Asset definition_hash must start with 'def:' and content_hash with 'content:'.

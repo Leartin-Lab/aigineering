@@ -15,7 +15,7 @@ class Asset:
     content: str
     content_type: str = "text"
     created_by: str = ""
-    origin: str = "system"
+    origin: str = ""
     trust_tier: str = "untrusted"
     minted_by: str = ""
     source_uri: str = ""

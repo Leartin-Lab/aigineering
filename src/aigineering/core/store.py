@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 from typing import Optional, Protocol, runtime_checkable
 
+from aigineering.core.provenance import verify_asset_signature
 from aigineering.protocol.types import Asset, Contract
 from aigineering.protocol.wire import asset_to_dict, contract_to_dict
 
@@ -37,6 +38,11 @@ class MemoryStore:
         self.contracts: dict[str, Contract] = {}
 
     def add_asset(self, asset: Asset) -> None:
+        if not asset.signed_by or not verify_asset_signature(asset):
+            raise ValueError(
+                f"G3/N-P1.6: Asset '{asset.id}' rejected — missing or invalid canonical seal "
+                f"(signed_by={asset.signed_by!r})"
+            )
         self.assets[asset.id] = asset
 
     def get_asset(self, asset_id: str) -> Optional[Asset]:
@@ -109,7 +115,7 @@ class JsonLStore:
                     content=data["content"],
                     content_type=data.get("content_type", "text"),
                     created_by=data.get("created_by", ""),
-                    origin=data.get("origin", "system"),
+                    origin=data.get("origin", ""),
                     trust_tier=data.get("trust_tier", "untrusted"),
                     minted_by=data.get("minted_by", ""),
                     source_uri=data.get("source_uri", ""),
@@ -171,6 +177,11 @@ class JsonLStore:
                 _logger.warning("fsync failed for %s", path)
 
     def add_asset(self, asset: Asset) -> None:
+        if not asset.signed_by or not verify_asset_signature(asset):
+            raise ValueError(
+                f"G3/N-P1.6: Asset '{asset.id}' rejected — missing or invalid canonical seal "
+                f"(signed_by={asset.signed_by!r})"
+            )
         line = json.dumps(asset_to_dict(asset), ensure_ascii=False) + "\n"
         self._write_jsonl_line(self._assets_path, line)
         # If ID already exists, remove old index entries before overwriting

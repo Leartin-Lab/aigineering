@@ -13,6 +13,7 @@ import sqlite3
 from pathlib import Path
 from typing import Optional
 
+from aigineering.core.provenance import verify_asset_signature
 from aigineering.protocol.types import Asset, Contract
 from aigineering.protocol.wire import asset_to_dict, contract_to_dict
 
@@ -253,6 +254,11 @@ class SQLiteStore:
     # ------------------------------------------------------------------
 
     def add_asset(self, asset: Asset) -> None:
+        if not asset.signed_by or not verify_asset_signature(asset):
+            raise ValueError(
+                f"G3/N-P1.6: Asset '{asset.id}' rejected — missing or invalid canonical seal "
+                f"(signed_by={asset.signed_by!r})"
+            )
         d = asset_to_dict(asset)
         with self._conn:
             self._conn.execute(

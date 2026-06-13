@@ -344,7 +344,7 @@ def test_report_is_traceable_asset():
     assert asset.definition_hash
     assert asset.content_hash
     assert asset.id
-    assert asset.id.startswith("asset:")
+    assert asset.id.startswith("content:")
 
 
 def test_sufficiency_asset_can_be_stored_and_retrieved():
