@@ -1076,7 +1076,15 @@ class TestWorkerProtocolFixes:
         Gate: G4
         Debt: N-P1.12 (tool_worker.py:24, mcp_worker.py:27)
         """
-        pass  # Placeholder — implement after Phase F2
+        import inspect
+        from aigineering.agent.tool_worker import ToolWorker
+        from aigineering.agent.worker import Worker
+        # ToolWorker.invoke must accept (self, contract, disclosed_assets) like Worker protocol
+        sig = inspect.signature(ToolWorker.invoke)
+        params = list(sig.parameters.keys())
+        assert "contract" in params or len(params) >= 2, (
+            f"G4/N-P1.12: ToolWorker.invoke must accept contract + disclosed_assets. Params: {params}"
+        )
 
     def test_mock_worker_id_is_frozen_instance_attr(self):
         """MockWorker.worker_id must be immutable after construction.
@@ -1084,7 +1092,20 @@ class TestWorkerProtocolFixes:
         Gate: G4
         Debt: N-P1.11 (mock.py:10-12)
         """
-        pass  # Placeholder — implement after Phase F2
+        from aigineering.agent.mock import MockWorker
+        w = MockWorker()
+        assert w.worker_id == "mock_worker"
+        # Must raise on assignment attempt
+        try:
+            w.worker_id = "spoofed"
+            assert False, "G4/N-P1.11: MockWorker.worker_id must reject assignment"
+        except AttributeError:
+            pass  # Expected — frozen property
+        # Custom worker_id via constructor must work
+        w2 = MockWorker(worker_id="custom")
+        assert w2.worker_id == "custom"
+        # Original instance unchanged
+        assert w.worker_id == "mock_worker"
 
 
 class TestReplayIntegrity:

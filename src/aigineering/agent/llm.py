@@ -101,8 +101,12 @@ class LLMWorker:
             self._capabilities = capabilities or frozenset()
             self._tool_definitions = tool_definitions
 
-        self.worker_id = worker_id or f"llm:{self.model}"
+        self.worker_id = worker_id or f"llm:{self._sanitize_model_name()}"
         self._transport = transport
+
+    def _sanitize_model_name(self) -> str:
+        """Return a safe model name for use in worker_id slugs."""
+        return "".join(c if c.isalnum() or c in "-_" else "_" for c in self.model)[:64]
 
     def invoke(
         self,
