@@ -501,6 +501,41 @@ class SQLiteStore:
         return [trace_entry_from_dict(dict(row)) for row in cur.fetchall()]
 
     # ------------------------------------------------------------------
+    # Claim persistence (040 C4, G8)
+    # ------------------------------------------------------------------
+
+    def persist_claim(self, claim_id: str, contract_id: str, worker_id: str,
+                      lease_until: str, status: str = "active") -> None:
+        """Persist a claim record to survive restarts."""
+        with self._conn:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO claims (id, source_asset_id, "
+                "replacement_asset_id, definition_hash, claim_type, "
+                "signed_by, provenance_seal, lineage_id) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (claim_id, contract_id, worker_id, lease_until, status, "", "", ""),
+            )
+
+    def get_claim(self, contract_id: str) -> dict | None:
+        """Return the active claim for *contract_id*, or None."""
+        cur = self._conn.execute(
+            "SELECT id, source_asset_id, replacement_asset_id, "
+            "definition_hash, claim_type FROM claims "
+            "WHERE source_asset_id = ? ORDER BY rowid DESC LIMIT 1",
+            (contract_id,),
+        )
+        row = cur.fetchone()
+        if row is None:
+            return None
+        return {
+            "claim_id": row["id"],
+            "contract_id": row["source_asset_id"],
+            "worker_id": row["replacement_asset_id"],
+            "lease_until": row["definition_hash"],
+            "status": row["claim_type"],
+        }
+
+    # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
 
