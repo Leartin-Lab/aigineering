@@ -54,7 +54,7 @@ def replay_session(
                 candidate_store = JsonLTraceStore(str(fp))
                 candidate_ids = {e.id for e in candidate_store.get_all()}
                 # Match if the session's trace_ids are a subset of candidate's entries
-                if trace_id_set <= candidate_ids or trace_id_set & candidate_ids:
+                if trace_id_set <= candidate_ids:
                     trace_store = candidate_store
                     entries = trace_store.get_all()
                     break
