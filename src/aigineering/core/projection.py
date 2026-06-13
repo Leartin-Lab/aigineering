@@ -72,6 +72,7 @@ def project_candidate(
     accepted_assets: list[Asset] = []
 
     for a in accepted_dicts:
+        worker_origin = _derive_worker_origin(candidate.worker_id)
         asset = Asset(
             id=hash_asset_content(a["name"], a["content"]),
             name=a["name"],
@@ -80,7 +81,7 @@ def project_candidate(
             content_hash=hash_asset_content(a["name"], a["content"]),
             content_type="text",
             created_by=contract.id,
-            origin="worker",
+            origin=worker_origin,
             trust_tier="untrusted",
             minted_by=candidate.worker_id,
             source_uri="",
@@ -217,3 +218,22 @@ def _parse_legacy_lines(raw_output: str) -> tuple[list[dict], list[RejectedCandi
         fragments.append({"name": name, "content": content})
 
     return fragments, parse_rejected
+
+
+def _derive_worker_origin(worker_id: str) -> str:
+    """Derive the asset ``origin`` from the worker's canonical type prefix.
+
+    Maps known worker_id prefixes to their corresponding origin category:
+    ``llm:`` → ``"llm"``, ``tool_worker:`` → ``"tool"``,
+    ``mcp_worker:`` → ``"mcp"``, ``mock`` → ``"mock"``.
+    Falls back to ``"worker"`` for unknown workers.
+    """
+    if worker_id.startswith("llm:"):
+        return "llm"
+    if worker_id.startswith("tool_worker:"):
+        return "tool"
+    if worker_id.startswith("mcp_worker:"):
+        return "mcp"
+    if worker_id == "mock_worker":
+        return "mock"
+    return "worker"

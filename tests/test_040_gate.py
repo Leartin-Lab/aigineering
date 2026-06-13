@@ -816,7 +816,21 @@ class TestDisclosureRedaction:
         Gate: G4 (Strong Worker Protocol)
         Debt: N-P1.9 (projection.py:83)
         """
-        pass  # Placeholder — implement after Phase D4
+        from aigineering.core.projection import project_candidate, _derive_worker_origin
+        from aigineering.protocol.types import Contract, Candidate
+
+        cases = [
+            ("mock_worker", "mock"),
+            ("llm:gpt-4", "llm"),
+            ("tool_worker:search", "tool"),
+            ("mcp_worker:search.query", "mcp"),
+            ("unknown_worker", "worker"),
+        ]
+        for worker_id, expected_origin in cases:
+            assert _derive_worker_origin(worker_id) == expected_origin, (
+                f"G4/N-P1.9: worker_id={worker_id!r} → expected origin={expected_origin!r}, "
+                f"got {_derive_worker_origin(worker_id)!r}"
+            )
 
     def test_asset_default_origin_is_unset_not_system(self):
         """Asset.origin default must not be 'system'.

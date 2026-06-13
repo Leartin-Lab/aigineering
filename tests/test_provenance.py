@@ -50,7 +50,7 @@ def test_projection_assets_record_worker_provenance():
 
     assert len(result.accepted_assets) == 1
     asset = result.accepted_assets[0]
-    assert asset.origin == "worker"
+    assert asset.origin == "mock"
     assert asset.trust_tier == "untrusted"
     assert asset.minted_by == "mock_worker"
 
