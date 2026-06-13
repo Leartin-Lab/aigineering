@@ -209,6 +209,12 @@ class Engine:
     def _resolve_budget(self, contract: Contract) -> int:
         if contract.id not in self._budget:
             self._budget[contract.id] = max(contract.budget, 1)
+            self._add_trace(
+                contract.id,
+                "budget_initialized",
+                budget_initial=self._budget[contract.id],
+                budget_remaining=self._budget[contract.id],
+            )
         return self._budget[contract.id]
 
     def _compute_scope(self, contract: Contract) -> list[Asset]:
@@ -271,7 +277,16 @@ class Engine:
             self._schedule_method_contract(contract, action, candidate)
 
         remaining = self._resolve_budget(contract)
-        self._budget[contract.id] = max(0, remaining - 1)
+        consumed = 1
+        self._budget[contract.id] = max(0, remaining - consumed)
+        self._add_trace(
+            contract.id,
+            "budget_consumed",
+            relation_type=action.type,
+            budget_requested=consumed,
+            budget_effective=consumed,
+            budget_remaining=self._budget[contract.id],
+        )
         self._suspended.add(contract.id)
 
     def _schedule_method_contract(
@@ -628,15 +643,16 @@ class Engine:
         engine = cls(store, worker, trace_store, labels, tools, method_registry,
                      context_size_limit=context_size_limit)
 
-        # Count activations per contract for budget derivation
-        # NOTE: _dispatch_method budget decrements are NOT yet traced (N-P1.1).
-        # Full budget recovery requires Phase B2 budget_consumed trace events.
+        # Count activations and budget consumption per contract for budget derivation
         activation_counts: dict[str, int] = {}
 
         for entry in trace_store.get_all():
             cid = entry.contract_id
 
             if entry.event_type == "activation":
+                activation_counts[cid] = activation_counts.get(cid, 0) + 1
+
+            elif entry.event_type == "budget_consumed":
                 activation_counts[cid] = activation_counts.get(cid, 0) + 1
 
             elif entry.event_type == "method_scheduled":

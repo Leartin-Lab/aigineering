@@ -102,24 +102,53 @@ class TestSessionSealedConfig:
 class TestRestoreBudget:
     """G9: Recovery must reconstruct runtime state from committed records."""
 
-    @pytest.mark.xfail(
-        reason="Deferred to Phase B2: _dispatch_method budget decrements not yet traced (N-P1.1). "
-               "Full fix requires budget_consumed trace events, then counting them alongside activations."
-    )
-    def test_restore_from_store_counts_method_scheduled_as_consumption(self):
-        """restore_from_store must count method_scheduled trace events as budget consumption.
+    def test_restore_from_store_counts_budget_consumed_events(self):
+        """restore_from_store must count budget_consumed trace events as consumption.
 
         Gate: G9 (Recovery Is Crash-Consistent)
-        Debt: N-P0.2 (engine.py:664-668)
-
-        DEFERRED to Phase B2: _dispatch_method() decrements budget without tracing (N-P1.1).
-        Counting method_scheduled alone would double-count because the activation event
-        already covers the base budget decrement. The correct fix requires:
-        1. Phase B2: Add budget_consumed trace events to _dispatch_method
-        2. Then: Count both activation + budget_consumed in restore_from_store
+        Debt: N-P0.2 (engine.py:664-668), N-P1.1 (engine.py:264)
         """
-        import pytest
-        pytest.skip("Deferred to Phase B2 — requires budget_consumed trace events (N-P1.1 fix first)")
+        from aigineering.core.engine import Engine
+        from aigineering.core.trace import MemoryTraceStore, create_entry
+        from aigineering.protocol.types import Contract
+        from aigineering.agent.mock import MockWorker
+
+        store = MemoryStore()
+        trace = MemoryTraceStore()
+        worker = MockWorker()
+
+        contract = Contract(
+            id="c-budget-2",
+            parent_id=None,
+            name="test-budget-2",
+            description="Budget recovery test with budget_consumed events",
+            inputs=[],
+            outputs=["result"],
+            budget=10,
+        )
+        store.add_contract(contract)
+
+        # Simulate: 3 activations + 2 budget_consumed = 5 total decrements
+        for i in range(3):
+            trace.append(create_entry(
+                contract_id="c-budget-2",
+                event_type="activation",
+                budget_remaining=10 - i,
+            ))
+        for i in range(2):
+            trace.append(create_entry(
+                contract_id="c-budget-2",
+                event_type="budget_consumed",
+                budget_remaining=10 - 3 - (i + 1),
+            ))
+
+        restored = Engine.restore_from_store(store, worker, trace)
+        expected = 10 - 3 - 2  # = 5
+        actual = restored._budget.get("c-budget-2", -1)
+        assert actual == expected, (
+            f"G9/N-P0.2: restore_from_store budget = {actual}, expected {expected}. "
+            f"budget_consumed events ({2}) not counted as consumption."
+        )
 
 
 # ============================================================================
@@ -136,7 +165,37 @@ class TestCLIRetryBypass:
         Gate: G1 (Single Runtime Ingress)
         Debt: D-P0.1 (cli/retry.py:22-47)
         """
+        import ast
+        import os
+
+        # ── Static analysis: cli/retry.py must not call add_contract() directly ──
+        retry_path = os.path.join(
+            os.path.dirname(__file__),
+            "..", "src", "aigineering", "cli", "retry.py"
+        )
+        with open(retry_path) as f:
+            source = f.read()
+        tree = ast.parse(source)
+
+        add_contract_calls = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call):
+                if (isinstance(node.func, ast.Attribute)
+                        and node.func.attr == "add_contract"):
+                    add_contract_calls.append(node.lineno)
+
+        assert len(add_contract_calls) == 0, (
+            f"G1/D-P0.1: cli/retry.py calls add_contract() directly at line(s): "
+            f"{add_contract_calls}. Must go through method ingress "
+            f"(MethodRuntime → RetryMethodHandler)."
+        )
+
+        # ── Functional test: CLI retry still creates the retry contract ──
         from aigineering.protocol.types import Contract
+        from aigineering.core.ids import hash_retry
+        from aigineering.cli import retry as retry_module
+        from click.testing import CliRunner
+        from unittest.mock import patch
 
         store = MemoryStore()
         original = Contract(
@@ -150,8 +209,35 @@ class TestCLIRetryBypass:
         )
         store.add_contract(original)
 
-        # Full test after B3 repair (CLI retry → method ingress)
-        pass  # Full test after B3 repair
+        expected_id = hash_retry("c-original")
+        assert store.get_contract(expected_id) is None, (
+            "Precondition: retry contract must not exist before CLI runs."
+        )
+
+        runner = CliRunner()
+        with patch.object(retry_module, "_persistent_store", return_value=store):
+            result = runner.invoke(retry_module.retry, ["--contract", "c-original"])
+
+        assert result.exit_code == 0, (
+            f"G1/D-P0.1: CLI retry failed: {result.output}"
+        )
+
+        retry_contract = store.get_contract(expected_id)
+        assert retry_contract is not None, (
+            f"G1/D-P0.1: Retry contract '{expected_id}' not found in store. "
+            f"CLI output: {result.output}"
+        )
+        assert retry_contract.name == original.name, (
+            f"G1/D-P0.1: Retry contract name mismatch. "
+            f"Expected '{original.name}', got '{retry_contract.name}'."
+        )
+        assert retry_contract.parent_id == original.parent_id, (
+            "G1/D-P0.1: Retry contract parent_id must match original."
+        )
+        assert expected_id in result.output or hash_retry("c-original") in result.output, (
+            f"G1/D-P0.1: Retry contract ID must appear in CLI output. "
+            f"Got: {result.output}"
+        )
 
 
 class TestContextOverflow:
@@ -218,9 +304,7 @@ class TestAuthorityClamp:
         Gate: G6 (Deny-By-Default Capability Containment)
         Debt: D-P0.4 (methods.py:275-294)
         """
-        # Current behavior: clamps tool_scope (action="clamped"), child accepted
-        # Required behavior: rejects child (action="rejected"), child skipped
-        # This test must FAIL against current code (which clamps)
+        # Behavior: rejects child (action="rejected"), child skipped entirely
         from aigineering.core.methods import contracts_from_plan_asset
 
         parent = Contract(
@@ -246,8 +330,7 @@ class TestAuthorityClamp:
             plan_asset, parent_id=parent.id, parent_contract=parent
         )
 
-        # After repair: the tool_scope widening (adding "tool_c") must REJECT the child
-        # Current bug: code clamps (action="clamped") — this test must FAIL until B4 repair
+        # The tool_scope widening (adding "tool_c") must REJECT the child
         tool_scope_rejections = [
             r for r in rejections
             if isinstance(r, dict) and r.get("field") == "tool_scope"
@@ -265,7 +348,7 @@ class TestAuthorityClamp:
             )
         # Also verify no child was accepted with the widened scope
         child_tool_scopes = {c.name: list(c.tool_scope) for c in children}
-        assert "child-task" not in child_tool_scopes or set(child_tool_scopes.get("child-task", [])).issubset({"tool_a", "tool_b"}), (
+        assert "child-task" not in child_tool_scopes, (
             f"G6/D-P0.4: Widened tool_scope child must not be accepted. "
             f"Accepted children: {child_tool_scopes}"
         )
@@ -276,9 +359,8 @@ class TestAuthorityClamp:
         Gate: G6 (Deny-By-Default Capability Containment)
         Debt: D-P0.4 (methods.py:358-395)
         """
-        # Budget containment is different from authority rejection:
-        # - Budget can be contained (child accepted with reduced budget)
-        # - But the trace MUST record requested, effective, and remaining budget
+        # Budget containment: child is accepted with reduced budget, but the trace
+        # MUST record requested, effective, and remaining budget fields.
         from aigineering.core.methods import contracts_from_plan_asset
 
         parent = Contract(
@@ -304,23 +386,50 @@ class TestAuthorityClamp:
             parent_budget_remaining=parent.budget,
         )
 
-        # Budget clamping: child is accepted with reduced budget (current behavior)
-        # Phase B4 will change action from "clamped" to "budget_contained" with
-        # requested/effective/remaining trace fields
+        # Budget containment: child is accepted with reduced budget (action="budget_contained"),
+        # with requested/effective/remaining trace fields
         budget_rejections = [
             r for r in rejections
             if isinstance(r, dict) and r.get("field") == "budget"
         ]
 
-        if budget_rejections:
-            # Current behavior: budget is clamped
-            clamped = [r for r in budget_rejections if r.get("action") == "clamped"]
-            assert len(clamped) > 0 or len(children) > 0, (
-                f"G6/D-P0.4: Budget must be clamped or contained for child overspend. "
-                f"Children: {[c.name for c in children]}, Budget rejections: {budget_rejections}"
+        assert len(budget_rejections) > 0, (
+            f"G6/D-P0.4: Budget overspend must produce a rejection entry. "
+            f"Got rejections: {rejections}"
+        )
+
+        for r in budget_rejections:
+            assert r.get("action") == "budget_contained", (
+                f"G6/D-P0.4: Budget widening action must be 'budget_contained', "
+                f"got '{r.get('action')}'. Full entry: {r}"
             )
-            # After Phase B4 repair: verify containment trace has requested/effective/remaining
-            # The assertion below will be updated when B4 implements explicit budget tracing
+            assert "requested" in r, (
+                f"G6/D-P0.4: Budget containment entry must have 'requested' field. "
+                f"Full entry: {r}"
+            )
+            assert "effective" in r, (
+                f"G6/D-P0.4: Budget containment entry must have 'effective' field. "
+                f"Full entry: {r}"
+            )
+            assert "remaining" in r, (
+                f"G6/D-P0.4: Budget containment entry must have 'remaining' field. "
+                f"Full entry: {r}"
+            )
+            # Verify values are sensible
+            assert r["requested"] == 20, f"requested should be 20, got {r['requested']}"
+            assert r["effective"] == 5, f"effective should be 5, got {r['effective']}"
+            assert r["remaining"] == 0, f"remaining should be 0, got {r['remaining']}"
+
+        # Child should still be accepted with contained budget
+        assert any(c.name == "child-task" for c in children), (
+            f"G6/D-P0.4: Budget-contained child must still be accepted. "
+            f"Accepted children: {[c.name for c in children]}"
+        )
+        child = next(c for c in children if c.name == "child-task")
+        assert child.budget == 5, (
+            f"G6/D-P0.4: Budget-contained child must have contained budget=5, "
+            f"got {child.budget}"
+        )
 
 
 class TestProtectedMintingAuthority:
