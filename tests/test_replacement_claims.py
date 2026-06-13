@@ -26,7 +26,7 @@ class TestReplacementClaimCreation:
             definition_hash=def_hash,
             claim_type="replacement",
             signed_by="signer-1",
-            signature="sig-abc",
+            provenance_seal="sig-abc",
             lineage_id=lineage,
         )
 
@@ -36,7 +36,7 @@ class TestReplacementClaimCreation:
         assert claim.definition_hash == def_hash
         assert claim.claim_type == "replacement"
         assert claim.signed_by == "signer-1"
-        assert claim.signature == "sig-abc"
+        assert claim.provenance_seal == "sig-abc"
         assert claim.lineage_id == lineage
 
     def test_claim_types(self):
@@ -70,7 +70,7 @@ class TestReplacementClaimCreation:
             claim_type="replacement",
         )
         assert claim.signed_by == ""
-        assert claim.signature == ""
+        assert claim.provenance_seal == ""
         assert claim.lineage_id == ""
 
     def test_claim_is_frozen(self):

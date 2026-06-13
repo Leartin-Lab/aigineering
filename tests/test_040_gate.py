@@ -616,7 +616,7 @@ class TestTransactionalSubmit:
             content_hash="content:test",
             origin="user",
             signed_by="",
-            signature="",
+            provenance_seal="",
         )
 
         with pytest.raises(ValueError, match="missing or invalid canonical seal"):
@@ -674,7 +674,7 @@ class TestTransactionalSubmit:
         Gate: G3, G4, G10
         Debt: N-P1.6
         """
-        from aigineering.core.provenance import sign_asset, verify_asset_signature
+        from aigineering.core.provenance import sign_asset, verify_asset_seal
         from aigineering.protocol.types import Asset
 
         store = MemoryStore()
@@ -691,8 +691,8 @@ class TestTransactionalSubmit:
         signed = sign_asset(asset)
 
         # Verify the seal is valid
-        assert verify_asset_signature(signed), (
-            "G4/G10: signed asset must pass verify_asset_signature"
+        assert verify_asset_seal(signed), (
+            "G4/G10: signed asset must pass verify_asset_seal"
         )
 
         # Store should accept this
@@ -700,7 +700,7 @@ class TestTransactionalSubmit:
         stored = store.get_asset("signed-asset")
         assert stored is not None
         assert stored.signed_by == signed.signed_by
-        assert stored.signature == signed.signature
+        assert stored.provenance_seal == signed.provenance_seal
 
     def test_idempotency_survives_restart(self):
         """IdempotencyStore must persist across process restarts.

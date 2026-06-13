@@ -20,7 +20,7 @@ class Asset:
     minted_by: str = ""
     source_uri: str = ""
     signed_by: str = ""
-    signature: str = ""
+    provenance_seal: str = ""
     promptable: bool = True
     disclosure_view: str = "original"
     definition_hash: str = ""
@@ -139,7 +139,7 @@ class ReplacementClaim:
     definition_hash: str
     claim_type: str
     signed_by: str = ""
-    signature: str = ""
+    provenance_seal: str = ""
     lineage_id: str = ""
 
     _VALID_CLAIM_TYPES = frozenset({

@@ -204,7 +204,7 @@ def test_trust_gap_triggers_escalate():
 # ── Signature gaps ───────────────────────────────────────────────────────
 
 
-def test_signature_gap_detection_unsigned():
+def test_seal_gap_detection_unsigned():
     """Store rejects unsigned assets — sufficiency reports missing input."""
     contract = _make_contract(inputs=["unsigned_asset"])
     store = MemoryStore()
@@ -217,7 +217,7 @@ def test_signature_gap_detection_unsigned():
     assert not report["sufficiency_ok"]
 
 
-def test_signature_gap_detection_invalid():
+def test_seal_gap_detection_invalid():
     """Store rejects tampered assets — sufficiency reports missing input."""
     from dataclasses import replace
 
@@ -234,17 +234,17 @@ def test_signature_gap_detection_invalid():
     assert "tampered" in report["missing_inputs"]
 
 
-def test_no_signature_gap_for_validly_signed():
+def test_no_seal_gap_for_validly_signed():
     contract = _make_contract(inputs=["signed_asset"])
     store = MemoryStore()
     store.add_asset(_make_asset("signed_asset", "data", signed=True))
 
     report = check_sufficiency(contract, store)
 
-    assert report["signature_gaps"] == []
+    assert report["seal_gaps"] == []
 
 
-def test_signature_gap_triggers_escalate():
+def test_seal_gap_triggers_escalate():
     """Store rejects unsigned — missing input triggers escalate."""
     contract = _make_contract(inputs=["unsigned_asset"])
     store = MemoryStore()
@@ -416,7 +416,7 @@ def test_tombstoned_asset_not_flagged_as_sig_gap():
     report = check_sufficiency(contract, store)
 
     assert "stale_unsigned" in report["stale_assets"]
-    assert "stale_unsigned" not in report["signature_gaps"]
+    assert "stale_unsigned" not in report["seal_gaps"]
 
 
 # ── Parametrized across store types ──────────────────────────────────────

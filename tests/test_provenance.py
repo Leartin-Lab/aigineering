@@ -4,9 +4,9 @@ from aigineering.core.projection import project_candidate
 from dataclasses import replace
 
 from aigineering.core.provenance import (
-    provenance_signature,
+    compute_provenance_seal,
     sign_asset,
-    verify_asset_signature,
+    verify_asset_seal,
 )
 from aigineering.core.store import JsonLStore
 from aigineering.protocol.types import Asset, Candidate, Contract
@@ -55,7 +55,7 @@ def test_projection_assets_record_worker_provenance():
     assert asset.minted_by == "mock_worker"
 
 
-def test_sign_asset_adds_deterministic_provenance_signature():
+def test_sign_asset_adds_deterministic_compute_provenance_seal():
     asset = Asset(
         id="asset_1",
         name="evidence",
@@ -69,9 +69,9 @@ def test_sign_asset_adds_deterministic_provenance_signature():
     signed_again = sign_asset(asset)
 
     assert signed.signed_by == "tool_worker"
-    assert signed.signature.startswith("asig_")
-    assert signed.signature == signed_again.signature
-    assert signed.signature == provenance_signature(asset, signed_by="tool_worker")
+    assert signed.provenance_seal.startswith("asig_")
+    assert signed.provenance_seal == signed_again.provenance_seal
+    assert signed.provenance_seal == compute_provenance_seal(asset, signed_by="tool_worker")
 
 
 def test_jsonl_store_roundtrips_asset_signature(tmp_path):
@@ -98,10 +98,10 @@ def test_jsonl_store_roundtrips_asset_signature(tmp_path):
 
     loaded = reopened.get_asset("asset_1")
     assert loaded == signed
-    assert loaded.signature == signed.signature
+    assert loaded.provenance_seal == signed.provenance_seal
 
 
-def test_verify_asset_signature_accepts_signed_asset():
+def test_verify_asset_seal_accepts_signed_asset():
     signed = sign_asset(
         Asset(
             id="asset_1",
@@ -111,10 +111,10 @@ def test_verify_asset_signature_accepts_signed_asset():
         )
     )
 
-    assert verify_asset_signature(signed) is True
+    assert verify_asset_seal(signed) is True
 
 
-def test_verify_asset_signature_rejects_tampered_asset():
+def test_verify_asset_seal_rejects_tampered_asset():
     signed = sign_asset(
         Asset(
             id="asset_1",
@@ -126,10 +126,10 @@ def test_verify_asset_signature_rejects_tampered_asset():
 
     tampered = replace(signed, content="changed")
 
-    assert verify_asset_signature(tampered) is False
+    assert verify_asset_seal(tampered) is False
 
 
-def test_verify_asset_signature_rejects_unsigned_asset():
+def test_verify_asset_seal_rejects_unsigned_asset():
     asset = Asset(id="asset_1", name="evidence", content="observed")
 
-    assert verify_asset_signature(asset) is False
+    assert verify_asset_seal(asset) is False

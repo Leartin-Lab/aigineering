@@ -8,7 +8,7 @@ import pytest
 
 from aigineering.agent.mcp_worker import MCPWorker
 from aigineering.core.capability_descriptors import create_mcp_descriptor
-from aigineering.core.provenance import verify_asset_signature
+from aigineering.core.provenance import verify_asset_seal
 from aigineering.core.store import MemoryStore
 from aigineering.protocol.types import Asset, Candidate
 
@@ -82,7 +82,7 @@ def test_mcp_descriptor_creation_server_only():
     assert "tool_name" not in content
     assert "input_schema" not in content
     assert "output_schema" not in content
-    assert verify_asset_signature(descriptor) is True
+    assert verify_asset_seal(descriptor) is True
 
 
 def test_mcp_descriptor_sealed_config():
@@ -121,7 +121,7 @@ def test_mcp_descriptor_sealed_config():
 
     # Descriptor has proper provenance
     assert descriptor.origin == "capability_registry"
-    assert verify_asset_signature(descriptor) is True
+    assert verify_asset_seal(descriptor) is True
 
 
 def test_mcp_descriptor_carries_provenance():
@@ -160,10 +160,10 @@ def test_mcp_descriptor_carries_provenance():
 
         # Signature fields are populated
         assert desc.signed_by
-        assert desc.signature.startswith("asig_")
+        assert desc.provenance_seal.startswith("asig_")
 
         # Signature verifies
-        assert verify_asset_signature(desc) is True
+        assert verify_asset_seal(desc) is True
 
         # ID and hash fields are computed
         assert desc.id.startswith("cap:")
@@ -173,7 +173,7 @@ def test_mcp_descriptor_carries_provenance():
     # Tampered content breaks signature verification
     from dataclasses import replace
     tampered = replace(descriptors[0], content="tampered content")
-    assert verify_asset_signature(tampered) is False
+    assert verify_asset_seal(tampered) is False
 
     # Provenance is preserved through store round-trip
     store = MemoryStore()
@@ -186,8 +186,8 @@ def test_mcp_descriptor_carries_provenance():
         assert reloaded.origin == "capability_registry"
         assert reloaded.minted_by == "capability_registry"
         assert reloaded.signed_by == desc.signed_by
-        assert reloaded.signature == desc.signature
-        assert verify_asset_signature(reloaded) is True
+        assert reloaded.provenance_seal == desc.provenance_seal
+        assert verify_asset_seal(reloaded) is True
 
 
 # ---------------------------------------------------------------------------
@@ -347,7 +347,7 @@ def test_mcp_descriptor_store_round_trip():
     assert content["tool_name"] == "search.query"
     assert content["input_schema"]["properties"]["q"]["type"] == "string"
     assert content["output_schema"]["properties"]["results"]["type"] == "array"
-    assert verify_asset_signature(loaded) is True
+    assert verify_asset_seal(loaded) is True
 
 
 def test_mcp_worker_arguments_preserved():

@@ -37,7 +37,7 @@ def asset_to_dict(asset: Asset) -> dict[str, Any]:
         "minted_by": asset.minted_by,
         "source_uri": asset.source_uri,
         "signed_by": asset.signed_by,
-        "signature": asset.signature,
+        "provenance_seal": asset.provenance_seal,
         "definition_hash": asset.definition_hash,
         "content_hash": asset.content_hash,
         "promptable": asset.promptable,

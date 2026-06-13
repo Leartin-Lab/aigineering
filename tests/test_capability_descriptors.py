@@ -13,7 +13,7 @@ from aigineering.core.capability_descriptors import (
     create_memory_descriptor,
     create_persona_descriptor,
 )
-from aigineering.core.provenance import verify_asset_signature
+from aigineering.core.provenance import verify_asset_seal
 from aigineering.core.store import MemoryStore
 from aigineering.protocol.types import Asset
 
@@ -100,7 +100,7 @@ def test_mcp_descriptor_sealed_config():
     # The descriptor itself should have proper provenance
     assert descriptor.origin == "capability_registry"
     assert descriptor.name == "_mcp_github"
-    assert verify_asset_signature(descriptor) is True
+    assert verify_asset_seal(descriptor) is True
 
 
 # ---------------------------------------------------------------------------
@@ -158,7 +158,7 @@ def test_all_five_capability_kinds():
         assert desc.origin == "capability_registry"
         assert desc.minted_by == "capability_registry"
         assert desc.signed_by
-        assert desc.signature.startswith("asig_")
+        assert desc.provenance_seal.startswith("asig_")
 
         # Names follow expected conventions
         if kind == "tool":
@@ -298,10 +298,10 @@ def test_descriptors_carry_provenance():
 
         # Signature fields are populated
         assert desc.signed_by
-        assert desc.signature.startswith("asig_")
+        assert desc.provenance_seal.startswith("asig_")
 
         # Signature verifies
-        assert verify_asset_signature(desc) is True
+        assert verify_asset_seal(desc) is True
 
         # ID and hash fields are computed
         assert desc.id.startswith("cap:")
@@ -311,7 +311,7 @@ def test_descriptors_carry_provenance():
     # Tampered content breaks signature verification
     from dataclasses import replace
     tampered = replace(descriptors[0], content="tampered content")
-    assert verify_asset_signature(tampered) is False
+    assert verify_asset_seal(tampered) is False
 
     # Provenance is preserved through store round-trip
     store = MemoryStore()
@@ -324,5 +324,5 @@ def test_descriptors_carry_provenance():
         assert reloaded.origin == "capability_registry"
         assert reloaded.minted_by == "capability_registry"
         assert reloaded.signed_by == desc.signed_by
-        assert reloaded.signature == desc.signature
-        assert verify_asset_signature(reloaded) is True
+        assert reloaded.provenance_seal == desc.provenance_seal
+        assert verify_asset_seal(reloaded) is True

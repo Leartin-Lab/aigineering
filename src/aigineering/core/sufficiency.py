@@ -9,7 +9,7 @@ import json
 from typing import Any
 
 from aigineering.core.ids import hash_asset_content, hash_asset_definition
-from aigineering.core.provenance import verify_asset_signature
+from aigineering.core.provenance import verify_asset_seal
 from aigineering.protocol.types import Asset, Contract
 from aigineering.core.store import StoreProtocol
 
@@ -34,11 +34,11 @@ def _trust_gap(asset: Asset) -> bool:
     return tier < _TRUST_ORDER.get("observed", 2)
 
 
-def _signature_gap(asset: Asset) -> bool:
+def _seal_gap(asset: Asset) -> bool:
     """Return True when *asset* has missing or invalid provenance signature."""
-    if not asset.signed_by or not asset.signature:
+    if not asset.signed_by or not asset.provenance_seal:
         return True
-    return not verify_asset_signature(asset)
+    return not verify_asset_seal(asset)
 
 
 # ---------------------------------------------------------------------------
@@ -61,7 +61,7 @@ def check_sufficiency(contract: Contract, store: StoreProtocol) -> dict[str, Any
         "stale_assets": [],
         "version_conflicts": [],
         "trust_gaps": [],
-        "signature_gaps": [],
+        "seal_gaps": [],
         "recommendation": "exec",
         "sufficiency_ok": True,
     }
@@ -110,16 +110,16 @@ def check_sufficiency(contract: Contract, store: StoreProtocol) -> dict[str, Any
     # ── 5. Signature gaps ─────────────────────────────────────────────────
     for input_name in contract.inputs:
         for asset in store.get_assets_by_name(input_name):
-            if _signature_gap(asset) and not asset.tombstoned:
-                if input_name not in report["signature_gaps"]:
-                    report["signature_gaps"].append(input_name)
+            if _seal_gap(asset) and not asset.tombstoned:
+                if input_name not in report["seal_gaps"]:
+                    report["seal_gaps"].append(input_name)
 
     # ── 6. Recommendation ─────────────────────────────────────────────────
     has_missing = len(report["missing_inputs"]) > 0
     has_stale = len(report["stale_assets"]) > 0
     has_conflicts = len(report["version_conflicts"]) > 0
     has_trust = len(report["trust_gaps"]) > 0
-    has_sig = len(report["signature_gaps"]) > 0
+    has_sig = len(report["seal_gaps"]) > 0
 
     if has_missing:
         report["recommendation"] = "plan"

@@ -8,7 +8,7 @@ import os
 from pathlib import Path
 from typing import Optional, Protocol, runtime_checkable
 
-from aigineering.core.provenance import verify_asset_signature
+from aigineering.core.provenance import verify_asset_seal
 from aigineering.protocol.types import Asset, Contract
 from aigineering.protocol.wire import asset_to_dict, contract_to_dict
 
@@ -38,7 +38,7 @@ class MemoryStore:
         self.contracts: dict[str, Contract] = {}
 
     def add_asset(self, asset: Asset) -> None:
-        if not asset.signed_by or not verify_asset_signature(asset):
+        if not asset.signed_by or not verify_asset_seal(asset):
             raise ValueError(
                 f"G3/N-P1.6: Asset '{asset.id}' rejected — missing or invalid canonical seal "
                 f"(signed_by={asset.signed_by!r})"
@@ -120,7 +120,7 @@ class JsonLStore:
                     minted_by=data.get("minted_by", ""),
                     source_uri=data.get("source_uri", ""),
                     signed_by=data.get("signed_by", ""),
-                    signature=data.get("signature", ""),
+                    provenance_seal=data.get("provenance_seal", data.get("signature", "")),
                     definition_hash=data.get("definition_hash", ""),
                     content_hash=data.get("content_hash", ""),
                     promptable=data.get("promptable", True),
@@ -177,7 +177,7 @@ class JsonLStore:
                 _logger.warning("fsync failed for %s", path)
 
     def add_asset(self, asset: Asset) -> None:
-        if not asset.signed_by or not verify_asset_signature(asset):
+        if not asset.signed_by or not verify_asset_seal(asset):
             raise ValueError(
                 f"G3/N-P1.6: Asset '{asset.id}' rejected — missing or invalid canonical seal "
                 f"(signed_by={asset.signed_by!r})"

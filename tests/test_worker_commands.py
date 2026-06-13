@@ -9,14 +9,15 @@ from click.testing import CliRunner
 from aigineering.cli.main import cli
 from aigineering.core.idempotency_store import IdempotencyStore
 from aigineering.core.ids import hash_asset_content, hash_asset_definition, hash_contract
-from aigineering.core.store import JsonLStore
+from aigineering.core.provenance import sign_asset
+from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.protocol.envelope import CandidateEnvelope
 from aigineering.protocol.package import WorkerPackage
 from aigineering.protocol.types import Asset, Contract
 from aigineering.protocol.wire import contract_to_dict
 
 
-def _seed_contract(store: JsonLStore) -> Contract:
+def _seed_contract(store: SQLiteStore) -> Contract:
     """Add a test contract and return it."""
     contract = Contract(
         id=hash_contract(
@@ -40,10 +41,10 @@ def _seed_contract(store: JsonLStore) -> Contract:
     return contract
 
 
-def _seed_contract_with_asset(store: JsonLStore) -> tuple[Contract, Asset]:
+def _seed_contract_with_asset(store: SQLiteStore) -> tuple[Contract, Asset]:
     """Add a test contract and an input asset, return both."""
     contract = _seed_contract(store)
-    asset = Asset(
+    asset = sign_asset(Asset(
         id=hash_asset_content("input1", "test input content"),
         name="input1",
         content="test input content",
@@ -51,7 +52,7 @@ def _seed_contract_with_asset(store: JsonLStore) -> tuple[Contract, Asset]:
         content_hash=hash_asset_content("input1", "test input content"),
         origin="human",
         trust_tier="human",
-    )
+    ))
     store.add_asset(asset)
     return contract, asset
 
@@ -75,7 +76,7 @@ def test_worker_package_creation():
     """aig worker package --contract <id> --json returns valid WorkerPackage JSON."""
     runner = CliRunner()
     with runner.isolated_filesystem():
-        store = JsonLStore(".aig/store/assets.jsonl", ".aig/store/contracts.jsonl")
+        store = SQLiteStore(".aig/store.db")
         contract, asset = _seed_contract_with_asset(store)
 
         result = runner.invoke(
@@ -121,7 +122,7 @@ def test_submit_creates_projection_assets():
     """valid submit creates assets in store and returns accepted status."""
     runner = CliRunner()
     with runner.isolated_filesystem():
-        store = JsonLStore(".aig/store/assets.jsonl", ".aig/store/contracts.jsonl")
+        store = SQLiteStore(".aig/store.db")
         contract, asset = _seed_contract_with_asset(store)
 
         envelope_json = _valid_envelope_json(contract.id)
@@ -141,7 +142,7 @@ def test_submit_creates_projection_assets():
         assert "trace_id" in data
 
         # Verify asset is actually in the store
-        stored = JsonLStore(".aig/store/assets.jsonl", ".aig/store/contracts.jsonl")
+        stored = SQLiteStore(".aig/store.db")
         assets = stored.get_assets_by_name("final_report")
         assert len(assets) == 1
         assert assets[0].name == "final_report"
@@ -151,7 +152,7 @@ def test_idempotent_duplicate_submit():
     """Same idempotency key twice returns identical cached result, no duplicate assets."""
     runner = CliRunner()
     with runner.isolated_filesystem():
-        store = JsonLStore(".aig/store/assets.jsonl", ".aig/store/contracts.jsonl")
+        store = SQLiteStore(".aig/store.db")
         contract, asset = _seed_contract_with_asset(store)
 
         envelope_json = _valid_envelope_json(contract.id)
@@ -180,7 +181,7 @@ def test_idempotent_duplicate_submit():
         assert data2["status"] == data1["status"]
 
         # Verify only one asset exists (not duplicated)
-        stored = JsonLStore(".aig/store/assets.jsonl", ".aig/store/contracts.jsonl")
+        stored = SQLiteStore(".aig/store.db")
         assets = stored.get_assets_by_name("final_report")
         assert len(assets) == 1
 
@@ -189,7 +190,7 @@ def test_different_key_conflict():
     """Different idempotency key after existing submission returns conflict error."""
     runner = CliRunner()
     with runner.isolated_filesystem():
-        store = JsonLStore(".aig/store/assets.jsonl", ".aig/store/contracts.jsonl")
+        store = SQLiteStore(".aig/store.db")
         contract, asset = _seed_contract_with_asset(store)
 
         envelope_json = _valid_envelope_json(contract.id)
@@ -216,7 +217,7 @@ def test_submit_without_idempotency_key():
     """Submit without idempotency key works, but duplicate detection is disabled."""
     runner = CliRunner()
     with runner.isolated_filesystem():
-        store = JsonLStore(".aig/store/assets.jsonl", ".aig/store/contracts.jsonl")
+        store = SQLiteStore(".aig/store.db")
         contract, asset = _seed_contract_with_asset(store)
 
         envelope_json = _valid_envelope_json(contract.id)
@@ -244,7 +245,7 @@ def test_sealed_config_not_in_output():
     """Submit output JSON never contains config_snapshot or worker_snapshot."""
     runner = CliRunner()
     with runner.isolated_filesystem():
-        store = JsonLStore(".aig/store/assets.jsonl", ".aig/store/contracts.jsonl")
+        store = SQLiteStore(".aig/store.db")
         contract, asset = _seed_contract_with_asset(store)
 
         envelope_json = _valid_envelope_json(contract.id)
@@ -299,7 +300,7 @@ def test_submit_rejected_candidate():
     """Submit candidate with undeclared output returns rejected status."""
     runner = CliRunner()
     with runner.isolated_filesystem():
-        store = JsonLStore(".aig/store/assets.jsonl", ".aig/store/contracts.jsonl")
+        store = SQLiteStore(".aig/store.db")
         contract, asset = _seed_contract_with_asset(store)
 
         # Output "secret_data" is not in contract.outputs ["final_report"]
@@ -323,7 +324,7 @@ def test_submit_rejected_preserves_trace():
     """Rejected submissions still record a trace entry."""
     runner = CliRunner()
     with runner.isolated_filesystem():
-        store = JsonLStore(".aig/store/assets.jsonl", ".aig/store/contracts.jsonl")
+        store = SQLiteStore(".aig/store.db")
         contract, asset = _seed_contract_with_asset(store)
 
         bad_envelope = CandidateEnvelope(
@@ -358,7 +359,7 @@ def test_worker_next_returns_package():
     """aig worker next --json returns a WorkerPackage for a ready contract."""
     runner = CliRunner()
     with runner.isolated_filesystem():
-        store = JsonLStore(".aig/store/assets.jsonl", ".aig/store/contracts.jsonl")
+        store = SQLiteStore(".aig/store.db")
         contract, asset = _seed_contract_with_asset(store)
 
         result = runner.invoke(cli, ["worker", "next", "--json"])
@@ -397,7 +398,7 @@ def test_worker_next_skips_completed_contract():
     """worker next does not return a contract whose outputs are all satisfied."""
     runner = CliRunner()
     with runner.isolated_filesystem():
-        store = JsonLStore(".aig/store/assets.jsonl", ".aig/store/contracts.jsonl")
+        store = SQLiteStore(".aig/store.db")
         contract, asset = _seed_contract_with_asset(store)
 
         # Submit once to satisfy the output
@@ -416,7 +417,7 @@ def test_worker_next_submit_full_cycle():
     """Full cycle: next → submit → trace entries include projection and complete."""
     runner = CliRunner()
     with runner.isolated_filesystem():
-        store = JsonLStore(".aig/store/assets.jsonl", ".aig/store/contracts.jsonl")
+        store = SQLiteStore(".aig/store.db")
         contract, asset = _seed_contract_with_asset(store)
 
         # ── Step 1: worker next — get a package ─────────────────────────

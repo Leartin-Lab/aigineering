@@ -19,6 +19,8 @@ from aigineering.protocol.types import Asset, Contract, ReplacementClaim
 def _make_asset(name: str, content: str, **kwargs: object) -> Asset:
     """Create a signed Asset with correct definition_hash and content_hash."""
     extra = dict(kwargs)
+    if "origin" not in extra:
+        extra["origin"] = "test"
     asset = Asset(
         id=hash_asset_content(name, content),
         name=name,
@@ -38,6 +40,7 @@ def _make_broken_asset(name: str, content: str) -> Asset:
         content=content,
         definition_hash=hash_asset_definition(name),
         content_hash="content:deadbeef00000000000000000000000000000000000000000000000000000000",
+        origin="test",
     )
     return sign_asset(asset)
 

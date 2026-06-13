@@ -6,7 +6,7 @@ import json
 import pytest
 
 from aigineering.core.provider_config import create_provider_config_snapshot
-from aigineering.core.provenance import verify_asset_signature
+from aigineering.core.provenance import verify_asset_seal
 from aigineering.core.store import MemoryStore
 from aigineering.protocol.types import Asset
 
@@ -163,10 +163,10 @@ def test_provenance_metadata():
 
     # Signature fields are populated
     assert snapshot.signed_by
-    assert snapshot.signature.startswith("asig_")
+    assert snapshot.provenance_seal.startswith("asig_")
 
     # Signature verifies
-    assert verify_asset_signature(snapshot) is True
+    assert verify_asset_seal(snapshot) is True
 
     # ID and hash fields are computed
     assert snapshot.id.startswith("cap:")
@@ -225,7 +225,7 @@ def test_snapshot_is_immutable():
     )
     assert snapshot.id == snapshot2.id
     assert snapshot.content_hash == snapshot2.content_hash
-    assert snapshot.signature == snapshot2.signature
+    assert snapshot.provenance_seal == snapshot2.provenance_seal
 
 
 # ---------------------------------------------------------------------------
@@ -265,4 +265,4 @@ def test_snapshot_store_round_trip():
     # Provenance is intact
     assert loaded.origin == "capability_registry"
     assert loaded.minted_by == "capability_registry"
-    assert verify_asset_signature(loaded) is True
+    assert verify_asset_seal(loaded) is True

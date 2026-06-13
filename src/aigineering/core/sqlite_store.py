@@ -13,7 +13,7 @@ import sqlite3
 from pathlib import Path
 from typing import Optional
 
-from aigineering.core.provenance import verify_asset_signature
+from aigineering.core.provenance import verify_asset_seal
 from aigineering.protocol.types import Asset, Contract
 from aigineering.protocol.wire import asset_to_dict, contract_to_dict
 
@@ -44,7 +44,7 @@ CREATE TABLE IF NOT EXISTS assets (
     minted_by TEXT NOT NULL DEFAULT '',
     source_uri TEXT NOT NULL DEFAULT '',
     signed_by TEXT NOT NULL DEFAULT '',
-    signature TEXT NOT NULL DEFAULT '',
+    provenance_seal TEXT NOT NULL DEFAULT '',
     promptable INTEGER NOT NULL DEFAULT 1,
     disclosure_view TEXT NOT NULL DEFAULT 'original',
     definition_hash TEXT NOT NULL DEFAULT '',
@@ -114,7 +114,7 @@ CREATE TABLE IF NOT EXISTS claims (
     definition_hash TEXT NOT NULL DEFAULT '',
     claim_type TEXT NOT NULL DEFAULT '',
     signed_by TEXT NOT NULL DEFAULT '',
-    signature TEXT NOT NULL DEFAULT '',
+    provenance_seal TEXT NOT NULL DEFAULT '',
     lineage_id TEXT NOT NULL DEFAULT ''
 )
 """
@@ -222,7 +222,7 @@ class SQLiteStore:
             minted_by=row["minted_by"],
             source_uri=row["source_uri"],
             signed_by=row["signed_by"],
-            signature=row["signature"],
+            provenance_seal=row["provenance_seal"],
             promptable=bool(row["promptable"]),
             disclosure_view=row["disclosure_view"],
             definition_hash=row["definition_hash"],
@@ -254,7 +254,7 @@ class SQLiteStore:
     # ------------------------------------------------------------------
 
     def add_asset(self, asset: Asset) -> None:
-        if not asset.signed_by or not verify_asset_signature(asset):
+        if not asset.signed_by or not verify_asset_seal(asset):
             raise ValueError(
                 f"G3/N-P1.6: Asset '{asset.id}' rejected — missing or invalid canonical seal "
                 f"(signed_by={asset.signed_by!r})"
@@ -265,13 +265,13 @@ class SQLiteStore:
                 """INSERT OR REPLACE INTO assets (
                     id, name, content, content_type, created_by,
                     origin, trust_tier, minted_by, source_uri,
-                    signed_by, signature, promptable, disclosure_view,
+                    signed_by, provenance_seal, promptable, disclosure_view,
                     definition_hash, content_hash,
                     keep_flag, tombstoned, tombstoned_at, lineage_id
                 ) VALUES (
                     :id, :name, :content, :content_type, :created_by,
                     :origin, :trust_tier, :minted_by, :source_uri,
-                    :signed_by, :signature, :promptable, :disclosure_view,
+                    :signed_by, :provenance_seal, :promptable, :disclosure_view,
                     :definition_hash, :content_hash,
                     :keep_flag, :tombstoned, :tombstoned_at, :lineage_id
                 )""",
@@ -286,7 +286,7 @@ class SQLiteStore:
                     "minted_by": d["minted_by"],
                     "source_uri": d["source_uri"],
                     "signed_by": d["signed_by"],
-                    "signature": d["signature"],
+                    "provenance_seal": d["provenance_seal"],
                     "promptable": int(d["promptable"]),
                     "disclosure_view": d["disclosure_view"],
                     "definition_hash": d["definition_hash"],

@@ -84,5 +84,5 @@ def readiness(
             click.echo(f"    def_hash={vc['definition_hash']} names={vc['names']}")
     if report["trust_gaps"]:
         click.echo(f"  Trust gaps:      {report['trust_gaps']}")
-    if report["signature_gaps"]:
-        click.echo(f"  Signature gaps:  {report['signature_gaps']}")
+    if report["seal_gaps"]:
+        click.echo(f"  Seal gaps:  {report['seal_gaps']}")
