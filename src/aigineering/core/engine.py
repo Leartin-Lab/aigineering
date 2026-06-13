@@ -8,7 +8,7 @@ from collections.abc import Mapping
 
 from aigineering.agent.worker import Worker
 from aigineering.core.activation import check_activation
-from aigineering.core.disclosure import compute_disclosure
+from aigineering.core.disclosure import compute_disclosure, redact_for_disclosure
 from aigineering.core.labels import Label, resolve_contract_labels
 from aigineering.core.methods import (
     contracts_from_plan_asset,
@@ -234,13 +234,13 @@ class Engine:
                 continue
             if asset.id not in seen:
                 seen.add(asset.id)
-                scope.append(asset)
+                scope.append(redact_for_disclosure(asset))
         for asset in self._method_context.get(contract.id, []):
             if not asset.promptable:
                 continue
             if asset.id not in seen:
                 seen.add(asset.id)
-                scope.append(asset)
+                scope.append(redact_for_disclosure(asset))
         return scope
 
     def _all_outputs_satisfied(self, contract: Contract) -> bool:
