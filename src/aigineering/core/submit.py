@@ -26,6 +26,10 @@ class SubmitConflictError(Exception):
     """Raised when a different idempotency key has already been used for this contract."""
 
 
+class SubmitClaimError(Exception):
+    """Raised when envelope.claim_id does not match an active claim for the contract."""
+
+
 def submit_candidate(
     envelope: CandidateEnvelope,
     store: StoreProtocol,
@@ -68,6 +72,58 @@ def submit_candidate(
                 f"Contract '{contract.id}' already has a submission with a "
                 f"different idempotency key"
             )
+
+    # ── Claim validation (G8) ────────────────────────────────────────
+    # If the envelope carries a claim_id, verify it matches an active
+    # claim for this contract owned by this worker, and that the lease
+    # has not expired. Stores that don't track claims (e.g. MemoryStore)
+    # skip this check — only SQLite-backed stores enforce it.
+    if envelope.claim_id:
+        get_claim = getattr(store, "get_claim", None)
+        if get_claim is not None:
+            claim = get_claim(contract.id)
+            if claim is None:
+                raise SubmitClaimError(
+                    f"No active claim for contract '{contract.id}' — "
+                    f"worker '{envelope.worker_id}' must claim before submitting"
+                )
+            if claim.get("claim_id") != envelope.claim_id:
+                raise SubmitClaimError(
+                    f"claim_id mismatch: envelope='{envelope.claim_id}' "
+                    f"vs store='{claim.get('claim_id')}'"
+                )
+            if claim.get("worker_id") != envelope.worker_id:
+                raise SubmitClaimError(
+                    f"claim owned by '{claim.get('worker_id')}', "
+                    f"not '{envelope.worker_id}'"
+                )
+            if claim.get("status") != "active":
+                raise SubmitClaimError(
+                    f"claim status is '{claim.get('status')}', not 'active' — "
+                    f"worker must re-claim before submitting"
+                )
+            lease_until = claim.get("lease_until", "")
+            from datetime import datetime, timezone
+            if not lease_until:
+                raise SubmitClaimError(
+                    "active claim has no lease_until — "
+                    "refusing to accept claim with unbounded lease"
+                )
+            try:
+                lease_dt = datetime.fromisoformat(lease_until)
+            except ValueError as e:
+                raise SubmitClaimError(
+                    f"claim lease_until is malformed ({lease_until!r}): {e} — "
+                    f"refusing to accept unparseable lease timestamp"
+                )
+            now = datetime.now(timezone.utc)
+            if lease_dt.tzinfo is None:
+                lease_dt = lease_dt.replace(tzinfo=timezone.utc)
+            if lease_dt < now:
+                raise SubmitClaimError(
+                    f"claim lease expired at {lease_until} — "
+                    f"worker must re-claim before submitting"
+                )
 
     # ── Disclosure scope ─────────────────────────────────────────────
     scope = compute_disclosure(contract, store)

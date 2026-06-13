@@ -266,7 +266,7 @@ class TestContextOverflow:
             parent_id=None,
             name="overflow-test",
             description="Test",
-            inputs=["big-asset"],
+            inputs=["big-doc"],
             outputs=["result"],
             budget=10,
         )
@@ -284,16 +284,35 @@ class TestContextOverflow:
         # Set a small context limit to trigger overflow
         engine._context_size_limit = 100  # ~25 tokens
 
-        # Check context overflow — should NOT fabricate a candidate with worker_id="engine"
-        # After repair: should create _context_overflow_report_ asset + schedule /replan via method
-        overflowed = engine._check_context_overflow(contract, [huge_asset])
+        # Run the engine — it must terminate (not loop forever) and produce
+        # the diagnostic asset + trace event via the real run() path.
+        # This proves the kernel boundary invariant: no worker_id="engine"
+        # candidate is fabricated, and the contract is suspended so the
+        # run() loop exits cleanly.
+        engine.run()
 
-        if overflowed:
-            # Check that no candidate with worker_id="engine" was fabricated
-            # (This is the current bug — Engine creates synthetic candidate)
-            # After repair, this check should pass
-            # placeholder — full assertion after B2 repair
-            pass
+        engine_fabricated = store.get_assets_by_name("_context_overflow_report_")
+        assert len(engine_fabricated) == 1, (
+            f"G1/G2/B2: overflow must produce exactly one _context_overflow_report_ "
+            f"diagnostic asset, got {len(engine_fabricated)}"
+        )
+
+        overflow_trace = [
+            e for e in trace.get_by_contract("c-overflow")
+            if e.event_type == "context_overflow"
+        ]
+        assert len(overflow_trace) == 1, (
+            f"G1/G2/B2: overflow must record exactly one context_overflow trace event, "
+            f"got {len(overflow_trace)}"
+        )
+
+        assert "c-overflow" in engine._suspended, (
+            "G1/G2/B2: overflow must suspend the contract so run() does not loop"
+        )
+
+        assert "c-overflow" not in engine._completed, (
+            "G1/G2/B2: overflow must NOT mark the contract as completed"
+        )
 
 
 class TestAuthorityClamp:
@@ -593,10 +612,94 @@ class TestTransactionalSubmit:
         Gate: G3 (Transactional Runtime Substrate)
         Debt: D-P0.3 (submit.py:83-153)
         """
-        # Current behavior: separate writes to JsonLStore, JsonLTraceStore, IdempotencyStore
-        # After repair: single RuntimeTransaction
-        # This test marks the requirement; actual verification after C2 repair
-        pass  # Placeholder — implement after Phase C2
+        import tempfile, os
+        from aigineering.core.store import MemoryStore
+        from aigineering.core.trace import MemoryTraceStore
+        from aigineering.core.idempotency_store import IdempotencyStore
+        from aigineering.core.submit import submit_candidate, SubmitConflictError
+        from aigineering.protocol.envelope import CandidateEnvelope
+        from aigineering.protocol.types import Contract
+
+        store = MemoryStore()
+        trace = MemoryTraceStore()
+        with tempfile.TemporaryDirectory() as tmp:
+            idem = IdempotencyStore(path=os.path.join(tmp, "idem.jsonl"))
+
+            contract = Contract(
+                id="c-atomic", name="t", description="t", inputs=[], outputs=["out"], budget=10,
+            )
+            store.add_contract(contract)
+
+            env = CandidateEnvelope(
+                contract_id="c-atomic",
+                worker_id="worker-atomic",
+                raw_output='/exec {"out": "result"}',
+                idempotency_key="atomic-key-1",
+            )
+
+            result = submit_candidate(
+                env, store, trace,
+                idempotency_store=idem,
+                idempotency_key=env.idempotency_key,
+            )
+            assert result["status"] in ("accepted", "partial"), (
+                f"G3/D-P0.3: first submit must succeed, got {result['status']}"
+            )
+            assert result["duplicate"] is False, (
+                "G3/D-P0.3: first submit must not be flagged as duplicate"
+            )
+            assert len(result["accepted_assets"]) == 1, (
+                f"G3/D-P0.3: exactly one asset must be committed, "
+                f"got {len(result['accepted_assets'])}"
+            )
+
+            out_assets = store.get_assets_by_name("out")
+            assert len(out_assets) == 1, (
+                f"G3/D-P0.3: out asset must be in store after submit, got {len(out_assets)}"
+            )
+
+            trace_events = trace.get_by_contract("c-atomic")
+            assert len(trace_events) >= 1, (
+                f"G3/D-P0.3: trace must have at least one entry, got {len(trace_events)}"
+            )
+
+            assert idem.has_any("c-atomic"), (
+                "G3/D-P0.3: idempotency record must be persisted after first submit"
+            )
+
+            result2 = submit_candidate(
+                env, store, trace,
+                idempotency_store=idem,
+                idempotency_key=env.idempotency_key,
+            )
+            assert result2["duplicate"] is True, (
+                "G3/D-P0.3: second submit with same key must be flagged as duplicate"
+            )
+
+            out_assets_after = store.get_assets_by_name("out")
+            assert len(out_assets_after) == 1, (
+                f"G3/D-P0.3: duplicate submit must NOT create new assets, "
+                f"got {len(out_assets_after)}"
+            )
+
+            env3 = CandidateEnvelope(
+                contract_id="c-atomic",
+                worker_id="worker-atomic",
+                raw_output='/exec {"out": "different"}',
+                idempotency_key="atomic-key-2",
+            )
+            try:
+                submit_candidate(
+                    env3, store, trace,
+                    idempotency_store=idem,
+                    idempotency_key=env3.idempotency_key,
+                )
+            except SubmitConflictError:
+                pass
+            else:
+                raise AssertionError(
+                    "G3/D-P0.3: different idempotency_key for same contract must raise SubmitConflictError"
+                )
 
     def test_store_enforces_sign_asset_on_write(self):
         """Store implementations must enforce canonical seal on asset write.
@@ -656,8 +759,25 @@ class TestTransactionalSubmit:
         Gate: G3
         Debt: C1 (Schema version requirement)
         """
-        # Placeholder — implement after Phase C1
-        pass
+        import sqlite3
+        import tempfile, os
+        from aigineering.core.sqlite_store import SQLiteStore, CURRENT_SCHEMA_VERSION
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = os.path.join(tmp, "test.db")
+            store = SQLiteStore(db_path=db_path)
+            store.close()
+
+            conn = sqlite3.connect(db_path)
+            conn.execute("DELETE FROM schema_version")
+            conn.commit()
+            conn.close()
+
+            store2 = SQLiteStore(db_path=db_path)
+            assert store2.schema_version == CURRENT_SCHEMA_VERSION, (
+                f"G3/C1: v0 DB (no schema_version row) must migrate to "
+                f"v{CURRENT_SCHEMA_VERSION}, got v{store2.schema_version}"
+            )
 
     def test_unknown_schema_version_fails_closed(self):
         """SQLite store must fail closed on unknown schema version.
@@ -665,8 +785,28 @@ class TestTransactionalSubmit:
         Gate: G3
         Debt: C1 (Unknown version requirement)
         """
-        # Placeholder — implement after Phase C1
-        pass
+        import sqlite3
+        import tempfile, os
+        from aigineering.core.sqlite_store import SQLiteStore
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = os.path.join(tmp, "test.db")
+            SQLiteStore(db_path=db_path).close()
+            conn = sqlite3.connect(db_path)
+            conn.execute("UPDATE schema_version SET version = 999")
+            conn.commit()
+            conn.close()
+
+            try:
+                SQLiteStore(db_path=db_path)
+            except RuntimeError as e:
+                assert "newer than supported" in str(e), (
+                    f"G3/C1: RuntimeError must mention 'newer than supported', got: {e}"
+                )
+            else:
+                raise AssertionError(
+                    "G3/C1: SQLiteStore must raise RuntimeError on future schema version"
+                )
 
     def test_store_enforces_canonical_seal_on_write(self):
         """Store must verify canonical seal (not just non-empty check).
@@ -708,8 +848,23 @@ class TestTransactionalSubmit:
         Gate: G3
         Debt: N-P1.16 (idempotency_store.py:56)
         """
-        # Placeholder — implement after Phase C2
-        pass
+        import tempfile, os
+        from aigineering.core.idempotency_store import IdempotencyStore
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "idem.jsonl")
+            store1 = IdempotencyStore(path=path)
+            store1.set("c1", "key-1", {"status": "accepted", "contract_id": "c1"})
+
+            store2 = IdempotencyStore(path=path)
+            assert store2.has_any("c1"), (
+                "G3/N-P1.16: IdempotencyStore must reload records from disk after restart"
+            )
+            cached = store2.get("c1", "key-1")
+            assert cached is not None, (
+                "G3/N-P1.16: persisted idempotency key must be retrievable after restart"
+            )
+            assert cached["status"] == "accepted"
 
 
 # ============================================================================
@@ -726,7 +881,59 @@ class TestCrashRecovery:
         Gate: G9 (Recovery Is Crash-Consistent)
         Debt: C5 (Crash injection tests)
         """
-        pass  # Placeholder — implement after Phase C5
+        from aigineering.core.engine import Engine
+        from aigineering.core.store import MemoryStore
+        from aigineering.core.trace import MemoryTraceStore, create_entry
+        from aigineering.core.provenance import sign_asset
+        from aigineering.agent.mock import MockWorker
+        from aigineering.protocol.types import Contract, Asset
+
+        store = MemoryStore()
+        trace = MemoryTraceStore()
+        worker = MockWorker()
+
+        contract = Contract(
+            id="c-crash1", name="c", description="c", inputs=[], outputs=["out"], budget=5,
+        )
+        store.add_contract(contract)
+
+        output_asset = sign_asset(Asset(
+            id="a-output",
+            name="out",
+            content="recovered-content",
+            definition_hash="def:out",
+            content_hash="content:out",
+            origin="worker",
+            created_by="c-crash1",
+        ))
+        store.add_asset(output_asset)
+
+        trace.append(create_entry(
+            contract_id="c-crash1", event_type="activation", sequence=0,
+            budget_remaining=5,
+        ))
+        trace.append(create_entry(
+            contract_id="c-crash1", event_type="projection", sequence=1,
+            accepted_fragments=["a-output"], budget_remaining=4,
+        ))
+
+        engine = Engine.restore_from_store(store, worker, trace)
+
+        assert store.get_asset("a-output") is not None, (
+            "G9/C5: asset written before crash must survive in store after recovery"
+        )
+        assert store.get_asset("a-output").content == "recovered-content", (
+            "G9/C5: recovered asset content must match pre-crash write"
+        )
+
+        assert "c-crash1" in engine._contract_last_entry, (
+            "G9/C5: contract_last_entry must be reconstructed from trace events "
+            "during restore_from_store"
+        )
+        last_entry = engine._contract_last_entry["c-crash1"]
+        assert last_entry is not None, (
+            "G9/C5: contract_last_entry value must reference a trace entry id"
+        )
 
     def test_crash_after_method_schedule_before_parent_suspend(self):
         """Crash between method schedule and parent suspend must recover correctly.
@@ -734,7 +941,40 @@ class TestCrashRecovery:
         Gate: G9
         Debt: C5
         """
-        pass  # Placeholder
+        from aigineering.core.engine import Engine
+        from aigineering.core.store import MemoryStore
+        from aigineering.core.trace import MemoryTraceStore, create_entry
+        from aigineering.agent.mock import MockWorker
+        from aigineering.protocol.types import Contract
+
+        store = MemoryStore()
+        trace = MemoryTraceStore()
+        worker = MockWorker()
+
+        parent = Contract(
+            id="c-parent", name="p", description="p", inputs=[], outputs=["out"], budget=5,
+        )
+        child = Contract(
+            id="c-child", name="ch", description="ch", inputs=[], outputs=["out"], budget=3,
+        )
+        store.add_contract(parent)
+        store.add_contract(child)
+
+        trace.append(create_entry(
+            contract_id="c-parent", event_type="method_scheduled", sequence=0,
+            relation_type="replan", relation_target="c-child", budget_remaining=4,
+        ))
+
+        engine = Engine.restore_from_store(store, worker, trace)
+
+        assert "c-parent" in engine._suspended, (
+            "G9/C5: parent must be in _suspended after recovery from "
+            "method_scheduled trace event (crash before parent suspend)"
+        )
+        assert "c-child" in engine._method_scheduled, (
+            "G9/C5: child must be in _method_scheduled after recovery "
+            "from method_scheduled trace event's relation_target"
+        )
 
     def test_crash_after_child_complete_before_parent_resume(self):
         """Crash between child completion and parent resume must recover correctly.
@@ -742,7 +982,42 @@ class TestCrashRecovery:
         Gate: G9
         Debt: C5
         """
-        pass  # Placeholder
+        from aigineering.core.engine import Engine
+        from aigineering.core.store import MemoryStore
+        from aigineering.core.trace import MemoryTraceStore, create_entry
+        from aigineering.agent.mock import MockWorker
+        from aigineering.protocol.types import Contract
+
+        store = MemoryStore()
+        trace = MemoryTraceStore()
+        worker = MockWorker()
+
+        parent = Contract(
+            id="c-parent2", name="p", description="p", inputs=[], outputs=["out"], budget=5,
+        )
+        child = Contract(
+            id="c-child2", name="ch", description="ch", inputs=[], outputs=["out"], budget=3,
+        )
+        store.add_contract(parent)
+        store.add_contract(child)
+
+        trace.append(create_entry(
+            contract_id="c-child2", event_type="method_scheduled", sequence=0,
+            relation_type="tool", relation_target="c-child2", budget_remaining=3,
+        ))
+        trace.append(create_entry(
+            contract_id="c-child2", event_type="complete", sequence=1,
+            budget_remaining=0,
+        ))
+
+        engine = Engine.restore_from_store(store, worker, trace)
+
+        assert "c-child2" in engine._completed, (
+            "G9/C5: child must be in _completed after recovery from complete trace"
+        )
+        assert "c-child2" not in engine._suspended, (
+            "G9/C5: completed child must be removed from _suspended"
+        )
 
     def test_double_crash_recovery_idempotent(self):
         """Repeated recovery must be idempotent.
@@ -750,7 +1025,45 @@ class TestCrashRecovery:
         Gate: G9
         Debt: C5
         """
-        pass  # Placeholder
+        from aigineering.core.engine import Engine
+        from aigineering.core.store import MemoryStore
+        from aigineering.core.trace import MemoryTraceStore, create_entry
+        from aigineering.agent.mock import MockWorker
+        from aigineering.protocol.types import Contract
+
+        store = MemoryStore()
+        trace = MemoryTraceStore()
+        worker = MockWorker()
+
+        contract = Contract(
+            id="c-double", name="c", description="c", inputs=[], outputs=["out"], budget=5,
+        )
+        store.add_contract(contract)
+
+        trace.append(create_entry(
+            contract_id="c-double", event_type="method_scheduled", sequence=0,
+            relation_type="replan", relation_target="c-child-d", budget_remaining=4,
+        ))
+        trace.append(create_entry(
+            contract_id="c-double", event_type="complete", sequence=1,
+            budget_remaining=0,
+        ))
+
+        e1 = Engine.restore_from_store(store, worker, trace)
+        e2 = Engine.restore_from_store(store, worker, trace)
+
+        assert e1._budget == e2._budget, (
+            "G9/C5: repeated restore must produce identical _budget"
+        )
+        assert e1._completed == e2._completed, (
+            "G9/C5: repeated restore must produce identical _completed"
+        )
+        assert e1._suspended == e2._suspended, (
+            "G9/C5: repeated restore must produce identical _suspended"
+        )
+        assert e1._method_scheduled == e2._method_scheduled, (
+            "G9/C5: repeated restore must produce identical _method_scheduled"
+        )
 
 
 # ============================================================================
@@ -767,7 +1080,20 @@ class TestClaimPersistence:
         Gate: G8 (Claim/Lease Worker Pull Semantics)
         Debt: N-P1.8 (claims.py:49-177)
         """
-        pass  # Placeholder — implement after Phase C4
+        from aigineering.core.sqlite_store import SQLiteStore
+        import tempfile, os
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = os.path.join(tmp, "test.db")
+            store = SQLiteStore(db_path=db_path)
+            store.persist_claim("claim-1", "c1", "worker-1", "2026-12-31T00:00:00", "active")
+
+            # Simulate restart — new connection
+            store.close()
+            store2 = SQLiteStore(db_path=db_path)
+            claim = store2.get_claim("c1")
+            assert claim is not None, "G8/N-P1.8: claim must survive restart"
+            assert claim["claim_id"] == "claim-1"
 
     def test_worker_submit_validates_claim_lease_and_worker(self):
         """worker submit must validate claim ownership, lease status, and worker id.
@@ -775,7 +1101,127 @@ class TestClaimPersistence:
         Gate: G8
         Debt: D-P1.2 (cli/worker.py:67-145)
         """
-        pass  # Placeholder — implement after Phase E3
+        import tempfile, os
+        from aigineering.core.claims import ClaimStore
+        from aigineering.core.sqlite_store import SQLiteStore
+        from aigineering.core.submit import submit_candidate, SubmitClaimError
+        from aigineering.core.trace import MemoryTraceStore
+        from aigineering.core.provenance import sign_asset
+        from aigineering.protocol.envelope import CandidateEnvelope
+        from aigineering.protocol.types import Contract, Asset
+
+        with tempfile.TemporaryDirectory() as tmp:
+            store = SQLiteStore(db_path=os.path.join(tmp, "test.db"))
+            trace = MemoryTraceStore()
+
+            contract = Contract(
+                id="c1", name="t", description="t", inputs=[], outputs=["out"], budget=10,
+            )
+            store.add_contract(contract)
+
+            claim_store = ClaimStore()
+            claim = claim_store.claim("c1", "worker-1", lease_seconds=60)
+            assert claim is not None, "G8/D-P1.2: claim must succeed for worker-1"
+            assert claim.claim_id is not None, "G8/D-P1.2: claim must have claim_id"
+
+            store.persist_claim(
+                claim.claim_id, "c1", "worker-1",
+                lease_until=claim.lease_until,
+            )
+
+            # Duplicate claim by different worker must be rejected
+            dup = claim_store.claim("c1", "worker-2")
+            assert dup is None, "G8/D-P1.2: duplicate claim must be rejected"
+
+            # Worker-1 submits with valid claim — must succeed
+            env = CandidateEnvelope(
+                contract_id="c1",
+                worker_id="worker-1",
+                raw_output='/exec {"out": "hello"}',
+                claim_id=claim.claim_id,
+            )
+            result = submit_candidate(env, store, trace)
+            assert result["status"] in ("accepted", "partial"), (
+                f"G8/D-P1.2: valid claim+worker must accept, got {result['status']}"
+            )
+
+            # Worker-2 submits with worker-1's claim — must be rejected
+            env2 = CandidateEnvelope(
+                contract_id="c1",
+                worker_id="worker-2",
+                raw_output='/exec {"out": "hijack"}',
+                claim_id=claim.claim_id,
+            )
+            try:
+                submit_candidate(env2, store, trace)
+            except SubmitClaimError as e:
+                assert "worker" in str(e).lower(), (
+                    f"G8/D-P1.2: claim worker mismatch must raise SubmitClaimError, got: {e}"
+                )
+            else:
+                raise AssertionError(
+                    "G8/D-P1.2: submit with wrong worker_id for active claim must raise SubmitClaimError"
+                )
+
+            from datetime import datetime, timezone, timedelta
+            contract2 = Contract(
+                id="c2", name="t2", description="t2", inputs=[], outputs=["out2"], budget=10,
+            )
+            store.add_contract(contract2)
+            expired_lease = (
+                datetime.now(timezone.utc) - timedelta(seconds=60)
+            ).isoformat()
+            store.persist_claim(
+                "expired-claim-id", "c2", "worker-1",
+                lease_until=expired_lease,
+            )
+
+            env3 = CandidateEnvelope(
+                contract_id="c2",
+                worker_id="worker-1",
+                raw_output='/exec {"out2": "late"}',
+                claim_id="expired-claim-id",
+            )
+            try:
+                submit_candidate(env3, store, trace)
+            except SubmitClaimError as e:
+                assert "expired" in str(e).lower(), (
+                    f"G8/D-P1.2: expired lease must raise SubmitClaimError, got: {e}"
+                )
+            else:
+                raise AssertionError(
+                    "G8/D-P1.2: submit with expired lease must raise SubmitClaimError"
+                )
+
+            contract3 = Contract(
+                id="c3", name="t3", description="t3", inputs=[], outputs=["out3"], budget=10,
+            )
+            store.add_contract(contract3)
+            future_lease = (
+                datetime.now(timezone.utc) + timedelta(seconds=3600)
+            ).isoformat()
+            store.persist_claim(
+                "released-claim-id", "c3", "worker-1",
+                lease_until=future_lease,
+                status="released",
+            )
+
+            env4 = CandidateEnvelope(
+                contract_id="c3",
+                worker_id="worker-1",
+                raw_output='/exec {"out3": "stale"}',
+                claim_id="released-claim-id",
+            )
+            try:
+                submit_candidate(env4, store, trace)
+            except SubmitClaimError as e:
+                assert "status" in str(e).lower(), (
+                    f"G8/D-P1.2: non-active claim must raise SubmitClaimError, got: {e}"
+                )
+            else:
+                raise AssertionError(
+                    "G8/D-P1.2: submit with non-active claim must raise SubmitClaimError"
+                )
 
 
 # ============================================================================
@@ -792,7 +1238,20 @@ class TestDisclosureRedaction:
         Gate: G10 (Trust, Signatures, and Sealed Config Policy)
         Debt: N-P1.7 (prompt.py:42)
         """
-        pass  # Placeholder — implement after Phase D1
+        from aigineering.core.disclosure import redact_for_disclosure
+        from aigineering.protocol.types import Asset
+        from aigineering.core.provenance import sign_asset
+
+        asset = Asset(id="a1", name="secret", content="sensitive data",
+                      definition_hash="def:test", content_hash="content:test",
+                      origin="user", disclosure_view="redacted")
+        asset = sign_asset(asset)
+        redacted = redact_for_disclosure(asset)
+        assert redacted.content == "[redacted]", (
+            f"G10/N-P1.7: content must be redacted, got '{redacted.content}'"
+        )
+        # Original store asset's id/hash preserved
+        assert redacted.id == asset.id
 
     def test_sensitive_policy_checks_actual_disclosed_assets(self):
         """Sensitive policy must check only contract inputs, not get_all_assets().
@@ -848,7 +1307,46 @@ class TestDisclosureRedaction:
         Gate: G10
         Debt: N-P0.1 (Phase D3 verification)
         """
-        pass  # Placeholder — implement after Phase D3
+        import json
+        from aigineering.cli._common import _redact_sealed
+        from aigineering.cli.replay import _build_replay_json_result
+        from aigineering.protocol.types import Session
+        from aigineering.protocol.wire import session_to_dict
+
+        session = Session(
+            id="s1",
+            config_snapshot={"api_key": "sk-secret-value"},
+            worker_snapshot={"token": "secret-worker-token"},
+        )
+        rendered = _redact_sealed(session_to_dict(session))
+
+        assert "config_snapshot" not in rendered, (
+            "G10/N-P0.1: CLI JSON must strip config_snapshot via _redact_sealed"
+        )
+        assert "worker_snapshot" not in rendered, (
+            "G10/N-P0.1: CLI JSON must strip worker_snapshot via _redact_sealed"
+        )
+        assert "id" in rendered, "G10/N-P0.1: non-sensitive fields must be preserved"
+
+        cli_json = json.dumps(rendered)
+        assert "sk-secret-value" not in cli_json, (
+            "G10/N-P0.1: sealed config values must not appear in CLI JSON output"
+        )
+        assert "secret-worker-token" not in cli_json, (
+            "G10/N-P0.1: sealed worker values must not appear in CLI JSON output"
+        )
+
+        replay_payload = _build_replay_json_result(
+            {"session": session, "entries": [], "accepted_count": 0,
+             "rejected_count": 0, "consistent": True}
+        )
+        replay_json = json.dumps(replay_payload)
+        assert "sk-secret-value" not in replay_json, (
+            "G10/N-P0.1: sealed config must not appear in replay JSON output"
+        )
+        assert "secret-worker-token" not in replay_json, (
+            "G10/N-P0.1: sealed worker token must not appear in replay JSON output"
+        )
 
     def test_projection_origin_reflects_worker_type(self):
         """Projection origin must derive from worker type (llm/tool/mcp/mock).
@@ -1229,4 +1727,69 @@ class TestSQLiteTrace:
         Gate: G3
         Debt: C3 (SQLite trace operations)
         """
-        pass  # Placeholder — implement after Phase C3
+        from aigineering.core.sqlite_store import SQLiteStore
+        from aigineering.core.trace import create_entry
+        import tempfile, os
+
+        entry = create_entry(
+            contract_id="c1",
+            event_type="projection",
+            disclosed_assets=["da-1", "da-2"],
+            accepted_fragments=["af-1"],
+            accepted_asset_names=["out-1"],
+            rejected_fragments=["rf-1"],
+            worker_id="w-1",
+            candidate_raw="/exec payload",
+            authority_policy='{"scope":"strict"}',
+            authority_result="accepted",
+            budget_remaining=7,
+            relation_type="exec",
+            relation_target="c2",
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = os.path.join(tmp, "test.db")
+            store = SQLiteStore(db_path=db_path)
+            store.append_trace_entry(entry)
+
+            events = store.get_trace_events(contract_id="c1")
+            assert len(events) == 1, (
+                f"G3/C3: expected 1 trace event for c1, got {len(events)}"
+            )
+            e = events[0]
+            assert e.event_type == "projection", (
+                f"G3/C3: event_type round-trip failed: expected 'projection', got '{e.event_type}'"
+            )
+            assert e.contract_id == "c1", (
+                f"G3/C3: contract_id round-trip failed: expected 'c1', got '{e.contract_id}'"
+            )
+            assert e.worker_id == "w-1", (
+                f"G3/C3: worker_id round-trip failed: expected 'w-1', got '{e.worker_id}'"
+            )
+            assert e.candidate_raw == "/exec payload", (
+                f"G3/C3: candidate_raw round-trip failed"
+            )
+            assert e.budget_remaining == 7, (
+                f"G3/C3: budget_remaining round-trip failed: expected 7, got {e.budget_remaining}"
+            )
+            assert e.relation_type == "exec", (
+                f"G3/C3: relation_type round-trip failed: expected 'exec', got '{e.relation_type}'"
+            )
+            assert e.relation_target == "c2", (
+                f"G3/C3: relation_target round-trip failed: expected 'c2', got '{e.relation_target}'"
+            )
+            assert e.authority_result == "accepted", (
+                f"G3/C3: authority_result round-trip failed: expected 'accepted', got '{e.authority_result}'"
+            )
+            assert e.accepted_fragments == ("af-1",), (
+                f"G3/C3: accepted_fragments round-trip failed: expected ('af-1',), got {e.accepted_fragments}"
+            )
+            assert e.accepted_asset_names == ("out-1",), (
+                f"G3/C3: accepted_asset_names round-trip failed"
+            )
+            assert e.rejected_fragments == ("rf-1",), (
+                f"G3/C3: rejected_fragments round-trip failed"
+            )
+            assert e.disclosed_assets == ("da-1", "da-2"), (
+                f"G3/C3: disclosed_assets round-trip failed: expected ('da-1', 'da-2'), got {e.disclosed_assets}"
+            )

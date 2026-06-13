@@ -356,6 +356,10 @@ class Engine:
         if estimated_tokens <= self._context_size_limit:
             return False
 
+        # Record the overflow as a trace event and store a diagnostic
+        # asset so the next worker invocation can act on it via /replan.
+        # Do NOT fabricate a candidate with worker_id="engine" — Engine
+        # is the kernel boundary, not a worker.
         self._add_trace(
             contract.id,
             "context_overflow",
@@ -369,18 +373,25 @@ class Engine:
             budget_remaining=self._resolve_budget(contract),
         )
 
-        from aigineering.protocol.types import Candidate
-        from aigineering.protocol.actions import WorkerAction
+        from aigineering.core.provenance import sign_asset
 
-        action = WorkerAction(
-            type="replan",
-            payload={"reason": f"context overflow ({estimated_tokens} tokens)"},
+        report_asset = sign_asset(
+            system_asset(
+                name="_context_overflow_report_",
+                content=(
+                    f"Context overflow: {estimated_tokens} tokens "
+                    f"exceeds limit {self._context_size_limit}."
+                ),
+                created_by=contract.id,
+            )
         )
-        candidate = Candidate(
-            worker_id="engine",
-            raw_output=f'/replan {{"reason": "context overflow ({estimated_tokens} tokens)"}}',
-        )
-        self._dispatch_method(contract, action, candidate)
+        self._store.add_asset(report_asset)
+
+        # Suspend the contract and consume budget so the outer run() loop
+        # does not re-select this contract on the next iteration. Without
+        # this, overflow detection repeats forever.
+        self._suspended.add(contract.id)
+        self._budget[contract.id] = 0
         return True
 
     def _run_system_method(self, contract: Contract) -> bool:

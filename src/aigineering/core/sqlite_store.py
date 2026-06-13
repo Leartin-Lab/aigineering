@@ -188,12 +188,19 @@ class SQLiteStore:
         row = cur.fetchone()
         current = row[0] if row and row[0] is not None else 0
 
-        if current < 1:
+        if current > CURRENT_SCHEMA_VERSION:
+            raise RuntimeError(
+                f"SQLite schema version {current} is newer than supported "
+                f"version {CURRENT_SCHEMA_VERSION}. Refusing to open — "
+                f"this build cannot read a newer database."
+            )
+
+        if current < CURRENT_SCHEMA_VERSION:
             from aigineering.core.ids import now_iso
 
             self._conn.execute(
                 "INSERT INTO schema_version (version, applied_at) VALUES (?, ?)",
-                (1, now_iso()),
+                (CURRENT_SCHEMA_VERSION, now_iso()),
             )
             self._conn.commit()
 
@@ -386,82 +393,7 @@ class SQLiteStore:
         return [self._row_to_contract(row) for row in cur.fetchall()]
 
     # ------------------------------------------------------------------
-    # Trace operations (G3)
-    # ------------------------------------------------------------------
-
-    def append_trace_entry(self, entry: TraceEntry) -> None:
-        """Persist a trace entry to the trace_events table."""
-        d = trace_entry_to_dict(entry)
-        with self._conn:
-            self._conn.execute(
-                """INSERT OR REPLACE INTO trace_events (
-                    id, parent_id, contract_id, event_type,
-                    disclosed_assets, accepted_fragments, accepted_asset_names,
-                    rejected_fragments, worker_id, candidate_raw,
-                    authority_policy, authority_result, budget_remaining,
-                    relation_type, relation_target, timestamp
-                ) VALUES (
-                    :id, :parent_id, :contract_id, :event_type,
-                    :disclosed_assets, :accepted_fragments, :accepted_asset_names,
-                    :rejected_fragments, :worker_id, :candidate_raw,
-                    :authority_policy, :authority_result, :budget_remaining,
-                    :relation_type, :relation_target, :timestamp
-                )""",
-                {
-                    "id": d.get("id", ""),
-                    "parent_id": d.get("parent_id"),
-                    "contract_id": d.get("contract_id", ""),
-                    "event_type": d.get("event_type", ""),
-                    "disclosed_assets": json.dumps(d.get("disclosed_assets", [])),
-                    "accepted_fragments": json.dumps(d.get("accepted_fragments", [])),
-                    "accepted_asset_names": json.dumps(d.get("accepted_asset_names", [])),
-                    "rejected_fragments": json.dumps(d.get("rejected_fragments", [])),
-                    "worker_id": d.get("worker_id"),
-                    "candidate_raw": d.get("candidate_raw"),
-                    "authority_policy": d.get("authority_policy"),
-                    "authority_result": d.get("authority_result"),
-                    "budget_remaining": d.get("budget_remaining", 0),
-                    "relation_type": d.get("relation_type"),
-                    "relation_target": d.get("relation_target"),
-                    "timestamp": d.get("timestamp", ""),
-                },
-            )
-
-    def get_trace_events(self, contract_id: str | None = None) -> list[TraceEntry]:
-        """Return trace entries, optionally filtered by contract_id."""
-        if contract_id is not None:
-            cur = self._conn.execute(
-                "SELECT * FROM trace_events WHERE contract_id = ? ORDER BY rowid",
-                (contract_id,),
-            )
-        else:
-            cur = self._conn.execute("SELECT * FROM trace_events ORDER BY rowid")
-        return [self._row_to_trace_entry(row) for row in cur.fetchall()]
-
-    def _row_to_trace_entry(self, row: sqlite3.Row) -> TraceEntry:
-        """Convert a trace_events row to a TraceEntry."""
-        import json as _json
-        return TraceEntry(
-            id=row["id"],
-            parent_id=row["parent_id"],
-            contract_id=row["contract_id"],
-            event_type=row["event_type"],
-            disclosed_assets=_json.loads(row["disclosed_assets"] or "[]"),
-            accepted_fragments=_json.loads(row["accepted_fragments"] or "[]"),
-            accepted_asset_names=_json.loads(row["accepted_asset_names"] or "[]"),
-            rejected_fragments=_json.loads(row["rejected_fragments"] or "[]"),
-            worker_id=row["worker_id"],
-            candidate_raw=row["candidate_raw"],
-            authority_policy=row["authority_policy"],
-            authority_result=row["authority_result"],
-            budget_remaining=row["budget_remaining"],
-            relation_type=row["relation_type"],
-            relation_target=row["relation_target"],
-            timestamp=row["timestamp"],
-        )
-
-    # ------------------------------------------------------------------
-    # Trace operations (040 C3)
+    # Trace operations (G3, 040 C3)
     # ------------------------------------------------------------------
 
     def append_trace_entry(self, entry) -> None:
@@ -483,14 +415,12 @@ class SQLiteStore:
                     :authority_policy, :authority_result, :budget_remaining,
                     :relation_type, :relation_target, :timestamp
                 )""",
-                {k: json.dumps(v) if isinstance(v, (list, dict)) else v
+                {k: json.dumps(v) if isinstance(v, (list, dict, tuple)) else v
                  for k, v in d.items()},
             )
 
     def get_trace_events(self, contract_id: str | None = None) -> list:
-        """Return trace events, optionally filtered by *contract_id*."""
-        from aigineering.protocol.types import TraceEntry
-        from aigineering.protocol.wire import trace_entry_from_dict
+        """Return trace entries, optionally filtered by contract_id."""
         if contract_id is not None:
             cur = self._conn.execute(
                 "SELECT * FROM trace_events WHERE contract_id = ? ORDER BY rowid",
@@ -498,7 +428,30 @@ class SQLiteStore:
             )
         else:
             cur = self._conn.execute("SELECT * FROM trace_events ORDER BY rowid")
-        return [trace_entry_from_dict(dict(row)) for row in cur.fetchall()]
+        return [self._row_to_trace_entry(row) for row in cur.fetchall()]
+
+    def _row_to_trace_entry(self, row: sqlite3.Row):
+        """Convert a trace_events row to a TraceEntry."""
+        from aigineering.protocol.types import TraceEntry
+        import json as _json
+        return TraceEntry(
+            id=row["id"],
+            parent_id=row["parent_id"],
+            contract_id=row["contract_id"],
+            event_type=row["event_type"],
+            disclosed_assets=_json.loads(row["disclosed_assets"] or "[]"),
+            accepted_fragments=_json.loads(row["accepted_fragments"] or "[]"),
+            accepted_asset_names=_json.loads(row["accepted_asset_names"] or "[]"),
+            rejected_fragments=_json.loads(row["rejected_fragments"] or "[]"),
+            worker_id=row["worker_id"],
+            candidate_raw=row["candidate_raw"],
+            authority_policy=row["authority_policy"],
+            authority_result=row["authority_result"],
+            budget_remaining=row["budget_remaining"],
+            relation_type=row["relation_type"],
+            relation_target=row["relation_target"],
+            timestamp=row["timestamp"],
+        )
 
     # ------------------------------------------------------------------
     # Claim persistence (040 C4, G8)
