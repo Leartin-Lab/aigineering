@@ -94,13 +94,13 @@ def hash_asset_definition(name: str) -> str:
 
 
 def hash_asset_content(name: str, content: str) -> str:
-    """Identity of asset *content* (``asset:`` tag).
+    """Identity of asset *content* (``content:`` tag).
 
     Both name and content contribute so that different assets with matching
     content are still distinguishable.
     """
     canonical = canonical_json({"name": name, "content": content})
-    return f"asset:{compute_content_hash(canonical)}"
+    return f"content:{compute_content_hash(canonical)}"
 
 
 def hash_lineage(group_name: str, asset_ids: list[str]) -> str:

@@ -46,8 +46,8 @@ def test_compute_content_hash_nfc_normalization():
 def test_asset_id():
     canonical = json.dumps({"name": "x", "content": "y"}, sort_keys=True)
     aid = asset_id(canonical)
-    assert aid.startswith("asset:")
-    assert len(aid) == 6 + 64  # "asset:" + 64 hex chars
+    assert aid.startswith("content:")
+    assert len(aid) == 8 + 64  # "content:" + 64 hex chars
 
 
 def test_asset_id_deterministic():
@@ -117,7 +117,7 @@ def test_hash_contract_includes_all_fields():
 
 def test_hash_asset_content_prefix():
     cid = hash_asset_content("report", "content here")
-    assert cid.startswith("asset:")
+    assert cid.startswith("content:")
 
 
 def test_hash_asset_content_deterministic():
