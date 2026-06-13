@@ -200,11 +200,11 @@ def check_sensitive_input_policy(
     # --- Required signer ---
     required_signer: str = effective_policy.get("required_signer", "")
     if required_signer:
-        all_assets = store.get_all_assets()
-        signed_ok = any(a.signed_by == required_signer for a in all_assets)
+        input_assets = _collect_input_assets(contract, store)
+        signed_ok = any(a.signed_by == required_signer for a in input_assets)
         if not signed_ok:
             violations.append(
-                f"required_signer '{required_signer}' has not signed any asset in store"
+                f"required_signer '{required_signer}' has not signed any input asset of contract '{contract.id}'"
             )
 
     # --- Required trust tier ---
@@ -223,14 +223,14 @@ def check_sensitive_input_policy(
                 f"required_trust_tier '{required_trust_tier}' is not a recognized tier"
             )
         else:
-            all_assets = store.get_all_assets()
+            input_assets = _collect_input_assets(contract, store)
             sufficient = any(
                 _TRUST_TIER_RANK.get(a.trust_tier, -1) >= min_rank
-                for a in all_assets
+                for a in input_assets
             )
             if not sufficient:
                 violations.append(
-                    f"no asset in store meets required_trust_tier "
+                    f"no input asset of contract '{contract.id}' meets required_trust_tier "
                     f"'{required_trust_tier}' (minimum rank {min_rank})"
                 )
 
@@ -238,3 +238,11 @@ def check_sensitive_input_policy(
         "compliant": len(violations) == 0,
         "violations": violations,
     }
+
+
+def _collect_input_assets(contract: Contract, store: Any) -> list[Any]:
+    """Collect all assets that are contract inputs (not all store assets)."""
+    result: list[Any] = []
+    for input_name in contract.inputs:
+        result.extend(store.get_assets_by_name(input_name))
+    return result

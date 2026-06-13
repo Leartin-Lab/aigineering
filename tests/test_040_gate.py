@@ -800,7 +800,47 @@ class TestDisclosureRedaction:
         Gate: G10
         Debt: D-P1.3 (verification.py:203,226)
         """
-        pass  # Placeholder — implement after Phase D2
+        from aigineering.core.verification import check_sensitive_input_policy
+        from aigineering.core.store import MemoryStore
+        from aigineering.core.provenance import sign_asset
+        from aigineering.protocol.types import Asset, Contract
+
+        store = MemoryStore()
+
+        # An unrelated asset with high trust — should NOT satisfy policy
+        unrelated = Asset(
+            id="unrelated", name="unrelated", content="trusted content",
+            definition_hash="def:unrel", content_hash="content:unrel",
+            origin="human", trust_tier="high", signed_by="trusted_signer",
+        )
+        unrelated = sign_asset(unrelated)
+        store.add_asset(unrelated)
+
+        # The actual input asset — unsigned, low trust
+        input_asset = Asset(
+            id="real-input", name="real-input", content="sensitive data",
+            definition_hash="def:input", content_hash="content:input",
+            origin="user", trust_tier="untrusted", signed_by="",
+        )
+        input_asset = sign_asset(input_asset)
+        store.add_asset(input_asset)
+
+        # Contract with sensitive_input_policy requiring a trusted signer
+        contract = Contract(
+            id="c-policy", name="sensitive-task",
+            description="Test", inputs=["real-input"], outputs=["result"],
+            budget=5,
+            sensitive_input_policy={"required_signer": "trusted_signer"},
+        )
+
+        # Policy check: only contract.inputs assets should be checked
+        result = check_sensitive_input_policy(contract, store)
+        assert not result["compliant"], (
+            f"G10/D-P1.3: Policy should be non-compliant — "
+            f"input asset 'real-input' has signed_by='{input_asset.signed_by}', "
+            f"not 'trusted_signer'. Unrelated trusted asset should not satisfy policy. "
+            f"Violations: {result['violations']}"
+        )
 
     def test_sealed_config_absent_from_trace_json_prompt_replay(self):
         """Sealed config must never appear in trace, JSON CLI, prompt, or replay exports.
