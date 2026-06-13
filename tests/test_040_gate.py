@@ -899,7 +899,45 @@ class TestDisclosureRedaction:
         Gate: G10
         Debt: D6 (Minimum capability descriptor trust gate)
         """
-        pass  # Placeholder — implement after Phase D6
+        from aigineering.core.capability_descriptors import verify_descriptor, create_tool_descriptor
+        from aigineering.core.provenance import sign_asset
+        from aigineering.protocol.types import Asset
+
+        # Valid descriptor: signed, configured trust tier, correct prefix, dual-hash
+        valid = create_tool_descriptor("search", "Search tool", {"type": "object"}, trust_tier="configured")
+        assert verify_descriptor(valid, kind="tool"), (
+            "G10/D6: Valid tool descriptor should pass verification"
+        )
+
+        # Unsigned descriptor: missing canonical seal
+        unsigned = Asset(
+            id="unsigned", name="_tool_capability_search", content="{}",
+            definition_hash="def:test", content_hash="content:test",
+            origin="capability_registry", trust_tier="configured",
+            signed_by="",
+        )
+        assert not verify_descriptor(unsigned, kind="tool"), (
+            "G10/D6: Unsigned descriptor must be rejected"
+        )
+
+        # Low trust tier: below minimum
+        low_trust = create_tool_descriptor("low", "Low trust tool", {"type": "object"}, trust_tier="untrusted")
+        assert not verify_descriptor(low_trust, kind="tool"), (
+            "G10/D6: Descriptor with trust_tier='untrusted' must be rejected"
+        )
+
+        # Wrong name prefix for kind
+        wrong_prefix = create_tool_descriptor("search", "Search tool", {"type": "object"}, trust_tier="configured")
+        wrong_prefix = Asset(
+            id=wrong_prefix.id, name="_mcp_search", content=wrong_prefix.content,
+            definition_hash=wrong_prefix.definition_hash,
+            content_hash=wrong_prefix.content_hash,
+            origin=wrong_prefix.origin, trust_tier=wrong_prefix.trust_tier,
+            signed_by=wrong_prefix.signed_by, provenance_seal=wrong_prefix.provenance_seal,
+        )
+        assert not verify_descriptor(wrong_prefix, kind="tool"), (
+            "G10/D6: Descriptor with wrong name prefix for kind must be rejected"
+        )
 
 
 # ============================================================================

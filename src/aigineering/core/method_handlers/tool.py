@@ -6,6 +6,7 @@ import json
 from typing import TYPE_CHECKING
 
 from aigineering.agent.tool_worker import ToolWorker
+from aigineering.core.capability_descriptors import verify_descriptor
 from aigineering.core.methods import method_payload, system_asset
 from aigineering.core.provenance import sign_asset
 from aigineering.protocol.actions import parse_method_action
@@ -86,6 +87,13 @@ class ToolMethodHandler:
         elif runtime.get_tool_registry() is None:
             error = "no ToolRegistry configured"
         else:
+            # Verify tool capability descriptor before execution (G10/D6)
+            tool_descriptor_name = f"_tool_capability_{tool_name}"
+            descriptors = runtime.get_assets_by_name(tool_descriptor_name)
+            if descriptors:
+                descriptor = descriptors[0]
+                if not verify_descriptor(descriptor, kind="tool"):
+                    error = f"tool '{tool_name}' descriptor failed verification (G10 trust gate)"
             worker = ToolWorker(runtime.get_tool_registry())
             candidate = worker.invoke(
                 tool_name,
