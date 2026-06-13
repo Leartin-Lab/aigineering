@@ -6,7 +6,10 @@ import click
 
 from aigineering.cli._common import _output_json, _persistent_store
 from aigineering.core.ids import hash_retry
-from aigineering.protocol.types import Contract
+from aigineering.core.method_handlers.retry import RetryMethodHandler
+from aigineering.core.method_runtime import MethodRuntime
+from aigineering.core.trace import MemoryTraceStore
+from aigineering.protocol.types import Candidate
 
 
 @click.command("retry")
@@ -29,22 +32,22 @@ def retry(
             click.echo(f"Contract '{contract_id}' not found.")
         return
 
-    retry_id = hash_retry(contract_id)
-    retry_contract = Contract(
-        id=retry_id,
-        parent_id=original.parent_id,
-        name=original.name,
-        description=original.description,
-        inputs=original.inputs,
-        outputs=original.outputs,
-        activation=original.activation,
-        budget=original.budget,
-        tool_scope=original.tool_scope,
-        labels=original.labels,
-        origin=original.origin,
-        sensitive_input_policy=original.sensitive_input_policy,
+    # Method ingress (G1): dispatch through RetryMethodHandler instead of
+    # directly calling store.add_contract().
+    runtime = MethodRuntime(
+        store=store,
+        trace=MemoryTraceStore(),
+        budget={},
     )
-    store.add_contract(retry_contract)
+    candidate = Candidate(
+        worker_id="cli",
+        raw_output="/retry",
+        parsed_action={"type": "retry"},
+    )
+    handler = RetryMethodHandler()
+    handler.handle_method(runtime, original, "retry", candidate)
+
+    retry_id = hash_retry(contract_id)
 
     if json_output:
         _output_json({

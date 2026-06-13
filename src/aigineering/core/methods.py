@@ -272,25 +272,24 @@ def contracts_from_plan_asset(
                 )
                 continue
 
-        # --- Tool-scope containment: clamp to parent intersection ---
+        # --- Tool-scope containment: reject if not subset ---
         if parent_tools is not None:
             child_tools = set(tool_scope)
             if not child_tools.issubset(parent_tools):
-                original_scope = sorted(tool_scope)
-                tool_scope = sorted(child_tools & parent_tools)
                 rejected.append(
                     {
                         "child_name": name,
                         "field": "tool_scope",
                         "reason": (
-                            f"tool_scope {original_scope} is not a subset "
+                            f"tool_scope {sorted(tool_scope)} is not a subset "
                             f"of parent {sorted(parent_tools)}"
                         ),
-                        "action": "clamped",
+                        "action": "rejected",
                         "expected": f"subset of {sorted(parent_tools)}",
-                        "actual": str(original_scope),
+                        "actual": str(sorted(tool_scope)),
                     }
                 )
+                continue
 
         # --- Label containment: reject if not subset ---
         if parent_labels is not None and not set(labels).issubset(parent_labels):
@@ -355,10 +354,16 @@ def contracts_from_plan_asset(
                     }
                 )
 
-        # --- Budget fan-out: clamp to individual parent budget first ---
+        # --- Budget fan-out: contain to individual parent budget first ---
         if parent_budget is not None and budget > parent_budget:
             origin_budget = budget
             budget = parent_budget
+            effective_budget = budget
+            remaining_budget = (
+                max(0, parent_budget_remaining - (_cumulative_budget + effective_budget))
+                if parent_budget_remaining is not None
+                else None
+            )
             rejected.append(
                 {
                     "child_name": name,
@@ -366,17 +371,25 @@ def contracts_from_plan_asset(
                     "reason": (
                         f"budget {origin_budget} exceeds parent budget {parent_budget}"
                     ),
-                    "action": "clamped",
+                    "action": "budget_contained",
                     "expected": f"<= {parent_budget}",
                     "actual": str(origin_budget),
+                    "requested": origin_budget,
+                    "effective": effective_budget,
+                    "remaining": remaining_budget,
                 }
             )
 
-        # --- Budget fan-out: cumulative clamping to parent remaining ---
+        # --- Budget fan-out: cumulative containment to parent remaining ---
         if parent_budget_remaining is not None:
             if _cumulative_budget + budget > parent_budget_remaining:
-                clamped_budget = max(1, parent_budget_remaining - _cumulative_budget)
-                if budget != clamped_budget:
+                contained_budget = max(1, parent_budget_remaining - _cumulative_budget)
+                if budget != contained_budget:
+                    requested_budget = budget
+                    budget = contained_budget
+                    remaining_budget = max(
+                        0, parent_budget_remaining - (_cumulative_budget + budget)
+                    )
                     rejected.append(
                         {
                             "child_name": name,
@@ -384,14 +397,16 @@ def contracts_from_plan_asset(
                             "reason": (
                                 f"cumulative child budgets would exceed parent "
                                 f"remaining ({parent_budget_remaining}); "
-                                f"clamped from {budget} to {clamped_budget}"
+                                f"contained from {requested_budget} to {contained_budget}"
                             ),
-                            "action": "clamped",
+                            "action": "budget_contained",
                             "expected": f"total <= {parent_budget_remaining}",
-                            "actual": str(budget),
+                            "actual": str(requested_budget),
+                            "requested": requested_budget,
+                            "effective": budget,
+                            "remaining": remaining_budget,
                         }
                     )
-                    budget = clamped_budget
             _cumulative_budget += budget
 
         cid = hash_contract(

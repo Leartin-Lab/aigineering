@@ -44,6 +44,7 @@ class Contract:
     tool_scope: tuple[str, ...] = field(default_factory=tuple)
     labels: tuple[str, ...] = field(default_factory=tuple)
     origin: str = "human"
+    minting_authority: tuple[str, ...] = field(default_factory=tuple)
     sensitive_input_policy: Optional[MappingProxyType] = None
 
     def __post_init__(self) -> None:
@@ -51,6 +52,7 @@ class Contract:
         object.__setattr__(self, "outputs", tuple(self.outputs))
         object.__setattr__(self, "tool_scope", tuple(self.tool_scope))
         object.__setattr__(self, "labels", tuple(self.labels))
+        object.__setattr__(self, "minting_authority", tuple(self.minting_authority))
         if self.sensitive_input_policy is not None:
             object.__setattr__(
                 self, "sensitive_input_policy",

@@ -101,11 +101,17 @@ def test_tool_obs_names_rejected():
         assert rej[0]["category"] == "protected_name_rejection"
 
 
-def test_system_contract_can_mint_declared_reserved_output():
+def test_system_contract_can_mint_declared_reserved_output_with_exact_authority():
+    """System contract with exact minting_authority CAN mint protected names.
+
+    After G5 gate fix: origin==system is NOT sufficient — exact
+    minting_authority is required.
+    """
     contract = Contract(
         id="system_contract",
         outputs=["_plan_result_parent"],
         origin="system",
+        minting_authority=["_plan_result_parent"],
     )
 
     acc, rej, _ = check_authority(
@@ -113,5 +119,8 @@ def test_system_contract_can_mint_declared_reserved_output():
         [{"name": "_plan_result_parent", "content": "plan"}],
     )
 
-    assert acc == [{"name": "_plan_result_parent", "content": "plan"}]
+    assert acc == [{"name": "_plan_result_parent", "content": "plan"}], (
+        f"G5: With exact minting_authority, protected output should be accepted. "
+        f"Got rejected: {rej}"
+    )
     assert rej == []
