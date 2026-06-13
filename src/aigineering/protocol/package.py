@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 from aigineering.core.ids import compute_content_hash
@@ -34,19 +34,25 @@ class WorkerPackage:
         object.__setattr__(self, "tool_scope", tuple(self.tool_scope))
         object.__setattr__(self, "capability_requirements", tuple(self.capability_requirements))
 
-        # Compute package_id deterministically if not provided
+        # Compute or verify package_id deterministically
+        computed = self._compute_package_id()
         if not self.package_id:
-            object.__setattr__(self, "package_id", self._compute_package_id())
+            object.__setattr__(self, "package_id", computed)
+        elif self.package_id != computed:
+            raise ValueError(
+                f"Package integrity check failed: provided package_id "
+                f"{self.package_id} does not match computed {computed}"
+            )
 
-        # Fail closed on unknown protocol version
-        if self.protocol_version > CURRENT_PROTOCOL_VERSION:
+        # Fail closed on unsupported protocol version
+        if self.protocol_version != CURRENT_PROTOCOL_VERSION:
             raise ValueError(
                 f"Unsupported protocol version {self.protocol_version} "
                 f"(current: {CURRENT_PROTOCOL_VERSION})"
             )
 
     def _compute_package_id(self) -> str:
-        """Deterministic package identity from contract + disclosure hashes."""
+        """Deterministic package identity covering all security-relevant fields."""
         contract_hash = compute_content_hash(json.dumps(self.contract, sort_keys=True))
         disclosure_hash = compute_content_hash(
             json.dumps(list(self.disclosed_assets), sort_keys=True)
@@ -54,7 +60,15 @@ class WorkerPackage:
         method_hash = compute_content_hash(
             json.dumps(list(self.method_context_assets), sort_keys=True)
         )
-        payload = f"v{self.protocol_version}|{self.contract_id}|{contract_hash}|{disclosure_hash}|{method_hash}"
+        tool_scope_hash = compute_content_hash(
+            json.dumps(sorted(self.tool_scope))
+        )
+        payload = (
+            f"v{self.protocol_version}|{self.contract_id}"
+            f"|{contract_hash}|{disclosure_hash}|{method_hash}"
+            f"|b{self.budget_remaining}|t{tool_scope_hash}"
+            f"|c{','.join(sorted(self.capability_requirements))}"
+        )
         return f"pkg:{compute_content_hash(payload)}"
 
     def to_json(self) -> str:
@@ -76,8 +90,10 @@ class WorkerPackage:
     def from_json(cls, data: str) -> WorkerPackage:
         """Deserialize from a JSON string. Fails closed on unknown version."""
         d = json.loads(data)
-        version = d.get("protocol_version", 0)
-        if version > CURRENT_PROTOCOL_VERSION:
+        version = d.get("protocol_version")
+        if version is None:
+            version = CURRENT_PROTOCOL_VERSION
+        if version != CURRENT_PROTOCOL_VERSION:
             raise ValueError(
                 f"Unsupported protocol version {version} (current: {CURRENT_PROTOCOL_VERSION})"
             )

@@ -916,7 +916,30 @@ class TestWorkerProtocolHashing:
         Gate: G4 (Strong Worker Protocol)
         Debt: D-P1.1 (package.py:10-53)
         """
-        pass  # Placeholder — implement after Phase E1
+        from aigineering.protocol.package import WorkerPackage, CURRENT_PROTOCOL_VERSION
+        import pytest
+
+        pkg = WorkerPackage(
+            contract_id="c1", contract={"name": "test"},
+            disclosed_assets=({"name": "a1", "content": "original"},),
+            method_context_assets=(), tool_scope=(), budget_remaining=5,
+        )
+        pkg_json = pkg.to_json()
+
+        # Tamper: modify a disclosed asset's content
+        tampered = pkg_json.replace('"original"', '"tampered"')
+        with pytest.raises(ValueError):
+            # Tampered JSON should produce a different package_id
+            pkg2 = WorkerPackage.from_json(tampered)
+            assert pkg2.package_id == pkg.package_id, (
+                "G4: tampered disclosure should change package_id"
+            )
+        # Unknown protocol version must fail closed
+        with pytest.raises(ValueError, match="Unsupported protocol version"):
+            WorkerPackage.from_json(
+                pkg_json.replace(f'"protocol_version": {CURRENT_PROTOCOL_VERSION}',
+                                 '"protocol_version": 999')
+            )
 
     def test_candidate_envelope_rejects_wrong_protocol_version(self):
         """CandidateEnvelope must fail closed on unknown protocol version.
@@ -924,7 +947,27 @@ class TestWorkerProtocolHashing:
         Gate: G4
         Debt: N-P2.5, N-P2.11
         """
-        pass  # Placeholder — implement after Phase E2
+        from aigineering.protocol.envelope import CandidateEnvelope, CURRENT_ENVELOPE_VERSION
+        import json, pytest
+
+        env = CandidateEnvelope(contract_id="c1", worker_id="w1", raw_output="ok")
+        env_json = env.to_json()
+        env_dict = json.loads(env_json)
+
+        # Future version must be rejected
+        env_dict["protocol_version"] = 2
+        with pytest.raises(ValueError, match="Unsupported envelope protocol version"):
+            CandidateEnvelope.from_json(json.dumps(env_dict))
+
+        # Missing version defaults to current (not rejected)
+        del env_dict["protocol_version"]
+        env2 = CandidateEnvelope.from_json(json.dumps(env_dict))
+        assert env2.protocol_version == CURRENT_ENVELOPE_VERSION
+
+        # Claim_id length limit
+        with pytest.raises(ValueError, match="claim_id exceeds maximum"):
+            CandidateEnvelope(contract_id="c1", worker_id="w1", raw_output="ok",
+                              claim_id="x" * 257)
 
 
 # ============================================================================
