@@ -20,6 +20,7 @@ RESERVED_PREFIXES: frozenset[str] = frozenset(
         "_replan_report_",
         "_fail_report_",
         "_retry_",
+        "_persona_",
     }
 )
 
@@ -55,15 +56,15 @@ def check_authority(
 
         if name not in contract.outputs:
             reasons.append(
-                f"asset '{name}' is not in contract.outputs "
-                f"({contract.outputs!r})"
+                f"asset '{name}' is not in contract.outputs ({contract.outputs!r})"
             )
             category = "authority_rejection"
 
         for prefix in RESERVED_PREFIXES:
-            if name.startswith(prefix) and contract.origin != "system":
+            if name.startswith(prefix) and name not in contract.minting_authority:
                 reasons.append(
                     f"asset '{name}' starts with reserved prefix '{prefix}'"
+                    f" and is not in contract.minting_authority"
                 )
                 category = "protected_name_rejection"
                 break

@@ -2,6 +2,7 @@
 
 import pytest
 
+from aigineering.core.provenance import sign_asset
 from aigineering.core.store import JsonLStore, MemoryStore
 from aigineering.protocol.types import Asset, Contract
 
@@ -12,27 +13,39 @@ def store(request, tmp_path):
     if request.param == "memory":
         return MemoryStore()
     else:
-        return JsonLStore(str(tmp_path / "assets.jsonl"), str(tmp_path / "contracts.jsonl"))
+        return JsonLStore(
+            str(tmp_path / "assets.jsonl"), str(tmp_path / "contracts.jsonl")
+        )
 
 
 def test_add_and_get_asset(store):
-    asset = Asset(id="asset_123", name="test_asset", content="hello")
+    asset = sign_asset(
+        Asset(id="asset_123", name="test_asset", content="hello", origin="test")
+    )
     store.add_asset(asset)
     assert store.get_asset("asset_123") == asset
     assert store.get_asset("nonexistent") is None
 
 
 def test_get_assets_by_name(store):
-    store.add_asset(Asset(id="a1", name="report", content="r1"))
-    store.add_asset(Asset(id="a2", name="report", content="r2"))
-    store.add_asset(Asset(id="a3", name="other", content="o1"))
+    store.add_asset(
+        sign_asset(Asset(id="a1", name="report", content="r1", origin="test"))
+    )
+    store.add_asset(
+        sign_asset(Asset(id="a2", name="report", content="r2", origin="test"))
+    )
+    store.add_asset(
+        sign_asset(Asset(id="a3", name="other", content="o1", origin="test"))
+    )
     results = store.get_assets_by_name("report")
     assert len(results) == 2
     assert {a.id for a in results} == {"a1", "a2"}
 
 
 def test_has_asset_named(store):
-    store.add_asset(Asset(id="a1", name="data_file", content="d"))
+    store.add_asset(
+        sign_asset(Asset(id="a1", name="data_file", content="d", origin="test"))
+    )
     assert store.has_asset_named("data_file")
     assert not store.has_asset_named("missing")
 
@@ -44,15 +57,19 @@ def test_add_and_get_contract(store):
 
 
 def test_get_all(store):
-    store.add_asset(Asset(id="a1", name="a", content="x"))
-    store.add_asset(Asset(id="a2", name="b", content="y"))
+    store.add_asset(sign_asset(Asset(id="a1", name="a", content="x", origin="test")))
+    store.add_asset(sign_asset(Asset(id="a2", name="b", content="y", origin="test")))
     assert len(store.get_all_assets()) == 2
 
 
 def test_name_index_accuracy(store):
-    store.add_asset(Asset(id="a1", name="alpha", content="x"))
-    store.add_asset(Asset(id="a2", name="beta", content="y"))
-    store.add_asset(Asset(id="a3", name="alpha", content="z"))
+    store.add_asset(
+        sign_asset(Asset(id="a1", name="alpha", content="x", origin="test"))
+    )
+    store.add_asset(sign_asset(Asset(id="a2", name="beta", content="y", origin="test")))
+    store.add_asset(
+        sign_asset(Asset(id="a3", name="alpha", content="z", origin="test"))
+    )
     results = store.get_assets_by_name("alpha")
     assert len(results) == 2
     assert {a.id for a in results} == {"a1", "a3"}
@@ -62,10 +79,22 @@ def test_name_index_accuracy(store):
 
 
 def test_created_by_index(store):
-    store.add_asset(Asset(id="a1", name="r1", content="x", created_by="c1"))
-    store.add_asset(Asset(id="a2", name="r2", content="y", created_by="c1"))
-    store.add_asset(Asset(id="a3", name="r3", content="z", created_by="c2"))
-    store.add_asset(Asset(id="a4", name="r4", content="w"))
+    store.add_asset(
+        sign_asset(
+            Asset(id="a1", name="r1", content="x", created_by="c1", origin="test")
+        )
+    )
+    store.add_asset(
+        sign_asset(
+            Asset(id="a2", name="r2", content="y", created_by="c1", origin="test")
+        )
+    )
+    store.add_asset(
+        sign_asset(
+            Asset(id="a3", name="r3", content="z", created_by="c2", origin="test")
+        )
+    )
+    store.add_asset(sign_asset(Asset(id="a4", name="r4", content="w", origin="test")))
     results_c1 = store.get_assets_by_contract("c1")
     assert len(results_c1) == 2
     assert {a.id for a in results_c1} == {"a1", "a2"}

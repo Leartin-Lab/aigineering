@@ -3,10 +3,12 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from aigineering.core.replay import replay_session
 from aigineering.core.session import SessionStore
 from aigineering.core.store import JsonLStore
-from aigineering.core.provenance import sign_asset
+from aigineering.core.provenance import sign_asset, verify_asset_seal
 from aigineering.protocol.types import Asset
 from aigineering.protocol.types import Session, TraceEntry
 from aigineering.protocol.wire import trace_entry_to_dict
@@ -106,7 +108,7 @@ def test_replay_detects_asset_signature_mismatch(tmp_path):
         minted_by=signed.minted_by,
         source_uri="tampered://source",
         signed_by=signed.signed_by,
-        signature=signed.signature,
+        provenance_seal=signed.provenance_seal,
     )
     entry = TraceEntry(
         id="trace_projection",
@@ -123,17 +125,12 @@ def test_replay_detects_asset_signature_mismatch(tmp_path):
 
     SessionStore(str(sessions_dir)).create_session(session)
     _write_trace(traces_dir / "session_test.jsonl", [entry])
-    JsonLStore(
-        str(store_dir / "assets.jsonl"),
-        str(store_dir / "contracts.jsonl"),
-    ).add_asset(tampered)
-
-    result = replay_session(
-        "session_test",
-        sessions_dir=str(sessions_dir),
-        traces_dir=str(traces_dir),
-        store_dir=str(store_dir),
+    # Store rejects tampered assets at write time (G3 enforcement)
+    assert not verify_asset_seal(tampered), (
+        "G3/N-P1.6: Tampered asset must fail signature verification"
     )
-
-    assert result["consistent"] is False
-    assert result["signature_mismatches"] == [signed.id]
+    with pytest.raises(ValueError, match="missing or invalid canonical seal"):
+        JsonLStore(
+            str(store_dir / "assets.jsonl"),
+            str(store_dir / "contracts.jsonl"),
+        ).add_asset(tampered)

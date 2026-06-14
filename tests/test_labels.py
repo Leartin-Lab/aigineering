@@ -4,18 +4,17 @@ import json
 
 from aigineering.agent.mock import MockWorker
 from aigineering.core.engine import Engine
-from aigineering.core.ids import asset_id, contract_id
+from aigineering.core.ids import hash_asset_content, hash_contract
 from aigineering.core.labels import Label, resolve_contract_labels
+from aigineering.core.provenance import sign_asset
 from aigineering.core.store import MemoryStore
 from aigineering.core.trace import TraceStore
 from aigineering.protocol.types import Asset, Contract
-from aigineering.protocol.wire import asset_to_canonical, contract_to_canonical
 
 
 def _asset(name: str, content: str, origin: str = "human") -> Asset:
-    draft = Asset(id="", name=name, content=content, origin=origin)
     return Asset(
-        id=asset_id(asset_to_canonical(draft)),
+        id=hash_asset_content(name, content),
         name=name,
         content=content,
         origin=origin,
@@ -23,13 +22,26 @@ def _asset(name: str, content: str, origin: str = "human") -> Asset:
 
 
 def _contract(**kwargs) -> Contract:
-    draft = Contract(id="", **kwargs)
-    return Contract(id=contract_id(contract_to_canonical(draft)), **kwargs)
+    contract = Contract(id="", **kwargs)
+    return Contract(
+        id=hash_contract(
+            name=contract.name,
+            description=contract.description,
+            inputs=list(contract.inputs),
+            outputs=list(contract.outputs),
+            activation=contract.activation,
+            budget=contract.budget,
+            tool_scope=list(contract.tool_scope),
+            labels=list(contract.labels),
+            origin=contract.origin,
+        ),
+        **kwargs,
+    )
 
 
 def test_label_injects_existing_asset():
     store = MemoryStore()
-    skill = _asset("_skill_review", "review procedure", origin="skill")
+    skill = sign_asset(_asset("_skill_review", "review procedure", origin="skill"))
     store.add_asset(skill)
     contract = _contract(name="review", labels=["reviewer"], outputs=["result"])
 
@@ -67,8 +79,8 @@ def test_engine_discloses_label_injected_assets_and_traces_resolution():
     worker = MockWorker()
     skill = _asset("_skill_review", "review procedure", origin="skill")
     input_asset = _asset("input", "input content")
-    store.add_asset(skill)
-    store.add_asset(input_asset)
+    store.add_asset(sign_asset(skill))
+    store.add_asset(sign_asset(input_asset))
 
     contract = _contract(
         name="review",

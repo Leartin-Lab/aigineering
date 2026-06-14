@@ -1,6 +1,6 @@
 [project]
 name = "aigineering"
-version = "0.3.0"
+version = "0.4.8"
 description = "Agent Runtime — structural hallucination containment for LLM-based agents"
 requires-python = ">=3.11"
 license = "MIT"
@@ -23,7 +23,7 @@ build-backend = "hatchling.build"
 packages = ["src/aigineering"]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "pytest-asyncio>=0.24", "build>=1.2"]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.24", "ruff>=0.8", "build>=1.2"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

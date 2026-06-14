@@ -39,3 +39,22 @@ Every rejected candidate — whether from parse error, duplicate conflict,
 authority rejection, or protected-name collision — is recorded with a
 `RejectionCategory` and a human-readable `reject_reason` in the
 `ProjectionResult.rejected_candidates` list. No rejection is silent.
+
+## 6. Methods are explicit subtasks
+
+Planning, replanning, retry, and tool execution enter the system as method
+contracts. The parent task is suspended while the method contract produces a
+method asset. Method handlers operate through `MethodRuntime`, not direct
+Engine private state.
+
+## 7. Worker pull submission is claim-bound
+
+Operational worker execution uses a `WorkerPackage` and `CandidateEnvelope`.
+SQLite enforces one active worker claim per contract. Submission validates the
+claim, worker identity, lease, and package binding before projection.
+
+## 8. Commit is transactional on the SQLite path
+
+For SQLite-backed worker submission, accepted assets, trace events, idempotency,
+and claim transition commit in one database transaction. A mid-commit failure
+rolls the whole submission back.

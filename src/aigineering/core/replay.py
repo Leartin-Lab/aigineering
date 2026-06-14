@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
-from aigineering.core.provenance import verify_asset_signature
+from aigineering.core.provenance import verify_asset_seal
 from aigineering.core.session import SessionStore
 from aigineering.core.store import JsonLStore
 from aigineering.core.trace import JsonLTraceStore
@@ -54,7 +54,7 @@ def replay_session(
                 candidate_store = JsonLTraceStore(str(fp))
                 candidate_ids = {e.id for e in candidate_store.get_all()}
                 # Match if the session's trace_ids are a subset of candidate's entries
-                if trace_id_set <= candidate_ids or trace_id_set & candidate_ids:
+                if trace_id_set <= candidate_ids:
                     trace_store = candidate_store
                     entries = trace_store.get_all()
                     break
@@ -90,7 +90,7 @@ def replay_session(
         else:
             seen.add(aid)
 
-    signature_mismatches: list[str] = []
+    seal_mismatches: list[str] = []
     store_path = Path(store_dir)
     assets_path = store_path / "assets.jsonl"
     contracts_path = store_path / "contracts.jsonl"
@@ -98,10 +98,10 @@ def replay_session(
         asset_store = JsonLStore(str(assets_path), str(contracts_path))
         for aid in sorted(seen):
             asset = asset_store.get_asset(aid)
-            if asset is not None and not verify_asset_signature(asset):
-                signature_mismatches.append(aid)
+            if asset is not None and not verify_asset_seal(asset):
+                seal_mismatches.append(aid)
 
-    consistent = len(duplicates) == 0 and len(signature_mismatches) == 0
+    consistent = len(duplicates) == 0 and len(seal_mismatches) == 0
 
     return {
         "session": session,
@@ -111,9 +111,7 @@ def replay_session(
         "rejected_count": rejected_count,
         "consistent": consistent,
         "duplicate_ids": duplicates if duplicates else None,
-        "signature_mismatches": (
-            signature_mismatches if signature_mismatches else None
-        ),
+        "seal_mismatches": (seal_mismatches if seal_mismatches else None),
     }
 
 

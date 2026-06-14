@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 from typing import Optional, Protocol, runtime_checkable
 
+from aigineering.core.provenance import verify_asset_seal
 from aigineering.protocol.types import Asset, Contract
 from aigineering.protocol.wire import asset_to_dict, contract_to_dict
 
@@ -27,6 +28,8 @@ class StoreProtocol(Protocol):
     def get_contract(self, contract_id: str) -> Optional[Contract]: ...
     def get_all_contracts(self) -> list[Contract]: ...
     def get_assets_by_contract(self, contract_id: str) -> list[Asset]: ...
+    def get_assets_by_definition(self, def_hash: str) -> list[Asset]: ...
+    def get_latest_asset(self, def_hash: str) -> Optional[Asset]: ...
 
 
 class MemoryStore:
@@ -35,6 +38,11 @@ class MemoryStore:
         self.contracts: dict[str, Contract] = {}
 
     def add_asset(self, asset: Asset) -> None:
+        if not asset.signed_by or not verify_asset_seal(asset):
+            raise ValueError(
+                f"G3/N-P1.6: Asset '{asset.id}' rejected — missing or invalid canonical seal "
+                f"(signed_by={asset.signed_by!r})"
+            )
         self.assets[asset.id] = asset
 
     def get_asset(self, asset_id: str) -> Optional[Asset]:
@@ -60,6 +68,16 @@ class MemoryStore:
 
     def get_assets_by_contract(self, contract_id: str) -> list[Asset]:
         return [a for a in self.assets.values() if a.created_by == contract_id]
+
+    def get_assets_by_definition(self, def_hash: str) -> list[Asset]:
+        return [a for a in self.assets.values() if a.definition_hash == def_hash]
+
+    def get_latest_asset(self, def_hash: str) -> Optional[Asset]:
+        latest: Optional[Asset] = None
+        for asset in self.assets.values():
+            if asset.definition_hash == def_hash:
+                latest = asset
+        return latest
 
 
 class JsonLStore:
@@ -97,14 +115,22 @@ class JsonLStore:
                     content=data["content"],
                     content_type=data.get("content_type", "text"),
                     created_by=data.get("created_by", ""),
-                    origin=data.get("origin", "system"),
+                    origin=data.get("origin", ""),
                     trust_tier=data.get("trust_tier", "untrusted"),
                     minted_by=data.get("minted_by", ""),
                     source_uri=data.get("source_uri", ""),
                     signed_by=data.get("signed_by", ""),
-                    signature=data.get("signature", ""),
+                    provenance_seal=data.get(
+                        "provenance_seal", data.get("signature", "")
+                    ),
+                    definition_hash=data.get("definition_hash", ""),
+                    content_hash=data.get("content_hash", ""),
                     promptable=data.get("promptable", True),
                     disclosure_view=data.get("disclosure_view", "original"),
+                    keep_flag=data.get("keep_flag", False),
+                    tombstoned=data.get("tombstoned", False),
+                    tombstoned_at=data.get("tombstoned_at"),
+                    lineage_id=data.get("lineage_id", ""),
                 )
                 self.assets[asset.id] = asset
         self._rebuild_indexes()
@@ -138,6 +164,8 @@ class JsonLStore:
                     tool_scope=data.get("tool_scope", []),
                     labels=data.get("labels", []),
                     origin=data.get("origin", "human"),
+                    minting_authority=data.get("minting_authority", []),
+                    sensitive_input_policy=data.get("sensitive_input_policy"),
                 )
                 self.contracts[contract.id] = contract
 
@@ -152,6 +180,11 @@ class JsonLStore:
                 _logger.warning("fsync failed for %s", path)
 
     def add_asset(self, asset: Asset) -> None:
+        if not asset.signed_by or not verify_asset_seal(asset):
+            raise ValueError(
+                f"G3/N-P1.6: Asset '{asset.id}' rejected — missing or invalid canonical seal "
+                f"(signed_by={asset.signed_by!r})"
+            )
         line = json.dumps(asset_to_dict(asset), ensure_ascii=False) + "\n"
         self._write_jsonl_line(self._assets_path, line)
         # If ID already exists, remove old index entries before overwriting
@@ -163,7 +196,9 @@ class JsonLStore:
                 ]
             if existing.created_by and existing.created_by in self._created_by_index:
                 self._created_by_index[existing.created_by] = [
-                    aid for aid in self._created_by_index[existing.created_by] if aid != asset.id
+                    aid
+                    for aid in self._created_by_index[existing.created_by]
+                    if aid != asset.id
                 ]
         self.assets[asset.id] = asset
         self._name_index.setdefault(asset.name, []).append(asset.id)
@@ -186,6 +221,16 @@ class JsonLStore:
     def get_assets_by_contract(self, contract_id: str) -> list[Asset]:
         ids = self._created_by_index.get(contract_id, [])
         return [self.assets[aid] for aid in ids if aid in self.assets]
+
+    def get_assets_by_definition(self, def_hash: str) -> list[Asset]:
+        return [a for a in self.assets.values() if a.definition_hash == def_hash]
+
+    def get_latest_asset(self, def_hash: str) -> Optional[Asset]:
+        latest: Optional[Asset] = None
+        for asset in self.assets.values():
+            if asset.definition_hash == def_hash:
+                latest = asset
+        return latest
 
     def add_contract(self, contract: Contract) -> None:
         line = json.dumps(contract_to_dict(contract), ensure_ascii=False) + "\n"

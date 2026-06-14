@@ -24,10 +24,10 @@ def test_plan_action_creates_system_sub_contract():
     assert child.parent_id == parent.id
     assert child.name == "root.plan"
     assert child.origin == "system"
-    assert child.outputs == ["_plan_result_contract_parent"]
+    assert child.outputs == ("_plan_result_contract_parent",)
     assert child.activation == "_method_ctx_contract_parent"
-    assert child.tool_scope == ["search"]
-    assert child.labels == ["research"]
+    assert child.tool_scope == ("search",)
+    assert child.labels == ("research",)
 
 
 def test_method_contract_ids_are_deterministic():
@@ -38,7 +38,7 @@ def test_method_contract_ids_are_deterministic():
     second = method_contract(parent, action)
 
     assert first.id == second.id
-    assert first.outputs == ["_replan_result_contract_parent"]
+    assert first.outputs == ("_replan_result_contract_parent",)
 
 
 def test_exec_action_is_not_a_method_contract():

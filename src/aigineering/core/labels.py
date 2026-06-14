@@ -6,10 +6,9 @@ import json
 from dataclasses import dataclass, field
 from typing import Protocol
 
-from aigineering.core.ids import asset_id
+from aigineering.core.ids import hash_asset_content, hash_asset_definition
 from aigineering.core.provenance import sign_asset
 from aigineering.protocol.types import Asset, Contract
-from aigineering.protocol.wire import asset_to_canonical
 
 
 class StoreLike(Protocol):
@@ -46,23 +45,16 @@ def _placeholder_asset(label_name: str, asset_name: str) -> Asset:
         sort_keys=True,
         ensure_ascii=False,
     )
-    draft = Asset(
-        id="",
+    return Asset(
+        id=hash_asset_content(asset_name, content),
         name=asset_name,
         content=content,
+        definition_hash=hash_asset_definition(asset_name),
+        content_hash=hash_asset_content(asset_name, content),
         content_type="application/json",
         origin="label_placeholder",
         trust_tier="untrusted",
         minted_by="label_resolver",
-    )
-    return Asset(
-        id=asset_id(asset_to_canonical(draft)),
-        name=draft.name,
-        content=draft.content,
-        content_type=draft.content_type,
-        origin=draft.origin,
-        trust_tier=draft.trust_tier,
-        minted_by=draft.minted_by,
     )
 
 

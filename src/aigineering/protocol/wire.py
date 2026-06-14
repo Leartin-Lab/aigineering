@@ -37,9 +37,15 @@ def asset_to_dict(asset: Asset) -> dict[str, Any]:
         "minted_by": asset.minted_by,
         "source_uri": asset.source_uri,
         "signed_by": asset.signed_by,
-        "signature": asset.signature,
+        "provenance_seal": asset.provenance_seal,
+        "definition_hash": asset.definition_hash,
+        "content_hash": asset.content_hash,
         "promptable": asset.promptable,
         "disclosure_view": asset.disclosure_view,
+        "keep_flag": asset.keep_flag,
+        "tombstoned": asset.tombstoned,
+        "tombstoned_at": asset.tombstoned_at,
+        "lineage_id": asset.lineage_id,
     }
 
 
@@ -72,6 +78,12 @@ def contract_to_dict(contract: Contract) -> dict[str, Any]:
         "tool_scope": contract.tool_scope,
         "labels": contract.labels,
         "origin": contract.origin,
+        "minting_authority": contract.minting_authority,
+        "sensitive_input_policy": (
+            dict(contract.sensitive_input_policy)
+            if contract.sensitive_input_policy is not None
+            else None
+        ),
     }
 
 
@@ -118,10 +130,11 @@ def trace_entry_from_dict(data: dict[str, Any]) -> TraceEntry:
 
 
 def candidate_to_dict(candidate: Candidate) -> dict[str, Any]:
+    parsed = candidate.parsed_action
     return {
         "worker_id": candidate.worker_id,
         "raw_output": candidate.raw_output,
-        "parsed_action": candidate.parsed_action,
+        "parsed_action": dict(parsed) if parsed is not None else None,
     }
 
 
@@ -132,8 +145,8 @@ def session_to_dict(session: Session) -> dict[str, Any]:
         "contract_ids": session.contract_ids,
         "asset_ids": session.asset_ids,
         "trace_ids": session.trace_ids,
-        "config_snapshot": session.config_snapshot,
-        "worker_snapshot": session.worker_snapshot,
+        "config_snapshot": dict(session.config_snapshot),
+        "worker_snapshot": dict(session.worker_snapshot),
         "created_at": session.created_at,
     }
 

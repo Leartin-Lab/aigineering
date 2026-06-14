@@ -1,7 +1,8 @@
 # Contributing
 
-Aigineering is pre-alpha. The main rule is to preserve the runtime boundary:
-worker output is a candidate until authority projects it into a runtime fact.
+Aigineering is an early Zero Trust Agent Runtime. The main rule is to preserve
+the runtime boundary: worker output is a candidate until authority projects it
+into a runtime fact.
 
 ## Branch Flow
 
@@ -15,6 +16,8 @@ worker output is a candidate until authority projects it into a runtime fact.
 
 ```bash
 pip install -e ".[dev]"
+ruff check src/aigineering tests
+ruff format --check src/aigineering tests
 pytest -q
 python -m build
 ```
@@ -25,5 +28,7 @@ python -m build
 - Do not treat undeclared outputs as committed assets.
 - Record rejected candidates in trace.
 - Keep DAG/tree views as trace projections, not runtime primitives.
-- Treat method requests such as `/plan`, `/replan`, and `/fail` as future
-  explicit subtasks, not hidden controller operations.
+- Treat method requests such as `/plan`, `/replan`, `/retry`, and `/tool` as
+  explicit subtasks or method-runtime handlers, not hidden controller operations.
+- Keep worker pull/submit claim-bound and transactionally committed on the
+  SQLite path.

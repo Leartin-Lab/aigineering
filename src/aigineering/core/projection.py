@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 
 from aigineering.core.authority import check_authority
-from aigineering.core.ids import asset_id
+from aigineering.core.ids import hash_asset_content, hash_asset_definition
 from aigineering.protocol.actions import (
     ActionParseError,
     WorkerAction,
@@ -67,33 +68,22 @@ def project_candidate(
         else:
             deduped_fragments.append(f)
 
-    accepted_dicts, authority_rejected_dicts, authority_policy = check_authority(contract, deduped_fragments)
+    accepted_dicts, authority_rejected_dicts, authority_policy = check_authority(
+        contract, deduped_fragments
+    )
     accepted_assets: list[Asset] = []
 
     for a in accepted_dicts:
-        canonical_str = json.dumps(
-            {
-                "name": a["name"],
-                "content": a["content"],
-                "content_type": "text",
-                "created_by": contract.id,
-                "origin": "worker",
-                "trust_tier": "untrusted",
-                "minted_by": candidate.worker_id,
-                "source_uri": "",
-                "promptable": True,
-                "disclosure_view": "original",
-            },
-            sort_keys=True,
-            ensure_ascii=False,
-        )
+        worker_origin = _derive_worker_origin(candidate.worker_id)
         asset = Asset(
-            id=asset_id(canonical_str),
+            id=hash_asset_content(a["name"], a["content"]),
             name=a["name"],
             content=a["content"],
+            definition_hash=hash_asset_definition(a["name"]),
+            content_hash=hash_asset_content(a["name"], a["content"]),
             content_type="text",
             created_by=contract.id,
-            origin="worker",
+            origin=worker_origin,
             trust_tier="untrusted",
             minted_by=candidate.worker_id,
             source_uri="",
@@ -139,7 +129,7 @@ def _parse_candidate_fragments(
     candidate: Candidate,
 ) -> tuple[list[dict], list[RejectedCandidate]]:
     parsed = candidate.parsed_action
-    if isinstance(parsed, dict) and isinstance(parsed.get("type"), str):
+    if isinstance(parsed, Mapping) and isinstance(parsed.get("type"), str):
         try:
             return _fragments_from_action(action_from_dict(parsed))
         except ActionParseError as e:
@@ -181,8 +171,7 @@ def _fragments_from_action(
             )
         ]
     return [
-        {"name": name, "content": content}
-        for name, content in action.outputs.items()
+        {"name": name, "content": content} for name, content in action.outputs.items()
     ], []
 
 
@@ -230,3 +219,22 @@ def _parse_legacy_lines(raw_output: str) -> tuple[list[dict], list[RejectedCandi
         fragments.append({"name": name, "content": content})
 
     return fragments, parse_rejected
+
+
+def _derive_worker_origin(worker_id: str) -> str:
+    """Derive the asset ``origin`` from the worker's canonical type prefix.
+
+    Maps known worker_id prefixes to their corresponding origin category:
+    ``llm:`` → ``"llm"``, ``tool_worker:`` → ``"tool"``,
+    ``mcp_worker:`` → ``"mcp"``, ``mock`` → ``"mock"``.
+    Falls back to ``"worker"`` for unknown workers.
+    """
+    if worker_id.startswith("llm:"):
+        return "llm"
+    if worker_id.startswith("tool_worker:"):
+        return "tool"
+    if worker_id.startswith("mcp_worker:"):
+        return "mcp"
+    if worker_id == "mock_worker":
+        return "mock"
+    return "worker"

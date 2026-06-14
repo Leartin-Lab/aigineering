@@ -44,7 +44,9 @@ def test_projection_result_all_rejected():
 def test_projection_result_partial():
     """Some accepted, some rejected → PARTIAL."""
     contract = Contract(id="c1", outputs=["valid"])
-    candidate = Candidate(worker_id="w", raw_output="valid: content\nundeclared: content")
+    candidate = Candidate(
+        worker_id="w", raw_output="valid: content\nundeclared: content"
+    )
     result = project_candidate(contract, candidate)
     assert result.status == ProjectionStatus.PARTIAL
     assert len(result.accepted_assets) == 1
@@ -62,7 +64,9 @@ def test_parse_error_has_category():
 
 def test_partial_acceptance_status():
     contract = Contract(id="c1", outputs=["valid"])
-    candidate = Candidate(worker_id="w", raw_output="valid: content\nundeclared: content")
+    candidate = Candidate(
+        worker_id="w", raw_output="valid: content\nundeclared: content"
+    )
     result = project_candidate(contract, candidate)
     assert result.status == ProjectionStatus.PARTIAL
     assert len(result.accepted_assets) == 1
@@ -115,7 +119,7 @@ def test_projection_rejects_non_exec_actions_as_outputs():
     result = project_candidate(contract, candidate)
 
     assert result.status == ProjectionStatus.REJECTED
-    assert result.accepted_assets == []
+    assert result.accepted_assets == ()
     assert result.rejected_candidates[0].name == "/plan"
 
 
@@ -126,7 +130,7 @@ def test_empty_candidate_output_is_rejected():
     result = project_candidate(contract, candidate)
 
     assert result.status == ProjectionStatus.REJECTED
-    assert result.accepted_assets == []
+    assert result.accepted_assets == ()
     assert result.rejected_candidates[0].name == "(empty)"
 
 
@@ -141,12 +145,13 @@ def test_projection_rejects_invalid_parsed_action_outputs():
     result = project_candidate(contract, candidate)
 
     assert result.status == ProjectionStatus.REJECTED
-    assert result.accepted_assets == []
+    assert result.accepted_assets == ()
     assert result.rejected_candidates[0].name == "(action)"
 
 
 def test_immutability():
     import dataclasses
+
     result = ProjectionResult(status=ProjectionStatus.REJECTED)
     with pytest.raises(dataclasses.FrozenInstanceError):
         result.status = ProjectionStatus.ACCEPTED

@@ -4,10 +4,11 @@ import json
 
 from aigineering.core.store import MemoryStore
 from aigineering.core.engine import Engine
+from aigineering.core.capability_descriptors import create_tool_descriptor
 from aigineering.core.tools import ToolRegistry
 from aigineering.core.trace import TraceStore
 from aigineering.agent.mock import MockWorker
-from aigineering.core.ids import asset_id, contract_id
+from aigineering.core.ids import hash_asset_content, hash_contract
 from aigineering.protocol.types import Asset, Contract, ToolSpec
 
 
@@ -22,24 +23,8 @@ class SequenceWorker:
         self.calls.append((contract, disclosed_assets))
         raw_output = self._outputs.pop(0) if self._outputs else ""
         from aigineering.protocol.types import Candidate
+
         return Candidate(worker_id=self.worker_id, raw_output=raw_output)
-
-
-def _asset_canonical(name: str, content: str) -> str:
-    return json.dumps(
-        {"name": name, "content": content, "content_type": "text",
-         "created_by": "", "origin": "human"},
-        sort_keys=True, ensure_ascii=False,
-    )
-
-
-def _contract_canonical(name: str, inputs: list[str], outputs: list[str], activation: str) -> str:
-    return json.dumps(
-        {"parent_id": None, "name": name, "description": "",
-         "inputs": sorted(inputs), "outputs": sorted(outputs),
-         "activation": activation, "budget": 5, "tool_scope": [], "origin": "human"},
-        sort_keys=True, ensure_ascii=False,
-    )
 
 
 def test_hallucinated_output_cannot_become_runtime_fact():
@@ -58,20 +43,29 @@ def test_hallucinated_output_cannot_become_runtime_fact():
 
     # Input assets
     data_file = Asset(
-        id=asset_id(_asset_canonical("data_file", "Sample data")),
-        name="data_file", content="Sample data",
+        id=hash_asset_content("data_file", "Sample data"),
+        name="data_file",
+        content="Sample data",
     )
     citation_db = Asset(
-        id=asset_id(_asset_canonical("citation_db", "Sample citations")),
-        name="citation_db", content="Sample citations",
+        id=hash_asset_content("citation_db", "Sample citations"),
+        name="citation_db",
+        content="Sample citations",
     )
 
     # Contract with only final_report as declared output
     contract = Contract(
-        id=contract_id(_contract_canonical(
-            "build_report", ["data_file", "citation_db"],
-            ["final_report"], "data_file AND citation_db",
-        )),
+        id=hash_contract(
+            "build_report",
+            "",
+            ["data_file", "citation_db"],
+            ["final_report"],
+            "data_file AND citation_db",
+            5,
+            [],
+            [],
+            "human",
+        ),
         name="build_report",
         inputs=["data_file", "citation_db"],
         outputs=["final_report"],
@@ -131,15 +125,27 @@ def test_duplicate_conflicting_outputs_are_all_rejected():
     worker.set_output("test", "final_report: version A\nfinal_report: version B")
 
     input_asset = Asset(
-        id=asset_id(_asset_canonical("x", "y")),
-        name="x", content="y",
+        id=hash_asset_content("x", "y"),
+        name="x",
+        content="y",
     )
     contract = Contract(
-        id=contract_id(_contract_canonical(
-            "test", ["x"], ["final_report"], "x",
-        )),
-        name="test", inputs=["x"], outputs=["final_report"],
-        activation="x", budget=5,
+        id=hash_contract(
+            "test",
+            "",
+            ["x"],
+            ["final_report"],
+            "x",
+            5,
+            [],
+            [],
+            "human",
+        ),
+        name="test",
+        inputs=["x"],
+        outputs=["final_report"],
+        activation="x",
+        budget=5,
     )
 
     engine = Engine(store, worker, trace_store)
@@ -169,15 +175,27 @@ def test_parse_rejection_recorded_in_trace():
     worker.set_output("test", "valid: content\nthis line has no colon\n# comment")
 
     input_asset = Asset(
-        id=asset_id(_asset_canonical("x", "y")),
-        name="x", content="y",
+        id=hash_asset_content("x", "y"),
+        name="x",
+        content="y",
     )
     contract = Contract(
-        id=contract_id(_contract_canonical(
-            "test", ["x"], ["valid"], "x",
-        )),
-        name="test", inputs=["x"], outputs=["valid"],
-        activation="x", budget=5,
+        id=hash_contract(
+            "test",
+            "",
+            ["x"],
+            ["valid"],
+            "x",
+            5,
+            [],
+            [],
+            "human",
+        ),
+        name="test",
+        inputs=["x"],
+        outputs=["valid"],
+        activation="x",
+        budget=5,
     )
 
     engine = Engine(store, worker, trace_store)
@@ -196,12 +214,22 @@ def test_method_action_schedules_subcontract_without_projection():
     trace_store = TraceStore()
     worker = MockWorker({"root": '/plan {"reason": "split work"}'})
     input_asset = Asset(
-        id=asset_id(_asset_canonical("x", "y")),
+        id=hash_asset_content("x", "y"),
         name="x",
         content="y",
     )
     contract = Contract(
-        id=contract_id(_contract_canonical("root", ["x"], ["report"], "x")),
+        id=hash_contract(
+            "root",
+            "",
+            ["x"],
+            ["report"],
+            "x",
+            5,
+            [],
+            [],
+            "human",
+        ),
         name="root",
         inputs=["x"],
         outputs=["report"],
@@ -218,7 +246,7 @@ def test_method_action_schedules_subcontract_without_projection():
     child_contracts = [c for c in contracts if c.parent_id == contract.id]
     assert len(child_contracts) == 1
     assert child_contracts[0].name == "root.plan"
-    assert child_contracts[0].outputs == [f"_plan_result_{contract.id}"]
+    assert child_contracts[0].outputs == (f"_plan_result_{contract.id}",)
 
     context_assets = store.get_assets_by_name(f"_method_ctx_{contract.id}")
     assert len(context_assets) == 1
@@ -235,12 +263,14 @@ def test_method_action_schedules_subcontract_without_projection():
 def test_method_scheduling_uses_child_contract_identity():
     store = MemoryStore()
     trace_store = TraceStore()
-    worker = SequenceWorker([
-        '/tool {"name": "search", "args": {"q": "a"}}',
-        '/tool {"name": "search", "args": {"q": "b"}}',
-        "",
-        "",
-    ])
+    worker = SequenceWorker(
+        [
+            '/tool {"name": "search", "args": {"q": "a"}}',
+            '/tool {"name": "search", "args": {"q": "b"}}',
+            "",
+            "",
+        ]
+    )
     tools = ToolRegistry()
     tools.register(ToolSpec(name="search"), lambda args: f"value:{args['q']}")
     contract = Contract(
@@ -262,6 +292,14 @@ def test_method_scheduling_uses_child_contract_identity():
 
 def test_tool_method_executes_registry_and_commits_observation():
     store = MemoryStore()
+    store.add_asset(
+        create_tool_descriptor(
+            "lookup",
+            "Lookup test values.",
+            {"type": "object"},
+            trust_tier="configured",
+        )
+    )
     trace_store = TraceStore()
     worker = MockWorker({"root": '/tool {"name": "lookup", "args": {"key": "x"}}'})
     tools = ToolRegistry()
@@ -281,7 +319,8 @@ def test_tool_method_executes_registry_and_commits_observation():
 
     assert store.get_assets_by_name("report") == []
     call_assets = [
-        asset for asset in store.get_all_assets()
+        asset
+        for asset in store.get_all_assets()
         if asset.name.startswith("_tool_call_")
     ]
     obs_assets = store.get_assets_by_name(f"_tool_obs_{contract.id}")
@@ -325,10 +364,12 @@ def test_tool_method_records_error_observation_for_out_of_scope_tool():
 def test_tool_observation_resumes_parent_without_satisfying_output():
     store = MemoryStore()
     trace_store = TraceStore()
-    worker = SequenceWorker([
-        '/tool {"name": "lookup", "args": {"key": "x"}}',
-        '/exec {"outputs": {"report": "final after tool"}}',
-    ])
+    worker = SequenceWorker(
+        [
+            '/tool {"name": "lookup", "args": {"key": "x"}}',
+            '/exec {"outputs": {"report": "final after tool"}}',
+        ]
+    )
     tools = ToolRegistry()
     tools.register(ToolSpec(name="lookup"), lambda args: f"value:{args['key']}")
     contract = Contract(
@@ -403,14 +444,15 @@ def test_plan_result_expands_child_contracts_without_system_authority():
     engine.run()
 
     planned = [
-        c for c in store.get_all_contracts()
+        c
+        for c in store.get_all_contracts()
         if c.parent_id == contract.id and c.name == "draft"
     ]
     assert len(planned) == 1
     assert planned[0].origin == "plan"
-    assert planned[0].outputs == ["draft_report"]
-    assert planned[0].tool_scope == ["lookup"]
-    assert planned[0].labels == ["research"]
+    assert planned[0].outputs == ("draft_report",)
+    assert planned[0].tool_scope == ("lookup",)
+    assert planned[0].labels == ("research",)
 
     expanded = trace_store.get_by_event_type("contracts_expanded")
     assert len(expanded) == 1
@@ -453,7 +495,8 @@ def test_plan_result_bad_budget_defaults_without_crashing():
     engine.run()
 
     planned = [
-        c for c in store.get_all_contracts()
+        c
+        for c in store.get_all_contracts()
         if c.parent_id == contract.id and c.name == "draft"
     ]
     assert len(planned) == 1

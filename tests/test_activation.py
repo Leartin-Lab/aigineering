@@ -53,12 +53,14 @@ def test_not_with_parentheses():
 
 def test_invalid_syntax_raises():
     import pytest
+
     with pytest.raises(ValueError):
         check_activation("a AND", {"a"})
 
 
 def test_deeply_nested_raises():
     import pytest
+
     deep = "(" * 60 + "a" + ")" * 60
     with pytest.raises((ValueError, RecursionError)):
         check_activation(deep, {"a"})
@@ -66,6 +68,7 @@ def test_deeply_nested_raises():
 
 def test_long_expression_raises():
     import pytest
+
     long_expr = " AND ".join(["a"] * 300)
     with pytest.raises((ValueError)):
         check_activation(long_expr, {"a"})

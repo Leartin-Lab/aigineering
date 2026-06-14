@@ -15,6 +15,10 @@ jobs:
           python-version: "3.11"
       - name: Install
         run: pip install -e ".[dev]"
+      - name: Lint
+        run: ruff check src/aigineering tests
+      - name: Format check
+        run: ruff format --check src/aigineering tests
       - name: Test
         run: pytest -q
       - name: Build

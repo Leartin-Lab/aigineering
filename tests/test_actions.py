@@ -2,7 +2,11 @@
 
 import pytest
 
-from aigineering.protocol.actions import ActionParseError, action_from_dict, parse_action
+from aigineering.protocol.actions import (
+    ActionParseError,
+    action_from_dict,
+    parse_action,
+)
 
 
 def test_parse_exec_action_outputs_wrapper():
@@ -33,9 +37,7 @@ def test_reject_unsupported_action():
 
 
 def test_action_from_dict_validates_exec_outputs():
-    action = action_from_dict(
-        {"type": "exec", "outputs": {"report": "ok"}}
-    )
+    action = action_from_dict({"type": "exec", "outputs": {"report": "ok"}})
 
     assert action.type == "exec"
     assert action.outputs == {"report": "ok"}

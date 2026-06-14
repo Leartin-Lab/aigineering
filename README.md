@@ -55,9 +55,11 @@ aig replay <session_id>   # replay a session
 
 ---
 
-## Status: v0.3.0 Pre-Alpha
+## Status: v0.4 Single-Node Stable Kernel
 
-This is an early proof-of-concept demonstrating the core invariant: **undeclared outputs cannot become runtime facts.** The v0.3.0 milestone adds a minimal real-worker protocol loop: an OpenAI-compatible worker can emit structured `/exec`, `/plan`, `/replan`, and `/tool` actions; tool calls execute through runtime-owned system assets; parent tasks resume from method observations without allowing those observations to shortcut declared outputs.
+This release stabilizes the single-node kernel needed for v0.5 productivity expansion. It demonstrates the core invariant: **unauthorized worker outputs cannot become runtime facts.** The v0.4 kernel is focused on strong protocolization and single-node runtime infrastructure: immutable data models, capability containment, method-first extensibility, SQLite-backed transactional state, recoverable engine state, worker pull/submit protocol, and a modular JSON CLI.
+
+This is not a security-audited production release. It is intended for local experiments, research prototypes, and early integration work where auditable runtime boundaries matter.
 
 **Currently implemented:**
 - Deterministic SHA-256 content-addressed IDs
@@ -92,11 +94,19 @@ This is an early proof-of-concept demonstrating the core invariant: **undeclared
 - Planner result expansion into non-system child contracts
 - CLI trace rendering for method scheduling, tool execution, resume, and expansion events
 - Tool registry with serializable `ToolSpec` and private handlers
+- SQLite-backed asset, contract, trace, worker-claim, and idempotency state
+- Transactional worker candidate submission across assets, trace, idempotency, and claim transition
+- Worker package / candidate envelope protocol with claim and package binding
+- Claim-bound SQLite worker submission via `aig worker next` / `aig worker submit`
+- Database-enforced single active claim per contract
+- Recoverable runtime state from persisted contracts, assets, and trace events
+- Method-first CLI execution path for `/plan`, `/replan`, `/retry`, and `/tool`
 
 **Not yet implemented (see ROADMAP.md):**
-- MCP / Skills / Tools
+- MCP / Skills ecosystem adapters
 - Multi-contract orchestration
-- Distributed runtime
+- Distributed runtime across shared stores
+- External security audit and deployment hardening
 - PyPI release
 
 See [ROADMAP.md](ROADMAP.md) for the full plan.
