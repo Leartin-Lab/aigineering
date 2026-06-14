@@ -15,8 +15,13 @@ from aigineering.core.ids import (
     hash_asset_definition,
     hash_contract,
 )
+from aigineering.core.method_handlers.plan import PlanMethodHandler
+from aigineering.core.method_handlers.replan import ReplanMethodHandler
+from aigineering.core.method_handlers.retry import RetryMethodHandler
+from aigineering.core.method_handlers.tool import ToolMethodHandler
+from aigineering.core.method_registry import MethodRegistry
 from aigineering.core.session import SessionStore
-from aigineering.core.store import JsonLStore, MemoryStore, StoreProtocol
+from aigineering.core.store import MemoryStore, StoreProtocol
 from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.core.trace import JsonLTraceStore, MemoryTraceStore, TraceStoreProtocol
 from aigineering.agent.llm import LLMWorker
@@ -37,6 +42,16 @@ def _get_store_dir() -> Path:
 def _persistent_store() -> SQLiteStore:
     """Create the default local persistent store (SQLite-backed)."""
     return SQLiteStore(db_path=".aig/store.db")
+
+
+def _default_method_registry() -> MethodRegistry:
+    """Return the standard method-first runtime registry for CLI execution."""
+    registry = MethodRegistry()
+    registry.register("plan", PlanMethodHandler())
+    registry.register("replan", ReplanMethodHandler())
+    registry.register("retry", RetryMethodHandler())
+    registry.register("tool", ToolMethodHandler())
+    return registry
 
 
 def _session_id() -> str:
@@ -91,7 +106,7 @@ def _parse_rejected_fragment(rf: str) -> tuple[str, str]:
     """
     if rf.startswith("[") and "]" in rf:
         end = rf.index("]")
-        return rf[1:end], rf[end + 1:].strip()
+        return rf[1:end], rf[end + 1 :].strip()
     return "unknown", rf
 
 
@@ -157,7 +172,9 @@ def _run_demo(
         name="data_file",
         content="Sample data for report generation",
         definition_hash=hash_asset_definition("data_file"),
-        content_hash=hash_asset_content("data_file", "Sample data for report generation"),
+        content_hash=hash_asset_content(
+            "data_file", "Sample data for report generation"
+        ),
         origin="human",
         trust_tier="human",
     )
@@ -190,7 +207,9 @@ def _run_demo(
         budget=5,
     )
 
-    engine = Engine(store, worker, trace_store)
+    engine = Engine(
+        store, worker, trace_store, method_registry=_default_method_registry()
+    )
     engine.add_contract(contract)
     engine.add_asset(data_file)
     engine.add_asset(citation_db)
@@ -219,7 +238,9 @@ def _redact_sealed(data: dict) -> dict:
     Removes ``config_snapshot`` and ``worker_snapshot`` entirely so API keys
     are never leaked into JSON output.
     """
-    return {k: v for k, v in data.items() if k not in ("config_snapshot", "worker_snapshot")}
+    return {
+        k: v for k, v in data.items() if k not in ("config_snapshot", "worker_snapshot")
+    }
 
 
 def _output_json(payload: object) -> None:

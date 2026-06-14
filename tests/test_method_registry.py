@@ -1,8 +1,8 @@
 """Tests for MethodHandler protocol and MethodRegistry dispatch."""
 
 from aigineering.core.engine import Engine
-from aigineering.core.ids import hash_asset_content, hash_contract
-from aigineering.core.method_registry import MethodHandler, MethodRegistry
+from aigineering.core.ids import hash_contract
+from aigineering.core.method_registry import MethodRegistry
 from aigineering.core.store import MemoryStore
 from aigineering.core.tools import ToolRegistry
 from aigineering.core.trace import TraceStore
@@ -10,6 +10,7 @@ from aigineering.protocol.types import Asset, Contract, ToolSpec
 
 
 # ── SequenceWorker helper ────────────────────────────────────────────
+
 
 class SequenceWorker:
     worker_id = "sequence_worker"
@@ -27,6 +28,7 @@ class SequenceWorker:
 
 
 # ── Recording handler for dispatch verification ─────────────────────
+
 
 class _RecordingHandler:
     """Handler that records handle_method and can_handle calls."""
@@ -56,6 +58,7 @@ class _FalseHandler:
 
 
 # ── Registry unit tests ─────────────────────────────────────────────
+
 
 def test_register_and_get_handler():
     """Register a handler and retrieve it by action type."""
@@ -144,6 +147,7 @@ def test_handler_protocol_is_structural():
 
 # ── Engine dispatch integration tests ───────────────────────────────
 
+
 def test_engine_dispatches_to_registry():
     """Engine with registry calls handler.handle_method for method actions."""
     registry = MethodRegistry()
@@ -181,7 +185,9 @@ def test_engine_dispatches_to_registry():
     assert contract.id in engine._suspended
 
     # Handler returned True → no default scheduling (handler owns scheduling)
-    child_contracts = [c for c in store.get_all_contracts() if c.parent_id == contract.id]
+    child_contracts = [
+        c for c in store.get_all_contracts() if c.parent_id == contract.id
+    ]
     assert len(child_contracts) == 0
 
 
@@ -208,7 +214,9 @@ def test_engine_falls_back_without_registry():
     assert contract.id in engine._suspended
 
     # Child contract created
-    child_contracts = [c for c in store.get_all_contracts() if c.parent_id == contract.id]
+    child_contracts = [
+        c for c in store.get_all_contracts() if c.parent_id == contract.id
+    ]
     assert len(child_contracts) == 1
     assert child_contracts[0].name == "root.plan"
 
@@ -224,10 +232,12 @@ def test_engine_dispatches_tool_method():
     tools = ToolRegistry()
     tools.register(ToolSpec(name="search"), lambda args: "result")
 
-    worker = SequenceWorker([
-        '/tool {"name": "search", "args": {"q": "test"}}',
-        "",
-    ])
+    worker = SequenceWorker(
+        [
+            '/tool {"name": "search", "args": {"q": "test"}}',
+            "",
+        ]
+    )
 
     contract = Contract(
         id=hash_contract("root", "", [], ["report"], "", 5, ["search"], [], "human"),
@@ -252,7 +262,9 @@ def test_engine_dispatches_tool_method():
     assert called_action_type == "tool"
 
     # Handler returned True → handler owns scheduling, no child created
-    child_contracts = [c for c in store.get_all_contracts() if c.parent_id == contract.id]
+    child_contracts = [
+        c for c in store.get_all_contracts() if c.parent_id == contract.id
+    ]
     assert len(child_contracts) == 0
     # No system method path either (handler owns lifecycle)
     tool_events = trace_store.get_by_event_type("tool_executed")
@@ -271,7 +283,9 @@ def test_handler_swap_works():
     worker1 = SequenceWorker(['/plan {"reason": "first"}', ""])
     contract1 = Contract(
         id=hash_contract("c1", "", [], [], "", 5, [], [], "human"),
-        name="c1", activation="", budget=5,
+        name="c1",
+        activation="",
+        budget=5,
     )
     engine1 = Engine(store1, worker1, TraceStore(), method_registry=registry)
     engine1.add_contract(contract1)
@@ -285,7 +299,9 @@ def test_handler_swap_works():
     worker2 = SequenceWorker(['/plan {"reason": "second"}', ""])
     contract2 = Contract(
         id=hash_contract("c2", "", [], [], "", 5, [], [], "human"),
-        name="c2", activation="", budget=5,
+        name="c2",
+        activation="",
+        budget=5,
     )
     engine2 = Engine(store2, worker2, TraceStore(), method_registry=registry)
     engine2.add_contract(contract2)
@@ -309,7 +325,9 @@ def test_multiple_handlers_isolated():
     worker1 = SequenceWorker(['/plan {"reason": "plan only"}', ""])
     contract1 = Contract(
         id=hash_contract("c1", "", [], [], "", 5, [], [], "human"),
-        name="c1", activation="", budget=5,
+        name="c1",
+        activation="",
+        budget=5,
     )
     engine1 = Engine(store1, worker1, TraceStore(), method_registry=registry)
     engine1.add_contract(contract1)
@@ -326,15 +344,22 @@ def test_multiple_handlers_isolated():
     store2 = MemoryStore()
     tools = ToolRegistry()
     tools.register(ToolSpec(name="search"), lambda args: "result")
-    worker2 = SequenceWorker([
-        '/tool {"name": "search", "args": {"q": "x"}}',
-        "",
-    ])
+    worker2 = SequenceWorker(
+        [
+            '/tool {"name": "search", "args": {"q": "x"}}',
+            "",
+        ]
+    )
     contract2 = Contract(
         id=hash_contract("c2", "", [], [], "", 5, ["search"], [], "human"),
-        name="c2", activation="", budget=5, tool_scope=["search"],
+        name="c2",
+        activation="",
+        budget=5,
+        tool_scope=["search"],
     )
-    engine2 = Engine(store2, worker2, TraceStore(), tools=tools, method_registry=registry)
+    engine2 = Engine(
+        store2, worker2, TraceStore(), tools=tools, method_registry=registry
+    )
     engine2.add_contract(contract2)
     engine2.run()
 
@@ -366,7 +391,9 @@ def test_false_handler_still_falls_back():
 
     # Even though can_handle returned False, default scheduling ran
     assert contract.id in engine._suspended
-    child_contracts = [c for c in store.get_all_contracts() if c.parent_id == contract.id]
+    child_contracts = [
+        c for c in store.get_all_contracts() if c.parent_id == contract.id
+    ]
     assert len(child_contracts) == 1
 
 
@@ -381,7 +408,11 @@ def test_handler_sees_candidate_data():
 
     contract = Contract(
         id=hash_contract("root", "", [], ["report"], "", 5, [], [], "human"),
-        name="root", inputs=[], outputs=["report"], activation="", budget=5,
+        name="root",
+        inputs=[],
+        outputs=["report"],
+        activation="",
+        budget=5,
     )
 
     engine = Engine(store, worker, TraceStore(), method_registry=registry)
@@ -405,7 +436,11 @@ def test_replan_dispatches_to_registry():
 
     contract = Contract(
         id=hash_contract("root", "", [], ["report"], "", 5, [], [], "human"),
-        name="root", inputs=[], outputs=["report"], activation="", budget=5,
+        name="root",
+        inputs=[],
+        outputs=["report"],
+        activation="",
+        budget=5,
     )
 
     engine = Engine(store, worker, TraceStore(), method_registry=registry)
@@ -428,7 +463,11 @@ def test_no_handler_triggers_no_crash():
 
     contract = Contract(
         id=hash_contract("root", "", [], ["report"], "", 5, [], [], "human"),
-        name="root", inputs=[], outputs=["report"], activation="", budget=5,
+        name="root",
+        inputs=[],
+        outputs=["report"],
+        activation="",
+        budget=5,
     )
 
     engine = Engine(store, worker, TraceStore(), method_registry=registry)

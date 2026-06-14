@@ -94,11 +94,13 @@ def check_sufficiency(contract: Contract, store: StoreProtocol) -> dict[str, Any
                 a = store.get_asset(aid)
                 if a is not None and a.name not in conflicting_names:
                     conflicting_names.append(a.name)
-            report["version_conflicts"].append({
-                "definition_hash": def_hash,
-                "asset_ids": sorted(unique_ids),
-                "names": sorted(conflicting_names),
-            })
+            report["version_conflicts"].append(
+                {
+                    "definition_hash": def_hash,
+                    "asset_ids": sorted(unique_ids),
+                    "names": sorted(conflicting_names),
+                }
+            )
 
     # ── 4. Trust gaps ─────────────────────────────────────────────────────
     for input_name in contract.inputs:

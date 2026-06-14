@@ -1,7 +1,5 @@
 """Tests for batch verification and sensitive input policy (v0.3.13)."""
 
-import pytest
-
 from aigineering.core.ids import (
     hash_asset_content,
     hash_asset_definition,
@@ -167,9 +165,7 @@ class TestSensitiveInputPolicy:
 
         result = check_sensitive_input_policy(contract, store)
         assert result["compliant"] is False
-        assert any(
-            "no assets in store" in v for v in result["violations"]
-        )
+        assert any("no assets in store" in v for v in result["violations"])
 
     def test_sensitive_input_all_ok_accepted(self):
         """Policy where all requirements are met → compliant."""
@@ -237,9 +233,7 @@ class TestSensitiveInputPolicy:
     def test_sensitive_input_trust_tier_too_low(self):
         """required_trust_tier not met by any asset → not compliant."""
         store = MemoryStore()
-        store.add_asset(
-            _make_asset("low_trust", "data", trust_tier="low")
-        )
+        store.add_asset(_make_asset("low_trust", "data", trust_tier="low"))
 
         contract = Contract(
             id="task:low_tier",

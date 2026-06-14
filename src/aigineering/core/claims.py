@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
-from typing import Optional
 
 from aigineering.core.ids import compute_content_hash, now_iso
 

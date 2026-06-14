@@ -25,15 +25,19 @@ def _output_run_json(
     session_id: str,
     entries: list[TraceEntry],
 ) -> None:
-    status = "complete" if entries and any(
-        e.event_type == "complete" for e in entries
-    ) else "incomplete"
-    _output_json({
-        "contract_id": contract_id,
-        "session_id": session_id,
-        "trace_ids": trace_ids,
-        "status": status,
-    })
+    status = (
+        "complete"
+        if entries and any(e.event_type == "complete" for e in entries)
+        else "incomplete"
+    )
+    _output_json(
+        {
+            "contract_id": contract_id,
+            "session_id": session_id,
+            "trace_ids": trace_ids,
+            "status": status,
+        }
+    )
 
 
 @click.command("run")
@@ -54,7 +58,10 @@ def _output_run_json(
     help="OpenAI-compatible base URL when --worker llm.",
 )
 @click.option(
-    "--json", "json_output", is_flag=True, default=False,
+    "--json",
+    "json_output",
+    is_flag=True,
+    default=False,
     help="Output machine-readable JSON instead of human-readable text.",
 )
 def run(
@@ -160,4 +167,3 @@ def demo(
     click.echo(f"Demo completed for goal: '{goal}'")
     click.echo(f"  Contract: {contract.name}")
     click.echo(f"  Assets: {[a.name for a in store.get_all_assets()]}")
-

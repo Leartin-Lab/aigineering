@@ -8,7 +8,6 @@ of the engine/planner layer.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
 
 from aigineering.core.claims import ClaimStore
 from aigineering.core.ids import now_iso

@@ -198,7 +198,7 @@ def test_check_expired_returns_empty_when_none_expired(store: ClaimStore):
 
 def test_check_expired_frees_contract(store: ClaimStore):
     """After expiry, the contract can be claimed again."""
-    c1 = store.claim("contract-1", "worker-A", lease_seconds=-1)
+    store.claim("contract-1", "worker-A", lease_seconds=-1)
     store.check_expired()
 
     c2 = store.claim("contract-1", "worker-B")

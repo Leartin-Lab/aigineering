@@ -33,20 +33,25 @@ class TestSessionSealedConfig:
         Debt: N-P0.1 (cli/session.py:53-54)
         """
         from aigineering.core.session import SessionStore, Session
+        import tempfile
 
         # Create a session with sensitive config
-        store = SessionStore()
-        session = Session(
-            id="test-session-redact",
-            root_contract_id="root-1",
-            contract_ids=["c-1"],
-            asset_ids=[],
-            trace_ids=[],
-            config_snapshot={"api_key": "sk-secret-12345", "model": "gpt-4"},
-            worker_snapshot={"worker_id": "llm-worker-001", "token": "secret-token"},
-            created_at="2026-01-01T00:00:00",
-        )
-        store.create_session(session)
+        with tempfile.TemporaryDirectory() as tmp:
+            store = SessionStore(sessions_dir=tmp)
+            session = Session(
+                id="test-session-redact",
+                root_contract_id="root-1",
+                contract_ids=["c-1"],
+                asset_ids=[],
+                trace_ids=[],
+                config_snapshot={"api_key": "sk-secret-12345", "model": "gpt-4"},
+                worker_snapshot={
+                    "worker_id": "llm-worker-001",
+                    "token": "secret-token",
+                },
+                created_at="2026-01-01T00:00:00",
+            )
+            store.create_session(session)
 
         # The fix applies _redact_sealed() to config_snapshot/worker_snapshot
         # before printing. Verify by checking what session_to_dict renders.
@@ -74,21 +79,21 @@ class TestSessionSealedConfig:
         from aigineering.core.session import SessionStore, Session
         from click.testing import CliRunner
 
-        store = SessionStore()
-        session = Session(
-            id="test-redact-leak",
-            root_contract_id="root-1",
-            contract_ids=["c-1"],
-            asset_ids=[],
-            trace_ids=[],
-            config_snapshot={"api_key": "sk-secret-12345"},
-            worker_snapshot={"token": "secret-token"},
-            created_at="2026-01-01T00:00:00",
-        )
-        store.create_session(session)
-
         runner = CliRunner()
-        result = runner.invoke(session_show, ["test-redact-leak"])
+        with runner.isolated_filesystem():
+            store = SessionStore()
+            session = Session(
+                id="test-redact-leak",
+                root_contract_id="root-1",
+                contract_ids=["c-1"],
+                asset_ids=[],
+                trace_ids=[],
+                config_snapshot={"api_key": "sk-secret-12345"},
+                worker_snapshot={"token": "secret-token"},
+                created_at="2026-01-01T00:00:00",
+            )
+            store.create_session(session)
+            result = runner.invoke(session_show, ["test-redact-leak"])
 
         # The raw secret values must NOT appear in text output
         assert "sk-secret-12345" not in result.output, (
@@ -128,22 +133,27 @@ class TestRestoreBudget:
         )
         store.add_contract(contract)
 
-        # Simulate: 3 activations + 2 budget_consumed = 5 total decrements
+        # Simulate: activation is an observation, budget_consumed is the
+        # authoritative state transition.
         for i in range(3):
-            trace.append(create_entry(
-                contract_id="c-budget-2",
-                event_type="activation",
-                budget_remaining=10 - i,
-            ))
+            trace.append(
+                create_entry(
+                    contract_id="c-budget-2",
+                    event_type="activation",
+                    budget_remaining=10 - i,
+                )
+            )
         for i in range(2):
-            trace.append(create_entry(
-                contract_id="c-budget-2",
-                event_type="budget_consumed",
-                budget_remaining=10 - 3 - (i + 1),
-            ))
+            trace.append(
+                create_entry(
+                    contract_id="c-budget-2",
+                    event_type="budget_consumed",
+                    budget_remaining=10 - 3 - (i + 1),
+                )
+            )
 
         restored = Engine.restore_from_store(store, worker, trace)
-        expected = 10 - 3 - 2  # = 5
+        expected = 10 - 2  # only budget_consumed events decrement budget
         actual = restored._budget.get("c-budget-2", -1)
         assert actual == expected, (
             f"G9/N-P0.2: restore_from_store budget = {actual}, expected {expected}. "
@@ -170,8 +180,7 @@ class TestCLIRetryBypass:
 
         # ── Static analysis: cli/retry.py must not call add_contract() directly ──
         retry_path = os.path.join(
-            os.path.dirname(__file__),
-            "..", "src", "aigineering", "cli", "retry.py"
+            os.path.dirname(__file__), "..", "src", "aigineering", "cli", "retry.py"
         )
         with open(retry_path) as f:
             source = f.read()
@@ -180,8 +189,10 @@ class TestCLIRetryBypass:
         add_contract_calls = []
         for node in ast.walk(tree):
             if isinstance(node, ast.Call):
-                if (isinstance(node.func, ast.Attribute)
-                        and node.func.attr == "add_contract"):
+                if (
+                    isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "add_contract"
+                ):
                     add_contract_calls.append(node.lineno)
 
         assert len(add_contract_calls) == 0, (
@@ -218,9 +229,7 @@ class TestCLIRetryBypass:
         with patch.object(retry_module, "_persistent_store", return_value=store):
             result = runner.invoke(retry_module.retry, ["--contract", "c-original"])
 
-        assert result.exit_code == 0, (
-            f"G1/D-P0.1: CLI retry failed: {result.output}"
-        )
+        assert result.exit_code == 0, f"G1/D-P0.1: CLI retry failed: {result.output}"
 
         retry_contract = store.get_contract(expected_id)
         assert retry_contract is not None, (
@@ -234,7 +243,9 @@ class TestCLIRetryBypass:
         assert retry_contract.parent_id == original.parent_id, (
             "G1/D-P0.1: Retry contract parent_id must match original."
         )
-        assert expected_id in result.output or hash_retry("c-original") in result.output, (
+        assert (
+            expected_id in result.output or hash_retry("c-original") in result.output
+        ), (
             f"G1/D-P0.1: Retry contract ID must appear in CLI output. "
             f"Got: {result.output}"
         )
@@ -298,7 +309,8 @@ class TestContextOverflow:
         )
 
         overflow_trace = [
-            e for e in trace.get_by_contract("c-overflow")
+            e
+            for e in trace.get_by_contract("c-overflow")
             if e.event_type == "context_overflow"
         ]
         assert len(overflow_trace) == 1, (
@@ -352,7 +364,8 @@ class TestAuthorityClamp:
 
         # The tool_scope widening (adding "tool_c") must REJECT the child
         tool_scope_rejections = [
-            r for r in rejections
+            r
+            for r in rejections
             if isinstance(r, dict) and r.get("field") == "tool_scope"
         ]
         assert len(tool_scope_rejections) > 0, (
@@ -402,15 +415,16 @@ class TestAuthorityClamp:
         )
 
         children, rejections = contracts_from_plan_asset(
-            plan_asset, parent_id=parent.id, parent_contract=parent,
+            plan_asset,
+            parent_id=parent.id,
+            parent_contract=parent,
             parent_budget_remaining=parent.budget,
         )
 
         # Budget containment: child is accepted with reduced budget (action="budget_contained"),
         # with requested/effective/remaining trace fields
         budget_rejections = [
-            r for r in rejections
-            if isinstance(r, dict) and r.get("field") == "budget"
+            r for r in rejections if isinstance(r, dict) and r.get("field") == "budget"
         ]
 
         assert len(budget_rejections) > 0, (
@@ -489,7 +503,10 @@ class TestProtectedMintingAuthority:
         )
         if rejected:
             reject_reason = str(rejected[0].get("reject_reason", ""))
-            assert "minting_authority" in reject_reason.lower() or "authority" in reject_reason.lower(), (
+            assert (
+                "minting_authority" in reject_reason.lower()
+                or "authority" in reject_reason.lower()
+            ), (
                 f"G5/D-P0.6: Rejection reason must mention minting_authority, got: {reject_reason}"
             )
 
@@ -573,7 +590,12 @@ class TestMethodHandlerIsolation:
 
         retry_handler_path = os.path.join(
             os.path.dirname(__file__),
-            "..", "src", "aigineering", "core", "method_handlers", "retry.py"
+            "..",
+            "src",
+            "aigineering",
+            "core",
+            "method_handlers",
+            "retry.py",
         )
 
         with open(retry_handler_path) as f:
@@ -585,11 +607,11 @@ class TestMethodHandlerIsolation:
         store_accesses = []
         for node in ast.walk(tree):
             if isinstance(node, ast.Attribute):
-                if hasattr(node, 'attr') and node.attr.startswith('_store'):
+                if hasattr(node, "attr") and node.attr.startswith("_store"):
                     store_accesses.append(f"line {node.lineno}: ._store")
-                if hasattr(node, 'attr') and node.attr.startswith('_budget'):
+                if hasattr(node, "attr") and node.attr.startswith("_budget"):
                     store_accesses.append(f"line {node.lineno}: ._budget")
-                if hasattr(node, 'attr') and node.attr.startswith('_add_trace'):
+                if hasattr(node, "attr") and node.attr.startswith("_add_trace"):
                     store_accesses.append(f"line {node.lineno}: ._add_trace")
 
         assert len(store_accesses) == 0, (
@@ -612,7 +634,8 @@ class TestTransactionalSubmit:
         Gate: G3 (Transactional Runtime Substrate)
         Debt: D-P0.3 (submit.py:83-153)
         """
-        import tempfile, os
+        import tempfile
+        import os
         from aigineering.core.store import MemoryStore
         from aigineering.core.trace import MemoryTraceStore
         from aigineering.core.idempotency_store import IdempotencyStore
@@ -626,7 +649,12 @@ class TestTransactionalSubmit:
             idem = IdempotencyStore(path=os.path.join(tmp, "idem.jsonl"))
 
             contract = Contract(
-                id="c-atomic", name="t", description="t", inputs=[], outputs=["out"], budget=10,
+                id="c-atomic",
+                name="t",
+                description="t",
+                inputs=[],
+                outputs=["out"],
+                budget=10,
             )
             store.add_contract(contract)
 
@@ -638,7 +666,9 @@ class TestTransactionalSubmit:
             )
 
             result = submit_candidate(
-                env, store, trace,
+                env,
+                store,
+                trace,
                 idempotency_store=idem,
                 idempotency_key=env.idempotency_key,
             )
@@ -668,7 +698,9 @@ class TestTransactionalSubmit:
             )
 
             result2 = submit_candidate(
-                env, store, trace,
+                env,
+                store,
+                trace,
                 idempotency_store=idem,
                 idempotency_key=env.idempotency_key,
             )
@@ -690,7 +722,9 @@ class TestTransactionalSubmit:
             )
             try:
                 submit_candidate(
-                    env3, store, trace,
+                    env3,
+                    store,
+                    trace,
                     idempotency_store=idem,
                     idempotency_key=env3.idempotency_key,
                 )
@@ -760,7 +794,8 @@ class TestTransactionalSubmit:
         Debt: C1 (Schema version requirement)
         """
         import sqlite3
-        import tempfile, os
+        import tempfile
+        import os
         from aigineering.core.sqlite_store import SQLiteStore, CURRENT_SCHEMA_VERSION
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -786,7 +821,8 @@ class TestTransactionalSubmit:
         Debt: C1 (Unknown version requirement)
         """
         import sqlite3
-        import tempfile, os
+        import tempfile
+        import os
         from aigineering.core.sqlite_store import SQLiteStore
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -848,7 +884,8 @@ class TestTransactionalSubmit:
         Gate: G3
         Debt: N-P1.16 (idempotency_store.py:56)
         """
-        import tempfile, os
+        import tempfile
+        import os
         from aigineering.core.idempotency_store import IdempotencyStore
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -893,29 +930,45 @@ class TestCrashRecovery:
         worker = MockWorker()
 
         contract = Contract(
-            id="c-crash1", name="c", description="c", inputs=[], outputs=["out"], budget=5,
+            id="c-crash1",
+            name="c",
+            description="c",
+            inputs=[],
+            outputs=["out"],
+            budget=5,
         )
         store.add_contract(contract)
 
-        output_asset = sign_asset(Asset(
-            id="a-output",
-            name="out",
-            content="recovered-content",
-            definition_hash="def:out",
-            content_hash="content:out",
-            origin="worker",
-            created_by="c-crash1",
-        ))
+        output_asset = sign_asset(
+            Asset(
+                id="a-output",
+                name="out",
+                content="recovered-content",
+                definition_hash="def:out",
+                content_hash="content:out",
+                origin="worker",
+                created_by="c-crash1",
+            )
+        )
         store.add_asset(output_asset)
 
-        trace.append(create_entry(
-            contract_id="c-crash1", event_type="activation", sequence=0,
-            budget_remaining=5,
-        ))
-        trace.append(create_entry(
-            contract_id="c-crash1", event_type="projection", sequence=1,
-            accepted_fragments=["a-output"], budget_remaining=4,
-        ))
+        trace.append(
+            create_entry(
+                contract_id="c-crash1",
+                event_type="activation",
+                sequence=0,
+                budget_remaining=5,
+            )
+        )
+        trace.append(
+            create_entry(
+                contract_id="c-crash1",
+                event_type="projection",
+                sequence=1,
+                accepted_fragments=["a-output"],
+                budget_remaining=4,
+            )
+        )
 
         engine = Engine.restore_from_store(store, worker, trace)
 
@@ -952,18 +1005,34 @@ class TestCrashRecovery:
         worker = MockWorker()
 
         parent = Contract(
-            id="c-parent", name="p", description="p", inputs=[], outputs=["out"], budget=5,
+            id="c-parent",
+            name="p",
+            description="p",
+            inputs=[],
+            outputs=["out"],
+            budget=5,
         )
         child = Contract(
-            id="c-child", name="ch", description="ch", inputs=[], outputs=["out"], budget=3,
+            id="c-child",
+            name="ch",
+            description="ch",
+            inputs=[],
+            outputs=["out"],
+            budget=3,
         )
         store.add_contract(parent)
         store.add_contract(child)
 
-        trace.append(create_entry(
-            contract_id="c-parent", event_type="method_scheduled", sequence=0,
-            relation_type="replan", relation_target="c-child", budget_remaining=4,
-        ))
+        trace.append(
+            create_entry(
+                contract_id="c-parent",
+                event_type="method_scheduled",
+                sequence=0,
+                relation_type="replan",
+                relation_target="c-child",
+                budget_remaining=4,
+            )
+        )
 
         engine = Engine.restore_from_store(store, worker, trace)
 
@@ -993,22 +1062,42 @@ class TestCrashRecovery:
         worker = MockWorker()
 
         parent = Contract(
-            id="c-parent2", name="p", description="p", inputs=[], outputs=["out"], budget=5,
+            id="c-parent2",
+            name="p",
+            description="p",
+            inputs=[],
+            outputs=["out"],
+            budget=5,
         )
         child = Contract(
-            id="c-child2", name="ch", description="ch", inputs=[], outputs=["out"], budget=3,
+            id="c-child2",
+            name="ch",
+            description="ch",
+            inputs=[],
+            outputs=["out"],
+            budget=3,
         )
         store.add_contract(parent)
         store.add_contract(child)
 
-        trace.append(create_entry(
-            contract_id="c-child2", event_type="method_scheduled", sequence=0,
-            relation_type="tool", relation_target="c-child2", budget_remaining=3,
-        ))
-        trace.append(create_entry(
-            contract_id="c-child2", event_type="complete", sequence=1,
-            budget_remaining=0,
-        ))
+        trace.append(
+            create_entry(
+                contract_id="c-child2",
+                event_type="method_scheduled",
+                sequence=0,
+                relation_type="tool",
+                relation_target="c-child2",
+                budget_remaining=3,
+            )
+        )
+        trace.append(
+            create_entry(
+                contract_id="c-child2",
+                event_type="complete",
+                sequence=1,
+                budget_remaining=0,
+            )
+        )
 
         engine = Engine.restore_from_store(store, worker, trace)
 
@@ -1036,18 +1125,33 @@ class TestCrashRecovery:
         worker = MockWorker()
 
         contract = Contract(
-            id="c-double", name="c", description="c", inputs=[], outputs=["out"], budget=5,
+            id="c-double",
+            name="c",
+            description="c",
+            inputs=[],
+            outputs=["out"],
+            budget=5,
         )
         store.add_contract(contract)
 
-        trace.append(create_entry(
-            contract_id="c-double", event_type="method_scheduled", sequence=0,
-            relation_type="replan", relation_target="c-child-d", budget_remaining=4,
-        ))
-        trace.append(create_entry(
-            contract_id="c-double", event_type="complete", sequence=1,
-            budget_remaining=0,
-        ))
+        trace.append(
+            create_entry(
+                contract_id="c-double",
+                event_type="method_scheduled",
+                sequence=0,
+                relation_type="replan",
+                relation_target="c-child-d",
+                budget_remaining=4,
+            )
+        )
+        trace.append(
+            create_entry(
+                contract_id="c-double",
+                event_type="complete",
+                sequence=1,
+                budget_remaining=0,
+            )
+        )
 
         e1 = Engine.restore_from_store(store, worker, trace)
         e2 = Engine.restore_from_store(store, worker, trace)
@@ -1081,12 +1185,15 @@ class TestClaimPersistence:
         Debt: N-P1.8 (claims.py:49-177)
         """
         from aigineering.core.sqlite_store import SQLiteStore
-        import tempfile, os
+        import tempfile
+        import os
 
         with tempfile.TemporaryDirectory() as tmp:
             db_path = os.path.join(tmp, "test.db")
             store = SQLiteStore(db_path=db_path)
-            store.persist_claim("claim-1", "c1", "worker-1", "2026-12-31T00:00:00", "active")
+            store.persist_claim(
+                "claim-1", "c1", "worker-1", "2026-12-31T00:00:00", "active"
+            )
 
             # Simulate restart — new connection
             store.close()
@@ -1101,21 +1208,26 @@ class TestClaimPersistence:
         Gate: G8
         Debt: D-P1.2 (cli/worker.py:67-145)
         """
-        import tempfile, os
+        import tempfile
+        import os
         from aigineering.core.claims import ClaimStore
         from aigineering.core.sqlite_store import SQLiteStore
         from aigineering.core.submit import submit_candidate, SubmitClaimError
         from aigineering.core.trace import MemoryTraceStore
-        from aigineering.core.provenance import sign_asset
         from aigineering.protocol.envelope import CandidateEnvelope
-        from aigineering.protocol.types import Contract, Asset
+        from aigineering.protocol.types import Contract
 
         with tempfile.TemporaryDirectory() as tmp:
             store = SQLiteStore(db_path=os.path.join(tmp, "test.db"))
             trace = MemoryTraceStore()
 
             contract = Contract(
-                id="c1", name="t", description="t", inputs=[], outputs=["out"], budget=10,
+                id="c1",
+                name="t",
+                description="t",
+                inputs=[],
+                outputs=["out"],
+                budget=10,
             )
             store.add_contract(contract)
 
@@ -1125,7 +1237,9 @@ class TestClaimPersistence:
             assert claim.claim_id is not None, "G8/D-P1.2: claim must have claim_id"
 
             store.persist_claim(
-                claim.claim_id, "c1", "worker-1",
+                claim.claim_id,
+                "c1",
+                "worker-1",
                 lease_until=claim.lease_until,
             )
 
@@ -1164,15 +1278,23 @@ class TestClaimPersistence:
                 )
 
             from datetime import datetime, timezone, timedelta
+
             contract2 = Contract(
-                id="c2", name="t2", description="t2", inputs=[], outputs=["out2"], budget=10,
+                id="c2",
+                name="t2",
+                description="t2",
+                inputs=[],
+                outputs=["out2"],
+                budget=10,
             )
             store.add_contract(contract2)
             expired_lease = (
                 datetime.now(timezone.utc) - timedelta(seconds=60)
             ).isoformat()
             store.persist_claim(
-                "expired-claim-id", "c2", "worker-1",
+                "expired-claim-id",
+                "c2",
+                "worker-1",
                 lease_until=expired_lease,
             )
 
@@ -1194,14 +1316,21 @@ class TestClaimPersistence:
                 )
 
             contract3 = Contract(
-                id="c3", name="t3", description="t3", inputs=[], outputs=["out3"], budget=10,
+                id="c3",
+                name="t3",
+                description="t3",
+                inputs=[],
+                outputs=["out3"],
+                budget=10,
             )
             store.add_contract(contract3)
             future_lease = (
                 datetime.now(timezone.utc) + timedelta(seconds=3600)
             ).isoformat()
             store.persist_claim(
-                "released-claim-id", "c3", "worker-1",
+                "released-claim-id",
+                "c3",
+                "worker-1",
                 lease_until=future_lease,
                 status="released",
             )
@@ -1242,9 +1371,15 @@ class TestDisclosureRedaction:
         from aigineering.protocol.types import Asset
         from aigineering.core.provenance import sign_asset
 
-        asset = Asset(id="a1", name="secret", content="sensitive data",
-                      definition_hash="def:test", content_hash="content:test",
-                      origin="user", disclosure_view="redacted")
+        asset = Asset(
+            id="a1",
+            name="secret",
+            content="sensitive data",
+            definition_hash="def:test",
+            content_hash="content:test",
+            origin="user",
+            disclosure_view="redacted",
+        )
         asset = sign_asset(asset)
         redacted = redact_for_disclosure(asset)
         assert redacted.content == "[redacted]", (
@@ -1268,26 +1403,39 @@ class TestDisclosureRedaction:
 
         # An unrelated asset with high trust — should NOT satisfy policy
         unrelated = Asset(
-            id="unrelated", name="unrelated", content="trusted content",
-            definition_hash="def:unrel", content_hash="content:unrel",
-            origin="human", trust_tier="high", signed_by="trusted_signer",
+            id="unrelated",
+            name="unrelated",
+            content="trusted content",
+            definition_hash="def:unrel",
+            content_hash="content:unrel",
+            origin="human",
+            trust_tier="high",
+            signed_by="trusted_signer",
         )
         unrelated = sign_asset(unrelated)
         store.add_asset(unrelated)
 
         # The actual input asset — unsigned, low trust
         input_asset = Asset(
-            id="real-input", name="real-input", content="sensitive data",
-            definition_hash="def:input", content_hash="content:input",
-            origin="user", trust_tier="untrusted", signed_by="",
+            id="real-input",
+            name="real-input",
+            content="sensitive data",
+            definition_hash="def:input",
+            content_hash="content:input",
+            origin="user",
+            trust_tier="untrusted",
+            signed_by="",
         )
         input_asset = sign_asset(input_asset)
         store.add_asset(input_asset)
 
         # Contract with sensitive_input_policy requiring a trusted signer
         contract = Contract(
-            id="c-policy", name="sensitive-task",
-            description="Test", inputs=["real-input"], outputs=["result"],
+            id="c-policy",
+            name="sensitive-task",
+            description="Test",
+            inputs=["real-input"],
+            outputs=["result"],
             budget=5,
             sensitive_input_policy={"required_signer": "trusted_signer"},
         )
@@ -1337,8 +1485,13 @@ class TestDisclosureRedaction:
         )
 
         replay_payload = _build_replay_json_result(
-            {"session": session, "entries": [], "accepted_count": 0,
-             "rejected_count": 0, "consistent": True}
+            {
+                "session": session,
+                "entries": [],
+                "accepted_count": 0,
+                "rejected_count": 0,
+                "consistent": True,
+            }
         )
         replay_json = json.dumps(replay_payload)
         assert "sk-secret-value" not in replay_json, (
@@ -1354,8 +1507,7 @@ class TestDisclosureRedaction:
         Gate: G4 (Strong Worker Protocol)
         Debt: N-P1.9 (projection.py:83)
         """
-        from aigineering.core.projection import project_candidate, _derive_worker_origin
-        from aigineering.protocol.types import Contract, Candidate
+        from aigineering.core.projection import _derive_worker_origin
 
         cases = [
             ("mock_worker", "mock"),
@@ -1397,21 +1549,29 @@ class TestDisclosureRedaction:
         Gate: G10
         Debt: D6 (Minimum capability descriptor trust gate)
         """
-        from aigineering.core.capability_descriptors import verify_descriptor, create_tool_descriptor
-        from aigineering.core.provenance import sign_asset
+        from aigineering.core.capability_descriptors import (
+            verify_descriptor,
+            create_tool_descriptor,
+        )
         from aigineering.protocol.types import Asset
 
         # Valid descriptor: signed, configured trust tier, correct prefix, dual-hash
-        valid = create_tool_descriptor("search", "Search tool", {"type": "object"}, trust_tier="configured")
+        valid = create_tool_descriptor(
+            "search", "Search tool", {"type": "object"}, trust_tier="configured"
+        )
         assert verify_descriptor(valid, kind="tool"), (
             "G10/D6: Valid tool descriptor should pass verification"
         )
 
         # Unsigned descriptor: missing canonical seal
         unsigned = Asset(
-            id="unsigned", name="_tool_capability_search", content="{}",
-            definition_hash="def:test", content_hash="content:test",
-            origin="capability_registry", trust_tier="configured",
+            id="unsigned",
+            name="_tool_capability_search",
+            content="{}",
+            definition_hash="def:test",
+            content_hash="content:test",
+            origin="capability_registry",
+            trust_tier="configured",
             signed_by="",
         )
         assert not verify_descriptor(unsigned, kind="tool"), (
@@ -1419,19 +1579,27 @@ class TestDisclosureRedaction:
         )
 
         # Low trust tier: below minimum
-        low_trust = create_tool_descriptor("low", "Low trust tool", {"type": "object"}, trust_tier="untrusted")
+        low_trust = create_tool_descriptor(
+            "low", "Low trust tool", {"type": "object"}, trust_tier="untrusted"
+        )
         assert not verify_descriptor(low_trust, kind="tool"), (
             "G10/D6: Descriptor with trust_tier='untrusted' must be rejected"
         )
 
         # Wrong name prefix for kind
-        wrong_prefix = create_tool_descriptor("search", "Search tool", {"type": "object"}, trust_tier="configured")
+        wrong_prefix = create_tool_descriptor(
+            "search", "Search tool", {"type": "object"}, trust_tier="configured"
+        )
         wrong_prefix = Asset(
-            id=wrong_prefix.id, name="_mcp_search", content=wrong_prefix.content,
+            id=wrong_prefix.id,
+            name="_mcp_search",
+            content=wrong_prefix.content,
             definition_hash=wrong_prefix.definition_hash,
             content_hash=wrong_prefix.content_hash,
-            origin=wrong_prefix.origin, trust_tier=wrong_prefix.trust_tier,
-            signed_by=wrong_prefix.signed_by, provenance_seal=wrong_prefix.provenance_seal,
+            origin=wrong_prefix.origin,
+            trust_tier=wrong_prefix.trust_tier,
+            signed_by=wrong_prefix.signed_by,
+            provenance_seal=wrong_prefix.provenance_seal,
         )
         assert not verify_descriptor(wrong_prefix, kind="tool"), (
             "G10/D6: Descriptor with wrong name prefix for kind must be rejected"
@@ -1456,9 +1624,12 @@ class TestWorkerProtocolHashing:
         import pytest
 
         pkg = WorkerPackage(
-            contract_id="c1", contract={"name": "test"},
+            contract_id="c1",
+            contract={"name": "test"},
             disclosed_assets=({"name": "a1", "content": "original"},),
-            method_context_assets=(), tool_scope=(), budget_remaining=5,
+            method_context_assets=(),
+            tool_scope=(),
+            budget_remaining=5,
         )
         pkg_json = pkg.to_json()
 
@@ -1473,8 +1644,10 @@ class TestWorkerProtocolHashing:
         # Unknown protocol version must fail closed
         with pytest.raises(ValueError, match="Unsupported protocol version"):
             WorkerPackage.from_json(
-                pkg_json.replace(f'"protocol_version": {CURRENT_PROTOCOL_VERSION}',
-                                 '"protocol_version": 999')
+                pkg_json.replace(
+                    f'"protocol_version": {CURRENT_PROTOCOL_VERSION}',
+                    '"protocol_version": 999',
+                )
             )
 
     def test_candidate_envelope_rejects_wrong_protocol_version(self):
@@ -1483,8 +1656,12 @@ class TestWorkerProtocolHashing:
         Gate: G4
         Debt: N-P2.5, N-P2.11
         """
-        from aigineering.protocol.envelope import CandidateEnvelope, CURRENT_ENVELOPE_VERSION
-        import json, pytest
+        from aigineering.protocol.envelope import (
+            CandidateEnvelope,
+            CURRENT_ENVELOPE_VERSION,
+        )
+        import json
+        import pytest
 
         env = CandidateEnvelope(contract_id="c1", worker_id="w1", raw_output="ok")
         env_json = env.to_json()
@@ -1502,8 +1679,9 @@ class TestWorkerProtocolHashing:
 
         # Claim_id length limit
         with pytest.raises(ValueError, match="claim_id exceeds maximum"):
-            CandidateEnvelope(contract_id="c1", worker_id="w1", raw_output="ok",
-                              claim_id="x" * 257)
+            CandidateEnvelope(
+                contract_id="c1", worker_id="w1", raw_output="ok", claim_id="x" * 257
+            )
 
 
 # ============================================================================
@@ -1524,18 +1702,29 @@ class TestPlanContainment:
         from aigineering.protocol.types import Asset, Contract
 
         parent = Contract(
-            id="parent-policy", name="parent", description="test",
-            inputs=[], outputs=[], budget=10,
+            id="parent-policy",
+            name="parent",
+            description="test",
+            inputs=[],
+            outputs=[],
+            budget=10,
             sensitive_input_policy={"required_signer": "trusted_signer"},
         )
         plan = Asset(
-            id="plan-policy", name="_plan_result_parent-policy",
+            id="plan-policy",
+            name="_plan_result_parent-policy",
             content='{"contracts":[{"name":"child","description":"test","inputs":[],"outputs":[],"budget":5}]}',
-            definition_hash="def:plan", content_hash="content:plan", origin="plan",
+            definition_hash="def:plan",
+            content_hash="content:plan",
+            origin="plan",
         )
-        children, _ = contracts_from_plan_asset(plan, parent_id=parent.id, parent_contract=parent)
+        children, _ = contracts_from_plan_asset(
+            plan, parent_id=parent.id, parent_contract=parent
+        )
         assert len(children) == 1, f"Expected 1 child, got {len(children)}"
-        assert children[0].sensitive_input_policy == {"required_signer": "trusted_signer"}, (
+        assert children[0].sensitive_input_policy == {
+            "required_signer": "trusted_signer"
+        }, (
             f"G6/N-P2.13: child must inherit parent's sensitive_input_policy. "
             f"Got: {children[0].sensitive_input_policy}"
         )
@@ -1550,16 +1739,27 @@ class TestPlanContainment:
         from aigineering.protocol.types import Asset, Contract
 
         parent = Contract(
-            id="parent-empty", name="parent", description="test",
-            inputs=[], outputs=[], budget=10,
+            id="parent-empty",
+            name="parent",
+            description="test",
+            inputs=[],
+            outputs=[],
+            budget=10,
         )
         plan = Asset(
-            id="plan-empty", name="_plan_result_parent-empty",
+            id="plan-empty",
+            name="_plan_result_parent-empty",
             content='{"contracts":[{"name":"","description":"test","inputs":[],"outputs":[],"budget":5}]}',
-            definition_hash="def:plan", content_hash="content:plan", origin="plan",
+            definition_hash="def:plan",
+            content_hash="content:plan",
+            origin="plan",
         )
-        children, rejections = contracts_from_plan_asset(plan, parent_id=parent.id, parent_contract=parent)
-        assert len(children) == 0, f"G6/N-P2.16: empty-name child must not be accepted. Got: {[c.name for c in children]}"
+        children, rejections = contracts_from_plan_asset(
+            plan, parent_id=parent.id, parent_contract=parent
+        )
+        assert len(children) == 0, (
+            f"G6/N-P2.16: empty-name child must not be accepted. Got: {[c.name for c in children]}"
+        )
         assert any(r.get("field") == "name" for r in rejections), (
             f"G6/N-P2.16: empty-name rejection must have field='name'. Rejections: {rejections}"
         )
@@ -1576,7 +1776,7 @@ class TestWorkerProtocolFixes:
         """
         import inspect
         from aigineering.agent.tool_worker import ToolWorker
-        from aigineering.agent.worker import Worker
+
         # ToolWorker.invoke must accept (self, contract, disclosed_assets) like Worker protocol
         sig = inspect.signature(ToolWorker.invoke)
         params = list(sig.parameters.keys())
@@ -1591,6 +1791,7 @@ class TestWorkerProtocolFixes:
         Debt: N-P1.11 (mock.py:10-12)
         """
         from aigineering.agent.mock import MockWorker
+
         w = MockWorker()
         assert w.worker_id == "mock_worker"
         # Must raise on assignment attempt
@@ -1616,9 +1817,11 @@ class TestReplayIntegrity:
         Debt: N-P2.8 (replay.py:41-60)
         """
         from aigineering.core.replay import replay_session
+
         # Verify replay_session only uses direct path or subset match
         # (intersection fallback was removed in N-P2.8)
         import inspect
+
         source = inspect.getsource(replay_session)
         assert "& candidate_ids" not in source, (
             "G9/N-P2.8: replay_session must not use loose intersection (&) "
@@ -1633,6 +1836,7 @@ class TestReplayIntegrity:
         """
         import inspect
         from aigineering.core.replay import replay_session
+
         source = inspect.getsource(replay_session)
         # Replay should validate store integrity or causal chain
         assert "consistent" in source or "causal" in source or "validate" in source, (
@@ -1647,6 +1851,7 @@ class TestReplayIntegrity:
         """
         import inspect
         from aigineering.core.idempotency_store import IdempotencyStore
+
         source = inspect.getsource(IdempotencyStore._write)
         # at minimum, the write path should include the data that could be verified
         assert "contract_id" in source and "idempotency_key" in source, (
@@ -1663,8 +1868,8 @@ class TestReplayIntegrity:
 class TestPublicDocs:
     """G11: Public docs must match reality."""
 
-    def test_public_docs_do_not_claim_050_or_production_security(self):
-        """README and ROADMAP must not claim completed transactional durability or 050.
+    def test_public_docs_match_040_release_scope(self):
+        """README and ROADMAP may claim 040 kernel infrastructure, not production security.
 
         Gate: G11 (Public Claims Match Reality)
         Debt: G11-D1 (README.md:55-96), G11-D2 (ROADMAP.md:3-13)
@@ -1678,39 +1883,32 @@ class TestPublicDocs:
         with open(readme_path) as f:
             readme = f.read()
 
-        # README must not claim "completed" or "production" for 040 foundation
+        # README must not claim audited production security.
         forbidden_claims = [
-            "transactional durability",
-            "completed foundation",
             "production-grade",
+            "distributed runtime is complete",
+            "v0.5 is complete",
         ]
         for claim in forbidden_claims:
             assert claim not in readme.lower(), (
                 f"G11: README claims '{claim}' which is not yet true under 040 gate."
             )
+        assert "not a security-audited production release" in readme.lower()
+        assert "v0.4 single-node stable kernel" in readme.lower()
+        assert "v0.5 productivity expansion" in readme.lower()
+        assert "transactional worker candidate submission" in readme.lower()
 
         # Check ROADMAP
         roadmap_path = os.path.join(repo_root, "ROADMAP.md")
         with open(roadmap_path) as f:
             roadmap = f.read()
 
-        # ROADMAP must not claim v0.4 transactional durability as completed.
-        # Check: if "transactional" appears, it must be in a context of incompleteness.
         roadmap_lower = roadmap.lower()
-        if "transactional" in roadmap_lower:
-            # Find the line containing "transactional"
-            transactional_lines = [
-                line for line in roadmap.split("\n")
-                if "transactional" in line.lower()
-            ]
-            # Each line mentioning transactional must indicate incompleteness
-            incompleteness_markers = ["[ ]", "in progress", "deferred", "not yet", "planned"]
-            for line in transactional_lines:
-                line_lower = line.lower()
-                assert any(marker in line_lower for marker in incompleteness_markers), (
-                    f"G11: ROADMAP line claims transactional durability as complete: '{line.strip()}'. "
-                    f"Must include incompleteness marker: {incompleteness_markers}"
-                )
+        assert "040 single-node stable kernel" in roadmap_lower
+        assert "v0.5" in roadmap_lower
+        assert "[x] transactional candidate submission" in roadmap_lower
+        assert "not a security-audited production deployment" in roadmap_lower
+        assert "[x] release packaging and distribution checks" in roadmap_lower
 
 
 # ============================================================================
@@ -1729,7 +1927,8 @@ class TestSQLiteTrace:
         """
         from aigineering.core.sqlite_store import SQLiteStore
         from aigineering.core.trace import create_entry
-        import tempfile, os
+        import tempfile
+        import os
 
         entry = create_entry(
             contract_id="c1",
@@ -1767,7 +1966,7 @@ class TestSQLiteTrace:
                 f"G3/C3: worker_id round-trip failed: expected 'w-1', got '{e.worker_id}'"
             )
             assert e.candidate_raw == "/exec payload", (
-                f"G3/C3: candidate_raw round-trip failed"
+                "G3/C3: candidate_raw round-trip failed"
             )
             assert e.budget_remaining == 7, (
                 f"G3/C3: budget_remaining round-trip failed: expected 7, got {e.budget_remaining}"
@@ -1785,10 +1984,10 @@ class TestSQLiteTrace:
                 f"G3/C3: accepted_fragments round-trip failed: expected ('af-1',), got {e.accepted_fragments}"
             )
             assert e.accepted_asset_names == ("out-1",), (
-                f"G3/C3: accepted_asset_names round-trip failed"
+                "G3/C3: accepted_asset_names round-trip failed"
             )
             assert e.rejected_fragments == ("rf-1",), (
-                f"G3/C3: rejected_fragments round-trip failed"
+                "G3/C3: rejected_fragments round-trip failed"
             )
             assert e.disclosed_assets == ("da-1", "da-2"), (
                 f"G3/C3: disclosed_assets round-trip failed: expected ('da-1', 'da-2'), got {e.disclosed_assets}"

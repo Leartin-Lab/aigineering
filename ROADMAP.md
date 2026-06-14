@@ -2,16 +2,23 @@
 
 ## Status
 
-Aigineering is a pre-alpha Zero Trust Agent Runtime. The current `v0.4.x`
-milestone is undergoing **040 production kernel gate validation**.
-Transactional durability, recoverable state, and capability containment are **in progress** — not yet production-complete.
+Aigineering is an early Zero Trust Agent Runtime. The current `v0.4.x`
+milestone is the **040 single-node stable kernel**: strong protocolization plus
+single-node runtime infrastructure for local, auditable experiments and v0.5
+productivity expansion.
+
+The v0.4 kernel includes SQLite-backed transactional submission, recoverable
+runtime state, capability containment, and a worker pull/submit protocol. It is
+not a security-audited production deployment, and it does not yet claim
+distributed runtime safety.
 
 ```text
 Contract -> Worker/Sub-agent -> Candidate -> Projection/Method -> Asset/Trace
 ```
 
-The project has completed Waves 0–3 of its development plan and is ready for
-broader single-machine experiments. It is not production-ready yet.
+The project has completed Waves 0–4 of its development plan and is ready for
+broader single-machine experiments. It is not externally audited or
+deployment-hardened yet.
 
 ## v0.1 - Hallucination Containment MVP
 
@@ -56,20 +63,32 @@ broader single-machine experiments. It is not production-ready yet.
 - [x] End-to-end fake-LLM protocol boundary tests
 - [x] CLI trace rendering for method scheduling, tool execution, resume, and expansion
 
-## v0.4 - Production Foundation
+## v0.4 - Kernel Infrastructure
 
-Focus: make the single-node runtime durable, resumable, and safer.
+Focus: make the single-node runtime durable, resumable, protocolized, and safer.
 
 - [x] SQLiteStore or equivalent single-file durable store
+- [x] Schema-versioned SQLite substrate with v1 -> v2 migration
+- [x] Contract authority metadata persistence (`minting_authority`, `sensitive_input_policy`)
+- [x] SQLite trace store operations for replay and recovery
+- [x] Worker claim and idempotency tables
+- [x] Transactional candidate submission across accepted assets, trace, idempotency, and claim transition
+- [x] Database-enforced single active worker claim per contract
+- [x] Worker package and candidate envelope claim/package binding
+- [x] Claim-bound SQLite worker submission via `aig worker next` / `aig worker submit`
 - [x] Resumable engine state for completed/suspended contracts, budgets, and method context
 - [x] Crash recovery from persisted assets/contracts/traces/session manifest
 - [x] `aig trace --tree` / `aig trace --dag` as views, not runtime truth
 - [x] CLI split into smaller command modules
+- [x] CLI default method registry for method-first `/plan`, `/replan`, `/retry`, and `/tool`
+- [x] 040 gate test suite for boundary, persistence, recovery, claim, and public-claim checks
+- [x] Release packaging and distribution checks
 
 ### Deferred to v0.4.x
 
 - [ ] Real cryptographic signer/verifier interface
 - [ ] Trust policy over signer, origin, trust tier, labels, tool scope, and reserved prefixes
+- [ ] Broader crash-injection and concurrent-worker stress tests
 
 ## v0.5 - Ecosystem Integration
 

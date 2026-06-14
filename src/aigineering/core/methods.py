@@ -6,7 +6,11 @@ import json
 import re
 
 from aigineering.core.authority import RESERVED_PREFIXES
-from aigineering.core.ids import hash_asset_content, hash_asset_definition, hash_contract
+from aigineering.core.ids import (
+    hash_asset_content,
+    hash_asset_definition,
+    hash_contract,
+)
 from aigineering.protocol.actions import WorkerAction
 from aigineering.protocol.types import Asset, Contract
 
@@ -21,9 +25,7 @@ _PLAN_RESERVED_PREFIXES: frozenset[str] = RESERVED_PREFIXES | frozenset({"_perso
 
 # Fields the planner must not set in child contract payloads.
 # (origin is always hard-clamped to "plan" by the engine.)
-_PLAN_PROTECTED_FIELDS: frozenset[str] = frozenset(
-    {"trust_tier", "created_by"}
-)
+_PLAN_PROTECTED_FIELDS: frozenset[str] = frozenset({"trust_tier", "created_by"})
 
 _ACTIVATION_KEYWORDS: frozenset[str] = frozenset({"AND", "OR", "NOT"})
 
@@ -38,14 +40,14 @@ def _extract_activation_names(expression: str) -> set[str]:
         return set()
     # Split on whitespace and strip parentheses
     names: set[str] = set()
-    for token in re.split(r'\s+', expression.strip()):
+    for token in re.split(r"\s+", expression.strip()):
         token = token.strip("()")
         if not token:
             continue
         if token.upper() in _ACTIVATION_KEYWORDS:
             continue
         # Only accept tokens that look like simple identifiers
-        if re.fullmatch(r'[a-zA-Z_][a-zA-Z0-9_-]*', token):
+        if re.fullmatch(r"[a-zA-Z_][a-zA-Z0-9_-]*", token):
             names.add(token)
     return names
 
@@ -88,6 +90,7 @@ def method_contract(parent: Contract, action: WorkerAction) -> Contract:
         tool_scope=tool_scope,
         labels=labels,
         origin="system",
+        minting_authority=(output_name,),
     )
 
 
@@ -99,6 +102,24 @@ def _method_description(parent: Contract, action: WorkerAction) -> str:
             "parent_contract_id": parent.id,
             "parent_contract_name": parent.name,
             "payload": payload,
+        },
+        sort_keys=True,
+        ensure_ascii=False,
+    )
+
+
+def method_context_content(
+    parent: Contract,
+    action: WorkerAction,
+    child: Contract,
+) -> str:
+    """Canonical JSON payload for `_method_ctx_*` activation assets."""
+    return json.dumps(
+        {
+            "method": action.type,
+            "parent_contract_id": parent.id,
+            "child_contract_id": child.id,
+            "payload": action.payload,
         },
         sort_keys=True,
         ensure_ascii=False,
@@ -182,7 +203,9 @@ def contracts_from_plan_asset(
     accepted: list[Contract] = []
     rejected: list[dict] = []
 
-    parent_tools = set(parent_contract.tool_scope) if parent_contract is not None else None
+    parent_tools = (
+        set(parent_contract.tool_scope) if parent_contract is not None else None
+    )
     parent_labels = set(parent_contract.labels) if parent_contract is not None else None
     parent_budget = parent_contract.budget if parent_contract is not None else None
 
@@ -194,14 +217,16 @@ def contracts_from_plan_asset(
 
         name = str(raw.get("name", ""))
         if not name or not name.strip():
-            rejected.append({
-                "child_name": "(empty)",
-                "field": "name",
-                "reason": "child contract name must be non-empty",
-                "action": "rejected",
-                "expected": "non-empty string",
-                "actual": repr(name),
-            })
+            rejected.append(
+                {
+                    "child_name": "(empty)",
+                    "field": "name",
+                    "reason": "child contract name must be non-empty",
+                    "action": "rejected",
+                    "expected": "non-empty string",
+                    "actual": repr(name),
+                }
+            )
             continue
 
         # --- Deny-by-default: protected fields ---
@@ -262,7 +287,8 @@ def contracts_from_plan_asset(
         if allowed_input_names is not None and allowed_input_names:
             child_output_set = set(outputs)
             unauthorized_inputs = [
-                inp for inp in inputs
+                inp
+                for inp in inputs
                 if inp not in allowed_input_names and inp not in child_output_set
             ]
             if unauthorized_inputs:
@@ -320,17 +346,14 @@ def contracts_from_plan_asset(
 
         # --- Protected output check ---
         violated_outputs = [
-            o for o in outputs
-            if any(o.startswith(p) for p in _PLAN_RESERVED_PREFIXES)
+            o for o in outputs if any(o.startswith(p) for p in _PLAN_RESERVED_PREFIXES)
         ]
         if violated_outputs:
             rejected.append(
                 {
                     "child_name": name,
                     "field": "outputs",
-                    "reason": (
-                        f"outputs {violated_outputs} use reserved prefixes"
-                    ),
+                    "reason": (f"outputs {violated_outputs} use reserved prefixes"),
                     "action": "rejected",
                     "expected": f"no prefix in {sorted(_PLAN_RESERVED_PREFIXES)}",
                     "actual": str(violated_outputs),
@@ -370,7 +393,9 @@ def contracts_from_plan_asset(
             budget = parent_budget
             effective_budget = budget
             remaining_budget = (
-                max(0, parent_budget_remaining - (_cumulative_budget + effective_budget))
+                max(
+                    0, parent_budget_remaining - (_cumulative_budget + effective_budget)
+                )
                 if parent_budget_remaining is not None
                 else None
             )
@@ -445,7 +470,8 @@ def contracts_from_plan_asset(
                 origin=origin,
                 sensitive_input_policy=(
                     parent_contract.sensitive_input_policy
-                    if parent_contract is not None and parent_contract.sensitive_input_policy
+                    if parent_contract is not None
+                    and parent_contract.sensitive_input_policy
                     else None
                 ),
             )

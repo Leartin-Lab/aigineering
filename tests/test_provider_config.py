@@ -1,4 +1,5 @@
 """Tests for provider config snapshot assets."""
+
 from __future__ import annotations
 
 import json
@@ -80,10 +81,10 @@ def test_api_key_not_in_content():
     for val in content.values():
         if isinstance(val, str):
             assert not val.startswith("Bearer "), (
-                f"Bearer token leaked in provider config"
+                "Bearer token leaked in provider config"
             )
             assert not val.startswith("Basic "), (
-                f"Basic auth token leaked in provider config"
+                "Basic auth token leaked in provider config"
             )
 
     # The sealed_config_ref is present but empty (no key leaked)

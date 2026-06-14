@@ -37,4 +37,6 @@ def verify_asset_seal(asset: Asset) -> bool:
 
     if not asset.signed_by or not asset.provenance_seal:
         return False
-    return asset.provenance_seal == compute_provenance_seal(asset, signed_by=asset.signed_by)
+    return asset.provenance_seal == compute_provenance_seal(
+        asset, signed_by=asset.signed_by
+    )

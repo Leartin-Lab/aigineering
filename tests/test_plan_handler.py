@@ -3,12 +3,12 @@
 import json
 
 from aigineering.core.engine import Engine
-from aigineering.core.ids import hash_asset_content, hash_contract
+from aigineering.core.ids import hash_contract
 from aigineering.core.method_registry import MethodRegistry
 from aigineering.core.method_handlers.plan import PlanMethodHandler
-from aigineering.core.methods import method_payload
 from aigineering.core.store import MemoryStore
 from aigineering.core.trace import TraceStore
+from aigineering.protocol.actions import parse_method_action
 from aigineering.protocol.types import Asset, Contract
 
 
@@ -28,6 +28,7 @@ class SequenceWorker:
 
 
 # ── Handler unit tests ────────────────────────────────────────────────
+
 
 def test_handler_can_handle_plan():
     handler = PlanMethodHandler()
@@ -66,12 +67,20 @@ def test_handler_schedules_plan_child():
     assert child_contracts[0].name == "root.plan"
     assert child_contracts[0].origin == "system"
 
+    context_assets = store.get_assets_by_name(f"_method_ctx_{contract.id}")
+    assert len(context_assets) == 1
+    context = json.loads(context_assets[0].content)
+    assert context == {
+        "method": "plan",
+        "parent_contract_id": contract.id,
+        "child_contract_id": child_contracts[0].id,
+        "payload": {"reason": "split work"},
+    }
+
 
 def test_handler_does_not_expand_non_plan():
     """handle_completion returns False for non-plan method contracts."""
     handler = PlanMethodHandler()
-
-    from aigineering.core.methods import method_payload
 
     store = MemoryStore()
     trace_store = TraceStore()
@@ -96,8 +105,12 @@ def test_handler_does_not_expand_non_plan():
         parent_id="parent_1",
         name="parent.tool",
         description=json.dumps(
-            {"method": "tool", "parent_contract_id": "parent_1",
-             "parent_contract_name": "parent", "payload": {}},
+            {
+                "method": "tool",
+                "parent_contract_id": "parent_1",
+                "parent_contract_name": "parent",
+                "payload": {},
+            },
             sort_keys=True,
         ),
         inputs=[],
@@ -112,6 +125,7 @@ def test_handler_does_not_expand_non_plan():
 
 
 # ── Engine integration tests ──────────────────────────────────────────
+
 
 def test_handler_expands_plan_results():
     """Full engine flow: PlanMethodHandler expands plan results into children."""
@@ -159,7 +173,8 @@ def test_handler_expands_plan_results():
     engine.run()
 
     planned = [
-        c for c in store.get_all_contracts()
+        c
+        for c in store.get_all_contracts()
         if c.parent_id == contract.id and c.name == "draft"
     ]
     assert len(planned) == 1
@@ -215,16 +230,16 @@ def test_handler_respects_containment():
     engine.run()
 
     planned = [
-        c for c in store.get_all_contracts()
+        c
+        for c in store.get_all_contracts()
         if c.parent_id == contract.id and c.name == "draft"
     ]
-    assert len(planned) == 1
-    assert planned[0].tool_scope == ("lookup",)
+    assert len(planned) == 0
 
     rejections = trace_store.get_by_event_type("containment_rejected")
     assert len(rejections) >= 1
-    clamp_events = [r for r in rejections if r.authority_result == "clamped"]
-    assert len(clamp_events) >= 1
+    reject_events = [r for r in rejections if r.authority_result == "rejected"]
+    assert len(reject_events) >= 1
 
 
 def test_engine_uses_plan_handler():
@@ -283,11 +298,13 @@ def test_engine_uses_plan_handler():
     engine.run()
 
     research_children = [
-        c for c in store.get_all_contracts()
+        c
+        for c in store.get_all_contracts()
         if c.parent_id == contract.id and c.name == "research"
     ]
     write_children = [
-        c for c in store.get_all_contracts()
+        c
+        for c in store.get_all_contracts()
         if c.parent_id == contract.id and c.name == "write"
     ]
     assert len(research_children) == 1, "research child should be created"
@@ -336,7 +353,8 @@ def test_fallback_without_handler():
     engine.run()
 
     planned = [
-        c for c in store.get_all_contracts()
+        c
+        for c in store.get_all_contracts()
         if c.parent_id == contract.id and c.name == "draft"
     ]
     assert len(planned) == 1
@@ -348,7 +366,6 @@ def test_fallback_without_handler():
 
 def test_handler_satisfies_protocol():
     """PlanMethodHandler is structurally compatible with MethodHandler."""
-    from aigineering.core.method_registry import MethodHandler
 
     handler = PlanMethodHandler()
     # Structural protocol check: all required methods are present
@@ -375,7 +392,9 @@ def test_legacy_handler_without_handle_completion_falls_back():
             return action_type == "plan"
 
         def handle_method(self, engine, contract, action_type, candidate) -> bool:
-            engine._schedule_method_contract(contract, parse_method_action(candidate), candidate)
+            engine._schedule_method_contract(
+                contract, parse_method_action(candidate), candidate
+            )
             return True
 
     registry.register("plan", LegacyHandler())
@@ -384,16 +403,23 @@ def test_legacy_handler_without_handle_completion_falls_back():
         {"contracts": [{"name": "draft", "inputs": [], "outputs": ["draft_out"]}]},
         sort_keys=True,
     )
-    worker = SequenceWorker([
-        '/plan {"reason": "split"}',
-        f'/exec {{"outputs": {{"_plan_result_contract_parent": {json.dumps(plan_content)}}}}}',
-        "",
-    ])
+    worker = SequenceWorker(
+        [
+            '/plan {"reason": "split"}',
+            f'/exec {{"outputs": {{"_plan_result_contract_parent": {json.dumps(plan_content)}}}}}',
+            "",
+        ]
+    )
     store = MemoryStore()
     trace_store = TraceStore()
     contract = Contract(
-        id="contract_parent", name="root", outputs=["report"],
-        activation="", budget=5, tool_scope=[], labels=[],
+        id="contract_parent",
+        name="root",
+        outputs=["report"],
+        activation="",
+        budget=5,
+        tool_scope=[],
+        labels=[],
     )
     engine = Engine(store, worker, trace_store, method_registry=registry)
     engine.add_contract(contract)
@@ -404,6 +430,3 @@ def test_legacy_handler_without_handle_completion_falls_back():
     children = [c for c in store.get_all_contracts() if c.parent_id == contract.id]
     draft = [c for c in children if c.name == "draft"]
     assert len(draft) == 1
-
-
-from aigineering.protocol.actions import parse_method_action

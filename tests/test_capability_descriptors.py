@@ -1,9 +1,9 @@
 """Tests for capability descriptor asset creation."""
+
 from __future__ import annotations
 
 import json
 
-import pytest
 
 from aigineering.core.capability_descriptors import (
     CAPABILITY_KINDS,
@@ -54,7 +54,10 @@ def test_tool_descriptor_registration_and_query():
     assert content["name"] == "web_search"
     assert content["version"] == "0.1.0"
     assert content["description"] == "Search the web for information."
-    assert content["input_schema"] == {"type": "object", "properties": {"q": {"type": "string"}}}
+    assert content["input_schema"] == {
+        "type": "object",
+        "properties": {"q": {"type": "string"}},
+    }
     assert content["sealed_config_ref"] == ""
 
     # Verify provenance on the Asset object itself
@@ -91,8 +94,16 @@ def test_mcp_descriptor_sealed_config():
     assert isinstance(content["sealed_config_ref"], str)
 
     # Private config MUST NOT be in disclosed content
-    for key in ("api_key", "access_token", "secret", "password", "credential",
-                 "token", "private_key", "auth"):
+    for key in (
+        "api_key",
+        "access_token",
+        "secret",
+        "password",
+        "credential",
+        "token",
+        "private_key",
+        "auth",
+    ):
         assert key not in content, (
             f"Private config key '{key}' leaked into MCP descriptor content"
         )
@@ -162,15 +173,15 @@ def test_all_five_capability_kinds():
 
         # Names follow expected conventions
         if kind == "tool":
-            assert desc.name == f"_tool_capability_lookup"
+            assert desc.name == "_tool_capability_lookup"
         elif kind == "mcp":
-            assert desc.name == f"_mcp_filesystem"
+            assert desc.name == "_mcp_filesystem"
         elif kind == "skill":
-            assert desc.name == f"_skill_capability_audit"
+            assert desc.name == "_skill_capability_audit"
         elif kind == "memory":
-            assert desc.name == f"_memory_capability_conversation"
+            assert desc.name == "_memory_capability_conversation"
         elif kind == "persona":
-            assert desc.name == f"_persona_capability_helpful_assistant"
+            assert desc.name == "_persona_capability_helpful_assistant"
 
     # All IDs are distinct
     ids = [d.id for d in descriptors.values()]
@@ -236,7 +247,9 @@ def test_descriptor_disclosure_metadata_only():
         # No binary or encoded private data in content
         for key, val in content.items():
             if isinstance(val, str):
-                assert not val.startswith("Bearer "), f"Auth token leaked in {desc.name}"
+                assert not val.startswith("Bearer "), (
+                    f"Auth token leaked in {desc.name}"
+                )
                 assert not val.startswith("Basic "), f"Auth token leaked in {desc.name}"
 
     # Verify the store round-trip does not add hidden fields
@@ -310,6 +323,7 @@ def test_descriptors_carry_provenance():
 
     # Tampered content breaks signature verification
     from dataclasses import replace
+
     tampered = replace(descriptors[0], content="tampered content")
     assert verify_asset_seal(tampered) is False
 

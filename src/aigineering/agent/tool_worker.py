@@ -21,7 +21,9 @@ class ToolWorker:
     def __init__(self, registry: ToolRegistry) -> None:
         self._registry = registry
 
-    def invoke(self, tool_name: str, args: dict[str, Any], contract_id: str) -> Candidate:
+    def invoke(
+        self, tool_name: str, args: dict[str, Any], contract_id: str
+    ) -> Candidate:
         """Execute a tool call and return a Candidate with the result.
 
         Args:

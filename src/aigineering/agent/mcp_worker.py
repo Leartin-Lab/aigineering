@@ -24,7 +24,9 @@ class MCPWorker:
     def __init__(self, mcp_servers: dict[str, Any] | None = None) -> None:
         self._servers: dict[str, Any] = mcp_servers or {}
 
-    def invoke(self, tool_name: str, args: dict[str, Any], contract_id: str) -> Candidate:
+    def invoke(
+        self, tool_name: str, args: dict[str, Any], contract_id: str
+    ) -> Candidate:
         """Execute an MCP tool call and return a Candidate with the result.
 
         Args:

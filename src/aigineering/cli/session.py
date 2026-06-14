@@ -16,7 +16,10 @@ def session() -> None:
 
 @session.command("ls")
 @click.option(
-    "--json", "json_output", is_flag=True, default=False,
+    "--json",
+    "json_output",
+    is_flag=True,
+    default=False,
     help="Output machine-readable JSON instead of human-readable text.",
 )
 def session_ls(json_output: bool) -> None:
@@ -24,9 +27,7 @@ def session_ls(json_output: bool) -> None:
     store = SessionStore()
     sessions = store.list_sessions()
     if json_output:
-        payload = [
-            _redact_sealed(session_to_dict(s)) for s in sessions
-        ]
+        payload = [_redact_sealed(session_to_dict(s)) for s in sessions]
         _output_json(payload)
         return
     if not sessions:
@@ -50,7 +51,12 @@ def session_show(session_id: str) -> None:
     click.echo(f"contract_ids:      {s.contract_ids}")
     click.echo(f"asset_ids:         {s.asset_ids}")
     click.echo(f"trace_ids:         {s.trace_ids}")
-    redacted = _redact_sealed({"config_snapshot": dict(s.config_snapshot or {}), "worker_snapshot": dict(s.worker_snapshot or {})})
+    redacted = _redact_sealed(
+        {
+            "config_snapshot": dict(s.config_snapshot or {}),
+            "worker_snapshot": dict(s.worker_snapshot or {}),
+        }
+    )
     click.echo(f"config_snapshot:   {redacted.get('config_snapshot', '[redacted]')}")
     click.echo(f"worker_snapshot:   {redacted.get('worker_snapshot', '[redacted]')}")
     click.echo(f"created_at:        {s.created_at}")

@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 from types import MappingProxyType
-from typing import Any, Optional
+from typing import Optional
 
 
 @dataclass(frozen=True)
@@ -55,7 +55,8 @@ class Contract:
         object.__setattr__(self, "minting_authority", tuple(self.minting_authority))
         if self.sensitive_input_policy is not None:
             object.__setattr__(
-                self, "sensitive_input_policy",
+                self,
+                "sensitive_input_policy",
                 MappingProxyType(dict(self.sensitive_input_policy)),
             )
 
@@ -69,7 +70,9 @@ class Candidate:
 
     def __post_init__(self) -> None:
         if self.parsed_action is not None:
-            object.__setattr__(self, "parsed_action", MappingProxyType(dict(self.parsed_action)))
+            object.__setattr__(
+                self, "parsed_action", MappingProxyType(dict(self.parsed_action))
+            )
         if self.metadata is not None:
             object.__setattr__(self, "metadata", MappingProxyType(dict(self.metadata)))
 
@@ -81,7 +84,9 @@ class ToolSpec:
     input_schema: MappingProxyType = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "input_schema", MappingProxyType(dict(self.input_schema)))
+        object.__setattr__(
+            self, "input_schema", MappingProxyType(dict(self.input_schema))
+        )
 
 
 @dataclass(frozen=True)
@@ -106,7 +111,9 @@ class TraceEntry:
     def __post_init__(self) -> None:
         object.__setattr__(self, "disclosed_assets", tuple(self.disclosed_assets))
         object.__setattr__(self, "accepted_fragments", tuple(self.accepted_fragments))
-        object.__setattr__(self, "accepted_asset_names", tuple(self.accepted_asset_names))
+        object.__setattr__(
+            self, "accepted_asset_names", tuple(self.accepted_asset_names)
+        )
         object.__setattr__(self, "rejected_fragments", tuple(self.rejected_fragments))
 
 
@@ -142,9 +149,15 @@ class ReplacementClaim:
     provenance_seal: str = ""
     lineage_id: str = ""
 
-    _VALID_CLAIM_TYPES = frozenset({
-        "replacement", "slice", "summary", "redaction", "equivalent_input",
-    })
+    _VALID_CLAIM_TYPES = frozenset(
+        {
+            "replacement",
+            "slice",
+            "summary",
+            "redaction",
+            "equivalent_input",
+        }
+    )
 
     def __post_init__(self) -> None:
         if self.claim_type not in self._VALID_CLAIM_TYPES:
@@ -166,7 +179,9 @@ class ProjectionResult:
         object.__setattr__(self, "accepted_assets", tuple(self.accepted_assets))
         object.__setattr__(self, "rejected_candidates", tuple(self.rejected_candidates))
         if self.authority_policy is not None:
-            object.__setattr__(self, "authority_policy", MappingProxyType(dict(self.authority_policy)))
+            object.__setattr__(
+                self, "authority_policy", MappingProxyType(dict(self.authority_policy))
+            )
 
 
 @dataclass(frozen=True)
@@ -184,5 +199,9 @@ class Session:
         object.__setattr__(self, "contract_ids", tuple(self.contract_ids))
         object.__setattr__(self, "asset_ids", tuple(self.asset_ids))
         object.__setattr__(self, "trace_ids", tuple(self.trace_ids))
-        object.__setattr__(self, "config_snapshot", MappingProxyType(dict(self.config_snapshot)))
-        object.__setattr__(self, "worker_snapshot", MappingProxyType(dict(self.worker_snapshot)))
+        object.__setattr__(
+            self, "config_snapshot", MappingProxyType(dict(self.config_snapshot))
+        )
+        object.__setattr__(
+            self, "worker_snapshot", MappingProxyType(dict(self.worker_snapshot))
+        )

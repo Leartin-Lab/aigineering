@@ -24,6 +24,7 @@ def _write_trace_entries(trace_file: Path, entries: list[TraceEntry]) -> None:
 # Existing test — updated to exercise the JSONL trace path
 # ---------------------------------------------------------------------------
 
+
 def test_audit_accepts_asset_name_via_asset_option():
     """aig audit --asset-name resolves from a pre-existing JSONL trace."""
     runner = CliRunner()
@@ -72,6 +73,7 @@ def test_audit_accepts_asset_name_via_asset_option():
 # ---------------------------------------------------------------------------
 # New tests — JSONL persistence and CLI commands
 # ---------------------------------------------------------------------------
+
 
 def test_run_creates_trace_file():
     """aig run writes a session_*.jsonl file with valid JSON lines."""
@@ -325,6 +327,7 @@ def test_replay_valid_session():
 # v0.3.18 — retry, trace --tree, trace --dag
 # ---------------------------------------------------------------------------
 
+
 def test_retry_creates_deterministic_contract():
     """aig retry --contract <id> creates a contract with deterministic retry ID."""
     runner = CliRunner()
@@ -355,7 +358,9 @@ def test_retry_creates_deterministic_contract():
         assert retry_id_1 == expected_id
 
         store2 = SQLiteStore(".aig/store.db")
-        retry_ids_in_store = [c.id for c in store2.get_all_contracts() if c.id.startswith("retry:")]
+        retry_ids_in_store = [
+            c.id for c in store2.get_all_contracts() if c.id.startswith("retry:")
+        ]
         assert expected_id in retry_ids_in_store
         store2.close()
 
@@ -457,9 +462,13 @@ def test_trace_tree_view():
         _write_trace_entries(
             Path(".aig/traces/session_tree.jsonl"),
             [
-                parent_activation, parent_disclosure, parent_projection,
+                parent_activation,
+                parent_disclosure,
+                parent_projection,
                 method_scheduled,
-                child_activation, child_disclosure, child_projection,
+                child_activation,
+                child_disclosure,
+                child_projection,
             ],
         )
 
@@ -470,8 +479,8 @@ def test_trace_tree_view():
         assert "contract: contract_parent" in output
         assert "contract: contract_child" in output
         lines = output.split("\n")
-        parent_line = [l for l in lines if "contract: contract_parent" in l]
-        child_line = [l for l in lines if "contract: contract_child" in l]
+        parent_line = [line for line in lines if "contract: contract_parent" in line]
+        child_line = [line for line in lines if "contract: contract_child" in line]
         assert parent_line
         assert child_line
         parent_indent = len(parent_line[0]) - len(parent_line[0].lstrip())
@@ -598,6 +607,7 @@ def test_views_are_derived_not_stored_truth():
 # v0.4.6 — enhanced tree and DAG projection tests
 # ---------------------------------------------------------------------------
 
+
 def test_trace_tree_hierarchy():
     """Tree view uses proper tree-drawing characters and nested indent levels.
 
@@ -687,11 +697,15 @@ def test_trace_tree_hierarchy():
         output = result.output
         lines = output.split("\n")
 
-        root_lines = [l for l in lines if "contract: root_contract" in l]
-        child_lines = [l for l in lines if "contract: child_contract" in l]
-        tool_lines = [l for l in lines if "contract: child_tool" in l]
-        assert len(root_lines) == 1, f"root_contract should appear once, got {root_lines}"
-        assert len(child_lines) == 1, f"child_contract should appear once, got {child_lines}"
+        root_lines = [line for line in lines if "contract: root_contract" in line]
+        child_lines = [line for line in lines if "contract: child_contract" in line]
+        tool_lines = [line for line in lines if "contract: child_tool" in line]
+        assert len(root_lines) == 1, (
+            f"root_contract should appear once, got {root_lines}"
+        )
+        assert len(child_lines) == 1, (
+            f"child_contract should appear once, got {child_lines}"
+        )
         assert len(tool_lines) == 1, f"child_tool should appear once, got {tool_lines}"
 
         root_line = root_lines[0]
@@ -834,9 +848,9 @@ def test_trace_tree_shows_method_chain():
         assert "complete" in output
 
         lines = output.split("\n")
-        parent_line = [l for l in lines if "contract: contract_parent" in l]
-        plan_line = [l for l in lines if "contract: contract_plan" in l]
-        tool_line = [l for l in lines if "contract: contract_tool" in l]
+        parent_line = [line for line in lines if "contract: contract_parent" in line]
+        plan_line = [line for line in lines if "contract: contract_plan" in line]
+        tool_line = [line for line in lines if "contract: contract_tool" in line]
         assert len(parent_line) == 1
         assert len(plan_line) == 1
         assert len(tool_line) == 1
@@ -955,11 +969,12 @@ def test_dag_output_valid_format():
         assert "flowchart TD" in output
 
         import re
+
         node_defs = re.findall(r'^\s{4}(\w+)\["', output, re.MULTILINE)
         assert "alpha" in node_defs
         assert "beta" in node_defs
 
-        edge_pattern = re.findall(r'^\s{4}(\w+) -->\|', output, re.MULTILINE)
+        edge_pattern = re.findall(r"^\s{4}(\w+) -->\|", output, re.MULTILINE)
         assert len(edge_pattern) >= 1
         assert "alpha" in edge_pattern
 

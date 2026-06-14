@@ -71,7 +71,9 @@ def test_sign_asset_adds_deterministic_compute_provenance_seal():
     assert signed.signed_by == "tool_worker"
     assert signed.provenance_seal.startswith("asig_")
     assert signed.provenance_seal == signed_again.provenance_seal
-    assert signed.provenance_seal == compute_provenance_seal(asset, signed_by="tool_worker")
+    assert signed.provenance_seal == compute_provenance_seal(
+        asset, signed_by="tool_worker"
+    )
 
 
 def test_jsonl_store_roundtrips_asset_signature(tmp_path):

@@ -85,7 +85,9 @@ class LLMWorker:
                 capabilities if capabilities is not None else config.capabilities
             )
             self._tool_definitions = (
-                tool_definitions if tool_definitions is not None else config.tool_definitions
+                tool_definitions
+                if tool_definitions is not None
+                else config.tool_definitions
             )
         else:
             self.model = model
@@ -204,7 +206,8 @@ class LLMWorker:
                         self._max_retries,
                     )
                     raise ProviderError(
-                        0, f"Timeout/network error after {self._max_retries} retries: {e}"
+                        0,
+                        f"Timeout/network error after {self._max_retries} retries: {e}",
                     ) from e
                 wait = self._retry_backoff ** (attempt + 1)
                 logger.info(
@@ -302,7 +305,9 @@ def _extract_message_content(response: Mapping[str, object]) -> str:
     raise ValueError("LLM response missing message content")
 
 
-def _extract_tool_calls(response: Mapping[str, object]) -> list[dict[str, object]] | None:
+def _extract_tool_calls(
+    response: Mapping[str, object],
+) -> list[dict[str, object]] | None:
     """Extract tool_calls from an OpenAI-compatible chat completion response.
 
     Returns ``None`` when the message has no tool_calls (text-only response).
@@ -336,7 +341,10 @@ def _extract_usage(response: Mapping[str, object]) -> MappingProxyType | None:
     total_tokens = usage.get("total_tokens")
     if not isinstance(prompt_tokens, int) and not isinstance(completion_tokens, int):
         return None
-    result: dict[str, object] = {"prompt_tokens": prompt_tokens, "completion_tokens": completion_tokens}
+    result: dict[str, object] = {
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens,
+    }
     if isinstance(total_tokens, int):
         result["total_tokens"] = total_tokens
     return MappingProxyType(result)

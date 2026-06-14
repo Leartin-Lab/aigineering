@@ -19,7 +19,8 @@ class MockWorker:
     }
 
     def __init__(
-        self, preset_outputs: Optional[dict[str, str]] = None,
+        self,
+        preset_outputs: Optional[dict[str, str]] = None,
         worker_id: str = "mock_worker",
     ) -> None:
         self._outputs: dict[str, str] = dict(self._DEFAULT_PRESETS)
@@ -34,9 +35,7 @@ class MockWorker:
     def set_output(self, contract_name: str, raw_output: str) -> None:
         self._outputs[contract_name] = raw_output
 
-    def invoke(
-        self, contract: Contract, disclosed_assets: list[Asset]
-    ) -> Candidate:
+    def invoke(self, contract: Contract, disclosed_assets: list[Asset]) -> Candidate:
         raw_output: str = self._outputs.get(contract.name, "")
         return Candidate(
             worker_id=self.worker_id,

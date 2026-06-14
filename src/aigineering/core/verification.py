@@ -10,7 +10,7 @@ from aigineering.protocol.types import ReplacementClaim
 
 if TYPE_CHECKING:
     from aigineering.core.store import StoreProtocol
-    from aigineering.protocol.types import Asset, Contract
+    from aigineering.protocol.types import Contract
 
 
 # ---------------------------------------------------------------------------
@@ -184,7 +184,9 @@ def check_sensitive_input_policy(
     for def_hash in required_defs:
         assets = store.get_assets_by_definition(def_hash)
         if not assets:
-            violations.append(f"required definition hash {def_hash} has no assets in store")
+            violations.append(
+                f"required definition hash {def_hash} has no assets in store"
+            )
 
     # --- Accepted claim types ---
     accepted_types: list[str] = effective_policy.get("accepted_claim_types", [])
@@ -225,8 +227,7 @@ def check_sensitive_input_policy(
         else:
             input_assets = _collect_input_assets(contract, store)
             sufficient = any(
-                _TRUST_TIER_RANK.get(a.trust_tier, -1) >= min_rank
-                for a in input_assets
+                _TRUST_TIER_RANK.get(a.trust_tier, -1) >= min_rank for a in input_assets
             )
             if not sufficient:
                 violations.append(

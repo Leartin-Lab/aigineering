@@ -1,8 +1,9 @@
-"""RuntimeTransaction — atomic multi-store transaction for candidate submission (G3).
+"""RuntimeTransaction — non-SQLite transaction helper for candidate submission (G3).
 
-One submit transaction must atomically cover: accepted assets, trace events,
-idempotency key, claim transition, and completion state. This replaces the
-current non-atomic multi-store writes in ``submit.py``.
+Operational SQLite submission atomically covers accepted assets, trace events,
+idempotency key, claim transition, and completion state in
+``SQLiteStore.commit_candidate_submission``. This helper exists for
+store-agnostic tests and legacy non-SQLite callers.
 
 Gate: G3 (Transactional Runtime Substrate)
 """
@@ -17,12 +18,12 @@ class RuntimeTransactionError(Exception):
 
 
 class RuntimeTransaction:
-    """In-memory transaction buffer for atomic candidate submission.
+    """In-memory transaction buffer for non-SQLite transaction tests.
 
-    Operations are queued in memory and committed atomically to the backing
-    stores. If any operation fails, the entire transaction rolls back.
-
-    This is the 040 prototype — full SQLite-backed transactions arrive in 050+.
+    Operational SQLite candidate submission uses
+    ``SQLiteStore.commit_candidate_submission`` so assets, trace events,
+    idempotency, and claim transition commit in one database transaction. This
+    helper remains for store-agnostic tests and legacy non-SQLite callers.
     """
 
     def __init__(self) -> None:
@@ -48,11 +49,13 @@ class RuntimeTransaction:
     def append_trace(self, contract_id: str, event_type: str, **kwargs: Any) -> None:
         """Queue a trace entry for commit."""
         self._check_active()
-        self._trace_entries.append({
-            "contract_id": contract_id,
-            "event_type": event_type,
-            **kwargs,
-        })
+        self._trace_entries.append(
+            {
+                "contract_id": contract_id,
+                "event_type": event_type,
+                **kwargs,
+            }
+        )
 
     def set_idempotency(self, contract_id: str, key: str) -> None:
         """Record an idempotency key."""
@@ -88,6 +91,7 @@ class RuntimeTransaction:
 
             for entry in self._trace_entries:
                 from aigineering.core.trace import create_entry
+
                 trace_entry = create_entry(**entry)
                 trace_store.append(trace_entry)
 

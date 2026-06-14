@@ -34,7 +34,10 @@ class CandidateEnvelope:
             raise ValueError("worker_id is required")
         if not self.raw_output:
             raise ValueError("raw_output is required")
-        if not isinstance(self.protocol_version, int) or self.protocol_version != CURRENT_ENVELOPE_VERSION:
+        if (
+            not isinstance(self.protocol_version, int)
+            or self.protocol_version != CURRENT_ENVELOPE_VERSION
+        ):
             raise ValueError(
                 f"Unsupported envelope protocol version {self.protocol_version} "
                 f"(current: {CURRENT_ENVELOPE_VERSION})"
@@ -43,19 +46,24 @@ class CandidateEnvelope:
             raise ValueError("claim_id exceeds maximum length (256)")
         if self.idempotency_key and len(self.idempotency_key) > 256:
             raise ValueError("idempotency_key exceeds maximum length (256)")
+        if self.package_id and not self.package_id.startswith("pkg:"):
+            raise ValueError("package_id must start with 'pkg:'")
 
     @property
     def candidate_hash(self) -> str:
         """Deterministic hash of the candidate payload for integrity verification."""
-        payload = json.dumps({
-            "protocol_version": self.protocol_version,
-            "contract_id": self.contract_id,
-            "worker_id": self.worker_id,
-            "raw_output": self.raw_output,
-            "claim_id": self.claim_id,
-            "idempotency_key": self.idempotency_key,
-            "package_id": self.package_id,
-        }, sort_keys=True)
+        payload = json.dumps(
+            {
+                "protocol_version": self.protocol_version,
+                "contract_id": self.contract_id,
+                "worker_id": self.worker_id,
+                "raw_output": self.raw_output,
+                "claim_id": self.claim_id,
+                "idempotency_key": self.idempotency_key,
+                "package_id": self.package_id,
+            },
+            sort_keys=True,
+        )
         return f"cand:{compute_content_hash(payload)}"
 
     def to_json(self) -> str:

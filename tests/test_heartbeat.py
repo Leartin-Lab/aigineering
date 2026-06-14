@@ -104,7 +104,9 @@ def test_heartbeat_extends_multiple_leases(
     assert u2 is not None and u2.lease_until > original2
 
 
-def test_heartbeat_stores_active_claim_ids(hb_store: HeartbeatStore, claim_store: ClaimStore):
+def test_heartbeat_stores_active_claim_ids(
+    hb_store: HeartbeatStore, claim_store: ClaimStore
+):
     """heartbeat() stores the provided claim_ids in the heartbeat record."""
     c = claim_store.claim("contract-1", "worker-A")
     assert c is not None

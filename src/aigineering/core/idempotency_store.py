@@ -53,15 +53,18 @@ class IdempotencyStore:
     def _write(self, contract_id: str, idempotency_key: str, result: dict) -> None:
         if self._path is None:
             return
-        line = json.dumps(
-            {
-                "contract_id": contract_id,
-                "idempotency_key": idempotency_key,
-                "result": result,
-            },
-            ensure_ascii=False,
-            sort_keys=True,
-        ) + "\n"
+        line = (
+            json.dumps(
+                {
+                    "contract_id": contract_id,
+                    "idempotency_key": idempotency_key,
+                    "result": result,
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+            + "\n"
+        )
         with open(self._path, "a", encoding="utf-8") as f:
             f.write(line)
             f.flush()

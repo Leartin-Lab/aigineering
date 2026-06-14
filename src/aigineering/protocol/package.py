@@ -26,13 +26,19 @@ class WorkerPackage:
     budget_remaining: int
     protocol_version: int = CURRENT_PROTOCOL_VERSION
     package_id: str = ""
+    claim_id: str = ""
+    lease_until: str = ""
     capability_requirements: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "disclosed_assets", tuple(self.disclosed_assets))
-        object.__setattr__(self, "method_context_assets", tuple(self.method_context_assets))
+        object.__setattr__(
+            self, "method_context_assets", tuple(self.method_context_assets)
+        )
         object.__setattr__(self, "tool_scope", tuple(self.tool_scope))
-        object.__setattr__(self, "capability_requirements", tuple(self.capability_requirements))
+        object.__setattr__(
+            self, "capability_requirements", tuple(self.capability_requirements)
+        )
 
         # Compute or verify package_id deterministically
         computed = self._compute_package_id()
@@ -52,7 +58,12 @@ class WorkerPackage:
             )
 
     def _compute_package_id(self) -> str:
-        """Deterministic package identity covering all security-relevant fields."""
+        """Deterministic identity for contract context and disclosed inputs.
+
+        Claim and lease fields are intentionally excluded to avoid circular
+        dependency: the store binds an active claim to this package_id, and the
+        candidate envelope carries both package_id and claim_id.
+        """
         contract_hash = compute_content_hash(json.dumps(self.contract, sort_keys=True))
         disclosure_hash = compute_content_hash(
             json.dumps(list(self.disclosed_assets), sort_keys=True)
@@ -60,9 +71,7 @@ class WorkerPackage:
         method_hash = compute_content_hash(
             json.dumps(list(self.method_context_assets), sort_keys=True)
         )
-        tool_scope_hash = compute_content_hash(
-            json.dumps(sorted(self.tool_scope))
-        )
+        tool_scope_hash = compute_content_hash(json.dumps(sorted(self.tool_scope)))
         payload = (
             f"v{self.protocol_version}|{self.contract_id}"
             f"|{contract_hash}|{disclosure_hash}|{method_hash}"
@@ -76,6 +85,8 @@ class WorkerPackage:
         d: dict[str, object] = {
             "protocol_version": self.protocol_version,
             "package_id": self.package_id,
+            "claim_id": self.claim_id,
+            "lease_until": self.lease_until,
             "contract_id": self.contract_id,
             "contract": self.contract,
             "disclosed_assets": list(self.disclosed_assets),
@@ -106,5 +117,7 @@ class WorkerPackage:
             budget_remaining=int(d["budget_remaining"]),
             protocol_version=version,
             package_id=d.get("package_id", ""),
+            claim_id=d.get("claim_id", ""),
+            lease_until=d.get("lease_until", ""),
             capability_requirements=tuple(d.get("capability_requirements", ())),
         )

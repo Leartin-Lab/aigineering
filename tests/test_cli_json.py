@@ -1,7 +1,6 @@
 """Tests for --json flag on CLI commands."""
 
 import json
-import os
 
 from click.testing import CliRunner
 
@@ -98,7 +97,8 @@ def test_audit_json_output():
         runner.invoke(cli, ["run", "test", "--worker", "mock"])
 
         result = runner.invoke(
-            cli, ["audit", "--asset-name", "final_report", "--json"],
+            cli,
+            ["audit", "--asset-name", "final_report", "--json"],
         )
         assert result.exit_code == 0
         data = json.loads(result.output)
@@ -177,7 +177,8 @@ def test_audit_json_error_message():
         runner.invoke(cli, ["run", "test", "--worker", "mock"])
 
         result = runner.invoke(
-            cli, ["audit", "--asset-name", "nonexistent_asset", "--json"],
+            cli,
+            ["audit", "--asset-name", "nonexistent_asset", "--json"],
         )
         assert result.exit_code == 0
         data = json.loads(result.output)
@@ -189,7 +190,8 @@ def test_replay_json_error_message():
     runner = CliRunner()
     with runner.isolated_filesystem():
         result = runner.invoke(
-            cli, ["replay", "nonexistent_session", "--json"],
+            cli,
+            ["replay", "nonexistent_session", "--json"],
         )
         assert result.exit_code == 0
         data = json.loads(result.output)

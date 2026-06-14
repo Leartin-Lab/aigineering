@@ -46,15 +46,17 @@ def test_retention_fields_persist_in_store(tmp_path):
         str(tmp_path / "contracts.jsonl"),
     )
 
-    asset = sign_asset(Asset(
-        id="asset_ret",
-        name="retained",
-        content="valuable",
-        keep_flag=True,
-        tombstoned=True,
-        tombstoned_at="2026-06-11T12:00:00Z",
-        origin="test",
-    ))
+    asset = sign_asset(
+        Asset(
+            id="asset_ret",
+            name="retained",
+            content="valuable",
+            keep_flag=True,
+            tombstoned=True,
+            tombstoned_at="2026-06-11T12:00:00Z",
+            origin="test",
+        )
+    )
 
     store.add_asset(asset)
 

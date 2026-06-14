@@ -40,7 +40,13 @@ class TestReplacementClaimCreation:
         assert claim.lineage_id == lineage
 
     def test_claim_types(self):
-        valid_types = ["replacement", "slice", "summary", "redaction", "equivalent_input"]
+        valid_types = [
+            "replacement",
+            "slice",
+            "summary",
+            "redaction",
+            "equivalent_input",
+        ]
         for ct in valid_types:
             claim = ReplacementClaim(
                 id=hash_claim("src", "repl", ct),
@@ -91,7 +97,15 @@ class TestLineageId:
         assert asset.lineage_id == ""
 
     def test_lineage_id_persists_memory_store(self):
-        asset = sign_asset(Asset(id="a1", name="test", content="hello", lineage_id="lineage:abc", origin="test"))
+        asset = sign_asset(
+            Asset(
+                id="a1",
+                name="test",
+                content="hello",
+                lineage_id="lineage:abc",
+                origin="test",
+            )
+        )
         store = MemoryStore()
         store.add_asset(asset)
         retrieved = store.get_asset("a1")
@@ -102,7 +116,15 @@ class TestLineageId:
         assets_path = tmp_path / "assets.jsonl"
         contracts_path = tmp_path / "contracts.jsonl"
 
-        asset = sign_asset(Asset(id="a1", name="test", content="hello", lineage_id="lineage:abc", origin="test"))
+        asset = sign_asset(
+            Asset(
+                id="a1",
+                name="test",
+                content="hello",
+                lineage_id="lineage:abc",
+                origin="test",
+            )
+        )
         store = JsonLStore(str(assets_path), str(contracts_path))
         store.add_asset(asset)
         retrieved = store.get_asset("a1")

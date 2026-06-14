@@ -48,7 +48,9 @@ def create_entry(
         worker_id=worker_id,
         candidate_raw=candidate_raw,
         accepted_fragments=accepted_fragments if accepted_fragments is not None else [],
-        accepted_asset_names=accepted_asset_names if accepted_asset_names is not None else [],
+        accepted_asset_names=accepted_asset_names
+        if accepted_asset_names is not None
+        else [],
         rejected_fragments=rejected_fragments if rejected_fragments is not None else [],
         authority_policy=authority_policy,
         authority_result=authority_result,
@@ -64,7 +66,9 @@ class TraceStoreProtocol(Protocol):
     """Protocol that any trace store (in-memory or persistent) must satisfy."""
 
     def append(self, entry: TraceEntry) -> None: ...
-    def new_entry(self, contract_id: str, event_type: str, **kwargs: object) -> TraceEntry: ...
+    def new_entry(
+        self, contract_id: str, event_type: str, **kwargs: object
+    ) -> TraceEntry: ...
     def get_by_contract(self, contract_id: str) -> list[TraceEntry]: ...
     def get_by_event_type(self, event_type: str) -> list[TraceEntry]: ...
     def get_all(self) -> list[TraceEntry]: ...

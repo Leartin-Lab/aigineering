@@ -13,9 +13,14 @@ from aigineering.protocol.types import Candidate
 
 
 @click.command("retry")
-@click.option("--contract", "contract_id", required=True, help="Original contract ID to retry.")
 @click.option(
-    "--json", "json_output", is_flag=True, default=False,
+    "--contract", "contract_id", required=True, help="Original contract ID to retry."
+)
+@click.option(
+    "--json",
+    "json_output",
+    is_flag=True,
+    default=False,
     help="Output machine-readable JSON instead of human-readable text.",
 )
 def retry(
@@ -50,10 +55,12 @@ def retry(
     retry_id = hash_retry(contract_id)
 
     if json_output:
-        _output_json({
-            "original_contract_id": contract_id,
-            "retry_contract_id": retry_id,
-        })
+        _output_json(
+            {
+                "original_contract_id": contract_id,
+                "retry_contract_id": retry_id,
+            }
+        )
     else:
         click.echo(f"Retry contract created: {retry_id}")
         click.echo(f"  Original: {contract_id}")

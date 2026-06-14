@@ -11,7 +11,6 @@ Verifies:
 import json
 import unicodedata
 
-from aigineering.core.provenance import sign_asset
 from aigineering.core.ids import (
     canonical_json,
     compute_content_hash,
@@ -54,9 +53,15 @@ def test_key_order_stability_via_asset_id():
 def test_key_order_stability_via_contract_id():
     """contract_id() produces identical results regardless of key order."""
     base = {
-        "name": "test", "description": "", "inputs": ["i"],
-        "outputs": ["o"], "activation": "", "budget": 1,
-        "tool_scope": [], "labels": [], "origin": "human",
+        "name": "test",
+        "description": "",
+        "inputs": ["i"],
+        "outputs": ["o"],
+        "activation": "",
+        "budget": 1,
+        "tool_scope": [],
+        "labels": [],
+        "origin": "human",
     }
     c1 = json.dumps(base, sort_keys=True)
     # Reverse key order dict (Python 3.7+ preserves insertion order)
@@ -72,11 +77,13 @@ def test_key_order_stability_via_contract_id():
 
 def test_unicode_nfc_normalization_precomposed_vs_decomposed():
     """é (U+00E9) and e + combining acute (U+0065+U+0301) produce the same hash."""
-    precomposed = "\u00E9"           # é (single codepoint)
-    decomposed = "e\u0301"           # e + combining acute (two codepoints)
+    precomposed = "\u00e9"  # é (single codepoint)
+    decomposed = "e\u0301"  # e + combining acute (two codepoints)
 
     assert precomposed != decomposed  # different byte sequences
-    assert unicodedata.normalize("NFC", precomposed) == unicodedata.normalize("NFC", decomposed)
+    assert unicodedata.normalize("NFC", precomposed) == unicodedata.normalize(
+        "NFC", decomposed
+    )
     assert compute_content_hash(precomposed) == compute_content_hash(decomposed)
 
 
@@ -88,22 +95,36 @@ def test_unicode_nfc_normalization_stable_for_ascii():
 
 def test_unicode_nfc_normalization_in_asset_content():
     """hash_asset_content normalizes NFC before hashing."""
-    precomposed_name = "r\u00E9sum\u00E9"
+    precomposed_name = "r\u00e9sum\u00e9"
     decomposed_name = "re\u0301sume\u0301"
-    assert hash_asset_content(precomposed_name, "data") == hash_asset_content(decomposed_name, "data")
+    assert hash_asset_content(precomposed_name, "data") == hash_asset_content(
+        decomposed_name, "data"
+    )
 
 
 def test_unicode_nfc_normalization_in_contract():
     """hash_contract normalizes all string fields via NFC."""
     a = hash_contract(
-        name="caf\u00E9", description="desc", inputs=["in"],
-        outputs=["out"], activation="act", budget=1,
-        tool_scope=[], labels=[], origin="human",
+        name="caf\u00e9",
+        description="desc",
+        inputs=["in"],
+        outputs=["out"],
+        activation="act",
+        budget=1,
+        tool_scope=[],
+        labels=[],
+        origin="human",
     )
     b = hash_contract(
-        name="cafe\u0301", description="desc", inputs=["in"],
-        outputs=["out"], activation="act", budget=1,
-        tool_scope=[], labels=[], origin="human",
+        name="cafe\u0301",
+        description="desc",
+        inputs=["in"],
+        outputs=["out"],
+        activation="act",
+        budget=1,
+        tool_scope=[],
+        labels=[],
+        origin="human",
     )
     assert a == b
 
@@ -154,10 +175,10 @@ def test_typed_hash_domains_are_distinct():
     c = hash_contract("same", "same", ["same"], ["same"], "same", 1, [], [], "human")
     a = hash_asset_content("same", "same")
     d = hash_asset_definition("same")
-    l = hash_lineage("same", ["same"])
+    lineage_id = hash_lineage("same", ["same"])
     e = hash_event("same", "same", 0)
     cl = hash_claim("same", "same", "same")
-    ids = {c, a, d, l, e, cl}
+    ids = {c, a, d, lineage_id, e, cl}
     assert len(ids) == 6, "all domain hashes should be distinct"
 
 
@@ -175,8 +196,12 @@ def test_deterministic_contract_id_same_inputs():
 
 def test_deterministic_contract_id_ordering_invariant():
     """Input/output/tool_scope/labels ordering does not affect hash."""
-    a = hash_contract("n", "d", ["b", "a"], ["y", "x"], "a", 1, ["t2", "t1"], ["l2", "l1"], "human")
-    b = hash_contract("n", "d", ["a", "b"], ["x", "y"], "a", 1, ["t1", "t2"], ["l1", "l2"], "human")
+    a = hash_contract(
+        "n", "d", ["b", "a"], ["y", "x"], "a", 1, ["t2", "t1"], ["l2", "l1"], "human"
+    )
+    b = hash_contract(
+        "n", "d", ["a", "b"], ["x", "y"], "a", 1, ["t1", "t2"], ["l1", "l2"], "human"
+    )
     assert a == b
 
 
@@ -268,9 +293,17 @@ def test_hash_content_backward_compat():
 def test_contract_id_wrapper_from_json():
     """contract_id() wrapper parses JSON and delegates to hash_contract."""
     canonical = json.dumps(
-        {"name": "test", "description": "d", "inputs": ["i"],
-         "outputs": ["o"], "activation": "a", "budget": 1,
-         "tool_scope": ["t"], "labels": ["l"], "origin": "human"},
+        {
+            "name": "test",
+            "description": "d",
+            "inputs": ["i"],
+            "outputs": ["o"],
+            "activation": "a",
+            "budget": 1,
+            "tool_scope": ["t"],
+            "labels": ["l"],
+            "origin": "human",
+        },
         sort_keys=True,
     )
     wid = contract_id(canonical)

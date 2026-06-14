@@ -5,7 +5,10 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from aigineering.protocol.types import Candidate
 
 _SUPPORTED_ACTIONS = {"exec", "plan", "replan", "tool", "retry"}
 
@@ -62,14 +65,19 @@ def action_from_dict(data: Mapping[str, Any]) -> WorkerAction:
     return WorkerAction(type=action_type, payload=dict(payload))
 
 
-def parse_method_action(candidate: "Candidate") -> WorkerAction | None:  # type: ignore[name-defined]
+def parse_method_action(candidate: "Candidate") -> WorkerAction | None:
     """Parse a method action from a candidate's parsed_action or raw_output.
 
     Returns **None** if the candidate does not contain a valid method action
     (plan, replan, tool, retry).
     """
     parsed = candidate.parsed_action
-    if isinstance(parsed, Mapping) and parsed.get("type") in {"plan", "replan", "tool", "retry"}:
+    if isinstance(parsed, Mapping) and parsed.get("type") in {
+        "plan",
+        "replan",
+        "tool",
+        "retry",
+    }:
         try:
             return action_from_dict(parsed)
         except ActionParseError:

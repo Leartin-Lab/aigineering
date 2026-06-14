@@ -16,6 +16,7 @@ from aigineering.core.trace import (
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture(params=["memory", "jsonl"])
 def trace_store(request, tmp_path):
     """Parametrized: runs each test on both Memory and JSONL stores."""
@@ -29,6 +30,7 @@ def trace_store(request, tmp_path):
 # Factory test (not store-specific)
 # ---------------------------------------------------------------------------
 
+
 def test_create_entry():
     entry = create_entry("contract_1", "activation")
     assert entry.contract_id == "contract_1"
@@ -40,6 +42,7 @@ def test_create_entry():
 # ---------------------------------------------------------------------------
 # Parametrized store tests (run on MemoryTraceStore AND JsonLTraceStore)
 # ---------------------------------------------------------------------------
+
 
 def test_trace_store_append(trace_store):
     entry = create_entry("c1", "activation", sequence=0)
@@ -72,11 +75,13 @@ def test_get_by_event_type(trace_store):
 
 def test_get_reverse_lineage(trace_store):
     trace_store.new_entry(
-        "c1", "projection",
+        "c1",
+        "projection",
         accepted_fragments=["asset_abc"],
     )
     trace_store.new_entry(
-        "c2", "projection",
+        "c2",
+        "projection",
         accepted_fragments=["asset_xyz"],
     )
     lineage = trace_store.get_reverse_lineage("asset_abc")
@@ -145,6 +150,7 @@ def test_new_entry_links_to_previous_entry_by_default(trace_store):
 # JSONL-specific tests (persistence, atomic flush, empty file handling)
 # ---------------------------------------------------------------------------
 
+
 def test_jsonl_append_and_read(tmp_path):
     """Entries written to JSONL must survive re-open and be readable."""
     path = str(tmp_path / "test_append.jsonl")
@@ -202,10 +208,8 @@ def test_jsonl_query_methods(tmp_path):
     store = JsonLTraceStore(path)
     store.new_entry("c1", "activation")
     store.new_entry("c2", "activation")
-    store.new_entry("c1", "disclosure",
-                    accepted_fragments=["asset_abc"])
-    store.new_entry("c2", "disclosure",
-                    accepted_fragments=["asset_xyz"])
+    store.new_entry("c1", "disclosure", accepted_fragments=["asset_abc"])
+    store.new_entry("c2", "disclosure", accepted_fragments=["asset_xyz"])
 
     # Query through reopened store to verify persistence
     store2 = JsonLTraceStore(path)

@@ -121,7 +121,10 @@ def test_candidate_envelope_multi_worker_compatibility():
         contract_id="c2",
         worker_id="llm:gpt-4.1-mini",
         raw_output='/tool {"name": "lookup", "args": {"key": "x"}}',
-        parsed_action={"type": "tool", "payload": {"name": "lookup", "args": {"key": "x"}}},
+        parsed_action={
+            "type": "tool",
+            "payload": {"name": "lookup", "args": {"key": "x"}},
+        },
     )
 
     # Simulate LLM worker output with exec action

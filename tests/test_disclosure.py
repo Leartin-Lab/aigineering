@@ -18,14 +18,16 @@ def _asset(
     promptable: bool = True,
     disclosure_view: str = "original",
 ) -> Asset:
-    return sign_asset(Asset(
-        id=hash_asset_content(name, content),
-        name=name,
-        content=content,
-        promptable=promptable,
-        disclosure_view=disclosure_view,
-        origin="test",
-    ))
+    return sign_asset(
+        Asset(
+            id=hash_asset_content(name, content),
+            name=name,
+            content=content,
+            promptable=promptable,
+            disclosure_view=disclosure_view,
+            origin="test",
+        )
+    )
 
 
 def _contract(**kwargs) -> Contract:
@@ -48,7 +50,9 @@ def _contract(**kwargs) -> Contract:
 
 def test_non_promptable_input_asset_is_not_disclosed():
     store = MemoryStore()
-    sealed = _asset("secret", "do not disclose", promptable=False, disclosure_view="sealed")
+    sealed = _asset(
+        "secret", "do not disclose", promptable=False, disclosure_view="sealed"
+    )
     store.add_asset(sealed)
     contract = _contract(name="task", inputs=["secret"], outputs=["result"])
 

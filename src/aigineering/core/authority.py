@@ -56,8 +56,7 @@ def check_authority(
 
         if name not in contract.outputs:
             reasons.append(
-                f"asset '{name}' is not in contract.outputs "
-                f"({contract.outputs!r})"
+                f"asset '{name}' is not in contract.outputs ({contract.outputs!r})"
             )
             category = "authority_rejection"
 

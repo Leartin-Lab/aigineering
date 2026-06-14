@@ -4,15 +4,16 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Mapping
 
 from aigineering.agent.worker import Worker
 from aigineering.core.activation import check_activation
+from aigineering.core.capability_descriptors import verify_descriptor
 from aigineering.core.disclosure import compute_disclosure, redact_for_disclosure
 from aigineering.core.labels import Label, resolve_contract_labels
 from aigineering.core.methods import (
     contracts_from_plan_asset,
     method_contract,
+    method_context_content,
     method_payload,
     system_asset,
 )
@@ -24,10 +25,7 @@ from aigineering.core.store import StoreProtocol
 from aigineering.core.trace import MemoryTraceStore, TraceStoreProtocol
 from aigineering.core.tools import ToolRegistry
 from aigineering.protocol.actions import (
-    ActionParseError,
     WorkerAction,
-    action_from_dict,
-    parse_action,
     parse_method_action,
 )
 from aigineering.protocol.types import Asset, Candidate, Contract, ProjectionResult
@@ -75,7 +73,9 @@ class Engine:
         self._completed: set[str] = set()
         self._suspended: set[str] = set()
         self._method_scheduled: set[str] = set()
-        self._contract_last_entry: dict[str, str] = {}  # contract_id → last trace entry id
+        self._contract_last_entry: dict[
+            str, str
+        ] = {}  # contract_id → last trace entry id
 
     def add_contract(self, contract: Contract) -> None:
         self._store.add_contract(contract)
@@ -100,7 +100,9 @@ class Engine:
 
     def _add_trace(self, contract_id: str, event_type: str, **kwargs: object) -> None:
         parent_id = self._contract_last_entry.get(contract_id)
-        entry = self._trace.new_entry(contract_id, event_type, parent_id=parent_id, **kwargs)
+        entry = self._trace.new_entry(
+            contract_id, event_type, parent_id=parent_id, **kwargs
+        )
         self._contract_last_entry[contract_id] = entry.id
 
     def _commit(self, result: ProjectionResult) -> None:
@@ -112,9 +114,7 @@ class Engine:
 
     def run(self) -> None:
         while True:
-            available_names: set[str] = {
-                a.name for a in self._store.get_all_assets()
-            }
+            available_names: set[str] = {a.name for a in self._store.get_all_assets()}
 
             enabled: list[Contract] = [
                 c
@@ -149,6 +149,12 @@ class Engine:
                 if self._run_system_method(contract):
                     remaining = self._resolve_budget(contract)
                     self._budget[contract.id] = max(0, remaining - 1)
+                    self._add_trace(
+                        contract.id,
+                        "budget_consumed",
+                        relation_type=method_payload(contract).get("method"),
+                        budget_remaining=self._budget[contract.id],
+                    )
                     if self._all_outputs_satisfied(contract):
                         self._add_trace(
                             contract.id,
@@ -167,7 +173,6 @@ class Engine:
 
                 result = project_candidate(contract, candidate)
                 self._commit(result)
-                accepted = result.accepted_assets
                 rejected_dicts = [
                     {
                         "name": r.name,
@@ -201,6 +206,11 @@ class Engine:
 
                 remaining = self._resolve_budget(contract)
                 self._budget[contract.id] = max(0, remaining - 1)
+                self._add_trace(
+                    contract.id,
+                    "budget_consumed",
+                    budget_remaining=self._budget[contract.id],
+                )
 
                 if self._all_outputs_satisfied(contract):
                     self._add_trace(
@@ -276,7 +286,14 @@ class Engine:
                 suspended=self._suspended,
                 method_scheduled=self._method_scheduled,
             )
-            handled = handler.handle_method(runtime, contract, action.type, candidate)
+            try:
+                handled = handler.handle_method(
+                    runtime, contract, action.type, candidate
+                )
+            except AttributeError:
+                # Pre-G7 handlers that reach for Engine internals are not a
+                # valid runtime boundary. Fall back to the built-in scheduler.
+                handled = False
 
         if not handled:
             self._schedule_method_contract(contract, action, candidate)
@@ -321,19 +338,9 @@ class Engine:
         child: Contract,
     ) -> None:
         name = f"_method_ctx_{contract.id}"
-        content = json.dumps(
-            {
-                "method": action.type,
-                "parent_contract_id": contract.id,
-                "child_contract_id": child.id,
-                "payload": action.payload,
-            },
-            sort_keys=True,
-            ensure_ascii=False,
-        )
         asset = system_asset(
             name=name,
-            content=content,
+            content=method_context_content(contract, action, child),
             created_by=contract.id,
         )
         self._store.add_asset(sign_asset(asset))
@@ -342,9 +349,7 @@ class Engine:
         total_chars = sum(len(a.content) for a in scope)
         return total_chars // self._CHARS_PER_TOKEN
 
-    def _check_context_overflow(
-        self, contract: Contract, scope: list[Asset]
-    ) -> bool:
+    def _check_context_overflow(self, contract: Contract, scope: list[Asset]) -> bool:
         # System method contracts are internally managed — never overflow.
         if contract.origin == "system":
             return False
@@ -387,11 +392,28 @@ class Engine:
         )
         self._store.add_asset(report_asset)
 
-        # Suspend the contract and consume budget so the outer run() loop
-        # does not re-select this contract on the next iteration. Without
-        # this, overflow detection repeats forever.
+        action = WorkerAction(
+            type="replan",
+            payload={"reason": "context_size_exceeded"},
+        )
+        candidate = Candidate(
+            worker_id="runtime:context_budget",
+            raw_output='/replan {"reason": "context_size_exceeded"}',
+        )
+        self._schedule_method_contract(contract, action, candidate)
+
+        remaining = self._resolve_budget(contract)
+        self._budget[contract.id] = max(0, remaining - 1)
+        self._add_trace(
+            contract.id,
+            "budget_consumed",
+            relation_type="replan",
+            budget_remaining=self._budget[contract.id],
+        )
+
+        # Suspend the contract so the outer run() loop does not re-select it
+        # until the method path produces a result.
         self._suspended.add(contract.id)
-        self._budget[contract.id] = 0
         return True
 
     def _run_system_method(self, contract: Contract) -> bool:
@@ -404,7 +426,9 @@ class Engine:
             handler = self._method_registry.get("tool")
             if handler is not None and handler.can_handle("tool"):
                 completion = getattr(handler, "handle_completion", None)
-                if callable(completion) and completion(_make_runtime(self), contract, []):
+                if callable(completion) and completion(
+                    _make_runtime(self), contract, []
+                ):
                     return True
 
         # Fallback: inline tool execution (backward compat).
@@ -438,13 +462,28 @@ class Engine:
         elif self._tools is None:
             error = "no ToolRegistry configured"
         else:
-            try:
-                result = self._tools.run(tool_name, args if isinstance(args, dict) else {})
-                ok = True
-            except Exception as e:  # pragma: no cover - exact handler errors vary
-                error = str(e)
+            descriptors = self._store.get_assets_by_name(
+                f"_tool_capability_{tool_name}"
+            )
+            if not descriptors:
+                error = f"tool '{tool_name}' descriptor is missing (G10 trust gate)"
+            elif not verify_descriptor(descriptors[0], kind="tool"):
+                error = (
+                    f"tool '{tool_name}' descriptor failed verification "
+                    "(G10 trust gate)"
+                )
+            else:
+                try:
+                    result = self._tools.run(
+                        tool_name, args if isinstance(args, dict) else {}
+                    )
+                    ok = True
+                except Exception as e:  # pragma: no cover - exact handler errors vary
+                    error = str(e)
 
-        obs_name = contract.outputs[0] if contract.outputs else f"_tool_obs_{contract.id}"
+        obs_name = (
+            contract.outputs[0] if contract.outputs else f"_tool_obs_{contract.id}"
+        )
         obs_content = json.dumps(
             {
                 "ok": ok,
@@ -574,11 +613,11 @@ class Engine:
                     "containment_rejected",
                     relation_type="plan",
                     relation_target=(
-                        f"{entry.get('child_name','?')}:{entry.get('field','?')}"
+                        f"{entry.get('child_name', '?')}:{entry.get('field', '?')}"
                     ),
                     rejected_fragments=[
-                        f"[{entry.get('action','rejected')}] "
-                        f"{entry.get('field','?')}: {entry.get('reason','')}"
+                        f"[{entry.get('action', 'rejected')}] "
+                        f"{entry.get('field', '?')}: {entry.get('reason', '')}"
                     ],
                     authority_result=entry.get("action", "rejected"),
                     budget_remaining=self._budget.get(parent_id, 0),
@@ -592,7 +631,6 @@ class Engine:
                 relation_target=",".join(created),
                 budget_remaining=self._budget.get(parent_id, 0),
             )
-
 
     # ── State persistence / recovery ──────────────────────────────────
 
@@ -625,8 +663,15 @@ class Engine:
         context_size_limit: int | None = None,
     ) -> "Engine":
         """Restore engine from serialized state."""
-        engine = cls(store, worker, trace_store, labels, tools, method_registry,
-                     context_size_limit=context_size_limit)
+        engine = cls(
+            store,
+            worker,
+            trace_store,
+            labels,
+            tools,
+            method_registry,
+            context_size_limit=context_size_limit,
+        )
         engine._budget = state["budget"]
         engine._completed = set(state["completed"])
         engine._suspended = set(state["suspended"])
@@ -654,20 +699,24 @@ class Engine:
         context_size_limit: int | None = None,
     ) -> "Engine":
         """Reconstruct engine state from store records and trace events."""
-        engine = cls(store, worker, trace_store, labels, tools, method_registry,
-                     context_size_limit=context_size_limit)
+        engine = cls(
+            store,
+            worker,
+            trace_store,
+            labels,
+            tools,
+            method_registry,
+            context_size_limit=context_size_limit,
+        )
 
-        # Count activations and budget consumption per contract for budget derivation
-        activation_counts: dict[str, int] = {}
+        # Budget recovery is derived from explicit budget_consumed events.
+        consumption_counts: dict[str, int] = {}
 
         for entry in trace_store.get_all():
             cid = entry.contract_id
 
-            if entry.event_type == "activation":
-                activation_counts[cid] = activation_counts.get(cid, 0) + 1
-
-            elif entry.event_type == "budget_consumed":
-                activation_counts[cid] = activation_counts.get(cid, 0) + 1
+            if entry.event_type == "budget_consumed":
+                consumption_counts[cid] = consumption_counts.get(cid, 0) + 1
 
             elif entry.event_type == "method_scheduled":
                 engine._suspended.add(cid)
@@ -702,11 +751,11 @@ class Engine:
             # Track last entry per contract for contract_last_entry
             engine._contract_last_entry[cid] = entry.id
 
-        # Derive budget from contracts and activation counts
+        # Derive budget from contracts and explicit budget consumption.
         for contract in store.get_all_contracts():
             cid = contract.id
             initial = max(contract.budget, 1)
-            consumed = activation_counts.get(cid, 0)
+            consumed = consumption_counts.get(cid, 0)
             engine._budget[cid] = max(0, initial - consumed)
 
         return engine

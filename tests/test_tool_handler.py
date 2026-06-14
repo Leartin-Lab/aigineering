@@ -3,9 +3,10 @@
 import json
 
 from aigineering.core.engine import Engine
+from aigineering.core.capability_descriptors import create_tool_descriptor
 from aigineering.core.method_registry import MethodRegistry
 from aigineering.core.method_handlers.tool import ToolMethodHandler
-from aigineering.core.methods import method_payload
+from aigineering.core.method_runtime import MethodRuntime
 from aigineering.core.store import MemoryStore
 from aigineering.core.tools import ToolRegistry
 from aigineering.core.trace import TraceStore
@@ -29,6 +30,7 @@ class SequenceWorker:
 
 # ── Handler unit tests ────────────────────────────────────────────────
 
+
 def test_handler_can_handle_tool():
     handler = ToolMethodHandler()
     assert handler.can_handle("tool") is True
@@ -43,6 +45,14 @@ def test_handler_schedules_tool_child():
     registry.register("tool", handler)
 
     store = MemoryStore()
+    store.add_asset(
+        create_tool_descriptor(
+            "lookup",
+            "Lookup test values.",
+            {"type": "object"},
+            trust_tier="configured",
+        )
+    )
     trace_store = TraceStore()
     worker = SequenceWorker(['/tool {"name": "lookup", "args": {"key": "x"}}', ""])
 
@@ -75,20 +85,16 @@ def test_handler_executes_tool_on_completion():
     trace_store = TraceStore()
     tools = ToolRegistry()
     tools.register(ToolSpec(name="lookup"), lambda args: f"value:{args['key']}")
+    store.add_asset(
+        create_tool_descriptor(
+            "lookup",
+            "Lookup test values.",
+            {"type": "object"},
+            trust_tier="configured",
+        )
+    )
 
-    class MinimalEngine:
-        _store = store
-        _trace = trace_store
-        _tools = tools
-        _budget: dict[str, int] = {}
-
-        def _add_trace(self, contract_id, event_type, **kwargs):
-            pass
-
-        def _resolve_budget(self, contract):
-            return 1
-
-    engine = MinimalEngine()
+    runtime = MethodRuntime(store, trace_store, {}, tools=tools)
     tool_contract = Contract(
         id="tool_child_1",
         parent_id="parent_1",
@@ -110,7 +116,7 @@ def test_handler_executes_tool_on_completion():
         origin="system",
     )
 
-    result = handler.handle_completion(engine, tool_contract, [])
+    result = handler.handle_completion(runtime, tool_contract, [])
     assert result is True
 
     obs_assets = store.get_assets_by_name("_tool_obs_tool_child_1")
@@ -118,10 +124,77 @@ def test_handler_executes_tool_on_completion():
     assert "value:x" in obs_assets[0].content
 
     call_assets = [
-        a for a in store.get_all_assets()
-        if a.name.startswith("_tool_call_")
+        a for a in store.get_all_assets() if a.name.startswith("_tool_call_")
     ]
     assert len(call_assets) == 1
+
+
+def test_handler_requires_verified_tool_descriptor():
+    """handle_completion blocks execution without a valid capability descriptor."""
+    handler = ToolMethodHandler()
+
+    store = MemoryStore()
+    trace_store = TraceStore()
+    calls: list[dict] = []
+    tools = ToolRegistry()
+
+    def should_not_run(args):
+        calls.append(dict(args))
+        return "executed"
+
+    tools.register(ToolSpec(name="lookup"), should_not_run)
+    runtime = MethodRuntime(store, trace_store, {}, tools=tools)
+    tool_contract = Contract(
+        id="tool_child_1",
+        parent_id="parent_1",
+        name="parent.tool",
+        description=json.dumps(
+            {
+                "method": "tool",
+                "parent_contract_id": "parent_1",
+                "parent_contract_name": "parent",
+                "payload": {"name": "lookup", "args": {"key": "x"}},
+            },
+            sort_keys=True,
+        ),
+        inputs=[],
+        outputs=["_tool_obs_tool_child_1"],
+        activation="_method_ctx_parent_1",
+        budget=1,
+        tool_scope=["lookup"],
+        origin="system",
+    )
+
+    result = handler.handle_completion(runtime, tool_contract, [])
+    assert result is True
+    assert calls == []
+    missing_obs = store.get_assets_by_name("_tool_obs_tool_child_1")
+    assert len(missing_obs) == 1
+    missing_content = json.loads(missing_obs[0].content)
+    assert missing_content["ok"] is False
+    assert "descriptor is missing" in missing_content["error"]
+
+    store = MemoryStore()
+    trace_store = TraceStore()
+    tools = ToolRegistry()
+    tools.register(ToolSpec(name="lookup"), should_not_run)
+    store.add_asset(
+        create_tool_descriptor(
+            "lookup",
+            "Lookup test values.",
+            {"type": "object"},
+            trust_tier="untrusted",
+        )
+    )
+    runtime = MethodRuntime(store, trace_store, {}, tools=tools)
+    result = handler.handle_completion(runtime, tool_contract, [])
+    assert result is True
+    assert calls == []
+    invalid_obs = store.get_assets_by_name("_tool_obs_tool_child_1")
+    assert len(invalid_obs) == 1
+    invalid_content = json.loads(invalid_obs[0].content)
+    assert invalid_content["ok"] is False
+    assert "descriptor failed verification" in invalid_content["error"]
 
 
 def test_handler_rejects_unknown_tool():
@@ -131,19 +204,7 @@ def test_handler_rejects_unknown_tool():
     store = MemoryStore()
     trace_store = TraceStore()
 
-    class MinimalEngine:
-        _store = store
-        _trace = trace_store
-        _tools = None
-        _budget: dict[str, int] = {}
-
-        def _add_trace(self, contract_id, event_type, **kwargs):
-            pass
-
-        def _resolve_budget(self, contract):
-            return 1
-
-    engine = MinimalEngine()
+    runtime = MethodRuntime(store, trace_store, {}, tools=None)
     tool_contract = Contract(
         id="tool_child_1",
         parent_id="parent_1",
@@ -165,7 +226,7 @@ def test_handler_rejects_unknown_tool():
         origin="system",
     )
 
-    result = handler.handle_completion(engine, tool_contract, [])
+    result = handler.handle_completion(runtime, tool_contract, [])
     assert result is True
 
     obs_assets = store.get_assets_by_name("_tool_obs_tool_child_1")
@@ -183,20 +244,16 @@ def test_handler_respects_tool_scope():
     trace_store = TraceStore()
     tools = ToolRegistry()
     tools.register(ToolSpec(name="lookup"), lambda args: "value")
+    store.add_asset(
+        create_tool_descriptor(
+            "lookup",
+            "Lookup test values.",
+            {"type": "object"},
+            trust_tier="configured",
+        )
+    )
 
-    class MinimalEngine:
-        _store = store
-        _trace = trace_store
-        _tools = tools
-        _budget: dict[str, int] = {}
-
-        def _add_trace(self, contract_id, event_type, **kwargs):
-            pass
-
-        def _resolve_budget(self, contract):
-            return 1
-
-    engine = MinimalEngine()
+    runtime = MethodRuntime(store, trace_store, {}, tools=tools)
     tool_contract = Contract(
         id="tool_child_1",
         parent_id="parent_1",
@@ -218,7 +275,7 @@ def test_handler_respects_tool_scope():
         origin="system",
     )
 
-    result = handler.handle_completion(engine, tool_contract, [])
+    result = handler.handle_completion(runtime, tool_contract, [])
     assert result is True
 
     obs_assets = store.get_assets_by_name("_tool_obs_tool_child_1")
@@ -252,8 +309,12 @@ def test_handler_returns_false_for_non_tool():
         parent_id="parent_1",
         name="parent.plan",
         description=json.dumps(
-            {"method": "plan", "parent_contract_id": "parent_1",
-             "parent_contract_name": "parent", "payload": {}},
+            {
+                "method": "plan",
+                "parent_contract_id": "parent_1",
+                "parent_contract_name": "parent",
+                "payload": {},
+            },
             sort_keys=True,
         ),
         inputs=[],
@@ -269,6 +330,7 @@ def test_handler_returns_false_for_non_tool():
 
 # ── Engine integration tests ──────────────────────────────────────────
 
+
 def test_engine_uses_tool_handler():
     """Full engine flow: registered ToolMethodHandler drives tool execution."""
     registry = MethodRegistry()
@@ -277,12 +339,22 @@ def test_engine_uses_tool_handler():
 
     tools = ToolRegistry()
     tools.register(ToolSpec(name="lookup"), lambda args: f"value:{args['key']}")
-
-    worker = SequenceWorker([
-        '/tool {"name": "lookup", "args": {"key": "x"}}',
-        '/exec {"outputs": {"report": "final after tool"}}',
-    ])
     store = MemoryStore()
+    store.add_asset(
+        create_tool_descriptor(
+            "lookup",
+            "Lookup test values.",
+            {"type": "object"},
+            trust_tier="configured",
+        )
+    )
+
+    worker = SequenceWorker(
+        [
+            '/tool {"name": "lookup", "args": {"key": "x"}}',
+            '/exec {"outputs": {"report": "final after tool"}}',
+        ]
+    )
     trace_store = TraceStore()
     contract = Contract(
         id="contract_parent",
@@ -306,8 +378,7 @@ def test_engine_uses_tool_handler():
     assert "value:x" in obs_assets[0].content
 
     call_assets = [
-        a for a in store.get_all_assets()
-        if a.name.startswith("_tool_call_")
+        a for a in store.get_all_assets() if a.name.startswith("_tool_call_")
     ]
     assert len(call_assets) == 1
     assert call_assets[0].promptable is False
@@ -323,15 +394,25 @@ def test_engine_uses_tool_handler():
 
 
 def test_fallback_without_handler():
-    """Engine works without ToolMethodHandler (backward compat)."""
+    """Engine fallback works without ToolMethodHandler when descriptor is trusted."""
     tools = ToolRegistry()
     tools.register(ToolSpec(name="lookup"), lambda args: f"value:{args['key']}")
 
-    worker = SequenceWorker([
-        '/tool {"name": "lookup", "args": {"key": "x"}}',
-        '/exec {"outputs": {"report": "final"}}',
-    ])
+    worker = SequenceWorker(
+        [
+            '/tool {"name": "lookup", "args": {"key": "x"}}',
+            '/exec {"outputs": {"report": "final"}}',
+        ]
+    )
     store = MemoryStore()
+    store.add_asset(
+        create_tool_descriptor(
+            "lookup",
+            "Lookup test values.",
+            {"type": "object"},
+            trust_tier="configured",
+        )
+    )
     trace_store = TraceStore()
     contract = Contract(
         id="contract_parent",
@@ -355,6 +436,43 @@ def test_fallback_without_handler():
     tool_events = trace_store.get_by_event_type("tool_executed")
     assert len(tool_events) == 1
     assert tool_events[0].authority_result == "accepted"
+
+
+def test_fallback_without_handler_requires_descriptor():
+    """Inline Engine tool fallback must not bypass descriptor verification."""
+    calls: list[dict] = []
+    tools = ToolRegistry()
+
+    def should_not_run(args):
+        calls.append(dict(args))
+        return "executed"
+
+    tools.register(ToolSpec(name="lookup"), should_not_run)
+    worker = SequenceWorker(['/tool {"name": "lookup", "args": {"key": "x"}}'])
+    store = MemoryStore()
+    trace_store = TraceStore()
+    contract = Contract(
+        id="contract_parent",
+        name="root",
+        outputs=["report"],
+        activation="",
+        budget=5,
+        tool_scope=["lookup"],
+    )
+
+    engine = Engine(store, worker, trace_store, tools=tools)
+    engine.add_contract(contract)
+    engine.run()
+
+    assert calls == []
+    obs_assets = store.get_assets_by_name(f"_tool_obs_{contract.id}")
+    assert len(obs_assets) == 1
+    content = json.loads(obs_assets[0].content)
+    assert content["ok"] is False
+    assert "descriptor is missing" in content["error"]
+    tool_events = trace_store.get_by_event_type("tool_executed")
+    assert len(tool_events) == 1
+    assert tool_events[0].authority_result == "rejected"
 
 
 def test_handler_satisfies_protocol():

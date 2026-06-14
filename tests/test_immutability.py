@@ -49,7 +49,9 @@ class TestContractImmutability:
 
     def test_contract_fields_are_hashable(self):
         """Tuples (but not lists) support hashing — confirms conversion."""
-        c = Contract(id="c1", inputs=["a"], outputs=["b"], tool_scope=["read"], labels=["l1"])
+        c = Contract(
+            id="c1", inputs=["a"], outputs=["b"], tool_scope=["read"], labels=["l1"]
+        )
         # If inputs/outputs are tuples, this works; if lists, TypeError
         try:
             hash(c.inputs)
@@ -148,7 +150,9 @@ class TestProjectionResultImmutability:
         r = ProjectionResult(rejected_candidates=[])
         with pytest.raises((AttributeError, TypeError)):
             r.rejected_candidates.append(  # type: ignore[union-attr]
-                RejectedCandidate(name="fabricated", content="fake", reject_reason="none")
+                RejectedCandidate(
+                    name="fabricated", content="fake", reject_reason="none"
+                )
             )
 
     def test_authority_policy_cannot_be_mutated(self):
@@ -170,6 +174,8 @@ class TestCandidateImmutability:
     """Candidate parsed_action must reject in-place mutation."""
 
     def test_parsed_action_cannot_be_mutated(self):
-        c = Candidate(worker_id="w1", raw_output="hello", parsed_action={"type": "exec"})
+        c = Candidate(
+            worker_id="w1", raw_output="hello", parsed_action={"type": "exec"}
+        )
         with pytest.raises((AttributeError, TypeError)):
             c.parsed_action["type"] = "hijack"  # type: ignore[index]

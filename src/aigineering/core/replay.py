@@ -111,9 +111,7 @@ def replay_session(
         "rejected_count": rejected_count,
         "consistent": consistent,
         "duplicate_ids": duplicates if duplicates else None,
-        "seal_mismatches": (
-            seal_mismatches if seal_mismatches else None
-        ),
+        "seal_mismatches": (seal_mismatches if seal_mismatches else None),
     }
 
 

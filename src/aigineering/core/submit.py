@@ -8,18 +8,16 @@ standalone worker environments.
 from __future__ import annotations
 
 import json
-from typing import Optional
 
 from aigineering.core.disclosure import compute_disclosure
 from aigineering.core.idempotency_store import IdempotencyStore
-from aigineering.core.ids import now_iso
 from aigineering.core.projection import project_candidate
 from aigineering.core.provenance import sign_asset
 from aigineering.core.store import StoreProtocol
 from aigineering.core.trace import TraceStoreProtocol, create_entry
 from aigineering.protocol.envelope import CandidateEnvelope
 from aigineering.protocol.types import Candidate, Contract, ProjectionResult
-from aigineering.protocol.wire import asset_to_dict, contract_to_dict, trace_entry_to_dict
+from aigineering.protocol.wire import asset_to_dict
 
 
 class SubmitConflictError(Exception):
@@ -28,6 +26,10 @@ class SubmitConflictError(Exception):
 
 class SubmitClaimError(Exception):
     """Raised when envelope.claim_id does not match an active claim for the contract."""
+
+
+class SubmitCommitError(Exception):
+    """Raised when an atomic submission commit cannot be completed safely."""
 
 
 def submit_candidate(
@@ -58,16 +60,28 @@ def submit_candidate(
         raise ValueError(f"Contract '{envelope.contract_id}' not found in store")
 
     idem = idempotency_store if idempotency_store is not None else IdempotencyStore()
+    effective_idempotency_key = idempotency_key or envelope.idempotency_key
 
     # ── Idempotency ──────────────────────────────────────────────────
-    if idempotency_key:
-        cached = idem.get(contract.id, idempotency_key)
+    if effective_idempotency_key:
+        store_get_idem = getattr(store, "get_idempotency", None)
+        cached = (
+            store_get_idem(contract.id, effective_idempotency_key)
+            if store_get_idem is not None
+            else idem.get(contract.id, effective_idempotency_key)
+        )
         if cached is not None:
             result = dict(cached)
             result["duplicate"] = True
             return result
 
-        if idem.has_any(contract.id):
+        store_has_any = getattr(store, "has_any_idempotency", None)
+        has_any = (
+            store_has_any(contract.id)
+            if store_has_any is not None
+            else idem.has_any(contract.id)
+        )
+        if has_any:
             raise SubmitConflictError(
                 f"Contract '{contract.id}' already has a submission with a "
                 f"different idempotency key"
@@ -78,10 +92,26 @@ def submit_candidate(
     # claim for this contract owned by this worker, and that the lease
     # has not expired. Stores that don't track claims (e.g. MemoryStore)
     # skip this check — only SQLite-backed stores enforce it.
+    get_claim = getattr(store, "get_claim", None)
+    active_claim = get_claim(contract.id) if get_claim is not None else None
+    requires_claim = getattr(store, "commit_candidate_submission", None) is not None
+    if requires_claim and not envelope.claim_id:
+        raise SubmitClaimError(
+            f"Contract '{contract.id}' requires claim-bound submission; "
+            "use worker next before submitting"
+        )
+    if (
+        active_claim is not None
+        and active_claim.get("status") == "active"
+        and not envelope.claim_id
+    ):
+        raise SubmitClaimError(
+            f"Contract '{contract.id}' has an active claim; envelope.claim_id is required"
+        )
+
     if envelope.claim_id:
-        get_claim = getattr(store, "get_claim", None)
         if get_claim is not None:
-            claim = get_claim(contract.id)
+            claim = active_claim if active_claim is not None else get_claim(contract.id)
             if claim is None:
                 raise SubmitClaimError(
                     f"No active claim for contract '{contract.id}' — "
@@ -104,6 +134,7 @@ def submit_candidate(
                 )
             lease_until = claim.get("lease_until", "")
             from datetime import datetime, timezone
+
             if not lease_until:
                 raise SubmitClaimError(
                     "active claim has no lease_until — "
@@ -124,6 +155,18 @@ def submit_candidate(
                     f"claim lease expired at {lease_until} — "
                     f"worker must re-claim before submitting"
                 )
+            if claim.get("package_id") and not envelope.package_id:
+                raise SubmitClaimError(
+                    "active claim is bound to a package_id; envelope.package_id is required"
+                )
+            if (
+                claim.get("package_id")
+                and claim.get("package_id") != envelope.package_id
+            ):
+                raise SubmitClaimError(
+                    f"package_id mismatch: envelope='{envelope.package_id}' "
+                    f"vs claim='{claim.get('package_id')}'"
+                )
 
     # ── Disclosure scope ─────────────────────────────────────────────
     scope = compute_disclosure(contract, store)
@@ -133,14 +176,13 @@ def submit_candidate(
     candidate = Candidate(
         worker_id=envelope.worker_id,
         raw_output=envelope.raw_output,
+        parsed_action=envelope.parsed_action,
     )
 
     # ── Projection (commitment boundary) ─────────────────────────────
     result: ProjectionResult = project_candidate(contract, candidate)
 
-    # ── Commit accepted assets ───────────────────────────────────────
-    for asset in result.accepted_assets:
-        store.add_asset(sign_asset(asset))
+    signed_assets = [sign_asset(asset) for asset in result.accepted_assets]
 
     # ── Build rejection dicts ────────────────────────────────────────
     rejected_dicts = [
@@ -179,41 +221,86 @@ def submit_candidate(
         ),
         budget_remaining=contract.budget,
     )
-    trace_store.append(entry)
-
     # ── Build response ───────────────────────────────────────────────
     response: dict = {
         "contract_id": contract.id,
         "status": result.status.value,
-        "accepted_assets": [asset_to_dict(a) for a in result.accepted_assets],
+        "accepted_assets": [asset_to_dict(a) for a in signed_assets],
         "rejected_candidates": rejected_dicts,
         "trace_id": entry.id,
         "duplicate": False,
     }
 
     # ── Completion check ────────────────────────────────────────────
-    if _all_outputs_satisfied(contract, store):
+    projected_output_names = {
+        a.name for a in signed_assets if a.created_by == contract.id
+    }
+    if _all_outputs_satisfied(
+        contract, store, extra_output_names=projected_output_names
+    ):
+        response["complete"] = True
+
+    budget_entry = create_entry(
+        contract_id=contract.id,
+        event_type="budget_consumed",
+        sequence=seq + 1,
+        relation_type="worker_submit",
+        budget_remaining=max(0, contract.budget - 1),
+    )
+
+    trace_entries = [entry, budget_entry]
+    if response.get("complete") is True:
         complete_entry = create_entry(
             contract_id=contract.id,
             event_type="complete",
-            sequence=seq + 1,
-            budget_remaining=contract.budget,
+            sequence=seq + 2,
+            budget_remaining=max(0, contract.budget - 1),
         )
-        trace_store.append(complete_entry)
-        response["complete"] = True
         response["complete_trace_id"] = complete_entry.id
+        trace_entries.append(complete_entry)
 
-    # ── Store idempotency result ─────────────────────────────────────
-    if idempotency_key:
-        cached_result = {k: v for k, v in response.items() if k != "duplicate"}
-        idem.set(contract.id, idempotency_key, cached_result)
+    cached_result = {k: v for k, v in response.items() if k != "duplicate"}
+    commit_submission = getattr(store, "commit_candidate_submission", None)
+    if commit_submission is not None:
+        try:
+            committed = commit_submission(
+                signed_assets,
+                trace_entries,
+                effective_idempotency_key,
+                cached_result,
+                envelope.claim_id,
+                envelope.worker_id,
+                envelope.package_id,
+            )
+        except Exception as e:
+            raise SubmitCommitError(
+                f"submission could not be atomically committed: {e}"
+            ) from e
+        if committed is False:
+            raise SubmitCommitError(
+                f"claim '{envelope.claim_id}' could not be atomically submitted"
+            )
+    else:
+        for asset in signed_assets:
+            store.add_asset(asset)
+        for trace_entry in trace_entries:
+            trace_store.append(trace_entry)
+        if effective_idempotency_key:
+            idem.set(contract.id, effective_idempotency_key, cached_result)
 
     return response
 
 
-def _all_outputs_satisfied(contract: Contract, store: StoreProtocol) -> bool:
+def _all_outputs_satisfied(
+    contract: Contract,
+    store: StoreProtocol,
+    extra_output_names: set[str] | None = None,
+) -> bool:
     """Return True when all declared contract outputs exist in the store."""
+    extra_output_names = extra_output_names or set()
     for output_name in contract.outputs:
+        if output_name in extra_output_names:
+            continue
         matching = store.get_assets_by_name(output_name)
         if not any(a.created_by == contract.id for a in matching):
             return False

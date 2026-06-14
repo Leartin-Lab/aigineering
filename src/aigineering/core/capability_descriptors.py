@@ -11,7 +11,11 @@ import json
 from collections.abc import Mapping
 from typing import Any
 
-from aigineering.core.ids import compute_content_hash, hash_asset_content, hash_asset_definition
+from aigineering.core.ids import (
+    compute_content_hash,
+    hash_asset_content,
+    hash_asset_definition,
+)
 from aigineering.core.provenance import sign_asset, verify_asset_seal
 from aigineering.protocol.types import Asset
 

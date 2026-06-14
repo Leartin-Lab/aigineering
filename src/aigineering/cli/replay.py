@@ -13,9 +13,18 @@ from aigineering.protocol.wire import session_to_dict, trace_entry_to_dict
 
 @click.command("replay")
 @click.argument("session_id", required=False)
-@click.option("--all", "replay_all_flag", is_flag=True, default=False, help="Replay all stored sessions")
 @click.option(
-    "--json", "json_output", is_flag=True, default=False,
+    "--all",
+    "replay_all_flag",
+    is_flag=True,
+    default=False,
+    help="Replay all stored sessions",
+)
+@click.option(
+    "--json",
+    "json_output",
+    is_flag=True,
+    default=False,
     help="Output machine-readable JSON instead of human-readable text.",
 )
 def replay(
@@ -42,7 +51,9 @@ def replay(
 
     if not session_id:
         if json_output:
-            _output_json({"error": "Usage: aig replay <session_id>  or  aig replay --all"})
+            _output_json(
+                {"error": "Usage: aig replay <session_id>  or  aig replay --all"}
+            )
         else:
             click.echo("Usage: aig replay <session_id>  or  aig replay --all")
         return
@@ -67,8 +78,7 @@ def _output_replay_json(result: dict) -> None:
     entries = result.get("entries", [])
     payload: dict = {
         "session": (
-            _redact_sealed(session_to_dict(session))
-            if session is not None else None
+            _redact_sealed(session_to_dict(session)) if session is not None else None
         ),
         "entries": [trace_entry_to_dict(e) for e in entries],
         "accepted_count": result.get("accepted_count", 0),
@@ -77,9 +87,7 @@ def _output_replay_json(result: dict) -> None:
     }
     by_event = result.get("by_event", {})
     if by_event:
-        payload["by_event"] = {
-            k: len(v) for k, v in by_event.items()
-        }
+        payload["by_event"] = {k: len(v) for k, v in by_event.items()}
     duplicates = result.get("duplicate_ids")
     if duplicates:
         payload["duplicate_ids"] = duplicates
@@ -91,8 +99,7 @@ def _build_replay_json_result(result: dict) -> dict:
     entries = result.get("entries", [])
     payload: dict = {
         "session": (
-            _redact_sealed(session_to_dict(session))
-            if session is not None else None
+            _redact_sealed(session_to_dict(session)) if session is not None else None
         ),
         "entries": [trace_entry_to_dict(e) for e in entries],
         "accepted_count": result.get("accepted_count", 0),
@@ -101,9 +108,7 @@ def _build_replay_json_result(result: dict) -> dict:
     }
     by_event = result.get("by_event", {})
     if by_event:
-        payload["by_event"] = {
-            k: len(v) for k, v in by_event.items()
-        }
+        payload["by_event"] = {k: len(v) for k, v in by_event.items()}
     duplicates = result.get("duplicate_ids")
     if duplicates:
         payload["duplicate_ids"] = duplicates
@@ -133,7 +138,7 @@ def _print_replay_result(result: dict) -> None:
 
     consistent = result.get("consistent", False)
     if consistent:
-        click.echo(f"  Consistency: ✓ no duplicate asset IDs")
+        click.echo("  Consistency: ✓ no duplicate asset IDs")
     else:
         duplicates = result.get("duplicate_ids", [])
         click.echo(f"  Consistency: ✗ duplicate asset IDs: {duplicates}")
@@ -157,4 +162,4 @@ def _print_replay_result(result: dict) -> None:
             rejected_count = len(entry.rejected_fragments)
             click.echo(f" +{accepted} accepted, -{rejected_count} rejected")
         elif entry.event_type == "complete":
-            click.echo(f" outputs satisfied")
+            click.echo(" outputs satisfied")

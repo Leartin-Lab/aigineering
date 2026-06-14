@@ -24,19 +24,33 @@ from aigineering.protocol.wire import trace_entry_to_dict
 # trace command
 # ---------------------------------------------------------------------------
 
+
 @click.command("trace")
-@click.option("--contract", "contract_filter", default=None, help="Filter by contract ID")
-@click.option("--session", "session_id", default=None, help="Read from a specific session ID")
 @click.option(
-    "--json", "json_output", is_flag=True, default=False,
+    "--contract", "contract_filter", default=None, help="Filter by contract ID"
+)
+@click.option(
+    "--session", "session_id", default=None, help="Read from a specific session ID"
+)
+@click.option(
+    "--json",
+    "json_output",
+    is_flag=True,
+    default=False,
     help="Output machine-readable JSON instead of human-readable text.",
 )
 @click.option(
-    "--tree", "tree_output", is_flag=True, default=False,
+    "--tree",
+    "tree_output",
+    is_flag=True,
+    default=False,
     help="Show hierarchical parent→child→method→tool chain view.",
 )
 @click.option(
-    "--dag", "dag_output", is_flag=True, default=False,
+    "--dag",
+    "dag_output",
+    is_flag=True,
+    default=False,
     help="Show graph edges connecting parent→child contracts.",
 )
 def trace(
@@ -98,10 +112,9 @@ def trace(
 # JSON / display helpers for trace
 # ---------------------------------------------------------------------------
 
+
 def _output_trace_json(entries: list[TraceEntry]) -> None:
-    payload = [
-        trace_entry_to_dict(e) for e in entries
-    ]
+    payload = [trace_entry_to_dict(e) for e in entries]
     _output_json(payload)
 
 
@@ -150,6 +163,7 @@ def _print_timeline_entry(entry: TraceEntry) -> None:
 # ---------------------------------------------------------------------------
 # Tree view
 # ---------------------------------------------------------------------------
+
 
 def _build_contract_tree(
     entries: list[TraceEntry],
@@ -242,7 +256,7 @@ def _print_trace_tree(entries: list[TraceEntry]) -> None:
             click.echo(f"{entry_indent}[{e.event_type}] {label}")
 
         for i, child in enumerate(children):
-            child_is_last = (i == len(children) - 1)
+            child_is_last = i == len(children) - 1
             _print_node(
                 child["contract_id"],
                 child,
@@ -256,7 +270,7 @@ def _print_trace_tree(entries: list[TraceEntry]) -> None:
     top_level = [(cid, n) for cid, n in tree.items() if _has_content(n)]
 
     for i, (cid, node) in enumerate(top_level):
-        is_last = (i == len(top_level) - 1)
+        is_last = i == len(top_level) - 1
         _print_node(cid, node, "", is_last)
 
 
@@ -298,6 +312,7 @@ def _entry_short_label(entry: TraceEntry) -> str:
 # ---------------------------------------------------------------------------
 # DAG view
 # ---------------------------------------------------------------------------
+
 
 def _build_contract_dag(
     entries: list[TraceEntry],
@@ -385,12 +400,12 @@ def _print_trace_dag(entries: list[TraceEntry]) -> None:
         st = status.get(cid, "active")
         safe_id = cid.replace(":", "_").replace("-", "_").replace("/", "_")
         label = cid if len(cid) <= 40 else cid[:37] + "..."
-        lines.append(f"    {safe_id}[\"{label}<br/>{st}\"]")
+        lines.append(f'    {safe_id}["{label}<br/>{st}"]')
 
     for parent, rel, child in edges:
         safe_parent = parent.replace(":", "_").replace("-", "_").replace("/", "_")
         safe_child = child.replace(":", "_").replace("-", "_").replace("/", "_")
-        lines.append(f"    {safe_parent} -->|\"{rel}\"| {safe_child}")
+        lines.append(f'    {safe_parent} -->|"{rel}"| {safe_child}')
 
     lines.append("")
     lines.append("    classDef completed fill:#90EE90,stroke:#333")
@@ -411,12 +426,20 @@ def _print_trace_dag(entries: list[TraceEntry]) -> None:
 # audit command
 # ---------------------------------------------------------------------------
 
+
 @click.command("audit")
 @click.option("--asset", "asset_id_filter", default=None, help="Asset ID to trace")
-@click.option("--asset-name", "asset_name_filter", default=None, help="Asset name to trace")
-@click.option("--session", "session_id", default=None, help="Read from a specific session ID")
 @click.option(
-    "--json", "json_output", is_flag=True, default=False,
+    "--asset-name", "asset_name_filter", default=None, help="Asset name to trace"
+)
+@click.option(
+    "--session", "session_id", default=None, help="Read from a specific session ID"
+)
+@click.option(
+    "--json",
+    "json_output",
+    is_flag=True,
+    default=False,
     help="Output machine-readable JSON instead of human-readable text.",
 )
 def audit(
@@ -453,11 +476,14 @@ def audit(
 
     if asset_id_filter:
         target_id, target_name = _resolve_asset_by_id(
-            asset_id_filter, jsonl_store, name_map,
+            asset_id_filter,
+            jsonl_store,
+            name_map,
         )
         if target_id is None:
             target_id, target_name = _resolve_asset_by_name(
-                asset_id_filter, jsonl_store,
+                asset_id_filter,
+                jsonl_store,
             )
         if target_id is None:
             msg = f"No asset found with id or name '{asset_id_filter}'"
@@ -468,7 +494,8 @@ def audit(
             return
     elif asset_name_filter:
         target_id, target_name = _resolve_asset_by_name(
-            asset_name_filter, jsonl_store,
+            asset_name_filter,
+            jsonl_store,
         )
         if target_id is None:
             msg = f"No asset found with name '{asset_name_filter}'"
@@ -504,13 +531,17 @@ def audit(
         return
 
     _print_reverse_lineage(
-        target_id, target_name or target_id, jsonl_store, name_map,
+        target_id,
+        target_name or target_id,
+        jsonl_store,
+        name_map,
     )
 
 
 # ---------------------------------------------------------------------------
 # Audit JSON / display helpers
 # ---------------------------------------------------------------------------
+
 
 def _resolve_asset_by_id(
     asset_id_val: str,
@@ -545,11 +576,13 @@ def _output_audit_json(
     asset_name: str,
     lineage: list[TraceEntry],
 ) -> None:
-    _output_json({
-        "asset_id": asset_id,
-        "asset_name": asset_name,
-        "lineage": [trace_entry_to_dict(e) for e in lineage],
-    })
+    _output_json(
+        {
+            "asset_id": asset_id,
+            "asset_name": asset_name,
+            "lineage": [trace_entry_to_dict(e) for e in lineage],
+        }
+    )
 
 
 def _print_reverse_lineage(
@@ -568,9 +601,13 @@ def _print_reverse_lineage(
     for entry in lineage_entries:
         indent = "  "
         if entry.event_type == "projection":
-            click.echo(f"{indent}← projection from candidate by {entry.worker_id or 'worker'}")
+            click.echo(
+                f"{indent}← projection from candidate by {entry.worker_id or 'worker'}"
+            )
             if entry.accepted_fragments:
-                accepted_names = entry.accepted_asset_names or ["?"] * len(entry.accepted_fragments)
+                accepted_names = entry.accepted_asset_names or ["?"] * len(
+                    entry.accepted_fragments
+                )
                 for aid, aname in zip(entry.accepted_fragments, accepted_names):
                     click.echo(f"{indent}  ✓ accepted: {aname} ({aid})")
             if entry.rejected_fragments:
@@ -609,5 +646,7 @@ def _follow_parents(
         elif parent.event_type == "activation":
             click.echo(f"{indent}← activation: conditions met")
         elif parent.event_type == "projection":
-            click.echo(f"{indent}← projection from candidate by {parent.worker_id or 'worker'}")
+            click.echo(
+                f"{indent}← projection from candidate by {parent.worker_id or 'worker'}"
+            )
         current = parent

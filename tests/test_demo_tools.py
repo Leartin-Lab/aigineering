@@ -9,6 +9,7 @@ import pytest
 from aigineering.agent.demo_tools import register_demo_tools, reset_demo_store
 from aigineering.agent.mcp_worker import MCPWorker
 from aigineering.agent.tool_worker import ToolWorker
+from aigineering.core.capability_descriptors import create_tool_descriptor
 from aigineering.core.engine import Engine
 from aigineering.core.method_registry import MethodRegistry
 from aigineering.core.method_handlers.tool import ToolMethodHandler
@@ -53,6 +54,18 @@ def _make_registry() -> ToolRegistry:
     return reg
 
 
+def _add_demo_tool_descriptors(store: MemoryStore, *names: str) -> None:
+    for name in names:
+        store.add_asset(
+            create_tool_descriptor(
+                name,
+                f"Demo tool: {name}",
+                {"type": "object"},
+                trust_tier="configured",
+            )
+        )
+
+
 # ── Unit: demo file_read / file_write (memory-backed) ───────────────────
 
 
@@ -65,7 +78,9 @@ def test_demo_file_read_write():
     registry = _make_registry()
 
     # Write a file
-    result = registry.run("file_write", {"path": "/notes.txt", "content": "hello world"})
+    result = registry.run(
+        "file_write", {"path": "/notes.txt", "content": "hello world"}
+    )
     assert result == "ok"
 
     # Read it back
@@ -138,6 +153,7 @@ def test_demo_search_via_mcp_worker():
     and dispatches to server callables.  This tests the MCP pipeline
     with a mock search server.
     """
+
     # Mock MCP search server
     def search_server(tool_name: str, args: dict) -> str:
         return json.dumps({"results": [f"hit: {args.get('q', '')}"]})
@@ -184,6 +200,7 @@ def test_demo_workflow_full_pipeline():
     )
 
     store = MemoryStore()
+    _add_demo_tool_descriptors(store, "file_write", "file_read", "search")
     trace_store = TraceStore()
     contract = Contract(
         id="contract_parent",
@@ -195,7 +212,9 @@ def test_demo_workflow_full_pipeline():
     )
 
     engine = Engine(
-        store, worker, trace_store,
+        store,
+        worker,
+        trace_store,
         tools=tools,
         method_registry=registry,
     )
@@ -214,13 +233,12 @@ def test_demo_workflow_full_pipeline():
     assert len(obs_assets) == 2
 
     # Both tool calls should produce call and obs assets
-    call_assets = [a for a in store.get_all_assets() if a.name.startswith("_tool_call_")]
+    call_assets = [
+        a for a in store.get_all_assets() if a.name.startswith("_tool_call_")
+    ]
     assert len(call_assets) == 2
 
-    all_obs = [
-        a for a in store.get_all_assets()
-        if a.name.startswith("_tool_obs_")
-    ]
+    all_obs = [a for a in store.get_all_assets() if a.name.startswith("_tool_obs_")]
     assert len(all_obs) == 2
 
     # ── Verify trace contains tool_executed events ───────────────────────
@@ -260,6 +278,7 @@ def test_demo_workflow_search_tool():
     )
 
     store = MemoryStore()
+    _add_demo_tool_descriptors(store, "search")
     trace_store = TraceStore()
     contract = Contract(
         id="contract_parent",

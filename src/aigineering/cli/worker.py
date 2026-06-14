@@ -8,17 +8,17 @@ from typing import Optional
 import click
 
 from aigineering.cli._common import (
-    _get_idempotency_path,
-    _get_trace_dir,
     _output_json,
     _persistent_store,
     _redact_sealed,
 )
 from aigineering.core.activation import check_activation
 from aigineering.core.disclosure import compute_disclosure
-from aigineering.core.idempotency_store import IdempotencyStore
-from aigineering.core.submit import SubmitConflictError, _all_outputs_satisfied, submit_candidate
-from aigineering.core.trace import JsonLTraceStore
+from aigineering.core.submit import (
+    SubmitConflictError,
+    _all_outputs_satisfied,
+    submit_candidate,
+)
 from aigineering.protocol.envelope import CandidateEnvelope
 from aigineering.protocol.package import WorkerPackage
 from aigineering.protocol.wire import asset_to_dict, contract_to_dict
@@ -30,9 +30,14 @@ def worker() -> None:
 
 
 @worker.command("package")
-@click.option("--contract", "contract_id", required=True, help="Contract ID to build package for")
 @click.option(
-    "--json", "json_output", is_flag=True, default=False,
+    "--contract", "contract_id", required=True, help="Contract ID to build package for"
+)
+@click.option(
+    "--json",
+    "json_output",
+    is_flag=True,
+    default=False,
     help="Output machine-readable JSON instead of human-readable text.",
 )
 def worker_package(contract_id: str, json_output: bool) -> None:
@@ -66,10 +71,19 @@ def worker_package(contract_id: str, json_output: bool) -> None:
 
 @worker.command("next")
 @click.option(
-    "--json", "json_output", is_flag=True, default=False,
+    "--worker-id", default="cli-worker", help="Worker identity for claim ownership."
+)
+@click.option(
+    "--lease-seconds", default=60, show_default=True, help="Lease duration in seconds."
+)
+@click.option(
+    "--json",
+    "json_output",
+    is_flag=True,
+    default=False,
     help="Output machine-readable JSON instead of human-readable text.",
 )
-def worker_next(json_output: bool) -> None:
+def worker_next(worker_id: str, lease_seconds: int, json_output: bool) -> None:
     """Derive the next ready contract and return a WorkerPackage.
 
     A contract is ready when:
@@ -89,22 +103,23 @@ def worker_next(json_output: bool) -> None:
             continue
 
         # ── Trace-based state checks ─────────────────────────────────
-        trace_path = _get_trace_dir() / f"worker_{contract.id}.jsonl"
-        activation_count = 0
+        budget_consumed_count = 0
         is_completed = False
         is_suspended = False
 
-        if trace_path.exists():
-            trace_store = JsonLTraceStore(str(trace_path))
-            for entry in trace_store.get_all():
-                if entry.event_type == "projection":
-                    activation_count += 1
-                elif entry.event_type == "complete":
-                    is_completed = True
-                elif entry.event_type == "method_scheduled":
-                    is_suspended = True
-                elif entry.event_type == "method_resumed":
-                    is_suspended = False
+        get_by_contract = getattr(store, "get_by_contract", None)
+        trace_entries = (
+            get_by_contract(contract.id) if get_by_contract is not None else []
+        )
+        for entry in trace_entries:
+            if entry.event_type == "budget_consumed":
+                budget_consumed_count += 1
+            elif entry.event_type == "complete":
+                is_completed = True
+            elif entry.event_type == "method_scheduled":
+                is_suspended = True
+            elif entry.event_type == "method_resumed":
+                is_suspended = False
 
         if is_completed:
             continue
@@ -112,7 +127,7 @@ def worker_next(json_output: bool) -> None:
         if is_suspended:
             continue
 
-        remaining_budget = contract.budget - activation_count
+        remaining_budget = contract.budget - budget_consumed_count
         if remaining_budget <= 0:
             continue
 
@@ -130,6 +145,27 @@ def worker_next(json_output: bool) -> None:
             tool_scope=contract.tool_scope,
             budget_remaining=remaining_budget,
         )
+        claim_contract = getattr(store, "claim_contract", None)
+        if claim_contract is not None:
+            claim = claim_contract(
+                contract.id,
+                worker_id,
+                lease_seconds=lease_seconds,
+                package_id=pkg.package_id,
+            )
+            if claim is None:
+                continue
+            pkg = WorkerPackage(
+                contract_id=contract.id,
+                contract=contract_to_dict(contract),
+                disclosed_assets=tuple(asset_to_dict(a) for a in scope),
+                method_context_assets=(),
+                tool_scope=contract.tool_scope,
+                budget_remaining=remaining_budget,
+                claim_id=claim["claim_id"],
+                lease_until=claim["lease_until"],
+                package_id=pkg.package_id,
+            )
 
         if json_output:
             result = json.loads(pkg.to_json())
@@ -146,7 +182,9 @@ def worker_next(json_output: bool) -> None:
 
 
 @worker.command("submit")
-@click.option("--json", "envelope_json", required=True, help="CandidateEnvelope JSON string")
+@click.option(
+    "--json", "envelope_json", required=True, help="CandidateEnvelope JSON string"
+)
 @click.option(
     "--idempotency-key",
     default=None,
@@ -170,24 +208,19 @@ def worker_submit(envelope_json: str, idempotency_key: Optional[str]) -> None:
         _output_json({"error": f"Contract '{envelope.contract_id}' not found."})
         return
 
-    idem_path = _get_idempotency_path()
-    idem = IdempotencyStore(idem_path)
-
-    # Use a per-contract trace file for operational submissions
-    trace_dir = _get_trace_dir()
-    trace_path = str(trace_dir / f"worker_{envelope.contract_id}.jsonl")
-    trace_store = JsonLTraceStore(trace_path)
-
     try:
         result = submit_candidate(
             envelope=envelope,
             store=store,
-            trace_store=trace_store,
-            idempotency_store=idem,
+            trace_store=store,
+            idempotency_store=None,
             idempotency_key=idempotency_key or "",
         )
     except SubmitConflictError as e:
         _output_json({"error": str(e), "status": "conflict"})
+        return
+    except Exception as e:
+        _output_json({"error": str(e), "status": "error"})
         return
 
     # Redact sealed config from result

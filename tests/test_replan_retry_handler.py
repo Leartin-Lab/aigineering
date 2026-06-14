@@ -7,6 +7,7 @@ from aigineering.core.ids import hash_asset_content, hash_contract, hash_retry
 from aigineering.core.method_registry import MethodRegistry
 from aigineering.core.method_handlers.replan import ReplanMethodHandler
 from aigineering.core.method_handlers.retry import RetryMethodHandler
+from aigineering.core.method_runtime import MethodRuntime
 from aigineering.core.store import MemoryStore
 from aigineering.core.trace import TraceStore
 from aigineering.protocol.types import Asset, Contract
@@ -28,6 +29,7 @@ class SequenceWorker:
 
 
 # ── ReplanMethodHandler ────────────────────────────────────────────────
+
 
 def test_replan_handler_can_handle():
     handler = ReplanMethodHandler()
@@ -100,8 +102,12 @@ def test_replan_handler_does_not_expand_non_replan():
         parent_id="parent_1",
         name="parent.plan",
         description=json.dumps(
-            {"method": "plan", "parent_contract_id": "parent_1",
-             "parent_contract_name": "parent", "payload": {}},
+            {
+                "method": "plan",
+                "parent_contract_id": "parent_1",
+                "parent_contract_name": "parent",
+                "payload": {},
+            },
             sort_keys=True,
         ),
         inputs=[],
@@ -161,7 +167,8 @@ def test_replan_handler_expands_replan_results():
     engine.run()
 
     planned = [
-        c for c in store.get_all_contracts()
+        c
+        for c in store.get_all_contracts()
         if c.parent_id == contract.id and c.name == "revised_draft"
     ]
     assert len(planned) == 1
@@ -188,6 +195,7 @@ def test_replan_handler_satisfies_protocol():
 
 
 # ── RetryMethodHandler ─────────────────────────────────────────────────
+
 
 def test_retry_handler_can_handle():
     handler = RetryMethodHandler()
@@ -266,33 +274,19 @@ def test_retry_handler_idempotent():
     )
 
     from aigineering.protocol.types import Candidate
-    from aigineering.protocol.actions import WorkerAction
 
-    class MinimalEngine:
-        _store = store
-        _trace = trace_store
-        _budget: dict[str, int] = {contract_id: 5}
-        _method_scheduled: set[str] = set()
+    runtime = MethodRuntime(store, trace_store, {contract_id: 5})
 
-        def _add_trace(self, cid, et, **kw):
-            trace_store.new_entry(cid, et, **kw)
-
-        def _resolve_budget(self, c):
-            return self._budget.get(c.id, 1)
-
-    engine = MinimalEngine()
-
-    action = WorkerAction(type="retry", payload={"reason": "first"})
     candidate = Candidate(worker_id="test", raw_output='/retry {"reason": "first"}')
 
     # First call — creates retry contract
-    result1 = handler.handle_method(engine, contract, "retry", candidate)
+    result1 = handler.handle_method(runtime, contract, "retry", candidate)
     assert result1 is True
     expected_retry_id = hash_retry(contract_id)
     assert store.get_contract(expected_retry_id) is not None
 
     # Second call — idempotent, already exists
-    result2 = handler.handle_method(engine, contract, "retry", candidate)
+    result2 = handler.handle_method(runtime, contract, "retry", candidate)
     assert result2 is True
     assert store.get_contract(expected_retry_id) is not None
 
@@ -309,6 +303,7 @@ def test_retry_handler_completion_returns_false():
 
 
 # ── Context overflow → replan ──────────────────────────────────────────
+
 
 def test_context_overflow_triggers_replan():
     """When scope assets exceed context_size_limit, the engine triggers replan."""
@@ -328,8 +323,9 @@ def test_context_overflow_triggers_replan():
     )
 
     # Limit set to 1000 tokens (4000 chars) — large_content is 3000 chars
-    contract_id = hash_contract("ctx_root", "", ["large_data"], ["report"],
-                                "large_data", 5, [], [], "human")
+    contract_id = hash_contract(
+        "ctx_root", "", ["large_data"], ["report"], "large_data", 5, [], [], "human"
+    )
     contract = Contract(
         id=contract_id,
         name="ctx_root",
@@ -341,8 +337,9 @@ def test_context_overflow_triggers_replan():
 
     # Worker should not be called — context overflow intercepts before invoke
     worker = SequenceWorker([""])
-    engine = Engine(store, worker, trace_store, method_registry=registry,
-                    context_size_limit=500)
+    engine = Engine(
+        store, worker, trace_store, method_registry=registry, context_size_limit=500
+    )
     engine.add_contract(contract)
     engine.add_asset(large_asset)
     engine.run()
@@ -374,8 +371,9 @@ def test_context_overflow_within_limit_does_not_trigger():
         content=small_content,
     )
 
-    contract_id = hash_contract("small_root", "", ["small_data"], ["report"],
-                                "small_data", 5, [], [], "human")
+    contract_id = hash_contract(
+        "small_root", "", ["small_data"], ["report"], "small_data", 5, [], [], "human"
+    )
     contract = Contract(
         id=contract_id,
         name="small_root",
@@ -386,8 +384,9 @@ def test_context_overflow_within_limit_does_not_trigger():
     )
 
     worker = SequenceWorker(['/exec {"outputs": {"report": "done"}}', ""])
-    engine = Engine(store, worker, trace_store, method_registry=registry,
-                    context_size_limit=500)
+    engine = Engine(
+        store, worker, trace_store, method_registry=registry, context_size_limit=500
+    )
     engine.add_contract(contract)
     engine.add_asset(small_asset)
     engine.run()
@@ -413,8 +412,9 @@ def test_context_overflow_no_limit_does_not_trigger():
         content=large_content,
     )
 
-    contract_id = hash_contract("big_root", "", ["big_data"], ["report"],
-                                "big_data", 5, [], [], "human")
+    contract_id = hash_contract(
+        "big_root", "", ["big_data"], ["report"], "big_data", 5, [], [], "human"
+    )
     contract = Contract(
         id=contract_id,
         name="big_root",

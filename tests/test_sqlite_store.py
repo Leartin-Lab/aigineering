@@ -1,12 +1,11 @@
 """Tests for SQLiteStore — transactional SQLite implementation of StoreProtocol."""
 
-import json
 import sqlite3
 
 import pytest
 
 from aigineering.core.provenance import sign_asset
-from aigineering.core.sqlite_store import SQLiteStore
+from aigineering.core.sqlite_store import CURRENT_SCHEMA_VERSION, SQLiteStore
 from aigineering.core.store import StoreProtocol
 from aigineering.protocol.types import Asset, Contract
 
@@ -14,6 +13,7 @@ from aigineering.protocol.types import Asset, Contract
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def store():
@@ -27,6 +27,7 @@ def store():
 # StoreProtocol compliance
 # ---------------------------------------------------------------------------
 
+
 def test_satisfies_store_protocol(store):
     """SQLiteStore must be recognized as implementing StoreProtocol."""
     assert isinstance(store, StoreProtocol)
@@ -36,9 +37,12 @@ def test_satisfies_store_protocol(store):
 # Basic CRUD: assets
 # ---------------------------------------------------------------------------
 
+
 def test_crud_asset(store):
     """Add, get, get_by_name, get_all for assets."""
-    asset = sign_asset(Asset(id="a1", name="report", content="hello world", origin="test"))
+    asset = sign_asset(
+        Asset(id="a1", name="report", content="hello world", origin="test")
+    )
     store.add_asset(asset)
 
     assert store.get_asset("a1") == asset
@@ -54,15 +58,23 @@ def test_crud_asset(store):
 
 
 def test_has_asset_named(store):
-    store.add_asset(sign_asset(Asset(id="a1", name="data.json", content="{}"), signed_by="test"))
+    store.add_asset(
+        sign_asset(Asset(id="a1", name="data.json", content="{}"), signed_by="test")
+    )
     assert store.has_asset_named("data.json") is True
     assert store.has_asset_named("missing") is False
 
 
 def test_get_assets_by_name_multiple(store):
-    store.add_asset(sign_asset(Asset(id="a1", name="report", content="r1"), signed_by="test"))
-    store.add_asset(sign_asset(Asset(id="a2", name="report", content="r2"), signed_by="test"))
-    store.add_asset(sign_asset(Asset(id="a3", name="other", content="o1"), signed_by="test"))
+    store.add_asset(
+        sign_asset(Asset(id="a1", name="report", content="r1"), signed_by="test")
+    )
+    store.add_asset(
+        sign_asset(Asset(id="a2", name="report", content="r2"), signed_by="test")
+    )
+    store.add_asset(
+        sign_asset(Asset(id="a3", name="other", content="o1"), signed_by="test")
+    )
 
     results = store.get_assets_by_name("report")
     assert len(results) == 2
@@ -70,10 +82,24 @@ def test_get_assets_by_name_multiple(store):
 
 
 def test_get_assets_by_contract(store):
-    store.add_asset(sign_asset(Asset(id="a1", name="r1", content="x", created_by="c1"), signed_by="test"))
-    store.add_asset(sign_asset(Asset(id="a2", name="r2", content="y", created_by="c1"), signed_by="test"))
-    store.add_asset(sign_asset(Asset(id="a3", name="r3", content="z", created_by="c2"), signed_by="test"))
-    store.add_asset(sign_asset(Asset(id="a4", name="r4", content="w"), signed_by="test"))
+    store.add_asset(
+        sign_asset(
+            Asset(id="a1", name="r1", content="x", created_by="c1"), signed_by="test"
+        )
+    )
+    store.add_asset(
+        sign_asset(
+            Asset(id="a2", name="r2", content="y", created_by="c1"), signed_by="test"
+        )
+    )
+    store.add_asset(
+        sign_asset(
+            Asset(id="a3", name="r3", content="z", created_by="c2"), signed_by="test"
+        )
+    )
+    store.add_asset(
+        sign_asset(Asset(id="a4", name="r4", content="w"), signed_by="test")
+    )
 
     results_c1 = store.get_assets_by_contract("c1")
     assert len(results_c1) == 2
@@ -91,10 +117,14 @@ def test_get_assets_by_contract(store):
 # Basic CRUD: contracts
 # ---------------------------------------------------------------------------
 
+
 def test_crud_contract(store):
     """Add, get, get_all for contracts."""
     contract = Contract(
-        id="c1", name="build", outputs=["report"], budget=10,
+        id="c1",
+        name="build",
+        outputs=["report"],
+        budget=10,
     )
     store.add_contract(contract)
 
@@ -140,14 +170,27 @@ def test_contract_with_tuple_fields(store):
 # Definition hash and version chain
 # ---------------------------------------------------------------------------
 
+
 def test_definition_hash_index(store):
     """Query by definition_hash must return matching assets."""
-    store.add_asset(sign_asset(Asset(id="a1", name="v1", content="x",
-                          definition_hash="abc123"), signed_by="test"))
-    store.add_asset(sign_asset(Asset(id="a2", name="v2", content="y",
-                          definition_hash="def456"), signed_by="test"))
-    store.add_asset(sign_asset(Asset(id="a3", name="v3", content="z",
-                          definition_hash="abc123"), signed_by="test"))
+    store.add_asset(
+        sign_asset(
+            Asset(id="a1", name="v1", content="x", definition_hash="abc123"),
+            signed_by="test",
+        )
+    )
+    store.add_asset(
+        sign_asset(
+            Asset(id="a2", name="v2", content="y", definition_hash="def456"),
+            signed_by="test",
+        )
+    )
+    store.add_asset(
+        sign_asset(
+            Asset(id="a3", name="v3", content="z", definition_hash="abc123"),
+            signed_by="test",
+        )
+    )
 
     results = store.get_assets_by_definition("abc123")
     assert len(results) == 2
@@ -163,12 +206,24 @@ def test_definition_hash_index(store):
 
 def test_version_chain(store):
     """get_assets_by_definition and get_latest_asset form a version chain."""
-    store.add_asset(sign_asset(Asset(id="a1", name="doc", content="v1",
-                          definition_hash="abc"), signed_by="test"))
-    store.add_asset(sign_asset(Asset(id="a2", name="doc", content="v2",
-                          definition_hash="abc"), signed_by="test"))
-    store.add_asset(sign_asset(Asset(id="a3", name="doc", content="v3",
-                          definition_hash="abc"), signed_by="test"))
+    store.add_asset(
+        sign_asset(
+            Asset(id="a1", name="doc", content="v1", definition_hash="abc"),
+            signed_by="test",
+        )
+    )
+    store.add_asset(
+        sign_asset(
+            Asset(id="a2", name="doc", content="v2", definition_hash="abc"),
+            signed_by="test",
+        )
+    )
+    store.add_asset(
+        sign_asset(
+            Asset(id="a3", name="doc", content="v3", definition_hash="abc"),
+            signed_by="test",
+        )
+    )
 
     # All three share the same definition_hash
     versions = store.get_assets_by_definition("abc")
@@ -188,29 +243,104 @@ def test_version_chain(store):
 # Schema versioning
 # ---------------------------------------------------------------------------
 
+
 def test_schema_version(store):
-    """schema_version table must exist with at least version 1."""
+    """schema_version table must exist and reach the current version."""
     cur = store._conn.execute("SELECT version, applied_at FROM schema_version")
     rows = cur.fetchall()
     assert len(rows) >= 1
 
     versions = [row["version"] for row in rows]
-    assert 1 in versions
+    assert versions == [CURRENT_SCHEMA_VERSION]
 
-    assert store.schema_version >= 1
+    assert store.schema_version == CURRENT_SCHEMA_VERSION
+
+
+def test_v1_schema_migrates_to_v2(tmp_path):
+    """A v1 database gains 040 worker/idempotency tables and contract metadata."""
+    db_path = str(tmp_path / "v1.db")
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        """
+        CREATE TABLE schema_version (
+            version INTEGER PRIMARY KEY,
+            applied_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute("INSERT INTO schema_version (version, applied_at) VALUES (1, 'old')")
+    conn.execute(
+        """
+        CREATE TABLE contracts (
+            id TEXT PRIMARY KEY,
+            parent_id TEXT,
+            name TEXT NOT NULL DEFAULT '',
+            description TEXT NOT NULL DEFAULT '',
+            inputs TEXT NOT NULL DEFAULT '[]',
+            outputs TEXT NOT NULL DEFAULT '[]',
+            activation TEXT NOT NULL DEFAULT '',
+            budget INTEGER NOT NULL DEFAULT 0,
+            tool_scope TEXT NOT NULL DEFAULT '[]',
+            labels TEXT NOT NULL DEFAULT '[]',
+            origin TEXT NOT NULL DEFAULT 'human'
+        )
+        """
+    )
+    conn.execute(
+        "INSERT INTO contracts (id, name, outputs) VALUES ('c1', 'old', '[\"out\"]')"
+    )
+    conn.commit()
+    conn.close()
+
+    migrated = SQLiteStore(db_path)
+    assert migrated.schema_version == CURRENT_SCHEMA_VERSION
+
+    contract_columns = {
+        row["name"]
+        for row in migrated._conn.execute("PRAGMA table_info(contracts)").fetchall()
+    }
+    assert "minting_authority" in contract_columns
+    assert "sensitive_input_policy" in contract_columns
+
+    tables = {
+        row["name"]
+        for row in migrated._conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()
+    }
+    assert "worker_claims" in tables
+    assert "idempotency_records" in tables
+
+    contract = migrated.get_contract("c1")
+    assert contract is not None
+    assert contract.minting_authority == ()
+    assert contract.sensitive_input_policy is None
+    migrated.close()
 
 
 # ---------------------------------------------------------------------------
 # Index coverage
 # ---------------------------------------------------------------------------
 
+
 def test_index_coverage_assets(store):
     """EXPLAIN QUERY PLAN must show index usage for indexed asset columns."""
     # Populate with data to give the planner a reason to use indexes
-    store.add_asset(sign_asset(Asset(id="a1", name="alpha", content="x",
-                          definition_hash="dh1", content_hash="ch1",
-                          lineage_id="li1", created_by="cb1",
-                          tombstoned=True), signed_by="test"))
+    store.add_asset(
+        sign_asset(
+            Asset(
+                id="a1",
+                name="alpha",
+                content="x",
+                definition_hash="dh1",
+                content_hash="ch1",
+                lineage_id="li1",
+                created_by="cb1",
+                tombstoned=True,
+            ),
+            signed_by="test",
+        )
+    )
 
     # definition_hash index
     plan = store._conn.execute(
@@ -265,22 +395,28 @@ def test_index_coverage_trace_events(store):
         ("c1",),
     ).fetchall()
     plan_text = "\n".join(r["detail"] for r in plan)
-    assert "INDEX" in plan_text.upper() or "idx_trace_events_contract_id" in plan_text, (
-        f"Expected index usage for trace_events.contract_id:\n{plan_text}"
-    )
+    assert (
+        "INDEX" in plan_text.upper() or "idx_trace_events_contract_id" in plan_text
+    ), f"Expected index usage for trace_events.contract_id:\n{plan_text}"
 
 
 # ---------------------------------------------------------------------------
 # Dual-hash fields
 # ---------------------------------------------------------------------------
 
+
 def test_dual_hash_fields(store):
     """definition_hash and content_hash must persist correctly."""
-    asset = sign_asset(Asset(
-        id="a1", name="doc", content="payload",
-        definition_hash="dh_abc123", content_hash="ch_def456",
-        origin="test",
-    ))
+    asset = sign_asset(
+        Asset(
+            id="a1",
+            name="doc",
+            content="payload",
+            definition_hash="dh_abc123",
+            content_hash="ch_def456",
+            origin="test",
+        )
+    )
     store.add_asset(asset)
 
     fetched = store.get_asset("a1")
@@ -293,6 +429,7 @@ def test_dual_hash_fields(store):
 # Retention fields
 # ---------------------------------------------------------------------------
 
+
 def test_retention_fields(store):
     """keep_flag and tombstoned must persist correctly."""
     # Default false
@@ -303,11 +440,17 @@ def test_retention_fields(store):
     assert store.get_asset("a1").tombstoned_at is None
 
     # Explicit true
-    asset_retained = sign_asset(Asset(
-        id="a2", name="kept", content="important",
-        keep_flag=True, tombstoned=True, tombstoned_at="2025-01-01T00:00:00Z",
-        origin="test",
-    ))
+    asset_retained = sign_asset(
+        Asset(
+            id="a2",
+            name="kept",
+            content="important",
+            keep_flag=True,
+            tombstoned=True,
+            tombstoned_at="2025-01-01T00:00:00Z",
+            origin="test",
+        )
+    )
     store.add_asset(asset_retained)
     fetched = store.get_asset("a2")
     assert fetched.keep_flag is True
@@ -319,9 +462,14 @@ def test_retention_fields(store):
 # Lineage ID
 # ---------------------------------------------------------------------------
 
+
 def test_lineage_id(store):
     """lineage_id must persist correctly."""
-    asset = sign_asset(Asset(id="a1", name="doc", content="data", lineage_id="lineage_xyz", origin="test"))
+    asset = sign_asset(
+        Asset(
+            id="a1", name="doc", content="data", lineage_id="lineage_xyz", origin="test"
+        )
+    )
     store.add_asset(asset)
 
     fetched = store.get_asset("a1")
@@ -329,7 +477,9 @@ def test_lineage_id(store):
     assert fetched.lineage_id == "lineage_xyz"
 
     # Empty lineage_id default
-    asset_no_lineage = sign_asset(Asset(id="a2", name="plain", content="plain", origin="test"))
+    asset_no_lineage = sign_asset(
+        Asset(id="a2", name="plain", content="plain", origin="test")
+    )
     store.add_asset(asset_no_lineage)
     assert store.get_asset("a2").lineage_id == ""
 
@@ -338,11 +488,14 @@ def test_lineage_id(store):
 # Transaction atomicity
 # ---------------------------------------------------------------------------
 
+
 def test_transaction_atomicity(store):
     """SQLite transactions must be atomic — committed data persists,
     uncommitted data does not."""
     # Normal commit path — data persists
-    store.add_asset(sign_asset(Asset(id="a1", name="committed", content="safe"), signed_by="test"))
+    store.add_asset(
+        sign_asset(Asset(id="a1", name="committed", content="safe"), signed_by="test")
+    )
     assert store.get_asset("a1") is not None
 
     # Simulate an uncommitted write on a separate connection
@@ -354,11 +507,15 @@ def test_transaction_atomicity(store):
 
 def test_insert_or_replace_upsert(store):
     """INSERT OR REPLACE must update an existing asset, not duplicate it."""
-    store.add_asset(sign_asset(Asset(id="a1", name="original", content="v1"), signed_by="test"))
+    store.add_asset(
+        sign_asset(Asset(id="a1", name="original", content="v1"), signed_by="test")
+    )
     assert len(store.get_all_assets()) == 1
 
     # Insert same ID with different content
-    store.add_asset(sign_asset(Asset(id="a1", name="updated", content="v2"), signed_by="test"))
+    store.add_asset(
+        sign_asset(Asset(id="a1", name="updated", content="v2"), signed_by="test")
+    )
     assert len(store.get_all_assets()) == 1
 
     updated = store.get_asset("a1")
@@ -371,6 +528,7 @@ def test_insert_or_replace_upsert(store):
 # All tables exist
 # ---------------------------------------------------------------------------
 
+
 def test_all_tables_exist(store):
     """Verify all required tables are created."""
     cur = store._conn.execute(
@@ -378,17 +536,194 @@ def test_all_tables_exist(store):
     )
     tables = {row["name"] for row in cur.fetchall()}
     expected = {
-        "assets", "contracts", "trace_events",
-        "sessions", "claims", "schema_version",
+        "assets",
+        "contracts",
+        "trace_events",
+        "sessions",
+        "claims",
+        "worker_claims",
+        "idempotency_records",
+        "schema_version",
     }
-    assert expected.issubset(tables), (
-        f"Missing tables: {expected - tables}"
+    assert expected.issubset(tables), f"Missing tables: {expected - tables}"
+
+
+# ---------------------------------------------------------------------------
+# Worker claim invariants
+# ---------------------------------------------------------------------------
+
+
+def test_worker_claim_has_database_unique_active_contract(store):
+    """SQLite enforces at most one active worker claim per contract."""
+    store.persist_claim("claim-1", "c1", "worker-1", "2026-12-31T00:00:00", "active")
+
+    with pytest.raises(sqlite3.IntegrityError):
+        store.persist_claim(
+            "claim-2", "c1", "worker-2", "2026-12-31T00:00:00", "active"
+        )
+
+    store.persist_claim("claim-2", "c1", "worker-2", "2026-12-31T00:00:00", "released")
+    claim = store.get_claim("c1")
+    assert claim is not None
+    assert claim["claim_id"] == "claim-1"
+    assert claim["status"] == "active"
+
+
+def test_claim_contract_rejects_second_connection_active_claim(tmp_path):
+    """Two SQLite connections cannot both claim the same contract as active."""
+    db_path = str(tmp_path / "claims.db")
+    first = SQLiteStore(db_path)
+    second = SQLiteStore(db_path)
+
+    claim1 = first.claim_contract("c1", "worker-1", package_id="pkg:first")
+    claim2 = second.claim_contract("c1", "worker-2", package_id="pkg:second")
+
+    assert claim1 is not None
+    assert claim2 is None
+
+    observed = second.get_claim("c1")
+    assert observed is not None
+    assert observed["worker_id"] == "worker-1"
+    assert observed["package_id"] == "pkg:first"
+
+    first.close()
+    second.close()
+
+
+def test_candidate_submission_rolls_back_on_mid_commit_failure(store, monkeypatch):
+    """Asset, trace, idempotency, and claim updates rollback as one transaction."""
+    from aigineering.core.trace import create_entry
+
+    store.persist_claim("claim-1", "c1", "worker-1", "2026-12-31T00:00:00", "active")
+    asset = sign_asset(
+        Asset(id="a-rollback", name="out", content="payload", created_by="c1"),
+        signed_by="runtime",
     )
+    entry = create_entry(contract_id="c1", event_type="projection", sequence=0)
+
+    def fail_trace_insert(_entry):
+        raise RuntimeError("simulated trace failure")
+
+    monkeypatch.setattr(store, "_insert_trace_entry", fail_trace_insert)
+
+    with pytest.raises(RuntimeError, match="simulated trace failure"):
+        store.commit_candidate_submission(
+            accepted_assets=[asset],
+            trace_entries=[entry],
+            idempotency_key="idem-1",
+            idempotency_result={"status": "accepted"},
+            claim_id="claim-1",
+        )
+
+    assert store.get_asset("a-rollback") is None
+    assert store.get_idempotency("c1", "idem-1") is None
+    claim = store.get_claim("c1")
+    assert claim is not None
+    assert claim["status"] == "active"
+
+
+def test_candidate_submission_rolls_back_when_claim_predicate_fails(store, monkeypatch):
+    """A stale claim state at commit time rejects and rolls back the submission."""
+    from aigineering.core.submit import SubmitCommitError, submit_candidate
+    from aigineering.protocol.envelope import CandidateEnvelope
+
+    contract = Contract(id="c-submit", name="submit", outputs=["out"], budget=3)
+    store.add_contract(contract)
+    store.persist_claim(
+        "claim-stale",
+        "c-submit",
+        "worker-1",
+        "2026-12-31T00:00:00+00:00",
+        "active",
+        "pkg:test",
+    )
+    store.persist_claim(
+        "claim-stale",
+        "c-submit",
+        "worker-1",
+        "2026-12-31T00:00:00+00:00",
+        "released",
+        "pkg:test",
+    )
+    monkeypatch.setattr(
+        store,
+        "get_claim",
+        lambda _contract_id: {
+            "claim_id": "claim-stale",
+            "contract_id": "c-submit",
+            "worker_id": "worker-1",
+            "lease_until": "2026-12-31T00:00:00+00:00",
+            "status": "active",
+            "package_id": "pkg:test",
+        },
+    )
+    envelope = CandidateEnvelope(
+        contract_id="c-submit",
+        worker_id="worker-1",
+        raw_output='/exec {"out": "value"}',
+        claim_id="claim-stale",
+        package_id="pkg:test",
+        idempotency_key="idem-stale",
+    )
+
+    with pytest.raises(SubmitCommitError):
+        submit_candidate(envelope, store, store)
+
+    assert store.get_assets_by_name("out") == []
+    assert store.get_trace_events("c-submit") == []
+    assert store.get_idempotency("c-submit", "idem-stale") is None
+
+
+def test_candidate_submission_rolls_back_when_claim_expires_at_commit(
+    store, monkeypatch
+):
+    """A claim that expires between validation and commit rejects atomically."""
+    from aigineering.core.submit import SubmitCommitError, submit_candidate
+    from aigineering.protocol.envelope import CandidateEnvelope
+
+    contract = Contract(id="c-expire", name="expire", outputs=["out"], budget=3)
+    store.add_contract(contract)
+    store.persist_claim(
+        "claim-expired",
+        "c-expire",
+        "worker-1",
+        "2000-01-01T00:00:00+00:00",
+        "active",
+        "pkg:expired",
+    )
+    monkeypatch.setattr(
+        store,
+        "get_claim",
+        lambda _contract_id: {
+            "claim_id": "claim-expired",
+            "contract_id": "c-expire",
+            "worker_id": "worker-1",
+            "lease_until": "2026-12-31T00:00:00+00:00",
+            "status": "active",
+            "package_id": "pkg:expired",
+        },
+    )
+    envelope = CandidateEnvelope(
+        contract_id="c-expire",
+        worker_id="worker-1",
+        raw_output='/exec {"out": "value"}',
+        claim_id="claim-expired",
+        package_id="pkg:expired",
+        idempotency_key="idem-expired",
+    )
+
+    with pytest.raises(SubmitCommitError):
+        submit_candidate(envelope, store, store)
+
+    assert store.get_assets_by_name("out") == []
+    assert store.get_trace_events("c-expire") == []
+    assert store.get_idempotency("c-expire", "idem-expired") is None
 
 
 # ---------------------------------------------------------------------------
 # WAL mode
 # ---------------------------------------------------------------------------
+
 
 def test_wal_mode_for_file_based_store(tmp_path):
     """Journal mode must be WAL for file-based stores."""
@@ -404,11 +739,14 @@ def test_wal_mode_for_file_based_store(tmp_path):
 # File-based store
 # ---------------------------------------------------------------------------
 
+
 def test_file_based_store(tmp_path):
     """SQLiteStore with a file path must persist data across connections."""
     db_path = str(tmp_path / "test.db")
     s1 = SQLiteStore(db_path)
-    s1.add_asset(sign_asset(Asset(id="a1", name="persist", content="data", origin="test")))
+    s1.add_asset(
+        sign_asset(Asset(id="a1", name="persist", content="data", origin="test"))
+    )
     s1.close()
 
     # Re-open — data must survive
@@ -432,8 +770,11 @@ def test_file_based_creates_parent_dirs(tmp_path):
 # Context manager support
 # ---------------------------------------------------------------------------
 
+
 def test_context_manager():
     """SQLiteStore must support with-statement usage."""
     with SQLiteStore(":memory:") as s:
-        s.add_asset(sign_asset(Asset(id="a1", name="ctx", content="test", origin="test")))
+        s.add_asset(
+            sign_asset(Asset(id="a1", name="ctx", content="test", origin="test"))
+        )
         assert s.get_asset("a1") is not None

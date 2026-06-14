@@ -109,11 +109,11 @@ class PlanMethodHandler:
                     "containment_rejected",
                     relation_type="plan",
                     relation_target=(
-                        f"{entry.get('child_name','?')}:{entry.get('field','?')}"
+                        f"{entry.get('child_name', '?')}:{entry.get('field', '?')}"
                     ),
                     rejected_fragments=[
-                        f"[{entry.get('action','rejected')}] "
-                        f"{entry.get('field','?')}: {entry.get('reason','')}"
+                        f"[{entry.get('action', 'rejected')}] "
+                        f"{entry.get('field', '?')}: {entry.get('reason', '')}"
                     ],
                     authority_result=entry.get("action", "rejected"),
                     budget_remaining=runtime.resolve_budget(parent_id),

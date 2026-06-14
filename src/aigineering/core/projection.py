@@ -68,7 +68,9 @@ def project_candidate(
         else:
             deduped_fragments.append(f)
 
-    accepted_dicts, authority_rejected_dicts, authority_policy = check_authority(contract, deduped_fragments)
+    accepted_dicts, authority_rejected_dicts, authority_policy = check_authority(
+        contract, deduped_fragments
+    )
     accepted_assets: list[Asset] = []
 
     for a in accepted_dicts:
@@ -169,8 +171,7 @@ def _fragments_from_action(
             )
         ]
     return [
-        {"name": name, "content": content}
-        for name, content in action.outputs.items()
+        {"name": name, "content": content} for name, content in action.outputs.items()
     ], []
 
 

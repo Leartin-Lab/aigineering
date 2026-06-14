@@ -2,10 +2,11 @@
 
 import json
 
-import pytest
 
 from aigineering.agent.tool_worker import ToolWorker
+from aigineering.core.capability_descriptors import create_tool_descriptor
 from aigineering.core.method_handlers.tool import ToolMethodHandler
+from aigineering.core.method_runtime import MethodRuntime
 from aigineering.core.store import MemoryStore
 from aigineering.core.tools import ToolRegistry
 from aigineering.core.trace import TraceStore
@@ -13,6 +14,7 @@ from aigineering.protocol.types import Asset, Candidate, Contract, ToolSpec
 
 
 # ── ToolWorker unit tests ──────────────────────────────────────────────
+
 
 def test_worker_invokes_tool_and_returns_candidate():
     """ToolWorker.invoke() executes a tool and returns a Candidate with the result."""
@@ -64,6 +66,7 @@ def test_worker_parity_with_direct_registry():
 
 # ── Handler integration tests ──────────────────────────────────────────
 
+
 def test_tool_handler_uses_tool_worker():
     """ToolMethodHandler.handle_completion dispatches via ToolWorker."""
     handler = ToolMethodHandler()
@@ -72,24 +75,21 @@ def test_tool_handler_uses_tool_worker():
     trace_store = TraceStore()
     tools = ToolRegistry()
     tools.register(ToolSpec(name="lookup"), lambda args: f"value:{args['key']}")
+    store.add_asset(
+        create_tool_descriptor(
+            "lookup",
+            "Lookup test values.",
+            {"type": "object"},
+            trust_tier="configured",
+        )
+    )
 
     # Verify the handler module imports ToolWorker
     import aigineering.core.method_handlers.tool as handler_mod
+
     assert hasattr(handler_mod, "ToolWorker")
 
-    class MinimalEngine:
-        _store = store
-        _trace = trace_store
-        _tools = tools
-        _budget: dict[str, int] = {}
-
-        def _add_trace(self, contract_id, event_type, **kwargs):
-            pass
-
-        def _resolve_budget(self, contract):
-            return 1
-
-    engine = MinimalEngine()
+    runtime = MethodRuntime(store, trace_store, {}, tools=tools)
     tool_contract = Contract(
         id="tool_child_1",
         parent_id="parent_1",
@@ -111,7 +111,7 @@ def test_tool_handler_uses_tool_worker():
         origin="system",
     )
 
-    result = handler.handle_completion(engine, tool_contract, [])
+    result = handler.handle_completion(runtime, tool_contract, [])
     assert result is True
 
     obs_assets = store.get_assets_by_name("_tool_obs_tool_child_1")

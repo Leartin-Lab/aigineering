@@ -7,8 +7,7 @@ from typing import TYPE_CHECKING
 
 from aigineering.agent.tool_worker import ToolWorker
 from aigineering.core.capability_descriptors import verify_descriptor
-from aigineering.core.methods import method_payload, system_asset
-from aigineering.core.provenance import sign_asset
+from aigineering.core.methods import method_payload
 from aigineering.protocol.actions import parse_method_action
 
 if TYPE_CHECKING:
@@ -63,8 +62,16 @@ class ToolMethodHandler:
         if existing:
             return True
 
-        tool_name = payload.get("payload", {}).get("name") if isinstance(payload.get("payload"), dict) else None
-        args = payload.get("payload", {}).get("args", {}) if isinstance(payload.get("payload"), dict) else {}
+        tool_name = (
+            payload.get("payload", {}).get("name")
+            if isinstance(payload.get("payload"), dict)
+            else None
+        )
+        args = (
+            payload.get("payload", {}).get("args", {})
+            if isinstance(payload.get("payload"), dict)
+            else {}
+        )
 
         call_content = json.dumps(
             {
@@ -90,22 +97,28 @@ class ToolMethodHandler:
             # Verify tool capability descriptor before execution (G10/D6)
             tool_descriptor_name = f"_tool_capability_{tool_name}"
             descriptors = runtime.get_assets_by_name(tool_descriptor_name)
-            if descriptors:
-                descriptor = descriptors[0]
-                if not verify_descriptor(descriptor, kind="tool"):
-                    error = f"tool '{tool_name}' descriptor failed verification (G10 trust gate)"
-            worker = ToolWorker(runtime.get_tool_registry())
-            candidate = worker.invoke(
-                tool_name,
-                args if isinstance(args, dict) else {},
-                contract.id,
-            )
-            obs = json.loads(candidate.raw_output)
-            ok = obs.get("ok", False)
-            result = obs.get("result", "")
-            error = obs.get("error", "")
+            if not descriptors:
+                error = f"tool '{tool_name}' descriptor is missing (G10 trust gate)"
+            elif not verify_descriptor(descriptors[0], kind="tool"):
+                error = (
+                    f"tool '{tool_name}' descriptor failed verification "
+                    "(G10 trust gate)"
+                )
+            else:
+                worker = ToolWorker(runtime.get_tool_registry())
+                candidate = worker.invoke(
+                    tool_name,
+                    args if isinstance(args, dict) else {},
+                    contract.id,
+                )
+                obs = json.loads(candidate.raw_output)
+                ok = obs.get("ok", False)
+                result = obs.get("result", "")
+                error = obs.get("error", "")
 
-        obs_name = contract.outputs[0] if contract.outputs else f"_tool_obs_{contract.id}"
+        obs_name = (
+            contract.outputs[0] if contract.outputs else f"_tool_obs_{contract.id}"
+        )
         obs_content = json.dumps(
             {
                 "ok": ok,

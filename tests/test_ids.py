@@ -35,7 +35,7 @@ def test_hash_content_format():
 
 def test_compute_content_hash_nfc_normalization():
     # U+00E9 (é) and U+0065+U+0301 (e + combining acute) produce same hash
-    precomposed = "\u00E9"  # é
+    precomposed = "\u00e9"  # é
     decomposed = "e\u0301"  # e + combining acute
     assert compute_content_hash(precomposed) == compute_content_hash(decomposed)
 
@@ -61,9 +61,17 @@ def test_asset_id_deterministic():
 
 def test_contract_id():
     canonical = json.dumps(
-        {"name": "test", "outputs": [], "inputs": [],
-         "activation": "", "budget": 0, "description": "",
-         "tool_scope": [], "labels": [], "origin": "human"},
+        {
+            "name": "test",
+            "outputs": [],
+            "inputs": [],
+            "activation": "",
+            "budget": 0,
+            "description": "",
+            "tool_scope": [],
+            "labels": [],
+            "origin": "human",
+        },
         sort_keys=True,
     )
     cid = contract_id(canonical)
@@ -187,8 +195,8 @@ def test_canonical_json_no_whitespace():
 
 
 def test_canonical_json_preserves_unicode():
-    result = canonical_json({"key": "\u00E9"})  # é
-    assert "\u00E9" in result or "é" in result
+    result = canonical_json({"key": "\u00e9"})  # é
+    assert "\u00e9" in result or "é" in result
 
 
 # ── now_iso ─────────────────────────────────────────────────────────────

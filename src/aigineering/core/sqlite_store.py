@@ -13,13 +13,18 @@ import sqlite3
 from pathlib import Path
 from typing import Optional
 
+from aigineering.core.ids import compute_content_hash, now_iso
 from aigineering.core.provenance import verify_asset_seal
-from aigineering.protocol.types import Asset, Contract
-from aigineering.protocol.wire import asset_to_dict, contract_to_dict
+from aigineering.protocol.types import Asset, Contract, TraceEntry
+from aigineering.protocol.wire import (
+    asset_to_dict,
+    contract_to_dict,
+    trace_entry_to_dict,
+)
 
 _logger = logging.getLogger(__name__)
 
-CURRENT_SCHEMA_VERSION = 1
+CURRENT_SCHEMA_VERSION = 2
 
 # ---------------------------------------------------------------------------
 # DDL
@@ -68,7 +73,9 @@ CREATE TABLE IF NOT EXISTS contracts (
     budget INTEGER NOT NULL DEFAULT 0,
     tool_scope TEXT NOT NULL DEFAULT '[]',
     labels TEXT NOT NULL DEFAULT '[]',
-    origin TEXT NOT NULL DEFAULT 'human'
+    origin TEXT NOT NULL DEFAULT 'human',
+    minting_authority TEXT NOT NULL DEFAULT '[]',
+    sensitive_input_policy TEXT
 )
 """
 
@@ -119,6 +126,29 @@ CREATE TABLE IF NOT EXISTS claims (
 )
 """
 
+_DDL_CREATE_WORKER_CLAIMS = """
+CREATE TABLE IF NOT EXISTS worker_claims (
+    claim_id TEXT PRIMARY KEY,
+    contract_id TEXT NOT NULL,
+    worker_id TEXT NOT NULL,
+    lease_until TEXT NOT NULL,
+    status TEXT NOT NULL,
+    package_id TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+)
+"""
+
+_DDL_CREATE_IDEMPOTENCY = """
+CREATE TABLE IF NOT EXISTS idempotency_records (
+    contract_id TEXT NOT NULL,
+    idempotency_key TEXT NOT NULL,
+    result_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (contract_id, idempotency_key)
+)
+"""
+
 _DDL_INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_assets_definition_hash ON assets(definition_hash)",
     "CREATE INDEX IF NOT EXISTS idx_assets_content_hash ON assets(content_hash)",
@@ -129,6 +159,9 @@ _DDL_INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_contracts_parent_id ON contracts(parent_id)",
     "CREATE INDEX IF NOT EXISTS idx_trace_events_contract_id ON trace_events(contract_id)",
     "CREATE INDEX IF NOT EXISTS idx_trace_events_event_type ON trace_events(event_type)",
+    "CREATE INDEX IF NOT EXISTS idx_worker_claims_contract_status ON worker_claims(contract_id, status)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_worker_claims_one_active ON worker_claims(contract_id) WHERE status = 'active'",
+    "CREATE INDEX IF NOT EXISTS idx_idempotency_contract ON idempotency_records(contract_id)",
 ]
 
 # ---------------------------------------------------------------------------
@@ -160,8 +193,19 @@ class SQLiteStore:
         if db_path != ":memory:":
             self._conn.execute("PRAGMA journal_mode=WAL")
 
+        self._conn.execute(_DDL_CREATE_SCHEMA_VERSION)
+        self._conn.commit()
+
+        current = self._current_schema_version()
+        if current > CURRENT_SCHEMA_VERSION:
+            raise RuntimeError(
+                f"SQLite schema version {current} is newer than supported "
+                f"version {CURRENT_SCHEMA_VERSION}. Refusing to open — "
+                f"this build cannot read a newer database."
+            )
+
         self._create_tables()
-        self._run_migrations()
+        self._run_migrations(current)
 
     # ------------------------------------------------------------------
     # Schema lifecycle
@@ -175,42 +219,59 @@ class SQLiteStore:
             _DDL_CREATE_TRACE_EVENTS,
             _DDL_CREATE_SESSIONS,
             _DDL_CREATE_CLAIMS,
+            _DDL_CREATE_WORKER_CLAIMS,
+            _DDL_CREATE_IDEMPOTENCY,
         ]:
             self._conn.execute(ddl)
         for idx_ddl in _DDL_INDEXES:
             self._conn.execute(idx_ddl)
         self._conn.commit()
 
-    def _run_migrations(self) -> None:
-        cur = self._conn.execute(
-            "SELECT MAX(version) FROM schema_version"
-        )
+    def _current_schema_version(self) -> int:
+        cur = self._conn.execute("SELECT MAX(version) FROM schema_version")
         row = cur.fetchone()
-        current = row[0] if row and row[0] is not None else 0
+        return row[0] if row and row[0] is not None else 0
 
-        if current > CURRENT_SCHEMA_VERSION:
-            raise RuntimeError(
-                f"SQLite schema version {current} is newer than supported "
-                f"version {CURRENT_SCHEMA_VERSION}. Refusing to open — "
-                f"this build cannot read a newer database."
-            )
-
-        if current < CURRENT_SCHEMA_VERSION:
-            from aigineering.core.ids import now_iso
-
+    def _ensure_contract_columns(self) -> None:
+        existing = {
+            row["name"]
+            for row in self._conn.execute("PRAGMA table_info(contracts)").fetchall()
+        }
+        if "minting_authority" not in existing:
             self._conn.execute(
-                "INSERT INTO schema_version (version, applied_at) VALUES (?, ?)",
-                (CURRENT_SCHEMA_VERSION, now_iso()),
+                "ALTER TABLE contracts ADD COLUMN minting_authority TEXT NOT NULL DEFAULT '[]'"
             )
-            self._conn.commit()
+        if "sensitive_input_policy" not in existing:
+            self._conn.execute(
+                "ALTER TABLE contracts ADD COLUMN sensitive_input_policy TEXT"
+            )
+
+    def _record_schema_version(self, version: int) -> None:
+        self._conn.execute("DELETE FROM schema_version")
+        self._conn.execute(
+            "INSERT INTO schema_version (version, applied_at) VALUES (?, ?)",
+            (version, now_iso()),
+        )
+
+    def _run_migrations(self, current: int) -> None:
+        with self._conn:
+            if current < 1:
+                self._record_schema_version(1)
+            if current < 2:
+                self._migrate_to_v2()
+                self._record_schema_version(2)
+
+    def _migrate_to_v2(self) -> None:
+        """Add 040 transactional worker state and contract authority metadata."""
+        self._ensure_contract_columns()
+        for ddl in (_DDL_CREATE_WORKER_CLAIMS, _DDL_CREATE_IDEMPOTENCY):
+            self._conn.execute(ddl)
+        for idx_ddl in _DDL_INDEXES:
+            self._conn.execute(idx_ddl)
 
     @property
     def schema_version(self) -> int:
-        cur = self._conn.execute(
-            "SELECT MAX(version) FROM schema_version"
-        )
-        row = cur.fetchone()
-        return row[0] if row and row[0] is not None else 0
+        return self._current_schema_version()
 
     # ------------------------------------------------------------------
     # Row → dataclass helpers
@@ -254,6 +315,12 @@ class SQLiteStore:
             tool_scope=tuple(json.loads(row["tool_scope"])),
             labels=tuple(json.loads(row["labels"])),
             origin=row["origin"],
+            minting_authority=tuple(json.loads(row["minting_authority"] or "[]")),
+            sensitive_input_policy=(
+                json.loads(row["sensitive_input_policy"])
+                if row["sensitive_input_policy"]
+                else None
+            ),
         )
 
     # ------------------------------------------------------------------
@@ -266,10 +333,13 @@ class SQLiteStore:
                 f"G3/N-P1.6: Asset '{asset.id}' rejected — missing or invalid canonical seal "
                 f"(signed_by={asset.signed_by!r})"
             )
-        d = asset_to_dict(asset)
         with self._conn:
-            self._conn.execute(
-                """INSERT OR REPLACE INTO assets (
+            self._insert_asset(asset)
+
+    def _insert_asset(self, asset: Asset) -> None:
+        d = asset_to_dict(asset)
+        self._conn.execute(
+            """INSERT OR REPLACE INTO assets (
                     id, name, content, content_type, created_by,
                     origin, trust_tier, minted_by, source_uri,
                     signed_by, provenance_seal, promptable, disclosure_view,
@@ -282,46 +352,40 @@ class SQLiteStore:
                     :definition_hash, :content_hash,
                     :keep_flag, :tombstoned, :tombstoned_at, :lineage_id
                 )""",
-                {
-                    "id": d["id"],
-                    "name": d["name"],
-                    "content": d["content"],
-                    "content_type": d["content_type"],
-                    "created_by": d["created_by"],
-                    "origin": d["origin"],
-                    "trust_tier": d["trust_tier"],
-                    "minted_by": d["minted_by"],
-                    "source_uri": d["source_uri"],
-                    "signed_by": d["signed_by"],
-                    "provenance_seal": d["provenance_seal"],
-                    "promptable": int(d["promptable"]),
-                    "disclosure_view": d["disclosure_view"],
-                    "definition_hash": d["definition_hash"],
-                    "content_hash": d["content_hash"],
-                    "keep_flag": int(d["keep_flag"]),
-                    "tombstoned": int(d["tombstoned"]),
-                    "tombstoned_at": d["tombstoned_at"],
-                    "lineage_id": d["lineage_id"],
-                },
-            )
+            {
+                "id": d["id"],
+                "name": d["name"],
+                "content": d["content"],
+                "content_type": d["content_type"],
+                "created_by": d["created_by"],
+                "origin": d["origin"],
+                "trust_tier": d["trust_tier"],
+                "minted_by": d["minted_by"],
+                "source_uri": d["source_uri"],
+                "signed_by": d["signed_by"],
+                "provenance_seal": d["provenance_seal"],
+                "promptable": int(d["promptable"]),
+                "disclosure_view": d["disclosure_view"],
+                "definition_hash": d["definition_hash"],
+                "content_hash": d["content_hash"],
+                "keep_flag": int(d["keep_flag"]),
+                "tombstoned": int(d["tombstoned"]),
+                "tombstoned_at": d["tombstoned_at"],
+                "lineage_id": d["lineage_id"],
+            },
+        )
 
     def get_asset(self, asset_id: str) -> Optional[Asset]:
-        cur = self._conn.execute(
-            "SELECT * FROM assets WHERE id = ?", (asset_id,)
-        )
+        cur = self._conn.execute("SELECT * FROM assets WHERE id = ?", (asset_id,))
         row = cur.fetchone()
         return self._row_to_asset(row) if row else None
 
     def get_assets_by_name(self, name: str) -> list[Asset]:
-        cur = self._conn.execute(
-            "SELECT * FROM assets WHERE name = ?", (name,)
-        )
+        cur = self._conn.execute("SELECT * FROM assets WHERE name = ?", (name,))
         return [self._row_to_asset(row) for row in cur.fetchall()]
 
     def has_asset_named(self, name: str) -> bool:
-        cur = self._conn.execute(
-            "SELECT 1 FROM assets WHERE name = ? LIMIT 1", (name,)
-        )
+        cur = self._conn.execute("SELECT 1 FROM assets WHERE name = ? LIMIT 1", (name,))
         return cur.fetchone() is not None
 
     def get_all_assets(self) -> list[Asset]:
@@ -360,11 +424,11 @@ class SQLiteStore:
                 """INSERT OR REPLACE INTO contracts (
                     id, parent_id, name, description,
                     inputs, outputs, activation, budget,
-                    tool_scope, labels, origin
+                    tool_scope, labels, origin, minting_authority, sensitive_input_policy
                 ) VALUES (
                     :id, :parent_id, :name, :description,
                     :inputs, :outputs, :activation, :budget,
-                    :tool_scope, :labels, :origin
+                    :tool_scope, :labels, :origin, :minting_authority, :sensitive_input_policy
                 )""",
                 {
                     "id": d["id"],
@@ -378,13 +442,17 @@ class SQLiteStore:
                     "tool_scope": json.dumps(list(d["tool_scope"])),
                     "labels": json.dumps(list(d["labels"])),
                     "origin": d["origin"],
+                    "minting_authority": json.dumps(list(d["minting_authority"])),
+                    "sensitive_input_policy": (
+                        json.dumps(d["sensitive_input_policy"], sort_keys=True)
+                        if d["sensitive_input_policy"] is not None
+                        else None
+                    ),
                 },
             )
 
     def get_contract(self, contract_id: str) -> Optional[Contract]:
-        cur = self._conn.execute(
-            "SELECT * FROM contracts WHERE id = ?", (contract_id,)
-        )
+        cur = self._conn.execute("SELECT * FROM contracts WHERE id = ?", (contract_id,))
         row = cur.fetchone()
         return self._row_to_contract(row) if row else None
 
@@ -398,11 +466,37 @@ class SQLiteStore:
 
     def append_trace_entry(self, entry) -> None:
         """Insert a TraceEntry into the trace_events table."""
-        from aigineering.protocol.wire import trace_entry_to_dict
-        d = trace_entry_to_dict(entry)
         with self._conn:
-            self._conn.execute(
-                """INSERT INTO trace_events (
+            self._insert_trace_entry(entry)
+
+    def append(self, entry: TraceEntry) -> None:
+        """TraceStoreProtocol-compatible append."""
+        self.append_trace_entry(entry)
+
+    def new_entry(
+        self, contract_id: str, event_type: str, **kwargs: object
+    ) -> TraceEntry:
+        """TraceStoreProtocol-compatible helper."""
+        from aigineering.core.trace import create_entry
+
+        parent_id = kwargs.get("parent_id")
+        if parent_id is None:
+            existing = self.get_trace_events(contract_id)
+            if existing:
+                kwargs["parent_id"] = existing[-1].id
+        entry = create_entry(
+            contract_id=contract_id,
+            event_type=event_type,
+            sequence=len(self.get_trace_events()),
+            **kwargs,  # type: ignore[arg-type]
+        )
+        self.append_trace_entry(entry)
+        return entry
+
+    def _insert_trace_entry(self, entry: TraceEntry) -> None:
+        d = trace_entry_to_dict(entry)
+        self._conn.execute(
+            """INSERT OR REPLACE INTO trace_events (
                     id, parent_id, contract_id, event_type,
                     disclosed_assets, accepted_fragments, accepted_asset_names,
                     rejected_fragments, worker_id, candidate_raw,
@@ -415,9 +509,11 @@ class SQLiteStore:
                     :authority_policy, :authority_result, :budget_remaining,
                     :relation_type, :relation_target, :timestamp
                 )""",
-                {k: json.dumps(v) if isinstance(v, (list, dict, tuple)) else v
-                 for k, v in d.items()},
-            )
+            {
+                k: json.dumps(v) if isinstance(v, (list, dict, tuple)) else v
+                for k, v in d.items()
+            },
+        )
 
     def get_trace_events(self, contract_id: str | None = None) -> list:
         """Return trace entries, optionally filtered by contract_id."""
@@ -430,10 +526,31 @@ class SQLiteStore:
             cur = self._conn.execute("SELECT * FROM trace_events ORDER BY rowid")
         return [self._row_to_trace_entry(row) for row in cur.fetchall()]
 
+    def get_by_contract(self, contract_id: str) -> list[TraceEntry]:
+        return self.get_trace_events(contract_id)
+
+    def get_by_event_type(self, event_type: str) -> list[TraceEntry]:
+        cur = self._conn.execute(
+            "SELECT * FROM trace_events WHERE event_type = ? ORDER BY rowid",
+            (event_type,),
+        )
+        return [self._row_to_trace_entry(row) for row in cur.fetchall()]
+
+    def get_all(self) -> list[TraceEntry]:
+        return self.get_trace_events()
+
+    def get_reverse_lineage(self, asset_id: str) -> list[TraceEntry]:
+        return [
+            entry
+            for entry in self.get_trace_events()
+            if asset_id in entry.accepted_fragments
+        ]
+
     def _row_to_trace_entry(self, row: sqlite3.Row):
         """Convert a trace_events row to a TraceEntry."""
         from aigineering.protocol.types import TraceEntry
         import json as _json
+
         return TraceEntry(
             id=row["id"],
             parent_id=row["parent_id"],
@@ -457,36 +574,207 @@ class SQLiteStore:
     # Claim persistence (040 C4, G8)
     # ------------------------------------------------------------------
 
-    def persist_claim(self, claim_id: str, contract_id: str, worker_id: str,
-                      lease_until: str, status: str = "active") -> None:
-        """Persist a claim record to survive restarts."""
+    def persist_claim(
+        self,
+        claim_id: str,
+        contract_id: str,
+        worker_id: str,
+        lease_until: str,
+        status: str = "active",
+        package_id: str = "",
+    ) -> None:
+        """Persist a worker lease claim to survive restarts."""
+        now = now_iso()
         with self._conn:
             self._conn.execute(
-                "INSERT OR REPLACE INTO claims (id, source_asset_id, "
-                "replacement_asset_id, definition_hash, claim_type, "
-                "signed_by, provenance_seal, lineage_id) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (claim_id, contract_id, worker_id, lease_until, status, "", "", ""),
+                """INSERT INTO worker_claims (
+                    claim_id, contract_id, worker_id, lease_until, status,
+                    package_id, created_at, updated_at
+                ) VALUES (
+                    ?, ?, ?, ?, ?, ?, ?, ?
+                )
+                ON CONFLICT(claim_id) DO UPDATE SET
+                    contract_id = excluded.contract_id,
+                    worker_id = excluded.worker_id,
+                    lease_until = excluded.lease_until,
+                    status = excluded.status,
+                    package_id = excluded.package_id,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    claim_id,
+                    contract_id,
+                    worker_id,
+                    lease_until,
+                    status,
+                    package_id,
+                    now,
+                    now,
+                ),
             )
 
     def get_claim(self, contract_id: str) -> dict | None:
         """Return the active claim for *contract_id*, or None."""
         cur = self._conn.execute(
-            "SELECT id, source_asset_id, replacement_asset_id, "
-            "definition_hash, claim_type FROM claims "
-            "WHERE source_asset_id = ? ORDER BY rowid DESC LIMIT 1",
+            "SELECT claim_id, contract_id, worker_id, lease_until, status, package_id "
+            "FROM worker_claims WHERE contract_id = ? "
+            "ORDER BY CASE WHEN status = 'active' THEN 0 ELSE 1 END, rowid DESC LIMIT 1",
             (contract_id,),
         )
         row = cur.fetchone()
         if row is None:
             return None
         return {
-            "claim_id": row["id"],
-            "contract_id": row["source_asset_id"],
-            "worker_id": row["replacement_asset_id"],
-            "lease_until": row["definition_hash"],
-            "status": row["claim_type"],
+            "claim_id": row["claim_id"],
+            "contract_id": row["contract_id"],
+            "worker_id": row["worker_id"],
+            "lease_until": row["lease_until"],
+            "status": row["status"],
+            "package_id": row["package_id"],
         }
+
+    def claim_contract(
+        self,
+        contract_id: str,
+        worker_id: str,
+        lease_seconds: int = 60,
+        package_id: str = "",
+    ) -> dict | None:
+        """Atomically claim *contract_id* for *worker_id* if no active claim exists."""
+        from datetime import datetime, timedelta, timezone
+
+        now = datetime.now(timezone.utc)
+        lease_until = (now + timedelta(seconds=lease_seconds)).isoformat()
+        claim_id = f"lease:{compute_content_hash(f'{contract_id}|{worker_id}|{now.isoformat()}')}"
+        try:
+            with self._conn:
+                active = self._conn.execute(
+                    "SELECT claim_id, lease_until FROM worker_claims "
+                    "WHERE contract_id = ? AND status = 'active' ORDER BY rowid DESC LIMIT 1",
+                    (contract_id,),
+                ).fetchone()
+                if active is not None:
+                    try:
+                        active_until = datetime.fromisoformat(active["lease_until"])
+                        if active_until.tzinfo is None:
+                            active_until = active_until.replace(tzinfo=timezone.utc)
+                    except ValueError:
+                        active_until = now
+                    if active_until >= now:
+                        return None
+                    self._conn.execute(
+                        "UPDATE worker_claims SET status = 'expired', updated_at = ? "
+                        "WHERE claim_id = ?",
+                        (now_iso(), active["claim_id"]),
+                    )
+                self._conn.execute(
+                    """INSERT INTO worker_claims (
+                        claim_id, contract_id, worker_id, lease_until, status,
+                        package_id, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, 'active', ?, ?, ?)""",
+                    (
+                        claim_id,
+                        contract_id,
+                        worker_id,
+                        lease_until,
+                        package_id,
+                        now_iso(),
+                        now_iso(),
+                    ),
+                )
+        except sqlite3.IntegrityError:
+            return None
+        return self.get_claim(contract_id)
+
+    def mark_claim_submitted(self, claim_id: str) -> None:
+        with self._conn:
+            self._conn.execute(
+                "UPDATE worker_claims SET status = 'submitted', updated_at = ? "
+                "WHERE claim_id = ?",
+                (now_iso(), claim_id),
+            )
+
+    def get_idempotency(self, contract_id: str, idempotency_key: str) -> dict | None:
+        cur = self._conn.execute(
+            "SELECT result_json FROM idempotency_records "
+            "WHERE contract_id = ? AND idempotency_key = ?",
+            (contract_id, idempotency_key),
+        )
+        row = cur.fetchone()
+        return json.loads(row["result_json"]) if row else None
+
+    def has_any_idempotency(self, contract_id: str) -> bool:
+        cur = self._conn.execute(
+            "SELECT 1 FROM idempotency_records WHERE contract_id = ? LIMIT 1",
+            (contract_id,),
+        )
+        return cur.fetchone() is not None
+
+    def set_idempotency(
+        self, contract_id: str, idempotency_key: str, result: dict
+    ) -> None:
+        self._conn.execute(
+            "INSERT OR REPLACE INTO idempotency_records "
+            "(contract_id, idempotency_key, result_json, created_at) VALUES (?, ?, ?, ?)",
+            (
+                contract_id,
+                idempotency_key,
+                json.dumps(result, sort_keys=True),
+                now_iso(),
+            ),
+        )
+
+    def commit_candidate_submission(
+        self,
+        accepted_assets: list[Asset],
+        trace_entries: list[TraceEntry],
+        idempotency_key: str,
+        idempotency_result: dict,
+        claim_id: str,
+        worker_id: str = "",
+        package_id: str = "",
+    ) -> bool:
+        """Commit accepted assets, trace, idempotency, and claim state atomically.
+
+        Returns ``False`` when a claimed submission can no longer satisfy the
+        active claim predicate at commit time.
+        """
+        with self._conn:
+            for asset in accepted_assets:
+                if not asset.signed_by or not verify_asset_seal(asset):
+                    raise ValueError(
+                        f"G3/N-P1.6: Asset '{asset.id}' rejected — missing or invalid canonical seal "
+                        f"(signed_by={asset.signed_by!r})"
+                    )
+                self._insert_asset(asset)
+            for entry in trace_entries:
+                self._insert_trace_entry(entry)
+            if idempotency_key:
+                self.set_idempotency(
+                    trace_entries[0].contract_id, idempotency_key, idempotency_result
+                )
+            if claim_id:
+                committed_at = now_iso()
+                cur = self._conn.execute(
+                    "UPDATE worker_claims SET status = 'submitted', updated_at = ? "
+                    "WHERE claim_id = ? AND status = 'active' "
+                    "AND worker_id = ? "
+                    "AND (? = '' OR package_id = ?) "
+                    "AND lease_until >= ?",
+                    (
+                        committed_at,
+                        claim_id,
+                        worker_id,
+                        package_id,
+                        package_id,
+                        committed_at,
+                    ),
+                )
+                if cur.rowcount != 1:
+                    raise sqlite3.IntegrityError(
+                        "active worker claim predicate failed during submit"
+                    )
+        return True
 
     # ------------------------------------------------------------------
     # Lifecycle

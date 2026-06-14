@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 
-import pytest
 
 from aigineering.agent.mcp_worker import MCPWorker
 from aigineering.core.capability_descriptors import create_mcp_descriptor
@@ -105,8 +104,14 @@ def test_mcp_descriptor_sealed_config():
 
     # Private config MUST NOT be in disclosed content
     private_keys = (
-        "api_key", "access_token", "secret", "password", "credential",
-        "token", "private_key", "auth",
+        "api_key",
+        "access_token",
+        "secret",
+        "password",
+        "credential",
+        "token",
+        "private_key",
+        "auth",
     )
     for key in private_keys:
         assert key not in content, (
@@ -172,6 +177,7 @@ def test_mcp_descriptor_carries_provenance():
 
     # Tampered content breaks signature verification
     from dataclasses import replace
+
     tampered = replace(descriptors[0], content="tampered content")
     assert verify_asset_seal(tampered) is False
 
@@ -197,6 +203,7 @@ def test_mcp_descriptor_carries_provenance():
 
 def test_mcp_worker_returns_candidate():
     """MCPWorker.invoke() executes a valid MCP tool call and returns a Candidate."""
+
     # Mock MCP server: callable that takes (tool_name, args) → str
     def mock_search_server(tool_name: str, args: dict) -> str:
         return json.dumps({"results": [f"hit for {args['q']}"]})
@@ -222,12 +229,15 @@ def test_mcp_worker_multi_server():
         def handler(tool_name: str, args: dict) -> str:
             calls[name].append((tool_name, args))
             return f"ok from {name}"
+
         return handler
 
-    worker = MCPWorker(mcp_servers={
-        "filesystem": make_server("filesystem"),
-        "database": make_server("database"),
-    })
+    worker = MCPWorker(
+        mcp_servers={
+            "filesystem": make_server("filesystem"),
+            "database": make_server("database"),
+        }
+    )
 
     # Call filesystem tool
     c1 = worker.invoke("filesystem.read", {"path": "/tmp"}, "c1")
@@ -261,6 +271,7 @@ def test_mcp_worker_handles_error_unknown_server():
 
 def test_mcp_worker_handles_error_tool_failure():
     """MCPWorker.invoke() returns an error Candidate when the server raises."""
+
     def failing_server(_tool_name: str, _args: dict) -> str:
         raise RuntimeError("connection refused")
 
@@ -282,6 +293,7 @@ def test_mcp_worker_candidate_not_committed_directly():
     appear in any store.  The handler must explicitly convert the
     Candidate into committed assets.
     """
+
     def mock_server(_tool_name: str, _args: dict) -> str:
         return "result"
 
@@ -305,6 +317,7 @@ def test_mcp_worker_candidate_not_committed_directly():
 
 def test_mcp_worker_parity_with_direct_call():
     """MCPWorker.invoke() produces the same result as calling the server directly."""
+
     def mock_server(tool_name: str, args: dict) -> str:
         return json.dumps({"echo": args.get("msg", "")})
 

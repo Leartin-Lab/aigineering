@@ -120,7 +120,9 @@ class JsonLStore:
                     minted_by=data.get("minted_by", ""),
                     source_uri=data.get("source_uri", ""),
                     signed_by=data.get("signed_by", ""),
-                    provenance_seal=data.get("provenance_seal", data.get("signature", "")),
+                    provenance_seal=data.get(
+                        "provenance_seal", data.get("signature", "")
+                    ),
                     definition_hash=data.get("definition_hash", ""),
                     content_hash=data.get("content_hash", ""),
                     promptable=data.get("promptable", True),
@@ -162,6 +164,7 @@ class JsonLStore:
                     tool_scope=data.get("tool_scope", []),
                     labels=data.get("labels", []),
                     origin=data.get("origin", "human"),
+                    minting_authority=data.get("minting_authority", []),
                     sensitive_input_policy=data.get("sensitive_input_policy"),
                 )
                 self.contracts[contract.id] = contract
@@ -193,7 +196,9 @@ class JsonLStore:
                 ]
             if existing.created_by and existing.created_by in self._created_by_index:
                 self._created_by_index[existing.created_by] = [
-                    aid for aid in self._created_by_index[existing.created_by] if aid != asset.id
+                    aid
+                    for aid in self._created_by_index[existing.created_by]
+                    if aid != asset.id
                 ]
         self.assets[asset.id] = asset
         self._name_index.setdefault(asset.name, []).append(asset.id)

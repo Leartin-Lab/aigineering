@@ -11,11 +11,16 @@ from aigineering.core.verification import batch_verify_definition
 
 @click.command("verify")
 @click.option(
-    "--definition-hash", "def_hash", required=True,
+    "--definition-hash",
+    "def_hash",
+    required=True,
     help="Definition hash (def:<hex>) to verify content hashes for.",
 )
 @click.option(
-    "--json", "json_output", is_flag=True, default=False,
+    "--json",
+    "json_output",
+    is_flag=True,
+    default=False,
     help="Output machine-readable JSON instead of human-readable text.",
 )
 def verify(def_hash: str, json_output: bool) -> None:
@@ -46,9 +51,17 @@ def verify(def_hash: str, json_output: bool) -> None:
 
 
 @click.command("readiness")
-@click.option("--contract", "contract_id", required=True, help="Contract ID to check readiness for")
 @click.option(
-    "--json", "json_output", is_flag=True, default=False,
+    "--contract",
+    "contract_id",
+    required=True,
+    help="Contract ID to check readiness for",
+)
+@click.option(
+    "--json",
+    "json_output",
+    is_flag=True,
+    default=False,
     help="Output machine-readable JSON instead of human-readable text.",
 )
 def readiness(
@@ -79,7 +92,7 @@ def readiness(
     if report["stale_assets"]:
         click.echo(f"  Stale assets:    {report['stale_assets']}")
     if report["version_conflicts"]:
-        click.echo(f"  Version conflicts:")
+        click.echo("  Version conflicts:")
         for vc in report["version_conflicts"]:
             click.echo(f"    def_hash={vc['definition_hash']} names={vc['names']}")
     if report["trust_gaps"]:

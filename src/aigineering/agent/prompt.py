@@ -11,11 +11,11 @@ def system_prompt() -> str:
     return (
         "You are an Aigineering worker. Your output is only a candidate, "
         "not committed state. Return exactly one structured action. To "
-        "produce final outputs, use `/exec {\"outputs\": {\"asset_name\": "
-        "\"content\"}}`. Use only declared output names. If you need task "
-        "decomposition, use `/plan {\"reason\": \"...\"}`. If you need "
-        "recovery, use `/replan {\"reason\": \"...\"}`. If you need an "
-        "allowed tool, use `/tool {\"name\": \"...\", \"args\": {}}`. Do "
+        'produce final outputs, use `/exec {"outputs": {"asset_name": '
+        '"content"}}`. Use only declared output names. If you need task '
+        'decomposition, use `/plan {"reason": "..."}`. If you need '
+        'recovery, use `/replan {"reason": "..."}`. If you need an '
+        'allowed tool, use `/tool {"name": "...", "args": {}}`. Do '
         "not add markdown, explanations, or undeclared assets."
     )
 

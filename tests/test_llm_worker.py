@@ -24,6 +24,7 @@ from aigineering.protocol.types import Asset, Contract
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _ok_transport(url, headers, payload):
     return {"choices": [{"message": {"content": "report: ok"}}]}
 
@@ -55,6 +56,7 @@ def _make_transport_with_retry(errors_before_success):
 # ---------------------------------------------------------------------------
 # Existing tests (kept as-is)
 # ---------------------------------------------------------------------------
+
 
 def test_llm_worker_satisfies_worker_protocol():
     worker = LLMWorker(model="test-model", transport=_ok_transport)
@@ -112,6 +114,7 @@ def test_llm_worker_requires_key_for_default_transport():
 # LLMConfig tests
 # ---------------------------------------------------------------------------
 
+
 def test_llmconfig_defaults():
     cfg = LLMConfig(model="gpt-4.1")
     assert cfg.model == "gpt-4.1"
@@ -146,6 +149,7 @@ def test_llm_worker_config_with_api_key():
 # ProviderError tests
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.parametrize(
     "status_code, expected_retryable",
     [
@@ -173,6 +177,7 @@ def test_provider_error_retryability(status_code, expected_retryable):
 # Retry logic tests
 # ---------------------------------------------------------------------------
 
+
 def test_retry_on_429_succeeds():
     """Simulate one 429 then success — verify retry happens and succeeds."""
     transport, call_log = _make_transport_with_retry([ProviderError(429, "rate limit")])
@@ -185,13 +190,14 @@ def test_retry_on_429_succeeds():
     candidate = worker.invoke(_min_contract(), [])
 
     assert candidate.raw_output == "report: ok"
-    assert len(call_log) == 2           # called twice: 429, then success
+    assert len(call_log) == 2  # called twice: 429, then success
     assert call_log[0].get("error") is not None
     assert "error" not in call_log[1]
 
 
 def test_no_retry_on_400():
     """Simulate a 400 — verify immediate error with NO retry."""
+
     def transport(url, headers, payload):
         raise ProviderError(400, "bad request")
 
@@ -224,6 +230,7 @@ def test_timeout_retry():
 
 def test_max_retries_exceeded():
     """All retries fail — verify ProviderError is raised after exhausting retries."""
+
     def transport(url, headers, payload):
         raise ProviderError(503, "service unavailable")
 
@@ -262,7 +269,9 @@ def test_backoff_increases_with_attempts():
 
 def test_retry_on_5xx_retries():
     """Simulate one 502 then success — retry should happen."""
-    transport, call_log = _make_transport_with_retry([ProviderError(502, "bad gateway")])
+    transport, call_log = _make_transport_with_retry(
+        [ProviderError(502, "bad gateway")]
+    )
 
     worker = LLMWorker(model="test-model", transport=transport, max_retries=3)
     candidate = worker.invoke(_min_contract(), [])
@@ -274,8 +283,10 @@ def test_retry_on_5xx_retries():
 # Usage metadata tests
 # ---------------------------------------------------------------------------
 
+
 def test_usage_metadata_captured():
     """Mock response with usage — verify metadata is tracked in Candidate."""
+
     def transport(url, headers, payload):
         return {
             "choices": [{"message": {"content": "report: ok"}}],
@@ -298,6 +309,7 @@ def test_usage_metadata_captured():
 
 def test_usage_metadata_none_when_absent():
     """No usage field in response — metadata should be None."""
+
     def transport(url, headers, payload):
         return {"choices": [{"message": {"content": "report: ok"}}]}
 
@@ -308,6 +320,7 @@ def test_usage_metadata_none_when_absent():
 
 def test_usage_metadata_partial_tokens():
     """Usage present but missing prompt/completion tokens — metadata should be None."""
+
     def transport(url, headers, payload):
         return {
             "choices": [{"message": {"content": "report: ok"}}],
@@ -320,9 +333,15 @@ def test_usage_metadata_partial_tokens():
 
 
 def test_extract_usage_valid():
-    usage = _extract_usage({"usage": {"prompt_tokens": 1, "completion_tokens": 2, "total_tokens": 3}})
+    usage = _extract_usage(
+        {"usage": {"prompt_tokens": 1, "completion_tokens": 2, "total_tokens": 3}}
+    )
     assert usage is not None
-    assert dict(usage) == {"prompt_tokens": 1, "completion_tokens": 2, "total_tokens": 3}
+    assert dict(usage) == {
+        "prompt_tokens": 1,
+        "completion_tokens": 2,
+        "total_tokens": 3,
+    }
 
 
 def test_extract_usage_missing():
@@ -335,8 +354,10 @@ def test_extract_usage_missing():
 # Metadata immutability test
 # ---------------------------------------------------------------------------
 
+
 def test_candidate_metadata_is_mappingproxy():
     """Metadata stored on Candidate must be an immutable MappingProxyType."""
+
     def transport(url, headers, payload):
         return {
             "choices": [{"message": {"content": "ok"}}],
@@ -345,7 +366,9 @@ def test_candidate_metadata_is_mappingproxy():
 
     worker = LLMWorker(model="test-model", transport=transport)
     candidate = worker.invoke(_min_contract(), [])
-    assert candidate.metadata is None or isinstance(candidate.metadata, MappingProxyType)
+    assert candidate.metadata is None or isinstance(
+        candidate.metadata, MappingProxyType
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -366,6 +389,7 @@ _SAMPLE_TOOL_CALLS = [
 
 def test_tool_calls_mapped_to_method_requests():
     """Simulate tool_calls from provider → /tool method request format."""
+
     def transport(url, headers, payload):
         return {
             "choices": [
@@ -390,6 +414,7 @@ def test_tool_calls_mapped_to_method_requests():
 
 def test_tool_calls_never_execute_directly():
     """Tool calls go through method dispatch, never executed by provider."""
+
     def transport(url, headers, payload):
         return {
             "choices": [
@@ -414,6 +439,7 @@ def test_tool_calls_never_execute_directly():
 
 def test_tool_call_format_valid():
     """Output matches expected /tool action format."""
+
     def transport(url, headers, payload):
         return {
             "choices": [
@@ -442,6 +468,7 @@ def test_tool_call_format_valid():
 
 def test_content_response_unchanged_without_tool_calls():
     """Text-only responses (no tool_calls) still work as before."""
+
     def transport(url, headers, payload):
         return {"choices": [{"message": {"content": "report: ok"}}]}
 
@@ -454,6 +481,7 @@ def test_content_response_unchanged_without_tool_calls():
 
 def test_tool_calls_take_priority_over_content():
     """When both content and tool_calls present, tool_calls win."""
+
     def transport(url, headers, payload):
         return {
             "choices": [
@@ -673,6 +701,7 @@ def test_tool_calls_go_through_method_dispatch_e2e():
     resumes, the second invocation produces the declared output.
     """
     from aigineering.core.engine import Engine
+    from aigineering.core.capability_descriptors import create_tool_descriptor
     from aigineering.core.store import MemoryStore
     from aigineering.core.tools import ToolRegistry
     from aigineering.core.trace import TraceStore
@@ -717,6 +746,14 @@ def test_tool_calls_go_through_method_dispatch_e2e():
     tools = ToolRegistry()
     tools.register(ToolSpec(name="lookup"), lambda args: f"value:{args['key']}")
     store = MemoryStore()
+    store.add_asset(
+        create_tool_descriptor(
+            "lookup",
+            "Lookup test values.",
+            {"type": "object"},
+            trust_tier="configured",
+        )
+    )
     trace_store = TraceStore()
     contract = Contract(
         id="contract_native_tool",
@@ -744,6 +781,7 @@ def test_tool_calls_go_through_method_dispatch_e2e():
 # ---------------------------------------------------------------------------
 # Edge-case reliability tests (v0.4.5)
 # ---------------------------------------------------------------------------
+
 
 def test_timeout_triggers_retry_with_backoff():
     """socket.timeout triggers retry with increasing backoff delays."""
@@ -827,6 +865,7 @@ def test_5xx_transient_retries_up_to_max():
 
 def test_malformed_structured_output_handled():
     """LLM returns a response missing message content — graceful error, not crash."""
+
     def transport(url, headers, payload):
         # Response has choices but no message with content
         return {"choices": [{"index": 0, "finish_reason": "stop"}]}
@@ -839,6 +878,7 @@ def test_malformed_structured_output_handled():
 
 def test_malformed_response_empty_choices_handled():
     """Empty choices list raises ValueError gracefully."""
+
     def transport(url, headers, payload):
         return {"choices": []}
 
@@ -850,6 +890,7 @@ def test_malformed_response_empty_choices_handled():
 
 def test_malformed_response_no_choices_key():
     """Missing choices key raises ValueError gracefully."""
+
     def transport(url, headers, payload):
         return {"data": "some unexpected structure"}
 
@@ -861,6 +902,7 @@ def test_malformed_response_no_choices_key():
 
 def test_provider_tool_call_mapping_preserves_authority():
     """Tool calls go through /tool format, preserving name and args exactly."""
+
     def transport(url, headers, payload):
         return {
             "choices": [
@@ -899,6 +941,7 @@ def test_provider_tool_call_mapping_preserves_authority():
 
 def test_multiple_tool_calls_in_one_response():
     """Multiple tool_calls in one response → only the first is used for the action."""
+
     def transport(url, headers, payload):
         return {
             "choices": [

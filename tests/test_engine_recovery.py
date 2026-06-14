@@ -76,10 +76,12 @@ def test_save_restore_preserves_method_context():
     """Method context assets survive save/restore roundtrip."""
     store = MemoryStore()
     trace_store = TraceStore()
-    worker = SequenceWorker([
-        '/tool {"name": "lookup", "args": {"key": "x"}}',
-        '/exec {"outputs": {"report": "done after tool"}}',
-    ])
+    worker = SequenceWorker(
+        [
+            '/tool {"name": "lookup", "args": {"key": "x"}}',
+            '/exec {"outputs": {"report": "done after tool"}}',
+        ]
+    )
     tools = ToolRegistry()
     tools.register(ToolSpec(name="lookup"), lambda args: f"value:{args['key']}")
 
@@ -146,10 +148,12 @@ def test_recovery_after_tool_observation():
     """Engine with tool observation → save → restore → observation preserved."""
     store = MemoryStore()
     trace_store = TraceStore()
-    worker = SequenceWorker([
-        '/tool {"name": "lookup", "args": {"key": "x"}}',
-        '/exec {"outputs": {"report": "final after tool"}}',
-    ])
+    worker = SequenceWorker(
+        [
+            '/tool {"name": "lookup", "args": {"key": "x"}}',
+            '/exec {"outputs": {"report": "final after tool"}}',
+        ]
+    )
     tools = ToolRegistry()
     tools.register(ToolSpec(name="lookup"), lambda args: f"value:{args['key']}")
 
@@ -205,11 +209,13 @@ def test_recovery_after_plan_expansion():
         },
         sort_keys=True,
     )
-    worker = SequenceWorker([
-        '/plan {"reason": "split work"}',
-        f'/exec {{"outputs": {{"_plan_result_contract_parent": {json.dumps(plan_content)}}}}}',
-        "",
-    ])
+    worker = SequenceWorker(
+        [
+            '/plan {"reason": "split work"}',
+            f'/exec {{"outputs": {{"_plan_result_contract_parent": {json.dumps(plan_content)}}}}}',
+            "",
+        ]
+    )
     store = MemoryStore()
     trace_store = TraceStore()
     contract = Contract(
@@ -269,8 +275,15 @@ def test_recovery_after_accepted_projection():
     )
     contract = Contract(
         id=hash_contract(
-            "build_report", "", ["data_file", "citation_db"],
-            ["final_report"], "data_file AND citation_db", 5, [], [], "human"
+            "build_report",
+            "",
+            ["data_file", "citation_db"],
+            ["final_report"],
+            "data_file AND citation_db",
+            5,
+            [],
+            [],
+            "human",
         ),
         name="build_report",
         inputs=["data_file", "citation_db"],
@@ -320,9 +333,7 @@ def test_recovery_after_rejected_candidate():
         content="y",
     )
     contract = Contract(
-        id=hash_contract(
-            "test", "", ["x"], ["final_report"], "x", 5, [], [], "human"
-        ),
+        id=hash_contract("test", "", ["x"], ["final_report"], "x", 5, [], [], "human"),
         name="test",
         inputs=["x"],
         outputs=["final_report"],
@@ -423,10 +434,12 @@ def test_restore_from_store_with_tool_observation():
     """restore_from_store preserves tool observation in method context."""
     store = MemoryStore()
     trace_store = TraceStore()
-    worker = SequenceWorker([
-        '/tool {"name": "lookup", "args": {"key": "x"}}',
-        '/exec {"outputs": {"report": "final after tool"}}',
-    ])
+    worker = SequenceWorker(
+        [
+            '/tool {"name": "lookup", "args": {"key": "x"}}',
+            '/exec {"outputs": {"report": "final after tool"}}',
+        ]
+    )
     tools = ToolRegistry()
     tools.register(ToolSpec(name="lookup"), lambda args: f"value:{args['key']}")
 
@@ -469,11 +482,13 @@ def test_restore_from_store_with_plan_expansion():
         },
         sort_keys=True,
     )
-    worker = SequenceWorker([
-        '/plan {"reason": "split work"}',
-        f'/exec {{"outputs": {{"_plan_result_contract_parent": {json.dumps(plan_content)}}}}}',
-        "",
-    ])
+    worker = SequenceWorker(
+        [
+            '/plan {"reason": "split work"}',
+            f'/exec {{"outputs": {{"_plan_result_contract_parent": {json.dumps(plan_content)}}}}}',
+            "",
+        ]
+    )
     store = MemoryStore()
     trace_store = TraceStore()
     contract = Contract(

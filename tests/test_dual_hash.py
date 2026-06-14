@@ -13,7 +13,9 @@ def store(request, tmp_path):
     if request.param == "memory":
         return MemoryStore()
     else:
-        return JsonLStore(str(tmp_path / "assets.jsonl"), str(tmp_path / "contracts.jsonl"))
+        return JsonLStore(
+            str(tmp_path / "assets.jsonl"), str(tmp_path / "contracts.jsonl")
+        )
 
 
 def test_definition_hash_is_set_on_creation():

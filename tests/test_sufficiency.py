@@ -16,6 +16,7 @@ from aigineering.protocol.types import Asset, Contract
 
 # ── Helpers ──────────────────────────────────────────────────────────────
 
+
 def _make_contract(name="test_contract", inputs=None, outputs=None):
     return Contract(
         id=f"task:contract_{name}",
@@ -399,7 +400,9 @@ def test_tombstoned_asset_not_flagged_as_trust_gap():
     """A tombstoned asset with low trust should be a stale issue, not a trust gap."""
     contract = _make_contract(inputs=["stale_low_trust"])
     store = MemoryStore()
-    store.add_asset(_make_asset("stale_low_trust", "old", trust_tier="untrusted", tombstoned=True))
+    store.add_asset(
+        _make_asset("stale_low_trust", "old", trust_tier="untrusted", tombstoned=True)
+    )
 
     report = check_sufficiency(contract, store)
 

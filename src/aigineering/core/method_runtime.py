@@ -9,8 +9,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from aigineering.core.ids import hash_contract
-from aigineering.core.methods import method_contract, system_asset
+from aigineering.core.methods import (
+    method_context_content,
+    method_contract,
+    system_asset,
+)
 from aigineering.core.provenance import sign_asset
 
 if TYPE_CHECKING:
@@ -45,7 +48,9 @@ class MethodRuntime:
         self._budget = budget
         self._tools = tools
         self._suspended: set[str] = suspended if suspended is not None else set()
-        self._method_scheduled: set[str] = method_scheduled if method_scheduled is not None else set()
+        self._method_scheduled: set[str] = (
+            method_scheduled if method_scheduled is not None else set()
+        )
 
     # -- Contract management -------------------------------------------------
 
@@ -111,6 +116,7 @@ class MethodRuntime:
         Replaces direct ``engine._add_trace(...)`` calls.
         """
         from aigineering.core.trace import create_entry
+
         entry = create_entry(contract_id=contract_id, event_type=event_type, **kwargs)
         self._trace.append(entry)
 
@@ -147,8 +153,8 @@ class MethodRuntime:
 
         # Create method context asset
         ctx = system_asset(
-            name=f"_method_ctx_{child.id}",
-            content=candidate.raw_output,
+            name=f"_method_ctx_{parent_contract.id}",
+            content=method_context_content(parent_contract, action, child),
             created_by=parent_contract.id,
         )
         signed_ctx = sign_asset(ctx)
