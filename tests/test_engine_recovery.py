@@ -3,8 +3,12 @@
 import json
 
 from aigineering.agent.mock import MockWorker
+from aigineering.core.capability_descriptors import create_tool_descriptor
 from aigineering.core.engine import Engine
 from aigineering.core.ids import hash_asset_content, hash_contract
+from aigineering.core.method_handlers.plan import PlanMethodHandler
+from aigineering.core.method_handlers.tool import ToolMethodHandler
+from aigineering.core.method_registry import MethodRegistry
 from aigineering.core.store import MemoryStore
 from aigineering.core.tools import ToolRegistry
 from aigineering.core.trace import TraceStore
@@ -24,6 +28,15 @@ class SequenceWorker:
         from aigineering.protocol.types import Candidate
 
         return Candidate(worker_id=self.worker_id, raw_output=raw_output)
+
+
+def _method_registry(*methods: str) -> MethodRegistry:
+    registry = MethodRegistry()
+    if "plan" in methods:
+        registry.register("plan", PlanMethodHandler())
+    if "tool" in methods:
+        registry.register("tool", ToolMethodHandler())
+    return registry
 
 
 # ── save_state / restore roundtrip ────────────────────────────────────
@@ -84,6 +97,22 @@ def test_save_restore_preserves_method_context():
     )
     tools = ToolRegistry()
     tools.register(ToolSpec(name="lookup"), lambda args: f"value:{args['key']}")
+    store.add_asset(
+        create_tool_descriptor(
+            "lookup",
+            "Lookup test values.",
+            {"type": "object"},
+            trust_tier="configured",
+        )
+    )
+    store.add_asset(
+        create_tool_descriptor(
+            "lookup",
+            "Lookup test values.",
+            {"type": "object"},
+            trust_tier="configured",
+        )
+    )
 
     contract = Contract(
         id="contract_parent",
@@ -93,13 +122,26 @@ def test_save_restore_preserves_method_context():
         budget=5,
         tool_scope=["lookup"],
     )
-    engine = Engine(store, worker, trace_store, tools=tools)
+    engine = Engine(
+        store,
+        worker,
+        trace_store,
+        tools=tools,
+        method_registry=_method_registry("tool"),
+    )
     engine.add_contract(contract)
     engine.run()
 
     state = engine.save_state()
 
-    engine2 = Engine.restore(store, worker, state, trace_store=trace_store, tools=tools)
+    engine2 = Engine.restore(
+        store,
+        worker,
+        state,
+        trace_store=trace_store,
+        tools=tools,
+        method_registry=_method_registry("tool"),
+    )
 
     # Method context should contain the tool observation asset
     assert contract.id in engine2._method_context
@@ -124,7 +166,12 @@ def test_recovery_after_method_scheduling():
         activation="",
         budget=5,
     )
-    engine = Engine(store, worker, trace_store)
+    engine = Engine(
+        store,
+        worker,
+        trace_store,
+        method_registry=_method_registry("plan"),
+    )
     engine.add_contract(contract)
     engine.run()
 
@@ -156,6 +203,14 @@ def test_recovery_after_tool_observation():
     )
     tools = ToolRegistry()
     tools.register(ToolSpec(name="lookup"), lambda args: f"value:{args['key']}")
+    store.add_asset(
+        create_tool_descriptor(
+            "lookup",
+            "Lookup test values.",
+            {"type": "object"},
+            trust_tier="configured",
+        )
+    )
 
     contract = Contract(
         id="contract_parent",
@@ -165,7 +220,13 @@ def test_recovery_after_tool_observation():
         budget=5,
         tool_scope=["lookup"],
     )
-    engine = Engine(store, worker, trace_store, tools=tools)
+    engine = Engine(
+        store,
+        worker,
+        trace_store,
+        tools=tools,
+        method_registry=_method_registry("tool"),
+    )
     engine.add_contract(contract)
     engine.run()
 
@@ -175,7 +236,14 @@ def test_recovery_after_tool_observation():
 
     state = engine.save_state()
 
-    engine2 = Engine.restore(store, worker, state, trace_store=trace_store, tools=tools)
+    engine2 = Engine.restore(
+        store,
+        worker,
+        state,
+        trace_store=trace_store,
+        tools=tools,
+        method_registry=_method_registry("tool"),
+    )
 
     # Verify method context contains the tool observation asset (by name, not ID)
     ctx_assets = engine2._method_context.get(contract.id, [])
@@ -225,7 +293,12 @@ def test_recovery_after_plan_expansion():
         activation="",
         budget=5,
     )
-    engine = Engine(store, worker, trace_store)
+    engine = Engine(
+        store,
+        worker,
+        trace_store,
+        method_registry=_method_registry("plan"),
+    )
     engine.add_contract(contract)
     engine.run()
 
@@ -238,7 +311,13 @@ def test_recovery_after_plan_expansion():
 
     state = engine.save_state()
 
-    engine2 = Engine.restore(store, worker, state, trace_store=trace_store)
+    engine2 = Engine.restore(
+        store,
+        worker,
+        state,
+        trace_store=trace_store,
+        method_registry=_method_registry("plan"),
+    )
 
     # Restored engine should see same completed/suspended state
     assert engine2._completed == engine._completed
@@ -451,11 +530,23 @@ def test_restore_from_store_with_tool_observation():
         budget=5,
         tool_scope=["lookup"],
     )
-    engine = Engine(store, worker, trace_store, tools=tools)
+    engine = Engine(
+        store,
+        worker,
+        trace_store,
+        tools=tools,
+        method_registry=_method_registry("tool"),
+    )
     engine.add_contract(contract)
     engine.run()
 
-    engine2 = Engine.restore_from_store(store, worker, trace_store, tools=tools)
+    engine2 = Engine.restore_from_store(
+        store,
+        worker,
+        trace_store,
+        tools=tools,
+        method_registry=_method_registry("tool"),
+    )
 
     assert contract.id in engine2._completed
     assert engine2._budget == engine._budget
@@ -498,11 +589,21 @@ def test_restore_from_store_with_plan_expansion():
         activation="",
         budget=5,
     )
-    engine = Engine(store, worker, trace_store)
+    engine = Engine(
+        store,
+        worker,
+        trace_store,
+        method_registry=_method_registry("plan"),
+    )
     engine.add_contract(contract)
     engine.run()
 
-    engine2 = Engine.restore_from_store(store, worker, trace_store)
+    engine2 = Engine.restore_from_store(
+        store,
+        worker,
+        trace_store,
+        method_registry=_method_registry("plan"),
+    )
 
     assert engine2._budget == engine._budget
     assert engine2._completed == engine._completed
