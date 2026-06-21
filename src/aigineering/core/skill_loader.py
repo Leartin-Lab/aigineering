@@ -125,6 +125,17 @@ class SkillLoader:
                 )
         if "content_file" in data and not isinstance(data["content_file"], str):
             raise ValueError(f"{manifest_path}: content_file must be a string")
+        content_file = data.get("content_file", "skill.md")
+        if Path(content_file).is_absolute():
+            raise ValueError(f"{manifest_path}: content_file must be relative")
+        skill_root = manifest_path.parent.resolve()
+        content_path = (manifest_path.parent / content_file).resolve()
+        try:
+            content_path.relative_to(skill_root)
+        except ValueError as e:
+            raise ValueError(
+                f"{manifest_path}: content_file must stay within the skill directory"
+            ) from e
 
         return SkillManifest(data, manifest_path.parent)
 
@@ -165,36 +176,7 @@ class SkillLoader:
         store.add_asset(signed_content)
         descriptors.append(signed_content)
 
-        # ── Load nested sub-skills if present ────────────────────────────
-        sub_dirs = [str(p) for p in manifest.directory.iterdir() if p.is_dir()]
-        if sub_dirs:
-            nested = _scan_dirs(sub_dirs)
-            for nested_manifest in nested:
-                descriptors.extend(self._load_one(store, nested_manifest))
-
         return descriptors
-
-
-def _scan_dirs(skill_dirs: list[str]) -> list[SkillManifest]:
-    """Scan directories for skill.toml manifests (internal helper)."""
-    manifests: list[SkillManifest] = []
-    for skill_dir in skill_dirs:
-        root = Path(skill_dir)
-        if not root.is_dir():
-            continue
-        for manifest_path in root.rglob("skill.toml"):
-            try:
-                raw = manifest_path.read_bytes()
-                data = tomllib.loads(raw.decode("utf-8"))
-            except Exception:
-                continue
-            if not isinstance(data, dict):
-                continue
-            required = _REQUIRED_MANIFEST_FIELDS
-            if not (required <= set(data.keys())):
-                continue
-            manifests.append(SkillManifest(data, manifest_path.parent))
-    return manifests
 
 
 def _is_string_list(value: object) -> bool:

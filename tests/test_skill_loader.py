@@ -92,6 +92,39 @@ class TestSkillLoaderScan:
         except ValueError as e:
             assert "capabilities must be a list of strings" in str(e)
 
+    def test_scan_rejects_content_file_path_escape(self, tmp_path: Path):
+        skill_dir = tmp_path / "escaping"
+        skill_dir.mkdir()
+        (skill_dir / "skill.toml").write_text(
+            'name = "escaping"\n'
+            'version = "0.1.0"\n'
+            'content_file = "../outside.md"\n'
+        )
+
+        loader = SkillLoader()
+        try:
+            loader.scan([str(tmp_path)])
+            assert False, "should have raised"
+        except ValueError as e:
+            assert "content_file must stay within the skill directory" in str(e)
+
+    def test_scan_rejects_absolute_content_file(self, tmp_path: Path):
+        skill_dir = tmp_path / "absolute"
+        skill_dir.mkdir()
+        outside = tmp_path / "outside.md"
+        (skill_dir / "skill.toml").write_text(
+            'name = "absolute"\n'
+            'version = "0.1.0"\n'
+            f'content_file = "{outside}"\n'
+        )
+
+        loader = SkillLoader()
+        try:
+            loader.scan([str(tmp_path)])
+            assert False, "should have raised"
+        except ValueError as e:
+            assert "content_file must be relative" in str(e)
+
 
 class TestSkillLoaderLoad:
     """Tests for SkillLoader.load()."""
@@ -146,3 +179,21 @@ class TestSkillLoaderLoad:
         store = MemoryStore()
         descriptors = load_skills(store, [str(tmp_path)])
         assert len(descriptors) == 2
+
+    def test_nested_skill_loaded_once(self, tmp_path: Path):
+        parent = tmp_path / "parent"
+        child = parent / "child"
+        child.mkdir(parents=True)
+        _write_skill_toml(parent, "parent", version="0.1.0")
+        _write_skill_toml(child, "child", version="0.1.0")
+        (parent / "skill.md").write_text("Parent skill.")
+        (child / "skill.md").write_text("Child skill.")
+
+        store = MemoryStore()
+        descriptors = load_skills(store, [str(tmp_path)])
+
+        assert len(descriptors) == 4
+        assert len(store.get_assets_by_name("_skill_capability_parent")) == 1
+        assert len(store.get_assets_by_name("_skill_content_parent")) == 1
+        assert len(store.get_assets_by_name("_skill_capability_child")) == 1
+        assert len(store.get_assets_by_name("_skill_content_child")) == 1
