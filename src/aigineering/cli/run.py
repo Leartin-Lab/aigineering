@@ -19,6 +19,14 @@ from aigineering.core.trace import JsonLTraceStore
 from aigineering.protocol.types import Session, TraceEntry
 
 
+def _parse_capabilities(capabilities_str: Optional[str]) -> frozenset[str] | None:
+    """Parse a comma-separated capabilities string into a frozenset."""
+    if capabilities_str is None:
+        return None
+    parts = [c.strip() for c in capabilities_str.split(",") if c.strip()]
+    return frozenset(parts) if parts else None
+
+
 def _output_run_json(
     contract_id: str,
     trace_ids: list[str],
@@ -58,6 +66,40 @@ def _output_run_json(
     help="OpenAI-compatible base URL when --worker llm.",
 )
 @click.option(
+    "--timeout",
+    type=float,
+    default=60.0,
+    show_default=True,
+    help="Request timeout in seconds.",
+)
+@click.option(
+    "--max-retries",
+    type=int,
+    default=3,
+    show_default=True,
+    help="Maximum retries for transient errors.",
+)
+@click.option(
+    "--capability",
+    "capabilities_str",
+    default=None,
+    help="Comma-separated provider capabilities (e.g. tool_calling,json_schema).",
+)
+@click.option(
+    "--behavior-label",
+    "behavior_labels",
+    multiple=True,
+    default=(),
+    help="Behavior label to inject (repeatable).",
+)
+@click.option(
+    "--save-config",
+    "save_config",
+    is_flag=True,
+    default=False,
+    help="Persist a sealed provider config snapshot before running.",
+)
+@click.option(
     "--json",
     "json_output",
     is_flag=True,
@@ -69,9 +111,15 @@ def run(
     worker_kind: str,
     model: Optional[str],
     base_url: str,
+    timeout: float,
+    max_retries: int,
+    capabilities_str: Optional[str],
+    behavior_labels: tuple[str, ...],
+    save_config: bool,
     json_output: bool,
 ) -> None:
     """Execute a demo contract and persist the trace to JSONL."""
+    capabilities = _parse_capabilities(capabilities_str)
     session_id = _session_id()
     trace_path = _get_trace_dir() / f"{session_id}.jsonl"
     jsonl_store = JsonLTraceStore(str(trace_path))
@@ -82,6 +130,11 @@ def run(
         worker_kind=worker_kind,
         model=model,
         base_url=base_url,
+        save_config=save_config,
+        timeout=timeout,
+        max_retries=max_retries,
+        capabilities=capabilities,
+        behavior_labels=behavior_labels,
     )
     entries = trace_store.get_by_contract(contract.id)
     trace_ids = [e.id for e in jsonl_store.get_all()]
@@ -151,18 +204,63 @@ def run(
     show_default=True,
     help="OpenAI-compatible base URL when --worker llm.",
 )
+@click.option(
+    "--timeout",
+    type=float,
+    default=60.0,
+    show_default=True,
+    help="Request timeout in seconds.",
+)
+@click.option(
+    "--max-retries",
+    type=int,
+    default=3,
+    show_default=True,
+    help="Maximum retries for transient errors.",
+)
+@click.option(
+    "--capability",
+    "capabilities_str",
+    default=None,
+    help="Comma-separated provider capabilities (e.g. tool_calling,json_schema).",
+)
+@click.option(
+    "--behavior-label",
+    "behavior_labels",
+    multiple=True,
+    default=(),
+    help="Behavior label to inject (repeatable).",
+)
+@click.option(
+    "--save-config",
+    "save_config",
+    is_flag=True,
+    default=False,
+    help="Persist a sealed provider config snapshot before running.",
+)
 def demo(
     goal: str,
     worker_kind: str,
     model: Optional[str],
     base_url: str,
+    timeout: float,
+    max_retries: int,
+    capabilities_str: Optional[str],
+    behavior_labels: tuple[str, ...],
+    save_config: bool,
 ) -> None:
     """Run a quick demo with the given goal (quickstart experience)."""
+    capabilities = _parse_capabilities(capabilities_str)
     store, trace_store, contract = _run_demo(
         goal,
         worker_kind=worker_kind,
         model=model,
         base_url=base_url,
+        save_config=save_config,
+        timeout=timeout,
+        max_retries=max_retries,
+        capabilities=capabilities,
+        behavior_labels=behavior_labels,
     )
     click.echo(f"Demo completed for goal: '{goal}'")
     click.echo(f"  Contract: {contract.name}")

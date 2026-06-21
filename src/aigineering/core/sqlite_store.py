@@ -128,6 +128,17 @@ CREATE TABLE IF NOT EXISTS claims (
 )
 """
 
+_DDL_CREATE_REPLACEMENT_CLAIMS = """
+CREATE TABLE IF NOT EXISTS replacement_claims (
+    claim_id TEXT PRIMARY KEY,
+    source_asset_id TEXT NOT NULL,
+    replacement_asset_id TEXT NOT NULL,
+    claim_type TEXT NOT NULL,
+    signed_by TEXT DEFAULT '',
+    provenance_seal TEXT DEFAULT ''
+)
+"""
+
 _DDL_CREATE_WORKER_CLAIMS = """
 CREATE TABLE IF NOT EXISTS worker_claims (
     claim_id TEXT PRIMARY KEY,
@@ -221,6 +232,7 @@ class SQLiteStore:
             _DDL_CREATE_TRACE_EVENTS,
             _DDL_CREATE_SESSIONS,
             _DDL_CREATE_CLAIMS,
+            _DDL_CREATE_REPLACEMENT_CLAIMS,
             _DDL_CREATE_WORKER_CLAIMS,
             _DDL_CREATE_IDEMPOTENCY,
         ]:
@@ -781,6 +793,53 @@ class SQLiteStore:
                         "active worker claim predicate failed during submit"
                     )
         return True
+
+    # ------------------------------------------------------------------
+    # Replacement claim persistence
+    # ------------------------------------------------------------------
+
+    def add_replacement_claim(self, claim) -> None:
+        with self._conn:
+            self._conn.execute(
+                """INSERT OR REPLACE INTO claims (
+                    id, source_asset_id, replacement_asset_id,
+                    definition_hash, claim_type, signed_by,
+                    provenance_seal, lineage_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (claim.id, claim.source_asset_id,
+                 claim.replacement_asset_id, claim.definition_hash,
+                 claim.claim_type, claim.signed_by,
+                 claim.provenance_seal, claim.lineage_id),
+            )
+
+    def get_claims_by_definition(self, definition_hash: str) -> list:
+        rows = self._conn.execute(
+            "SELECT * FROM claims WHERE definition_hash = ?",
+            (definition_hash,),
+        ).fetchall()
+        return [self._row_to_replacement_claim(r) for r in rows]
+
+    def get_claims_for_asset(self, asset_id: str) -> list:
+        rows = self._conn.execute(
+            "SELECT * FROM claims WHERE source_asset_id = ?",
+            (asset_id,),
+        ).fetchall()
+        return [self._row_to_replacement_claim(r) for r in rows]
+
+    @staticmethod
+    def _row_to_replacement_claim(row: sqlite3.Row):
+        from aigineering.protocol.types import ReplacementClaim
+
+        return ReplacementClaim(
+            id=row["id"],
+            source_asset_id=row["source_asset_id"],
+            replacement_asset_id=row["replacement_asset_id"],
+            definition_hash=row["definition_hash"],
+            claim_type=row["claim_type"],
+            signed_by=row["signed_by"],
+            provenance_seal=row["provenance_seal"],
+            lineage_id=row["lineage_id"],
+        )
 
     # ------------------------------------------------------------------
     # Lifecycle

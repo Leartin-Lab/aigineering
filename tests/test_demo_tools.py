@@ -1,4 +1,4 @@
-"""Tests for demo tools — memory-backed built-in tools (v0.4.10)."""
+"""Tests for demo tools — memory-backed built-in tools (v0.5.0-alpha.1)."""
 
 from __future__ import annotations
 

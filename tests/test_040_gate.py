@@ -1929,9 +1929,8 @@ class TestPublicDocs:
                 f"G11: README claims '{claim}' which is not yet true under 040 gate."
             )
         assert "not a security-audited production release" in readme.lower()
-        assert "alpha/experimental kernel" in readme.lower()
-        assert "v0.4.10" in readme.lower()
-        assert "experimental single-node kernel" in readme.lower()
+        assert "v0.5.0-alpha.1" in readme.lower()
+        assert "local productivity alpha" in readme.lower()
         assert "transactional worker candidate submission" in readme.lower()
 
         # Check ROADMAP
@@ -1940,7 +1939,7 @@ class TestPublicDocs:
             roadmap = f.read()
 
         roadmap_lower = roadmap.lower()
-        assert "alpha/experimental" in roadmap_lower
+        assert "local productivity alpha" in roadmap_lower
         assert "v0.5" in roadmap_lower
         assert "[x] transactional candidate submission" in roadmap_lower
         assert "not a security-audited production deployment" in roadmap_lower

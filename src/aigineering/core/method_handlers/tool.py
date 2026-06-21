@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING
 
+from aigineering.agent.mcp_executor import MCPExecutor
 from aigineering.agent.tool_executor import ToolExecutor
 from aigineering.core.capability_descriptors import verify_descriptor
 from aigineering.core.methods import method_payload
@@ -91,10 +92,38 @@ class ToolMethodHandler:
             error = "tool action missing string payload.name"
         elif tool_name not in contract.tool_scope:
             error = f"tool '{tool_name}' is not in contract.tool_scope"
+        elif tool_name.startswith("mcp:"):
+            # ── MCP tool routing ───────────────────────────────────
+            mcp_full = tool_name[4:]  # strip "mcp:"
+            server_name = mcp_full.split(".", 1)[0] if "." in mcp_full else mcp_full
+            mcp_descriptor_name = f"_mcp_{server_name}"
+            descriptors = runtime.get_assets_by_name(mcp_descriptor_name)
+            if not descriptors:
+                error = (
+                    f"MCP descriptor '{mcp_descriptor_name}' is missing "
+                    "(G10 trust gate)"
+                )
+            elif not verify_descriptor(descriptors[0], kind="mcp"):
+                error = (
+                    f"MCP descriptor '{mcp_descriptor_name}' failed "
+                    "verification (G10 trust gate)"
+                )
+            else:
+                mcp_servers = runtime.get_mcp_servers()
+                worker = MCPExecutor(mcp_servers)
+                candidate = worker.invoke(
+                    mcp_full,
+                    args if isinstance(args, dict) else {},
+                    contract.id,
+                )
+                obs = json.loads(candidate.raw_output)
+                ok = obs.get("ok", False)
+                result = obs.get("result", "")
+                error = obs.get("error", "")
         elif runtime.get_tool_registry() is None:
             error = "no ToolRegistry configured"
         else:
-            # Verify tool capability descriptor before execution (G10/D6)
+            # ── Regular tool execution ─────────────────────────────
             tool_descriptor_name = f"_tool_capability_{tool_name}"
             descriptors = runtime.get_assets_by_name(tool_descriptor_name)
             if not descriptors:

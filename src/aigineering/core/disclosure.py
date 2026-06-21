@@ -28,14 +28,21 @@ def redact_for_disclosure(asset: Asset) -> Asset:
 
 
 def compute_disclosure(contract: Contract, store: StoreLike) -> list[Asset]:
-    if not contract.inputs:
-        return []
-
     seen: set[str] = set()
     result: list[Asset] = []
 
     for input_name in contract.inputs:
         for asset in store.get_assets_by_name(input_name):
+            if not asset.promptable:
+                continue
+            if asset.id not in seen:
+                seen.add(asset.id)
+                result.append(redact_for_disclosure(asset))
+
+    # Include label-referenced assets (e.g. behavior:* labels) so that
+    # promptable behaviour assets are disclosed alongside declared inputs.
+    for label_name in contract.labels:
+        for asset in store.get_assets_by_name(label_name):
             if not asset.promptable:
                 continue
             if asset.id not in seen:

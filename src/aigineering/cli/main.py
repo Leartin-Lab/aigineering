@@ -21,7 +21,15 @@ from aigineering.cli.session import session  # noqa: E402
 from aigineering.cli.worker import worker  # noqa: E402
 from aigineering.cli.retry import retry  # noqa: E402
 from aigineering.cli.verify import verify, readiness  # noqa: E402
+from aigineering.cli.asset import asset_group  # noqa: E402
+from aigineering.cli.contract import contract_group  # noqa: E402
+from aigineering.cli.behavior import behavior_group  # noqa: E402
+from aigineering.cli.repl import repl  # noqa: E402
+from aigineering.cli.serve import serve  # noqa: E402
 
+cli.add_command(serve)
+cli.add_command(repl)
+cli.add_command(behavior_group)
 cli.add_command(run)
 cli.add_command(demo)
 cli.add_command(trace)
@@ -32,6 +40,8 @@ cli.add_command(worker)
 cli.add_command(retry)
 cli.add_command(verify)
 cli.add_command(readiness)
+cli.add_command(asset_group)
+cli.add_command(contract_group)
 
 
 def main() -> None:

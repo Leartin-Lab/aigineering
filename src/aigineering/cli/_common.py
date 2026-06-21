@@ -153,19 +153,46 @@ def _run_demo(
     worker_kind: str = "mock",
     model: Optional[str] = None,
     base_url: str = "https://api.openai.com/v1",
+    save_config: bool = False,
+    timeout: float = 60.0,
+    max_retries: int = 3,
+    capabilities: frozenset[str] | None = None,
+    behavior_labels: tuple[str, ...] = (),
 ) -> tuple[StoreProtocol, TraceStoreProtocol, Contract]:
     """Run the build_report hallucination containment demo."""
     if store is None:
         store = MemoryStore()
     if trace_store is None:
         trace_store = MemoryTraceStore()
-    worker = _build_worker(worker_kind, model, base_url)
+    worker = _build_worker(
+        worker_kind,
+        model,
+        base_url,
+        timeout=timeout,
+        max_retries=max_retries,
+        capabilities=capabilities,
+    )
     if isinstance(worker, MockWorker):
         raw_output = (
             f"final_report: Report content for goal '{goal}'\n"
             f"citation_summary: Citation summary for goal '{goal}'"
         )
         worker.set_output("build_report", raw_output)
+
+    if save_config and worker_kind == "llm" and model:
+        from aigineering.core.capability_descriptors import (
+            create_provider_config_snapshot,
+        )
+
+        config_asset = create_provider_config_snapshot(
+            provider_name="openai",
+            base_url=base_url,
+            model=model,
+            timeout=timeout,
+            max_retries=max_retries,
+            capabilities=tuple(capabilities or ()),
+        )
+        store.add_asset(config_asset)
 
     data_file = Asset(
         id=hash_asset_content("data_file", "Sample data for report generation"),
@@ -197,7 +224,7 @@ def _run_demo(
             activation="data_file AND citation_db",
             budget=5,
             tool_scope=[],
-            labels=[],
+            labels=list(behavior_labels),
             origin="human",
         ),
         name="build_report",
@@ -222,13 +249,22 @@ def _build_worker(
     worker_kind: str,
     model: Optional[str],
     base_url: str,
+    timeout: float = 60.0,
+    max_retries: int = 3,
+    capabilities: frozenset[str] | None = None,
 ) -> MockWorker | LLMWorker:
     if worker_kind == "mock":
         return MockWorker()
     if worker_kind == "llm":
         if not model:
             raise click.ClickException("--model is required when --worker llm")
-        return LLMWorker(model=model, base_url=base_url)
+        return LLMWorker(
+            model=model,
+            base_url=base_url,
+            timeout=int(timeout),
+            max_retries=max_retries,
+            capabilities=capabilities or frozenset(),
+        )
     raise click.ClickException(f"unsupported worker: {worker_kind}")
 
 

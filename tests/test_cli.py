@@ -993,7 +993,7 @@ def test_dag_output_valid_format():
 
 
 # ---------------------------------------------------------------------------
-# v0.4.10 — version metadata
+# v0.5.0-alpha.1 — version metadata
 # ---------------------------------------------------------------------------
 
 
@@ -1007,11 +1007,12 @@ class TestVersionMetadata:
         assert isinstance(__version__, str)
         assert len(__version__) > 0
         # Must be parseable as at least MAJOR.MINOR.PATCH
-        parts = __version__.split(".")
-        assert len(parts) >= 3, f"Version '{__version__}' should have at least 3 parts"
-        assert parts[0].isdigit()
-        assert parts[1].isdigit()
-        assert parts[2].split("-")[0].isdigit()  # handle 0.5.0-alpha1
+        from packaging.version import Version
+
+        parsed = Version(__version__)
+        assert parsed.major >= 0
+        assert parsed.minor >= 0
+        assert parsed.micro >= 0
 
     def test_package_version_matches_pyproject(self):
         """pyproject.toml version matches __version__ (when installed in dev)."""

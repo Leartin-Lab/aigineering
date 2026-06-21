@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Optional
 
 import click
@@ -156,8 +157,37 @@ def _print_timeline_entry(entry: TraceEntry) -> None:
     elif entry.event_type == "contracts_expanded":
         targets = entry.relation_target or ""
         click.echo(f"{prefix}← planner expanded contracts: {targets}")
+    elif entry.event_type == "asset_injected":
+        name = entry.relation_target or "(unnamed)"
+        extra = _parse_asset_injected_audit(entry)
+        label = f"injected asset: {name}"
+        if extra:
+            label += f" {extra}"
+        click.echo(f"{prefix}← {label}")
+    elif entry.event_type == "asset_injected_protected_override":
+        name = entry.relation_target or "(unnamed)"
+        click.echo(f"{prefix}← protected override: {name}")
     elif entry.event_type == "complete":
         click.echo(f"{prefix}← outputs satisfied")
+
+
+def _parse_asset_injected_audit(entry: TraceEntry) -> str:
+    """Extract audit metadata from an asset_injected trace entry."""
+    for af in entry.accepted_fragments or []:
+        try:
+            data = json.loads(af)
+            if isinstance(data, dict) and "asset_id" in data:
+                aid = data.get("asset_id", "")[:16]
+                parts = [f"({aid}"]
+                if "origin" in data:
+                    parts.append(data["origin"])
+                if "trust_tier" in data:
+                    parts.append(data["trust_tier"])
+                parts.append(")")
+                return " ".join(parts)
+        except (json.JSONDecodeError, TypeError):
+            continue
+    return ""
 
 
 # ---------------------------------------------------------------------------
@@ -304,6 +334,16 @@ def _entry_short_label(entry: TraceEntry) -> str:
     elif entry.event_type == "contracts_expanded":
         target = entry.relation_target or ""
         return f"expanded → {target}"
+    elif entry.event_type == "asset_injected":
+        name = entry.relation_target or "unnamed"
+        extra = _parse_asset_injected_audit(entry)
+        label = f"injected asset: {name}"
+        if extra:
+            label += f" {extra}"
+        return label
+    elif entry.event_type == "asset_injected_protected_override":
+        name = entry.relation_target or "unnamed"
+        return f"protected override: {name}"
     elif entry.event_type == "complete":
         return "complete"
     return ""

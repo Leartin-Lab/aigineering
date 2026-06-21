@@ -55,9 +55,9 @@ aig replay <session_id>   # replay a session
 
 ---
 
-## Status: v0.4.10 — Single-Node alpha/experimental Kernel
+## Status: v0.5.0-alpha.1 — Local Productivity Alpha
 
-This release provides an experimental single-node kernel for local research and early integration work. It demonstrates the core invariant: **unauthorized worker outputs cannot become runtime facts.** The v0.4 kernel is focused on strong protocolization and single-node runtime infrastructure: immutable data models, capability containment, method-first extensibility, SQLite-backed transactional state, recoverable engine state, worker pull/submit protocol, and a modular JSON CLI.
+This release layers a local productivity surface on top of the v0.4 single-node kernel. It demonstrates the core invariant: **unauthorized worker outputs cannot become runtime facts**, while adding traceable control-plane workflows for assets, contracts, behavior prompts, and additive asset versioning.
 
 This is not a security-audited production release. It is intended for local experiments, research prototypes, and early integration work where auditable runtime boundaries matter.
 
@@ -103,13 +103,20 @@ The transactional worker-submit guarantees (single active claim, idempotency, ca
 - Database-enforced single active claim per contract
 - Recoverable runtime state from persisted contracts, assets, and trace events
 - Method-first CLI execution path for `/plan`, `/replan`, `/retry`, and `/tool`
+- Control-plane asset injection via `aig asset add/list/show`
+- Control-plane contract injection via `aig contract add/list/show/run`
+- Additive asset slicing, replacement claims, versions, and lineage views
+- Behavior prompt assets via `aig behavior add/list/show`
+- LLM worker retry, provider capability, usage metadata, and multi-tool-call handling
+- Experimental `aig repl` for local CLI workflows
+- Optional experimental FastAPI surface via `aig serve` with the `api` extra
 
 **Not yet implemented (see ROADMAP.md):**
-- MCP / Skills ecosystem adapters
+- Stable MCP / Skills ecosystem adapters
 - Multi-contract orchestration
 - Distributed runtime across shared stores
 - External security audit and deployment hardening
-- PyPI release
+- Stable PyPI release channel
 
 See [ROADMAP.md](ROADMAP.md) for the full plan.
 

@@ -30,12 +30,16 @@ class StoreProtocol(Protocol):
     def get_assets_by_contract(self, contract_id: str) -> list[Asset]: ...
     def get_assets_by_definition(self, def_hash: str) -> list[Asset]: ...
     def get_latest_asset(self, def_hash: str) -> Optional[Asset]: ...
+    def add_replacement_claim(self, claim) -> None: ...
+    def get_claims_by_definition(self, definition_hash: str) -> list: ...
+    def get_claims_for_asset(self, asset_id: str) -> list: ...
 
 
 class MemoryStore:
     def __init__(self) -> None:
         self.assets: dict[str, Asset] = {}
         self.contracts: dict[str, Contract] = {}
+        self._claims: list = []
 
     def add_asset(self, asset: Asset) -> None:
         if not asset.signed_by or not verify_asset_seal(asset):
@@ -78,6 +82,15 @@ class MemoryStore:
             if asset.definition_hash == def_hash:
                 latest = asset
         return latest
+
+    def add_replacement_claim(self, claim) -> None:
+        self._claims.append(claim)
+
+    def get_claims_by_definition(self, definition_hash: str) -> list:
+        return [c for c in self._claims if c.definition_hash == definition_hash]
+
+    def get_claims_for_asset(self, asset_id: str) -> list:
+        return [c for c in self._claims if c.source_asset_id == asset_id]
 
 
 class JsonLStore:

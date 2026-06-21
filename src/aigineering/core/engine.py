@@ -215,6 +215,7 @@ class Engine:
                         else None
                     ),
                     budget_remaining=self._resolve_budget(contract),
+                    usage_metadata=candidate.metadata,
                 )
 
                 remaining = self._budget_mgr.consume(contract.id)

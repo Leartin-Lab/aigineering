@@ -2,10 +2,9 @@
 
 ## Status
 
-Aigineering is an early Zero Trust Agent Runtime. The current `v0.4.x`
-milestone is the **040 single-node alpha/experimental kernel**: strong protocolization plus
-single-node runtime infrastructure for local, auditable experiments and v0.5
-productivity expansion.
+Aigineering is an early Zero Trust Agent Runtime. The current `v0.5.0-alpha`
+milestone is the **050 local productivity alpha**: a traceable CLI/control-plane
+surface on top of the v0.4 single-node kernel.
 
 The v0.4 kernel includes SQLite-backed transactional submission, recoverable
 runtime state, capability containment, and a worker pull/submit protocol. It is
@@ -90,17 +89,23 @@ Focus: make the single-node runtime durable, resumable, protocolized, and safer.
 - [ ] Trust policy over signer, origin, trust tier, labels, tool scope, and reserved prefixes
 - [ ] Broader crash-injection and concurrent-worker stress tests
 
-## v0.5 - Ecosystem Integration
+## v0.5 - Local Productivity Alpha
 
-Focus: connect the runtime to agent/tool ecosystems without weakening the boundary.
+Focus: make the single-node runtime useful for local work without weakening the
+candidate/fact boundary.
 
-- [ ] MCP function call -> method/tool contract expansion
-- [ ] MCP descriptor assets
-- [ ] Skill loading as assets
-- [ ] Label-injected skill assets
+- [x] Control-plane asset injection (`aig asset add/list/show`)
+- [x] Control-plane contract/task injection (`aig contract add/list/show/run`)
+- [x] Asset slicing, replacement claims, versions, and lineage views
+- [x] Behavior prompt assets (`aig behavior add/list/show`)
+- [x] LLM worker retry, provider capabilities, usage metadata, and multi-tool-call envelope
+- [x] Experimental REPL (`aig repl`)
+- [x] Optional experimental API/server surface (`aig serve`, `api` extra)
+- [ ] Stable MCP function call -> method/tool contract expansion
+- [ ] Stable MCP descriptor assets
+- [ ] Stable skill loading as assets
+- [ ] Stable label-injected skill assets
 - [ ] Capability assets for tools, MCP, memory, and persona modules
-- [ ] Interactive REPL (`aig repl`)
-- [ ] API/server surface over core runtime
 - [ ] PyPI publish after API stabilizes
 
 ## v0.6 - Asset Management and Evaluation

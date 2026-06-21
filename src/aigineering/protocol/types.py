@@ -108,6 +108,7 @@ class TraceEntry:
     relation_type: Optional[str] = None
     relation_target: Optional[str] = None
     timestamp: str = ""
+    usage_metadata: Optional[MappingProxyType] = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "disclosed_assets", tuple(self.disclosed_assets))
@@ -116,6 +117,10 @@ class TraceEntry:
             self, "accepted_asset_names", tuple(self.accepted_asset_names)
         )
         object.__setattr__(self, "rejected_fragments", tuple(self.rejected_fragments))
+        if self.usage_metadata is not None:
+            object.__setattr__(
+                self, "usage_metadata", MappingProxyType(dict(self.usage_metadata))
+            )
 
 
 class RejectionCategory(Enum):

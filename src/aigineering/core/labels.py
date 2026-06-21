@@ -75,6 +75,25 @@ def resolve_contract_labels(
     seen_ids: set[str] = set()
 
     for label_name in contract.labels:
+        # Behavior labels (behavior:*) are self-referencing — the label
+        # name IS the asset name.  Resolve by looking up the asset
+        # directly instead of requiring a registered Label object.
+        if label_name.startswith("behavior:"):
+            matches = store.get_assets_by_name(label_name)
+            if not matches:
+                placeholder = sign_asset(_placeholder_asset(label_name, label_name))
+                store.add_asset(placeholder)
+                if placeholder.id not in seen_ids:
+                    placeholders.append(placeholder)
+                    injected.append(placeholder)
+                    seen_ids.add(placeholder.id)
+                continue
+            for asset in matches:
+                if asset.id not in seen_ids:
+                    injected.append(asset)
+                    seen_ids.add(asset.id)
+            continue
+
         label = labels.get(label_name)
         if label is None:
             placeholder = sign_asset(
