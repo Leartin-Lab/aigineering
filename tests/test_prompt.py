@@ -36,3 +36,29 @@ def test_contract_prompt_renders_declared_scope():
     assert "Allowed tools: search" in prompt
     assert '/exec {"outputs": {"declared_output": "content"}}' in prompt
     assert "- evidence: observed" in prompt
+
+
+def test_contract_prompt_separates_behavior_instructions_from_assets():
+    contract = Contract(
+        id="contract_1",
+        name="write_report",
+        description="Write a report.",
+        inputs=["evidence"],
+        outputs=["report"],
+    )
+    prompt = contract_prompt(
+        contract,
+        [
+            Asset(id="asset_1", name="evidence", content="observed"),
+            Asset(id="asset_2", name="behavior:concise", content="be concise"),
+        ],
+    )
+
+    behavior_section = prompt.split("Behavior instructions:", 1)[1].split(
+        "Disclosed assets:", 1
+    )[0]
+    disclosed_section = prompt.split("Disclosed assets:", 1)[1]
+
+    assert "- behavior:concise: be concise" in behavior_section
+    assert "- evidence: observed" in disclosed_section
+    assert "behavior:concise" not in disclosed_section

@@ -8,7 +8,10 @@ from typing import Protocol
 
 from aigineering.core.ids import hash_asset_content, hash_asset_definition
 from aigineering.core.provenance import sign_asset
-from aigineering.protocol.types import Asset, Contract
+from aigineering.protocol.types import Asset, Contract, TrustTier
+
+BEHAVIOR_LABEL_PREFIX = "behavior:"
+MIN_BEHAVIOR_TRUST_TIER = TrustTier.CONFIGURED
 
 
 class StoreLike(Protocol):
@@ -59,6 +62,18 @@ def _placeholder_asset(label_name: str, asset_name: str) -> Asset:
     )
 
 
+def is_behavior_asset_allowed(asset: Asset) -> bool:
+    """Return whether a behavior asset may be injected as worker instructions."""
+
+    if not asset.name.startswith(BEHAVIOR_LABEL_PREFIX):
+        return False
+    try:
+        tier = TrustTier.from_str(asset.trust_tier)
+    except ValueError:
+        return False
+    return tier.value >= MIN_BEHAVIOR_TRUST_TIER.value
+
+
 def resolve_contract_labels(
     contract: Contract,
     labels: dict[str, Label],
@@ -78,9 +93,12 @@ def resolve_contract_labels(
         # Behavior labels (behavior:*) are self-referencing — the label
         # name IS the asset name.  Resolve by looking up the asset
         # directly instead of requiring a registered Label object.
-        if label_name.startswith("behavior:"):
+        if label_name.startswith(BEHAVIOR_LABEL_PREFIX):
             matches = store.get_assets_by_name(label_name)
-            if not matches:
+            allowed_matches = [
+                asset for asset in matches if is_behavior_asset_allowed(asset)
+            ]
+            if not allowed_matches:
                 placeholder = sign_asset(_placeholder_asset(label_name, label_name))
                 store.add_asset(placeholder)
                 if placeholder.id not in seen_ids:
@@ -88,7 +106,7 @@ def resolve_contract_labels(
                     injected.append(placeholder)
                     seen_ids.add(placeholder.id)
                 continue
-            for asset in matches:
+            for asset in allowed_matches:
                 if asset.id not in seen_ids:
                     injected.append(asset)
                     seen_ids.add(asset.id)
