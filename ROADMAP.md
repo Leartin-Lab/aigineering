@@ -3,7 +3,7 @@
 ## Status
 
 Aigineering is an early Zero Trust Agent Runtime. The current `v0.4.x`
-milestone is the **040 single-node stable kernel**: strong protocolization plus
+milestone is the **040 single-node alpha/experimental kernel**: strong protocolization plus
 single-node runtime infrastructure for local, auditable experiments and v0.5
 productivity expansion.
 

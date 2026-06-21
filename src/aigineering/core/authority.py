@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from aigineering.protocol.types import Contract
 
+from aigineering.core.trust_policy import TrustPolicy
+
 RESERVED_PREFIXES: frozenset[str] = frozenset(
     {
         "_sys_",
@@ -28,6 +30,7 @@ RESERVED_PREFIXES: frozenset[str] = frozenset(
 def check_authority(
     contract: Contract,
     candidate_assets: list[dict],
+    trust_policy: TrustPolicy | None = None,
 ) -> tuple[list[dict], list[dict], dict]:
     """Check whether each candidate asset is within the contract's declared
     outputs and does not collide with a reserved name prefix.
@@ -49,6 +52,11 @@ def check_authority(
     accepted: list[dict] = []
     rejected: list[dict] = []
 
+    if trust_policy is not None and trust_policy.reserved_prefixes is not None:
+        prefixes = trust_policy.reserved_prefixes | RESERVED_PREFIXES
+    else:
+        prefixes = RESERVED_PREFIXES
+
     for candidate in candidate_assets:
         name: str = candidate["name"]
         reasons: list[str] = []
@@ -60,7 +68,7 @@ def check_authority(
             )
             category = "authority_rejection"
 
-        for prefix in RESERVED_PREFIXES:
+        for prefix in prefixes:
             if name.startswith(prefix) and name not in contract.minting_authority:
                 reasons.append(
                     f"asset '{name}' starts with reserved prefix '{prefix}'"
@@ -83,7 +91,7 @@ def check_authority(
 
     authority_policy: dict = {
         "declared_outputs": contract.outputs,
-        "reserved_prefixes": sorted(RESERVED_PREFIXES),
+        "reserved_prefixes": sorted(prefixes),
     }
 
     return accepted, rejected, authority_policy

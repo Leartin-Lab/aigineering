@@ -10,28 +10,18 @@ from typing import Any
 
 from aigineering.core.ids import hash_asset_content, hash_asset_definition
 from aigineering.core.provenance import verify_asset_seal
-from aigineering.protocol.types import Asset, Contract
+from aigineering.core.trust_policy import TrustPolicy
+from aigineering.protocol.types import Asset, Contract, TrustTier
 from aigineering.core.store import StoreProtocol
 
 
-# ---------------------------------------------------------------------------
-# Trust tier ordering (higher = more trusted)
-# ---------------------------------------------------------------------------
-
-_TRUST_ORDER: dict[str, int] = {
-    "untrusted": 0,
-    "worker": 1,
-    "observed": 2,
-    "tool": 3,
-    "human": 4,
-    "system": 5,
-}
-
-
 def _trust_gap(asset: Asset) -> bool:
-    """Return True when *asset* has a trust tier below 'observed' (i.e. untrusted or worker)."""
-    tier = _TRUST_ORDER.get(asset.trust_tier, 0)
-    return tier < _TRUST_ORDER.get("observed", 2)
+    """Return True when *asset* has a trust tier below OBSERVED (i.e. UNTRUSTED)."""
+    try:
+        tier = TrustTier.from_str(asset.trust_tier)
+    except ValueError:
+        tier = TrustTier.UNTRUSTED  # unknown tiers treated as untrusted
+    return tier.value < TrustTier.OBSERVED.value
 
 
 def _seal_gap(asset: Asset) -> bool:
@@ -46,7 +36,7 @@ def _seal_gap(asset: Asset) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def check_sufficiency(contract: Contract, store: StoreProtocol) -> dict[str, Any]:
+def check_sufficiency(contract: Contract, store: StoreProtocol, trust_policy: TrustPolicy | None = None) -> dict[str, Any]:
     """Check contract readiness. Returns a report dict.
 
     The report is a **recommendation** — it does NOT alter runtime state,
@@ -108,6 +98,19 @@ def check_sufficiency(contract: Contract, store: StoreProtocol) -> dict[str, Any
             if _trust_gap(asset) and not asset.tombstoned:
                 if input_name not in report["trust_gaps"]:
                     report["trust_gaps"].append(input_name)
+
+    # ── 4b. Trust policy enrichment (when policy provided) ────────────────
+    if trust_policy is not None:
+        for input_name in contract.inputs:
+            assets = store.get_assets_by_name(input_name)
+            if not assets:
+                continue
+            trust_result = trust_policy.evaluate(assets, contract)
+            if not trust_result.accepted:
+                for reason in trust_result.reasons:
+                    report["trust_gaps"].append(
+                        {"asset": input_name, "gap": "trust", "reason": reason}
+                    )
 
     # ── 5. Signature gaps ─────────────────────────────────────────────────
     for input_name in contract.inputs:

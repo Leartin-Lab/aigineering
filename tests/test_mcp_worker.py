@@ -1,11 +1,11 @@
-"""Tests for MCPWorker and MCP descriptor assets (v0.4.2)."""
+"""Tests for MCPExecutor and MCP descriptor assets (v0.4.2, renamed per ADR-006)."""
 
 from __future__ import annotations
 
 import json
 
 
-from aigineering.agent.mcp_worker import MCPWorker
+from aigineering.agent.mcp_executor import MCPExecutor
 from aigineering.core.capability_descriptors import create_mcp_descriptor
 from aigineering.core.provenance import verify_asset_seal
 from aigineering.core.store import MemoryStore
@@ -72,7 +72,7 @@ def test_mcp_descriptor_creation_server_only():
     descriptor = create_mcp_descriptor(
         name="filesystem",
         source_uri="mcp://filesystem",
-        trust_tier="trusted",
+        trust_tier="verified",
     )
 
     assert descriptor.name == "_mcp_filesystem"
@@ -90,7 +90,7 @@ def test_mcp_descriptor_sealed_config():
     descriptor = create_mcp_descriptor(
         name="github",
         source_uri="mcp://github/api",
-        trust_tier="trusted",
+        trust_tier="verified",
         tool_name="github.search_repos",
         input_schema={"type": "object"},
     )
@@ -150,12 +150,12 @@ def test_mcp_descriptor_carries_provenance():
         create_mcp_descriptor(
             name="database",
             source_uri="mcp://db",
-            trust_tier="trusted",
+            trust_tier="verified",
             tool_name="db.query",
         ),
     ]
 
-    expected_trust_tiers = ["verified", "observed", "trusted"]
+    expected_trust_tiers = ["verified", "observed", "verified"]
 
     for desc, expected_trust in zip(descriptors, expected_trust_tiers):
         # Core provenance fields are present
@@ -197,18 +197,18 @@ def test_mcp_descriptor_carries_provenance():
 
 
 # ---------------------------------------------------------------------------
-# MCPWorker tests
+# MCPExecutor tests
 # ---------------------------------------------------------------------------
 
 
 def test_mcp_worker_returns_candidate():
-    """MCPWorker.invoke() executes a valid MCP tool call and returns a Candidate."""
+    """MCPExecutor.invoke() executes a valid MCP tool call and returns a Candidate."""
 
     # Mock MCP server: callable that takes (tool_name, args) → str
     def mock_search_server(tool_name: str, args: dict) -> str:
         return json.dumps({"results": [f"hit for {args['q']}"]})
 
-    worker = MCPWorker(mcp_servers={"search": mock_search_server})
+    worker = MCPExecutor(mcp_servers={"search": mock_search_server})
     candidate = worker.invoke("search.query", {"q": "hello"}, "contract_1")
 
     assert isinstance(candidate, Candidate)
@@ -222,7 +222,7 @@ def test_mcp_worker_returns_candidate():
 
 
 def test_mcp_worker_multi_server():
-    """MCPWorker dispatches to the correct server based on tool_name prefix."""
+    """MCPExecutor dispatches to the correct server based on tool_name prefix."""
     calls: dict[str, list] = {"filesystem": [], "database": []}
 
     def make_server(name: str):
@@ -232,7 +232,7 @@ def test_mcp_worker_multi_server():
 
         return handler
 
-    worker = MCPWorker(
+    worker = MCPExecutor(
         mcp_servers={
             "filesystem": make_server("filesystem"),
             "database": make_server("database"),
@@ -257,8 +257,8 @@ def test_mcp_worker_multi_server():
 
 
 def test_mcp_worker_handles_error_unknown_server():
-    """MCPWorker.invoke() returns an error Candidate when the server is unknown."""
-    worker = MCPWorker(mcp_servers={})
+    """MCPExecutor.invoke() returns an error Candidate when the server is unknown."""
+    worker = MCPExecutor(mcp_servers={})
     candidate = worker.invoke("nonexistent.tool", {}, "contract_1")
 
     assert isinstance(candidate, Candidate)
@@ -270,12 +270,12 @@ def test_mcp_worker_handles_error_unknown_server():
 
 
 def test_mcp_worker_handles_error_tool_failure():
-    """MCPWorker.invoke() returns an error Candidate when the server raises."""
+    """MCPExecutor.invoke() returns an error Candidate when the server raises."""
 
     def failing_server(_tool_name: str, _args: dict) -> str:
         raise RuntimeError("connection refused")
 
-    worker = MCPWorker(mcp_servers={"broken": failing_server})
+    worker = MCPExecutor(mcp_servers={"broken": failing_server})
     candidate = worker.invoke("broken.ping", {}, "contract_1")
 
     assert isinstance(candidate, Candidate)
@@ -287,9 +287,9 @@ def test_mcp_worker_handles_error_tool_failure():
 
 
 def test_mcp_worker_candidate_not_committed_directly():
-    """Candidate from MCPWorker must go through projection to become a fact.
+    """Candidate from MCPExecutor must go through projection to become a fact.
 
-    MCPWorker returns a Candidate — it is NOT an Asset and does NOT
+    MCPExecutor returns a Candidate — it is NOT an Asset and does NOT
     appear in any store.  The handler must explicitly convert the
     Candidate into committed assets.
     """
@@ -297,7 +297,7 @@ def test_mcp_worker_candidate_not_committed_directly():
     def mock_server(_tool_name: str, _args: dict) -> str:
         return "result"
 
-    worker = MCPWorker(mcp_servers={"test": mock_server})
+    worker = MCPExecutor(mcp_servers={"test": mock_server})
     candidate = worker.invoke("test.run", {}, "contract_1")
 
     # Candidate is NOT an Asset
@@ -316,12 +316,12 @@ def test_mcp_worker_candidate_not_committed_directly():
 
 
 def test_mcp_worker_parity_with_direct_call():
-    """MCPWorker.invoke() produces the same result as calling the server directly."""
+    """MCPExecutor.invoke() produces the same result as calling the server directly."""
 
     def mock_server(tool_name: str, args: dict) -> str:
         return json.dumps({"echo": args.get("msg", "")})
 
-    worker = MCPWorker(mcp_servers={"echo": mock_server})
+    worker = MCPExecutor(mcp_servers={"echo": mock_server})
 
     direct_result = mock_server("echo.msg", {"msg": "hello"})
 
@@ -364,14 +364,14 @@ def test_mcp_descriptor_store_round_trip():
 
 
 def test_mcp_worker_arguments_preserved():
-    """MCPWorker passes all args to the server callable unchanged."""
+    """MCPExecutor passes all args to the server callable unchanged."""
     received: list = []
 
     def recording_server(tool_name: str, args: dict) -> str:
         received.append((tool_name, args))
         return "ok"
 
-    worker = MCPWorker(mcp_servers={"rec": recording_server})
+    worker = MCPExecutor(mcp_servers={"rec": recording_server})
     worker.invoke("rec.action", {"key1": "val1", "key2": 42, "nested": {"a": 1}}, "c1")
 
     assert len(received) == 1

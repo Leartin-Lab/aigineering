@@ -1,4 +1,4 @@
-"""MCP worker — executes MCP tool calls, returning Candidate results (v0.4.2)."""
+"""MCP executor — executes MCP tool calls, returning Candidate results (not a Worker — see ADR-006, v0.4.2)."""
 
 from __future__ import annotations
 
@@ -8,13 +8,14 @@ from typing import Any
 from aigineering.protocol.types import Candidate
 
 
-class MCPWorker:
-    """Worker that executes MCP tool calls, returning Candidate results.
+class MCPExecutor:
+    """Executes MCP tool calls, returning Candidate results.
 
-    MCPWorker splits MCP tool execution from the MCP method lifecycle:
-    the handler owns validation (tool_name, tool_scope, server existence)
-    and delegates execution to MCPWorker, which returns a Candidate.
-    The Candidate must go through projection before becoming a runtime fact.
+    MCPExecutor (not a Worker — see ADR-006) splits MCP tool execution
+    from the MCP method lifecycle: the handler owns validation (tool_name,
+    tool_scope, server existence) and delegates execution to MCPExecutor,
+    which returns a Candidate. The Candidate must go through projection
+    before becoming a runtime fact.
 
     Each server in ``mcp_servers`` is a callable with signature
     ``(tool_name: str, args: dict) -> str``.  The tool name is MCP-style

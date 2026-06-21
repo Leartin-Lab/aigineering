@@ -17,7 +17,8 @@ from aigineering.core.ids import (
     hash_asset_definition,
 )
 from aigineering.core.provenance import sign_asset, verify_asset_seal
-from aigineering.protocol.types import Asset
+from aigineering.core.trust_policy import TrustPolicy
+from aigineering.protocol.types import Asset, TrustTier
 
 CAPABILITY_KINDS = ("tool", "mcp", "skill", "memory", "persona")
 
@@ -157,12 +158,17 @@ def create_skill_descriptor(
 ) -> Asset:
     """Create a capability descriptor Asset for a Skill / procedure.
 
+    Per ADR-005/007, the descriptor carries only **metadata** (kind, name,
+    version, content hash, sealed ref).  The actual skill body is stored as
+    a separate promptable asset (``_skill_content_{name}``) so that the
+    descriptor does not mix capability proof with behaviour content.
+
     Parameters
     ----------
     name : str
         Skill name (e.g. ``"security_review"``).
     content : str
-        The skill definition / procedure content.
+        The skill definition / procedure content (used to compute the hash only).
     trust_tier : str
         Trust tier for the skill (default ``"untrusted"``).
 
@@ -176,7 +182,7 @@ def create_skill_descriptor(
         "name": name,
         "version": "0.1.0",
         "source_uri": "",
-        "content": content,
+        "content_hash": hash_asset_content(name, content),
         "sealed_config_ref": "",
     }
     return _build_descriptor_asset("skill", name, disclosed, trust_tier)
@@ -239,7 +245,7 @@ def create_persona_descriptor(
         "name": name,
         "version": "0.1.0",
         "source_uri": "",
-        "content": content,
+        "content_hash": hash_asset_content(name, content),
         "sealed_config_ref": "",
     }
     return _build_descriptor_asset("persona", name, disclosed, trust_tier)
@@ -318,15 +324,6 @@ def create_provider_config_snapshot(
 # Minimum trust tier required for capability descriptors (040 gate)
 _MINIMUM_TRUST_TIER = "configured"
 
-_TRUST_TIER_RANK: dict[str, int] = {
-    "untrusted": 0,
-    "observed": 1,
-    "configured": 2,
-    "verified": 3,
-    "system": 4,
-    "human": 5,
-}
-
 _ORIGIN_PREFIX_MAP: dict[str, str] = {
     "tool": "_tool_capability_",
     "mcp": "_mcp_",
@@ -336,24 +333,37 @@ _ORIGIN_PREFIX_MAP: dict[str, str] = {
 }
 
 
-def verify_descriptor(descriptor: Asset, kind: str | None = None) -> bool:
+def verify_descriptor(descriptor: Asset, kind: str | None = None,
+                      policy: TrustPolicy | None = None) -> bool:
     """Verify a capability descriptor asset meets the 040 trust gate (G10).
 
     Returns True if:
     1. Canonical seal valid (verify_asset_seal passes)
-    2. Trust tier at or above minimum ("configured")
+    2. Trust tier at or above minimum ("configured"), or passes *policy* evaluation
     3. Name prefix matches expected category (if *kind* provided; unknown kind rejected)
     4. Dual-hash integrity (definition_hash + content_hash non-empty)
+
+    When *policy* is provided and has a minimum_trust_tier, it is used instead of
+    the built-in ``_MINIMUM_TRUST_TIER`` gate.  When *policy* is None the existing
+    default gate behaviour is preserved.
 
     Gate: G10 (Trust, Signatures, and Sealed Config Policy)
     """
     if not verify_asset_seal(descriptor):
         return False
 
-    tier_rank = _TRUST_TIER_RANK.get(descriptor.trust_tier, -1)
-    min_rank = _TRUST_TIER_RANK.get(_MINIMUM_TRUST_TIER, 0)
-    if tier_rank < min_rank:
-        return False
+    if policy is not None:
+        result = policy.evaluate([descriptor])
+        if not result.accepted:
+            return False
+    else:
+        try:
+            tier = TrustTier.from_str(descriptor.trust_tier)
+        except ValueError:
+            return False
+        min_tier = TrustTier.from_str(_MINIMUM_TRUST_TIER)
+        if tier.value < min_tier.value:
+            return False
 
     if kind is not None:
         if kind not in _ORIGIN_PREFIX_MAP:

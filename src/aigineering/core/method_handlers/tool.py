@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING
 
-from aigineering.agent.tool_worker import ToolWorker
+from aigineering.agent.tool_executor import ToolExecutor
 from aigineering.core.capability_descriptors import verify_descriptor
 from aigineering.core.methods import method_payload
 from aigineering.protocol.actions import parse_method_action
@@ -105,7 +105,7 @@ class ToolMethodHandler:
                     "(G10 trust gate)"
                 )
             else:
-                worker = ToolWorker(runtime.get_tool_registry())
+                worker = ToolExecutor(runtime.get_tool_registry())
                 candidate = worker.invoke(
                     tool_name,
                     args if isinstance(args, dict) else {},

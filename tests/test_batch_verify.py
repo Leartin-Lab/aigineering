@@ -177,7 +177,7 @@ class TestSensitiveInputPolicy:
                 "trusted_input",
                 "safe content",
                 signed_by="trusted-signer",
-                trust_tier="high",
+                trust_tier="verified",
             )
         )
 
@@ -285,6 +285,31 @@ class TestSensitiveInputPolicy:
         result = check_sensitive_input_policy(contract, store)
         assert result["compliant"] is False
         assert any("not a recognized tier" in v for v in result["violations"])
+
+    def test_sensitive_input_invalid_asset_tier_does_not_crash(self):
+        """Asset with unrecognized trust_tier does not crash policy check."""
+        from aigineering.core.ids import hash_asset_definition
+
+        store = MemoryStore()
+        store.add_asset(
+            _make_asset("bad_asset", "content", trust_tier="banana_tier")
+        )
+        def_hash = hash_asset_definition("bad_asset")
+
+        contract = Contract(
+            id="task:invalid_asset_tier",
+            name="bad_tier_task",
+            inputs=["bad_asset"],
+            outputs=["report"],
+            activation="bad_asset",
+            sensitive_input_policy={
+                "required_trust_tier": "verified",
+                "required_definition_hashes": [def_hash],
+            },
+        )
+        # Must not raise ValueError; invalid tier → non-compliant.
+        result = check_sensitive_input_policy(contract, store)
+        assert result["compliant"] is False
 
 
 # ---------------------------------------------------------------------------

@@ -1,9 +1,9 @@
-"""Tests for ToolWorker (v0.3.6 — split tool execution from lifecycle)."""
+"""Tests for ToolExecutor (v0.3.6 — split tool execution from lifecycle, renamed per ADR-006)."""
 
 import json
 
 
-from aigineering.agent.tool_worker import ToolWorker
+from aigineering.agent.tool_executor import ToolExecutor
 from aigineering.core.capability_descriptors import create_tool_descriptor
 from aigineering.core.method_handlers.tool import ToolMethodHandler
 from aigineering.core.method_runtime import MethodRuntime
@@ -13,15 +13,15 @@ from aigineering.core.trace import TraceStore
 from aigineering.protocol.types import Asset, Candidate, Contract, ToolSpec
 
 
-# ── ToolWorker unit tests ──────────────────────────────────────────────
+# ── ToolExecutor unit tests ─────────────────────────────────────────────
 
 
 def test_worker_invokes_tool_and_returns_candidate():
-    """ToolWorker.invoke() executes a tool and returns a Candidate with the result."""
+    """ToolExecutor.invoke() executes a tool and returns a Candidate with the result."""
     registry = ToolRegistry()
     registry.register(ToolSpec(name="lookup"), lambda args: f"value:{args['key']}")
 
-    worker = ToolWorker(registry)
+    worker = ToolExecutor(registry)
     candidate = worker.invoke("lookup", {"key": "x"}, "contract_1")
 
     assert isinstance(candidate, Candidate)
@@ -35,10 +35,10 @@ def test_worker_invokes_tool_and_returns_candidate():
 
 
 def test_worker_returns_error_candidate_on_failure():
-    """ToolWorker.invoke() returns an error Candidate when the tool is unknown."""
+    """ToolExecutor.invoke() returns an error Candidate when the tool is unknown."""
     registry = ToolRegistry()
 
-    worker = ToolWorker(registry)
+    worker = ToolExecutor(registry)
     candidate = worker.invoke("missing_tool", {}, "contract_1")
 
     assert isinstance(candidate, Candidate)
@@ -50,13 +50,13 @@ def test_worker_returns_error_candidate_on_failure():
 
 
 def test_worker_parity_with_direct_registry():
-    """ToolWorker.invoke() produces the same result as ToolRegistry.run()."""
+    """ToolExecutor.invoke() produces the same result as ToolRegistry.run()."""
     registry = ToolRegistry()
     registry.register(ToolSpec(name="echo"), lambda args: args.get("msg", ""))
 
     direct_result = registry.run("echo", {"msg": "hello"})
 
-    worker = ToolWorker(registry)
+    worker = ToolExecutor(registry)
     candidate = worker.invoke("echo", {"msg": "hello"}, "contract_1")
 
     obs = json.loads(candidate.raw_output)
@@ -68,7 +68,7 @@ def test_worker_parity_with_direct_registry():
 
 
 def test_tool_handler_uses_tool_worker():
-    """ToolMethodHandler.handle_completion dispatches via ToolWorker."""
+    """ToolMethodHandler.handle_completion dispatches via ToolExecutor."""
     handler = ToolMethodHandler()
 
     store = MemoryStore()
@@ -84,10 +84,10 @@ def test_tool_handler_uses_tool_worker():
         )
     )
 
-    # Verify the handler module imports ToolWorker
+    # Verify the handler module imports ToolExecutor
     import aigineering.core.method_handlers.tool as handler_mod
 
-    assert hasattr(handler_mod, "ToolWorker")
+    assert hasattr(handler_mod, "ToolExecutor")
 
     runtime = MethodRuntime(store, trace_store, {}, tools=tools)
     tool_contract = Contract(
@@ -122,16 +122,16 @@ def test_tool_handler_uses_tool_worker():
 
 
 def test_worker_candidate_not_committed_directly():
-    """Candidate from ToolWorker must go through projection to become a fact.
+    """Candidate from ToolExecutor must go through projection to become a fact.
 
-    ToolWorker returns a Candidate — it is NOT an Asset and does NOT
+    ToolExecutor returns a Candidate — it is NOT an Asset and does NOT
     appear in any store.  The handler (or engine projection) must
     explicitly convert the Candidate into committed assets.
     """
     registry = ToolRegistry()
     registry.register(ToolSpec(name="lookup"), lambda args: f"value:{args['key']}")
 
-    worker = ToolWorker(registry)
+    worker = ToolExecutor(registry)
     candidate = worker.invoke("lookup", {"key": "x"}, "contract_1")
 
     # Candidate is NOT an Asset

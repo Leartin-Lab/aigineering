@@ -19,6 +19,11 @@ def compute_provenance_seal(asset: Asset, signed_by: str | None = None) -> str:
 
     This is not a public-key cryptographic signature. It binds the canonical
     asset content and provenance metadata to a signer string for stable audit.
+
+    Note: ``signer_kind`` is metadata that describes *how* the signer
+    operated (e.g. "deterministic", "llm", "human").  It is intentionally
+    excluded from the seal input — the seal is independent of which signer
+    mechanism produced it.
     """
     signer = signed_by or default_signer(asset)
     payload = f"{asset_to_canonical(replace(asset, signed_by=signer, provenance_seal=''))}|signed_by={signer}"

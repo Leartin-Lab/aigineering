@@ -124,3 +124,60 @@ def test_system_contract_can_mint_declared_reserved_output_with_exact_authority(
         f"Got rejected: {rej}"
     )
     assert rej == []
+
+
+class TestTrustPolicyPrefixProtection:
+    """TrustPolicy without reserved_prefixes must not weaken the default gate."""
+
+    def test_trust_policy_without_prefixes_still_blocks_reserved(self):
+        """Passing TrustPolicy(minimum_trust_tier=...) without reserved_prefixes
+        must still reject _sys_ and _mcp_ prefixes (fallback to RESERVED_PREFIXES)."""
+        from aigineering.core.trust_policy import TrustPolicy
+        from aigineering.protocol.types import TrustTier
+
+        policy = TrustPolicy(minimum_trust_tier=TrustTier.OBSERVED)
+        contract = Contract(
+            id="task:prefix_regression",
+            name="regression_test",
+            outputs=("_sys_secret",),
+            activation="",
+            budget=5,
+        )
+
+        acc, rej, _ = check_authority(
+            contract,
+            [{"name": "_sys_secret", "content": "should be blocked"}],
+            trust_policy=policy,
+        )
+
+        assert rej != [], (
+            "P0 regression: TrustPolicy without reserved_prefixes allowed "
+            "reserved prefix _sys_ — should fall back to RESERVED_PREFIXES"
+        )
+        assert acc == []
+
+    def test_trust_policy_without_prefixes_still_blocks_mcp(self):
+        """Same regression check for _mcp_ prefix."""
+        from aigineering.core.trust_policy import TrustPolicy
+        from aigineering.protocol.types import TrustTier
+
+        policy = TrustPolicy(minimum_trust_tier=TrustTier.OBSERVED)
+        contract = Contract(
+            id="task:mcp_regression",
+            name="mcp_regression",
+            outputs=("_mcp_filesystem",),
+            activation="",
+            budget=5,
+        )
+
+        acc, rej, _ = check_authority(
+            contract,
+            [{"name": "_mcp_filesystem", "content": "should be blocked"}],
+            trust_policy=policy,
+        )
+
+        assert rej != [], (
+            "P0 regression: TrustPolicy without reserved_prefixes allowed "
+            "reserved prefix _mcp_ — should fall back to RESERVED_PREFIXES"
+        )
+        assert acc == []

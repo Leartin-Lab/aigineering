@@ -51,10 +51,11 @@ def _placeholder_asset(label_name: str, asset_name: str) -> Asset:
         content=content,
         definition_hash=hash_asset_definition(asset_name),
         content_hash=hash_asset_content(asset_name, content),
-        content_type="application/json",
+        content_type="application/x-aig-placeholder",
         origin="label_placeholder",
         trust_tier="untrusted",
         minted_by="label_resolver",
+        promptable=False,
     )
 
 

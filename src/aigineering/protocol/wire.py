@@ -9,6 +9,12 @@ from aigineering.protocol.types import Asset, Candidate, Contract, Session, Trac
 
 
 def asset_to_canonical(asset: Asset) -> str:
+    """Canonical JSON for provenance seal computation.
+
+    Note: ``signer_kind`` is intentionally excluded — it is metadata about
+    the signer *mechanism*, not the asset content, and must not affect the
+    provenance seal.
+    """
     d = {
         "name": asset.name,
         "content": asset.content,
@@ -37,6 +43,7 @@ def asset_to_dict(asset: Asset) -> dict[str, Any]:
         "minted_by": asset.minted_by,
         "source_uri": asset.source_uri,
         "signed_by": asset.signed_by,
+        "signer_kind": asset.signer_kind,
         "provenance_seal": asset.provenance_seal,
         "definition_hash": asset.definition_hash,
         "content_hash": asset.content_hash,

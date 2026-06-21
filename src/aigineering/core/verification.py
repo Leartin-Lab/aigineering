@@ -6,7 +6,8 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
 from aigineering.core.ids import hash_asset_content, hash_asset_definition
-from aigineering.protocol.types import ReplacementClaim
+from aigineering.core.trust_policy import TrustPolicy
+from aigineering.protocol.types import ReplacementClaim, TrustTier
 
 if TYPE_CHECKING:
     from aigineering.core.store import StoreProtocol
@@ -199,41 +200,55 @@ def check_sensitive_input_policy(
                     f"valid types: {sorted(valid_types)}"
                 )
 
-    # --- Required signer ---
-    required_signer: str = effective_policy.get("required_signer", "")
-    if required_signer:
-        input_assets = _collect_input_assets(contract, store)
-        signed_ok = any(a.signed_by == required_signer for a in input_assets)
-        if not signed_ok:
-            violations.append(
-                f"required_signer '{required_signer}' has not signed any input asset of contract '{contract.id}'"
-            )
-
-    # --- Required trust tier ---
-    required_trust_tier: str = effective_policy.get("required_trust_tier", "")
-    if required_trust_tier:
-        _TRUST_TIER_RANK: dict[str, int] = {
-            "untrusted": 0,
-            "low": 1,
-            "medium": 2,
-            "high": 3,
-            "human": 4,
-        }
-        min_rank = _TRUST_TIER_RANK.get(required_trust_tier, -1)
-        if min_rank < 0:
-            violations.append(
-                f"required_trust_tier '{required_trust_tier}' is not a recognized tier"
-            )
-        else:
-            input_assets = _collect_input_assets(contract, store)
-            sufficient = any(
-                _TRUST_TIER_RANK.get(a.trust_tier, -1) >= min_rank for a in input_assets
-            )
-            if not sufficient:
+    # --- Delegate tier and signer checks to TrustPolicy ---
+    try:
+        trust_policy = TrustPolicy.from_config(effective_policy)
+    except ValueError:
+        # Invalid tier name → flag and skip tier/signer enforcement
+        violations.append(
+            f"required_trust_tier '{effective_policy.get('required_trust_tier', '')}' "
+            f"is not a recognized tier"
+        )
+    else:
+        input_assets = _collect_input_assets(contract, store) if contract.inputs else []
+        if not input_assets:
+            # Policy requires signer/tier but contract has no input assets
+            if effective_policy.get("required_signer"):
                 violations.append(
-                    f"no input asset of contract '{contract.id}' meets required_trust_tier "
-                    f"'{required_trust_tier}' (minimum rank {min_rank})"
+                    f"required_signer '{effective_policy['required_signer']}' "
+                    f"has not signed any input asset of contract '{contract.id}'"
                 )
+            if effective_policy.get("required_trust_tier"):
+                violations.append(
+                    f"no input asset of contract '{contract.id}' meets "
+                    f"required_trust_tier '{effective_policy['required_trust_tier']}'"
+                )
+        else:
+            # Existential semantics: at least ONE input asset must satisfy
+            # signer and tier requirements (matching pre-TrustPolicy behaviour).
+            if trust_policy.allowed_signers is not None:
+                if not any(a.signed_by in trust_policy.allowed_signers
+                           for a in input_assets):
+                    violations.append(
+                        f"required_signer '{effective_policy.get('required_signer', '')}' "
+                        f"has not signed any input asset of contract '{contract.id}'"
+                    )
+            if trust_policy.minimum_trust_tier is not None:
+                sufficient = False
+                for a in input_assets:
+                    try:
+                        t = TrustTier.from_str(a.trust_tier)
+                    except ValueError:
+                        continue
+                    if t.value >= trust_policy.minimum_trust_tier.value:
+                        sufficient = True
+                        break
+                if not sufficient:
+                    violations.append(
+                        f"no input asset of contract '{contract.id}' meets required_trust_tier "
+                        f"'{effective_policy.get('required_trust_tier', '')}'"
+                        f" (minimum rank {trust_policy.minimum_trust_tier.value})"
+                    )
 
     return {
         "compliant": len(violations) == 0,

@@ -8,6 +8,7 @@ import logging
 from aigineering.agent.worker import Worker
 from aigineering.core.activation import check_activation
 from aigineering.core.budget_manager import BudgetManager
+from aigineering.core.crash import check_crash_point
 from aigineering.core.context_overflow import ContextOverflowHandler
 from aigineering.core.disclosure import compute_disclosure, redact_for_disclosure
 from aigineering.core.labels import Label, resolve_contract_labels
@@ -173,6 +174,7 @@ class Engine:
                             budget_remaining=self._resolve_budget(contract),
                         )
                         self._completed.add(contract.id)
+                        check_crash_point("after_child_complete")
                         self._resume_parent_from_method(contract)
                     break
 
@@ -229,6 +231,7 @@ class Engine:
                         budget_remaining=self._resolve_budget(contract),
                     )
                     self._completed.add(contract.id)
+                    check_crash_point("after_child_complete")
                     self._resume_parent_from_method(contract)
                     break
 
@@ -301,6 +304,7 @@ class Engine:
         if not handled:
             self._schedule_method_contract(contract, action, candidate)
 
+        check_crash_point("after_method_schedule")
         remaining = self._budget_mgr.consume(contract.id)
         self._add_trace(
             contract.id,
@@ -351,10 +355,11 @@ class Engine:
         if overflow is None:
             return False
 
-        # Record the overflow as a trace event and store a diagnostic
-        # asset so the next worker invocation can act on it via /replan.
-        # Do NOT fabricate a candidate with worker_id="engine" — Engine
-        # is the kernel boundary, not a worker.
+        # Record overflow as trace event and diagnostic asset.
+        # The replan is dispatched via the normal method ingress
+        # (_dispatch_method → ReplanMethodHandler), NOT via Engine
+        # fabricating a worker candidate.  The worker_id prefix
+        # "runtime:" marks this as a kernel-generated method trigger.
         self._add_trace(
             contract.id,
             "context_overflow",
@@ -378,7 +383,7 @@ class Engine:
             payload={"reason": "context_size_exceeded"},
         )
         candidate = Candidate(
-            worker_id="runtime:context_budget",
+            worker_id="runtime:context_overflow",
             raw_output='/replan {"reason": "context_size_exceeded"}',
         )
         self._dispatch_method(contract, action, candidate)
