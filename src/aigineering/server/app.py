@@ -29,6 +29,16 @@ class ContractCreateRequest(BaseModel):
     description: str = ""
 
 
+class AssetCreateRequest(BaseModel):
+    name: str
+    content: str
+    origin: str = "human"
+    trust_tier: str = "human"
+    source_uri: str = ""
+    promptable: bool = True
+    content_type: str = "text"
+
+
 class AssetResponse(BaseModel):
     id: str
     name: str
@@ -103,6 +113,40 @@ def create_contract(body: ContractCreateRequest):
         budget=contract.budget,
         labels=list(contract.labels),
         tool_scope=list(contract.tool_scope),
+    )
+
+
+@app.post("/assets", response_model=AssetResponse, status_code=201)
+def create_asset(body: AssetCreateRequest):
+    """Inject a new asset through the control-plane API."""
+    from aigineering.core.control_plane import inject_asset
+
+    store = _persistent_store()
+    try:
+        asset = inject_asset(
+            store,
+            store,
+            name=body.name,
+            content=body.content,
+            origin=body.origin,
+            trust_tier=body.trust_tier,
+            source_uri=body.source_uri,
+            promptable=body.promptable,
+            content_type=body.content_type,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    return AssetResponse(
+        id=asset.id,
+        name=asset.name,
+        content=asset.content,
+        content_type=asset.content_type,
+        origin=asset.origin,
+        trust_tier=asset.trust_tier,
+        promptable=asset.promptable,
+        definition_hash=asset.definition_hash,
+        content_hash=asset.content_hash,
     )
 
 

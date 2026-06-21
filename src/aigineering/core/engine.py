@@ -57,6 +57,7 @@ class Engine:
         trace_store: TraceStoreProtocol | None = None,
         labels: dict[str, Label] | None = None,
         tools: ToolRegistry | None = None,
+        mcp_servers: dict[str, object] | None = None,
         method_registry: MethodRegistry | None = None,
         context_size_limit: int | None = None,
     ) -> None:
@@ -66,6 +67,7 @@ class Engine:
         self._trace_mgr = TraceManager(self._trace)
         self._labels = labels if labels is not None else {}
         self._tools = tools
+        self._mcp_servers: dict[str, object] = mcp_servers or {}
         self._method_registry = method_registry
         self._overflow_handler = ContextOverflowHandler(context_size_limit)
         self._label_context: dict[str, list[Asset]] = {}
@@ -297,6 +299,7 @@ class Engine:
                 trace=self._trace_mgr,
                 budget=self._budget_mgr,
                 tools=self._tools,
+                mcp_servers=self._mcp_servers,
                 suspended=self._suspended,
                 method_scheduled=self._method_scheduled,
             )
@@ -569,6 +572,7 @@ def _make_runtime(engine: Engine) -> MethodRuntime:
         trace=engine._trace_mgr,
         budget=engine._budget_mgr,
         tools=engine._tools,
+        mcp_servers=engine._mcp_servers,
         suspended=engine._suspended,
         method_scheduled=engine._method_scheduled,
     )

@@ -20,7 +20,7 @@ else:
 from aigineering.core.capability_descriptors import create_skill_descriptor
 from aigineering.core.ids import hash_asset_content, hash_asset_definition
 from aigineering.core.provenance import sign_asset
-from aigineering.protocol.types import Asset
+from aigineering.protocol.types import Asset, TrustTier
 
 _REQUIRED_MANIFEST_FIELDS = frozenset({"name", "version"})
 _OPTIONAL_MANIFEST_FIELDS = frozenset(
@@ -114,6 +114,17 @@ class SkillLoader:
             raise ValueError(
                 f"{manifest_path}: unknown fields: {sorted(unknown)}"
             )
+        try:
+            TrustTier.from_str(data.get("trust_tier", "untrusted"))
+        except ValueError as e:
+            raise ValueError(f"{manifest_path}: invalid trust_tier") from e
+        for field_name in ("capabilities", "labels"):
+            if field_name in data and not _is_string_list(data[field_name]):
+                raise ValueError(
+                    f"{manifest_path}: {field_name} must be a list of strings"
+                )
+        if "content_file" in data and not isinstance(data["content_file"], str):
+            raise ValueError(f"{manifest_path}: content_file must be a string")
 
         return SkillManifest(data, manifest_path.parent)
 
@@ -184,6 +195,10 @@ def _scan_dirs(skill_dirs: list[str]) -> list[SkillManifest]:
                 continue
             manifests.append(SkillManifest(data, manifest_path.parent))
     return manifests
+
+
+def _is_string_list(value: object) -> bool:
+    return isinstance(value, list) and all(isinstance(item, str) for item in value)
 
 
 def load_skills(store: StoreLike, skill_dirs: list[str]) -> list[Asset]:

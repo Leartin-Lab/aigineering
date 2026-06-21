@@ -1,11 +1,30 @@
 name: Publish to PyPI
 
 on:
+  pull_request:
+  push:
+    branches: [dev, main]
   release:
     types: [published]
 
 jobs:
+  build-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install build tools
+        run: pip install build twine
+      - name: Build distribution
+        run: python -m build
+      - name: Check distribution metadata
+        run: twine check dist/*
+
   pypi:
+    if: github.event_name == 'release'
+    needs: build-check
     runs-on: ubuntu-latest
     environment: pypi
     permissions:

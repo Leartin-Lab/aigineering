@@ -64,6 +64,34 @@ class TestSkillLoaderScan:
         except ValueError as e:
             assert "missing required fields" in str(e)
 
+    def test_scan_invalid_trust_tier_raises(self, tmp_path: Path):
+        skill_dir = tmp_path / "bad_tier"
+        skill_dir.mkdir()
+        (skill_dir / "skill.toml").write_text(
+            'name = "bad_tier"\nversion = "0.1.0"\ntrust_tier = "banana"\n'
+        )
+
+        loader = SkillLoader()
+        try:
+            loader.scan([str(tmp_path)])
+            assert False, "should have raised"
+        except ValueError as e:
+            assert "invalid trust_tier" in str(e)
+
+    def test_scan_invalid_capabilities_type_raises(self, tmp_path: Path):
+        skill_dir = tmp_path / "bad_caps"
+        skill_dir.mkdir()
+        (skill_dir / "skill.toml").write_text(
+            'name = "bad_caps"\nversion = "0.1.0"\ncapabilities = "tool"\n'
+        )
+
+        loader = SkillLoader()
+        try:
+            loader.scan([str(tmp_path)])
+            assert False, "should have raised"
+        except ValueError as e:
+            assert "capabilities must be a list of strings" in str(e)
+
 
 class TestSkillLoaderLoad:
     """Tests for SkillLoader.load()."""

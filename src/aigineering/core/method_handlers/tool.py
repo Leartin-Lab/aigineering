@@ -58,11 +58,6 @@ class ToolMethodHandler:
         if payload.get("method") != "tool":
             return False
 
-        call_asset_name = f"_tool_call_{contract.id}"
-        existing = runtime.get_assets_by_name(call_asset_name)
-        if existing:
-            return True
-
         tool_name = (
             payload.get("payload", {}).get("name")
             if isinstance(payload.get("payload"), dict)
@@ -73,6 +68,13 @@ class ToolMethodHandler:
             if isinstance(payload.get("payload"), dict)
             else {}
         )
+        is_mcp_tool = isinstance(tool_name, str) and tool_name.startswith("mcp:")
+        call_asset_name = (
+            f"_mcp_call_{contract.id}" if is_mcp_tool else f"_tool_call_{contract.id}"
+        )
+        existing = runtime.get_assets_by_name(call_asset_name)
+        if existing:
+            return True
 
         call_content = json.dumps(
             {

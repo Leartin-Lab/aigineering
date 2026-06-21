@@ -26,9 +26,11 @@ from aigineering.cli.contract import contract_group  # noqa: E402
 from aigineering.cli.behavior import behavior_group  # noqa: E402
 from aigineering.cli.repl import repl  # noqa: E402
 from aigineering.cli.serve import serve  # noqa: E402
+from aigineering.cli.skill import skill_group  # noqa: E402
 
 cli.add_command(serve)
 cli.add_command(repl)
+cli.add_command(skill_group)
 cli.add_command(behavior_group)
 cli.add_command(run)
 cli.add_command(demo)

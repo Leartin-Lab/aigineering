@@ -3,7 +3,10 @@
 import json
 
 from aigineering.core.engine import Engine
-from aigineering.core.capability_descriptors import create_tool_descriptor
+from aigineering.core.capability_descriptors import (
+    create_mcp_descriptor,
+    create_tool_descriptor,
+)
 from aigineering.core.method_registry import MethodRegistry
 from aigineering.core.method_handlers.tool import ToolMethodHandler
 from aigineering.core.method_runtime import MethodRuntime
@@ -126,6 +129,64 @@ def test_handler_executes_tool_on_completion():
     call_assets = [
         a for a in store.get_all_assets() if a.name.startswith("_tool_call_")
     ]
+    assert len(call_assets) == 1
+
+
+def test_handler_executes_mcp_tool_on_completion():
+    """MCP tool actions route through MCPExecutor and create MCP system assets."""
+    handler = ToolMethodHandler()
+
+    store = MemoryStore()
+    trace_store = TraceStore()
+    store.add_asset(
+        create_mcp_descriptor(
+            "search",
+            source_uri="mcp://search",
+            trust_tier="configured",
+        )
+    )
+
+    def search_server(tool_name, args):
+        assert tool_name == "search.query"
+        return f"result:{args['q']}"
+
+    runtime = MethodRuntime(
+        store,
+        trace_store,
+        {},
+        mcp_servers={"search": search_server},
+    )
+    tool_contract = Contract(
+        id="mcp_child_1",
+        parent_id="parent_1",
+        name="parent.tool",
+        description=json.dumps(
+            {
+                "method": "tool",
+                "parent_contract_id": "parent_1",
+                "parent_contract_name": "parent",
+                "payload": {"name": "mcp:search.query", "args": {"q": "x"}},
+            },
+            sort_keys=True,
+        ),
+        inputs=[],
+        outputs=["_mcp_obs_mcp_child_1"],
+        activation="_method_ctx_parent_1",
+        budget=1,
+        tool_scope=["mcp:search.query"],
+        origin="system",
+    )
+
+    result = handler.handle_completion(runtime, tool_contract, [])
+    assert result is True
+
+    obs_assets = store.get_assets_by_name("_mcp_obs_mcp_child_1")
+    assert len(obs_assets) == 1
+    obs = json.loads(obs_assets[0].content)
+    assert obs["ok"] is True
+    assert obs["result"] == "result:x"
+
+    call_assets = store.get_assets_by_name("_mcp_call_mcp_child_1")
     assert len(call_assets) == 1
 
 
