@@ -101,11 +101,11 @@ candidate/fact boundary.
 - [x] LLM worker retry, provider capabilities, usage metadata, and multi-tool-call envelope
 - [x] Experimental REPL (`aig repl`)
 - [x] Optional experimental API/server surface (`aig serve`, `api` extra)
-- [ ] Stable MCP function call -> method/tool contract expansion
-- [ ] Stable MCP descriptor assets
-- [ ] Stable skill loading as assets
-- [ ] Stable label-injected skill assets
-- [ ] Capability assets for tools, MCP, memory, and persona modules
+- [x] Stable MCP function call -> method/tool contract expansion
+- [x] Stable MCP descriptor assets (`aig mcp add/list/show`)
+- [x] Stable skill loading as assets (`aig skill load/list`)
+- [x] Stable label-injected skill assets
+- [x] Capability assets for tools, MCP, memory, and persona modules
 - [ ] PyPI publish after API stabilizes
 
 ## v0.6 - Asset Management and Evaluation

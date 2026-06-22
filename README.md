@@ -57,7 +57,7 @@ aig replay <session_id>   # replay a session
 
 ## Status: v0.5.0-alpha.1 — Local Productivity Alpha
 
-This release layers a local productivity surface on top of the v0.4 single-node kernel. It demonstrates the core invariant: **unauthorized worker outputs cannot become runtime facts**, while adding traceable control-plane workflows for assets, contracts, behavior prompts, and additive asset versioning.
+This release layers a local productivity surface on top of the v0.4 single-node kernel. It demonstrates the core invariant: **unauthorized worker outputs cannot become runtime facts**, while adding traceable control-plane workflows for assets, contracts, behavior prompts, capability descriptors, MCP/skill assets, and additive asset versioning.
 
 This is not a security-audited production release. It is intended for local experiments, research prototypes, and early integration work where auditable runtime boundaries matter.
 
@@ -72,7 +72,7 @@ The transactional worker-submit guarantees (single active claim, idempotency, ca
 - Mock worker demo (built-in `build_report` scenario)
 - CLI: `aig demo`, `aig run`, `aig trace`, `aig audit`, `aig replay`, `aig session`
 - JSONL persistent trace (`.aig/traces/`) with atomic append
-- JSONL persistent asset/contract store (`.aig/store/`)
+- SQLite persistent asset/contract/trace store (`.aig/store.db`)
 - Session manifest (`.aig/sessions/`) with trace linkage
 - Full replay from persisted runtime state with consistency validation
 - Label-based asset injection with traceable `label_resolved` events
@@ -107,12 +107,14 @@ The transactional worker-submit guarantees (single active claim, idempotency, ca
 - Control-plane contract injection via `aig contract add/list/show/run`
 - Additive asset slicing, replacement claims, versions, and lineage views
 - Behavior prompt assets via `aig behavior add/list/show`
+- Skill loading as descriptor/content assets via `aig skill load/list`
+- MCP descriptor assets via `aig mcp add/list/show`
+- Tool, memory, and persona capability descriptors via `aig capability`
 - LLM worker retry, provider capability, usage metadata, and multi-tool-call handling
 - Experimental `aig repl` for local CLI workflows
 - Optional experimental FastAPI surface via `aig serve` with the `api` extra
 
 **Not yet implemented (see ROADMAP.md):**
-- Stable MCP / Skills ecosystem adapters
 - Multi-contract orchestration
 - Distributed runtime across shared stores
 - External security audit and deployment hardening
