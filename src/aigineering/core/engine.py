@@ -7,11 +7,12 @@ import logging
 
 from aigineering.agent.worker import Worker
 from aigineering.core.activation import check_activation
-from aigineering.core.capability_descriptors import verify_descriptor
+from aigineering.core.budget_manager import BudgetManager
+from aigineering.core.crash import check_crash_point
+from aigineering.core.context_overflow import ContextOverflowHandler
 from aigineering.core.disclosure import compute_disclosure, redact_for_disclosure
 from aigineering.core.labels import Label, resolve_contract_labels
 from aigineering.core.methods import (
-    contracts_from_plan_asset,
     method_contract,
     method_context_content,
     method_payload,
@@ -21,8 +22,10 @@ from aigineering.core.projection import project_candidate
 from aigineering.core.provenance import sign_asset
 from aigineering.core.method_registry import MethodRegistry
 from aigineering.core.method_runtime import MethodRuntime
+from aigineering.core.state_serializer import StateSerializer, TraceStateRebuilder
 from aigineering.core.store import StoreProtocol
 from aigineering.core.trace import MemoryTraceStore, TraceStoreProtocol
+from aigineering.core.trace_manager import TraceManager
 from aigineering.core.tools import ToolRegistry
 from aigineering.protocol.actions import (
     WorkerAction,
@@ -47,9 +50,6 @@ def _safe_check_activation(expression: str, available_names: set[str]) -> bool:
 
 
 class Engine:
-    # Rough token estimate: ~4 chars per token for English text.
-    _CHARS_PER_TOKEN = 4
-
     def __init__(
         self,
         store: StoreProtocol,
@@ -63,23 +63,40 @@ class Engine:
         self._store = store
         self._worker = worker
         self._trace = trace_store if trace_store is not None else MemoryTraceStore()
+        self._trace_mgr = TraceManager(self._trace)
         self._labels = labels if labels is not None else {}
         self._tools = tools
         self._method_registry = method_registry
-        self._context_size_limit = context_size_limit  # None = no limit
+        self._overflow_handler = ContextOverflowHandler(context_size_limit)
         self._label_context: dict[str, list[Asset]] = {}
         self._method_context: dict[str, list[Asset]] = {}
-        self._budget: dict[str, int] = {}
+        self._budget_mgr = BudgetManager()
         self._completed: set[str] = set()
         self._suspended: set[str] = set()
         self._method_scheduled: set[str] = set()
-        self._contract_last_entry: dict[
-            str, str
-        ] = {}  # contract_id → last trace entry id
+
+    @property
+    def _budget(self) -> dict[str, int]:
+        """Compatibility snapshot for existing private-state tests."""
+        return self._budget_mgr.get_all()
+
+    @property
+    def _contract_last_entry(self) -> dict[str, str]:
+        """Compatibility snapshot for existing private-state tests."""
+        return self._trace_mgr.get_all_last_entries()
+
+    @property
+    def _context_size_limit(self) -> int | None:
+        """Compatibility accessor for tests that adjust the overflow limit."""
+        return self._overflow_handler.limit
+
+    @_context_size_limit.setter
+    def _context_size_limit(self, value: int | None) -> None:
+        self._overflow_handler = ContextOverflowHandler(value)
 
     def add_contract(self, contract: Contract) -> None:
         self._store.add_contract(contract)
-        self._budget[contract.id] = max(contract.budget, 1)
+        self._budget_mgr.initialize(contract.id, contract.budget)
         if contract.labels:
             resolution = resolve_contract_labels(contract, self._labels, self._store)
             self._label_context[contract.id] = resolution.injected_assets
@@ -99,11 +116,7 @@ class Engine:
         self._store.add_asset(signed)
 
     def _add_trace(self, contract_id: str, event_type: str, **kwargs: object) -> None:
-        parent_id = self._contract_last_entry.get(contract_id)
-        entry = self._trace.new_entry(
-            contract_id, event_type, parent_id=parent_id, **kwargs
-        )
-        self._contract_last_entry[contract_id] = entry.id
+        self._trace_mgr.record(contract_id, event_type, **kwargs)
 
     def _commit(self, result: ProjectionResult) -> None:
         for asset in result.accepted_assets:
@@ -147,13 +160,12 @@ class Engine:
                     break
 
                 if self._run_system_method(contract):
-                    remaining = self._resolve_budget(contract)
-                    self._budget[contract.id] = max(0, remaining - 1)
+                    remaining = self._budget_mgr.consume(contract.id)
                     self._add_trace(
                         contract.id,
                         "budget_consumed",
                         relation_type=method_payload(contract).get("method"),
-                        budget_remaining=self._budget[contract.id],
+                        budget_remaining=remaining,
                     )
                     if self._all_outputs_satisfied(contract):
                         self._add_trace(
@@ -162,6 +174,7 @@ class Engine:
                             budget_remaining=self._resolve_budget(contract),
                         )
                         self._completed.add(contract.id)
+                        check_crash_point("after_child_complete")
                         self._resume_parent_from_method(contract)
                     break
 
@@ -204,12 +217,11 @@ class Engine:
                     budget_remaining=self._resolve_budget(contract),
                 )
 
-                remaining = self._resolve_budget(contract)
-                self._budget[contract.id] = max(0, remaining - 1)
+                remaining = self._budget_mgr.consume(contract.id)
                 self._add_trace(
                     contract.id,
                     "budget_consumed",
-                    budget_remaining=self._budget[contract.id],
+                    budget_remaining=remaining,
                 )
 
                 if self._all_outputs_satisfied(contract):
@@ -219,18 +231,19 @@ class Engine:
                         budget_remaining=self._resolve_budget(contract),
                     )
                     self._completed.add(contract.id)
+                    check_crash_point("after_child_complete")
                     self._resume_parent_from_method(contract)
                     break
 
     def _resolve_budget(self, contract: Contract) -> int:
-        if contract.id not in self._budget:
-            self._budget[contract.id] = max(contract.budget, 1)
+        if contract.id not in self._budget_mgr.get_all():
+            remaining = self._budget_mgr.initialize(contract.id, contract.budget)
             self._add_trace(
                 contract.id,
                 "budget_initialized",
-                budget_remaining=self._budget[contract.id],
+                budget_remaining=remaining,
             )
-        return self._budget[contract.id]
+        return self._budget_mgr.get_remaining(contract.id)
 
     def _compute_scope(self, contract: Contract) -> list[Asset]:
         seen: set[str] = set()
@@ -266,10 +279,10 @@ class Engine:
         action: WorkerAction,
         candidate: Candidate,
     ) -> None:
-        """Dispatch a method action through the registry or inline fallback.
+        """Dispatch a method action through the registry or built-in scheduler.
 
         When a handler is registered and returns True, the handler owns the
-        scheduling.  Otherwise the engine uses the default inline scheduling.
+        scheduling.  Otherwise the engine uses the default method scheduler.
         Budget decrement and parent suspension always run.
         """
         handler = None
@@ -280,32 +293,24 @@ class Engine:
         if handler is not None and handler.can_handle(action.type):
             runtime = MethodRuntime(
                 store=self._store,
-                trace=self._trace,
-                budget=self._budget,
+                trace=self._trace_mgr,
+                budget=self._budget_mgr,
                 tools=self._tools,
                 suspended=self._suspended,
                 method_scheduled=self._method_scheduled,
             )
-            try:
-                handled = handler.handle_method(
-                    runtime, contract, action.type, candidate
-                )
-            except AttributeError:
-                # Pre-G7 handlers that reach for Engine internals are not a
-                # valid runtime boundary. Fall back to the built-in scheduler.
-                handled = False
+            handled = handler.handle_method(runtime, contract, action.type, candidate)
 
         if not handled:
             self._schedule_method_contract(contract, action, candidate)
 
-        remaining = self._resolve_budget(contract)
-        consumed = 1
-        self._budget[contract.id] = max(0, remaining - consumed)
+        check_crash_point("after_method_schedule")
+        remaining = self._budget_mgr.consume(contract.id)
         self._add_trace(
             contract.id,
             "budget_consumed",
             relation_type=action.type,
-            budget_remaining=self._budget[contract.id],
+            budget_remaining=remaining,
         )
         self._suspended.add(contract.id)
 
@@ -345,26 +350,16 @@ class Engine:
         )
         self._store.add_asset(sign_asset(asset))
 
-    def _estimate_context_tokens(self, scope: list[Asset]) -> int:
-        total_chars = sum(len(a.content) for a in scope)
-        return total_chars // self._CHARS_PER_TOKEN
-
     def _check_context_overflow(self, contract: Contract, scope: list[Asset]) -> bool:
-        # System method contracts are internally managed — never overflow.
-        if contract.origin == "system":
+        overflow = self._overflow_handler.check_overflow(contract, scope)
+        if overflow is None:
             return False
 
-        if self._context_size_limit is None:
-            return False
-
-        estimated_tokens = self._estimate_context_tokens(scope)
-        if estimated_tokens <= self._context_size_limit:
-            return False
-
-        # Record the overflow as a trace event and store a diagnostic
-        # asset so the next worker invocation can act on it via /replan.
-        # Do NOT fabricate a candidate with worker_id="engine" — Engine
-        # is the kernel boundary, not a worker.
+        # Record overflow as trace event and diagnostic asset.
+        # The replan is dispatched via the normal method ingress
+        # (_dispatch_method → ReplanMethodHandler), NOT via Engine
+        # fabricating a worker candidate.  The worker_id prefix
+        # "runtime:" marks this as a kernel-generated method trigger.
         self._add_trace(
             contract.id,
             "context_overflow",
@@ -372,23 +367,14 @@ class Engine:
             relation_type="replan",
             relation_target="context_size_exceeded",
             rejected_fragments=[
-                f"[replan_recommended] context size {estimated_tokens} "
-                f"exceeds limit {self._context_size_limit} — replan recommended"
+                f"[replan_recommended] context size {overflow.estimated_tokens} "
+                f"exceeds limit {overflow.limit} — replan recommended"
             ],
             budget_remaining=self._resolve_budget(contract),
         )
 
-        from aigineering.core.provenance import sign_asset
-
         report_asset = sign_asset(
-            system_asset(
-                name="_context_overflow_report_",
-                content=(
-                    f"Context overflow: {estimated_tokens} tokens "
-                    f"exceeds limit {self._context_size_limit}."
-                ),
-                created_by=contract.id,
-            )
+            self._overflow_handler.create_report_asset(contract.id, overflow)
         )
         self._store.add_asset(report_asset)
 
@@ -397,120 +383,51 @@ class Engine:
             payload={"reason": "context_size_exceeded"},
         )
         candidate = Candidate(
-            worker_id="runtime:context_budget",
+            worker_id="runtime:context_overflow",
             raw_output='/replan {"reason": "context_size_exceeded"}',
         )
-        self._schedule_method_contract(contract, action, candidate)
-
-        remaining = self._resolve_budget(contract)
-        self._budget[contract.id] = max(0, remaining - 1)
-        self._add_trace(
-            contract.id,
-            "budget_consumed",
-            relation_type="replan",
-            budget_remaining=self._budget[contract.id],
-        )
-
-        # Suspend the contract so the outer run() loop does not re-select it
-        # until the method path produces a result.
-        self._suspended.add(contract.id)
+        self._dispatch_method(contract, action, candidate)
         return True
 
     def _run_system_method(self, contract: Contract) -> bool:
         method = method_payload(contract)
-        if contract.origin != "system" or method.get("method") != "tool":
+        if contract.origin != "system":
             return False
 
-        # Tool handler takes priority when registered.
+        method_type = method.get("method")
+        if not isinstance(method_type, str):
+            self._add_trace(
+                contract.id,
+                "method_handler_missing",
+                authority_result="rejected",
+                rejected_fragments=[
+                    "[rejected] method_handler_missing: missing method type"
+                ],
+                budget_remaining=self._resolve_budget(contract),
+            )
+            return True
+
+        if method_type != "tool":
+            return False
+
         if self._method_registry is not None:
-            handler = self._method_registry.get("tool")
-            if handler is not None and handler.can_handle("tool"):
+            handler = self._method_registry.get(method_type)
+            if handler is not None and handler.can_handle(method_type):
                 completion = getattr(handler, "handle_completion", None)
                 if callable(completion) and completion(
                     _make_runtime(self), contract, []
                 ):
                     return True
 
-        # Fallback: inline tool execution (backward compat).
-        payload = method.get("payload", {})
-        tool_name = payload.get("name") if isinstance(payload, dict) else None
-        args = payload.get("args", {}) if isinstance(payload, dict) else {}
-        call_content = json.dumps(
-            {
-                "tool": tool_name,
-                "args": args,
-                "contract_id": contract.id,
-                "parent_contract_id": contract.parent_id,
-            },
-            sort_keys=True,
-            ensure_ascii=False,
-        )
-        call_asset = system_asset(
-            name=f"_tool_call_{contract.id}",
-            content=call_content,
-            created_by=contract.id,
-            promptable=False,
-        )
-
-        ok = False
-        result = ""
-        error = ""
-        if not isinstance(tool_name, str) or not tool_name:
-            error = "tool action missing string payload.name"
-        elif tool_name not in contract.tool_scope:
-            error = f"tool '{tool_name}' is not in contract.tool_scope"
-        elif self._tools is None:
-            error = "no ToolRegistry configured"
-        else:
-            descriptors = self._store.get_assets_by_name(
-                f"_tool_capability_{tool_name}"
-            )
-            if not descriptors:
-                error = f"tool '{tool_name}' descriptor is missing (G10 trust gate)"
-            elif not verify_descriptor(descriptors[0], kind="tool"):
-                error = (
-                    f"tool '{tool_name}' descriptor failed verification "
-                    "(G10 trust gate)"
-                )
-            else:
-                try:
-                    result = self._tools.run(
-                        tool_name, args if isinstance(args, dict) else {}
-                    )
-                    ok = True
-                except Exception as e:  # pragma: no cover - exact handler errors vary
-                    error = str(e)
-
-        obs_name = (
-            contract.outputs[0] if contract.outputs else f"_tool_obs_{contract.id}"
-        )
-        obs_content = json.dumps(
-            {
-                "ok": ok,
-                "tool": tool_name,
-                "result": result,
-                "error": error,
-            },
-            sort_keys=True,
-            ensure_ascii=False,
-        )
-        obs_asset = system_asset(
-            name=obs_name,
-            content=obs_content,
-            created_by=contract.id,
-            source_uri=f"tool://{tool_name}" if isinstance(tool_name, str) else "",
-        )
-
-        self._store.add_asset(sign_asset(call_asset))
-        self._store.add_asset(sign_asset(obs_asset))
         self._add_trace(
             contract.id,
-            "tool_executed",
-            accepted_fragments=[call_asset.id, obs_asset.id],
-            accepted_asset_names=[call_asset.name, obs_asset.name],
-            authority_result="accepted" if ok else "rejected",
-            relation_type="tool",
-            relation_target=tool_name if isinstance(tool_name, str) else None,
+            "method_handler_missing",
+            relation_type=method_type,
+            authority_result="rejected",
+            rejected_fragments=[
+                "[rejected] method_handler_missing: "
+                f"no handler registered for {method_type!r}"
+            ],
             budget_remaining=self._resolve_budget(contract),
         )
         return True
@@ -539,116 +456,44 @@ class Engine:
             disclosed_assets=[asset.id for asset in method_assets],
             relation_type=method_payload(contract).get("method"),
             relation_target=contract.id,
-            budget_remaining=self._budget.get(parent_id, 0),
+            budget_remaining=self._budget_mgr.get_remaining(parent_id),
         )
 
-        expanded = False
         method_type = method_payload(contract).get("method")
         if self._method_registry is not None and isinstance(method_type, str):
             handler = self._method_registry.get(method_type)
             if handler is not None and handler.can_handle(method_type):
                 completion = getattr(handler, "handle_completion", None)
                 if callable(completion):
-                    expanded = completion(_make_runtime(self), contract, method_assets)
-        if not expanded:
-            self._expand_plan_result(contract, method_assets)
+                    if completion(_make_runtime(self), contract, method_assets):
+                        return
 
-    def _expand_plan_result(
-        self,
-        method_contract: Contract,
-        method_assets: list[Asset],
-    ) -> None:
-        if method_payload(method_contract).get("method") != "plan":
-            return
-
-        parent_id = method_contract.parent_id
-
-        # --- Fail-closed: if parent_id is set but parent is not in store,
-        #     do NOT expand at all (no validation = error, not no-validation). ---
-        parent_contract: Contract | None = None
-        if parent_id is not None:
-            parent_contract = self._store.get_contract(parent_id)
-            if parent_contract is None:
-                self._add_trace(
-                    parent_id,
-                    "containment_rejected",
-                    relation_type="plan",
-                    relation_target="parent_not_found",
-                    rejected_fragments=[
-                        "[rejected] parent_not_found: "
-                        f"parent contract {parent_id} not in store — "
-                        "plan expansion abort (fail-closed)"
-                    ],
-                    authority_result="rejected",
-                    budget_remaining=0,
-                )
-                return
-
-        # Compute parent's disclosure scope for input/activation containment.
-        allowed_input_names: set[str] | None = None
-        parent_budget_remaining: int | None = None
-        if parent_contract is not None:
-            scope = compute_disclosure(parent_contract, self._store)
-            allowed_input_names = {a.name for a in scope}
-            parent_budget_remaining = self._resolve_budget(parent_contract)
-
-        created: list[str] = []
-        for asset in method_assets:
-            if not asset.name.startswith("_plan_result_"):
-                continue
-            children, rejections = contracts_from_plan_asset(
-                asset,
-                parent_id,
-                parent_contract=parent_contract,
-                allowed_input_names=allowed_input_names,
-                parent_budget_remaining=parent_budget_remaining,
-            )
-            for child in children:
-                if self._store.get_contract(child.id) is None:
-                    self.add_contract(child)
-                    created.append(child.id)
-            for entry in rejections:
-                self._add_trace(
-                    parent_id,
-                    "containment_rejected",
-                    relation_type="plan",
-                    relation_target=(
-                        f"{entry.get('child_name', '?')}:{entry.get('field', '?')}"
-                    ),
-                    rejected_fragments=[
-                        f"[{entry.get('action', 'rejected')}] "
-                        f"{entry.get('field', '?')}: {entry.get('reason', '')}"
-                    ],
-                    authority_result=entry.get("action", "rejected"),
-                    budget_remaining=self._budget.get(parent_id, 0),
-                )
-
-        if created and parent_id is not None:
-            self._add_trace(
-                parent_id,
-                "contracts_expanded",
-                relation_type="plan",
-                relation_target=",".join(created),
-                budget_remaining=self._budget.get(parent_id, 0),
-            )
+        self._add_trace(
+            parent_id,
+            "method_handler_missing",
+            relation_type=str(method_type),
+            relation_target=contract.id,
+            authority_result="rejected",
+            rejected_fragments=[
+                "[rejected] method_handler_missing: "
+                f"no completion handler registered for {method_type!r}"
+            ],
+            budget_remaining=self._budget_mgr.get_remaining(parent_id),
+        )
 
     # ── State persistence / recovery ──────────────────────────────────
 
     def save_state(self) -> dict:
         """Serialize engine runtime state for recovery."""
-        return {
-            "budget": dict(self._budget),
-            "completed": list(self._completed),
-            "suspended": list(self._suspended),
-            "method_scheduled": list(self._method_scheduled),
-            "method_context": {
-                k: [a.id for a in v] for k, v in self._method_context.items()
-            },
-            "label_context": {
-                k: [a.id for a in v] for k, v in self._label_context.items()
-            },
-            "contract_last_entry": dict(self._contract_last_entry),
-        }
+        return StateSerializer.serialize(
+            budget_mgr=self._budget_mgr,
+            completed=self._completed,
+            suspended=self._suspended,
+            method_scheduled=self._method_scheduled,
+            method_context=self._method_context,
+            label_context=self._label_context,
+            trace_mgr=self._trace_mgr,
+        )
 
     @classmethod
     def restore(
@@ -672,19 +517,14 @@ class Engine:
             method_registry,
             context_size_limit=context_size_limit,
         )
-        engine._budget = state["budget"]
-        engine._completed = set(state["completed"])
-        engine._suspended = set(state["suspended"])
-        engine._method_scheduled = set(state["method_scheduled"])
-        engine._method_context = {
-            k: [a for aid in ids if (a := store.get_asset(aid)) is not None]
-            for k, ids in state["method_context"].items()
-        }
-        engine._label_context = {
-            k: [a for aid in ids if (a := store.get_asset(aid)) is not None]
-            for k, ids in state["label_context"].items()
-        }
-        engine._contract_last_entry = state["contract_last_entry"]
+        engine_state = StateSerializer.deserialize(store, state)
+        engine._budget_mgr.restore(engine_state.budget)
+        engine._completed = engine_state.completed
+        engine._suspended = engine_state.suspended
+        engine._method_scheduled = engine_state.method_scheduled
+        engine._method_context = engine_state.method_context
+        engine._label_context = engine_state.label_context
+        engine._trace_mgr.restore_last_entries(engine_state.contract_last_entry)
         return engine
 
     @classmethod
@@ -709,54 +549,14 @@ class Engine:
             context_size_limit=context_size_limit,
         )
 
-        # Budget recovery is derived from explicit budget_consumed events.
-        consumption_counts: dict[str, int] = {}
-
-        for entry in trace_store.get_all():
-            cid = entry.contract_id
-
-            if entry.event_type == "budget_consumed":
-                consumption_counts[cid] = consumption_counts.get(cid, 0) + 1
-
-            elif entry.event_type == "method_scheduled":
-                engine._suspended.add(cid)
-                if entry.relation_target:
-                    engine._method_scheduled.add(entry.relation_target)
-
-            elif entry.event_type == "complete":
-                engine._completed.add(cid)
-                engine._suspended.discard(cid)
-
-            elif entry.event_type == "method_resumed":
-                engine._suspended.discard(cid)
-                # Reconstruct method context from disclosed_assets
-                assets: list[Asset] = []
-                for aid in entry.disclosed_assets:
-                    asset = store.get_asset(aid)
-                    if asset is not None:
-                        assets.append(asset)
-                if assets:
-                    engine._method_context.setdefault(cid, []).extend(assets)
-
-            elif entry.event_type == "label_resolved":
-                # Reconstruct label context from disclosed_assets
-                assets = []
-                for aid in entry.disclosed_assets:
-                    asset = store.get_asset(aid)
-                    if asset is not None:
-                        assets.append(asset)
-                if assets:
-                    engine._label_context[cid] = assets
-
-            # Track last entry per contract for contract_last_entry
-            engine._contract_last_entry[cid] = entry.id
-
-        # Derive budget from contracts and explicit budget consumption.
-        for contract in store.get_all_contracts():
-            cid = contract.id
-            initial = max(contract.budget, 1)
-            consumed = consumption_counts.get(cid, 0)
-            engine._budget[cid] = max(0, initial - consumed)
+        engine_state = TraceStateRebuilder.rebuild(store, trace_store)
+        engine._budget_mgr.restore(engine_state.budget)
+        engine._completed = engine_state.completed
+        engine._suspended = engine_state.suspended
+        engine._method_scheduled = engine_state.method_scheduled
+        engine._method_context = engine_state.method_context
+        engine._label_context = engine_state.label_context
+        engine._trace_mgr.restore_last_entries(engine_state.contract_last_entry)
 
         return engine
 
@@ -765,8 +565,8 @@ def _make_runtime(engine: Engine) -> MethodRuntime:
     """Create a MethodRuntime from an Engine instance."""
     return MethodRuntime(
         store=engine._store,
-        trace=engine._trace,
-        budget=engine._budget,
+        trace=engine._trace_mgr,
+        budget=engine._budget_mgr,
         tools=engine._tools,
         suspended=engine._suspended,
         method_scheduled=engine._method_scheduled,

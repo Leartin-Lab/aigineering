@@ -5,6 +5,9 @@ import json
 from aigineering.core.store import MemoryStore
 from aigineering.core.engine import Engine
 from aigineering.core.capability_descriptors import create_tool_descriptor
+from aigineering.core.method_handlers.plan import PlanMethodHandler
+from aigineering.core.method_handlers.tool import ToolMethodHandler
+from aigineering.core.method_registry import MethodRegistry
 from aigineering.core.tools import ToolRegistry
 from aigineering.core.trace import TraceStore
 from aigineering.agent.mock import MockWorker
@@ -25,6 +28,15 @@ class SequenceWorker:
         from aigineering.protocol.types import Candidate
 
         return Candidate(worker_id=self.worker_id, raw_output=raw_output)
+
+
+def _method_registry(*methods: str) -> MethodRegistry:
+    registry = MethodRegistry()
+    if "plan" in methods:
+        registry.register("plan", PlanMethodHandler())
+    if "tool" in methods:
+        registry.register("tool", ToolMethodHandler())
+    return registry
 
 
 def test_hallucinated_output_cannot_become_runtime_fact():
@@ -273,6 +285,14 @@ def test_method_scheduling_uses_child_contract_identity():
     )
     tools = ToolRegistry()
     tools.register(ToolSpec(name="search"), lambda args: f"value:{args['q']}")
+    store.add_asset(
+        create_tool_descriptor(
+            "search",
+            "Search test values.",
+            {"type": "object"},
+            trust_tier="configured",
+        )
+    )
     contract = Contract(
         id="contract_parent",
         name="root",
@@ -280,7 +300,13 @@ def test_method_scheduling_uses_child_contract_identity():
         budget=5,
         tool_scope=["search"],
     )
-    engine = Engine(store, worker, trace_store, tools=tools)
+    engine = Engine(
+        store,
+        worker,
+        trace_store,
+        tools=tools,
+        method_registry=_method_registry("tool"),
+    )
     engine.add_contract(contract)
 
     engine.run()
@@ -312,7 +338,13 @@ def test_tool_method_executes_registry_and_commits_observation():
         budget=5,
         tool_scope=["lookup"],
     )
-    engine = Engine(store, worker, trace_store, tools=tools)
+    engine = Engine(
+        store,
+        worker,
+        trace_store,
+        tools=tools,
+        method_registry=_method_registry("tool"),
+    )
     engine.add_contract(contract)
 
     engine.run()
@@ -349,7 +381,13 @@ def test_tool_method_records_error_observation_for_out_of_scope_tool():
         budget=5,
         tool_scope=[],
     )
-    engine = Engine(store, worker, trace_store, tools=tools)
+    engine = Engine(
+        store,
+        worker,
+        trace_store,
+        tools=tools,
+        method_registry=_method_registry("tool"),
+    )
     engine.add_contract(contract)
 
     engine.run()
@@ -380,7 +418,21 @@ def test_tool_observation_resumes_parent_without_satisfying_output():
         budget=5,
         tool_scope=["lookup"],
     )
-    engine = Engine(store, worker, trace_store, tools=tools)
+    store.add_asset(
+        create_tool_descriptor(
+            "lookup",
+            "Lookup test values.",
+            {"type": "object"},
+            trust_tier="configured",
+        )
+    )
+    engine = Engine(
+        store,
+        worker,
+        trace_store,
+        tools=tools,
+        method_registry=_method_registry("tool"),
+    )
     engine.add_contract(contract)
 
     engine.run()
@@ -438,7 +490,12 @@ def test_plan_result_expands_child_contracts_without_system_authority():
         tool_scope=["lookup"],
         labels=["research"],
     )
-    engine = Engine(store, worker, trace_store)
+    engine = Engine(
+        store,
+        worker,
+        trace_store,
+        method_registry=_method_registry("plan"),
+    )
     engine.add_contract(contract)
 
     engine.run()
@@ -489,7 +546,12 @@ def test_plan_result_bad_budget_defaults_without_crashing():
         activation="",
         budget=5,
     )
-    engine = Engine(store, worker, trace_store)
+    engine = Engine(
+        store,
+        worker,
+        trace_store,
+        method_registry=_method_registry("plan"),
+    )
     engine.add_contract(contract)
 
     engine.run()

@@ -318,8 +318,8 @@ def test_engine_uses_plan_handler():
     assert write_children[0].id in created_ids
 
 
-def test_fallback_without_handler():
-    """Engine works without PlanMethodHandler (backward compat)."""
+def test_plan_completion_without_handler_fails_closed():
+    """Engine must not expand plan results without a registered handler."""
     plan_content = json.dumps(
         {
             "contracts": [
@@ -357,11 +357,14 @@ def test_fallback_without_handler():
         for c in store.get_all_contracts()
         if c.parent_id == contract.id and c.name == "draft"
     ]
-    assert len(planned) == 1
-    assert planned[0].origin == "plan"
+    assert planned == []
 
     expanded = trace_store.get_by_event_type("contracts_expanded")
-    assert len(expanded) == 1
+    assert expanded == []
+    missing = trace_store.get_by_event_type("method_handler_missing")
+    assert len(missing) == 1
+    assert missing[0].authority_result == "rejected"
+    assert missing[0].relation_type == "plan"
 
 
 def test_handler_satisfies_protocol():
@@ -377,24 +380,16 @@ def test_handler_satisfies_protocol():
     assert callable(handler.handle_completion)
 
 
-def test_legacy_handler_without_handle_completion_falls_back():
-    """A handler without handle_completion must not crash the engine.
-
-    Pre-v0.3.4 handlers only implement can_handle + handle_method.
-    When a plan method contract completes, the engine must gracefully
-    fall back to _expand_plan_result instead of crashing with
-    AttributeError on the missing handle_completion method.
-    """
+def test_legacy_handler_without_handle_completion_fails_closed():
+    """A handler without handle_completion must not trigger Engine fallback."""
     registry = MethodRegistry()
 
     class LegacyHandler:
         def can_handle(self, action_type: str) -> bool:
             return action_type == "plan"
 
-        def handle_method(self, engine, contract, action_type, candidate) -> bool:
-            engine._schedule_method_contract(
-                contract, parse_method_action(candidate), candidate
-            )
+        def handle_method(self, runtime, contract, action_type, candidate) -> bool:
+            runtime.schedule_method(contract, parse_method_action(candidate), candidate)
             return True
 
     registry.register("plan", LegacyHandler())
@@ -423,10 +418,10 @@ def test_legacy_handler_without_handle_completion_falls_back():
     )
     engine = Engine(store, worker, trace_store, method_registry=registry)
     engine.add_contract(contract)
-    # Must not raise AttributeError
     engine.run()
-    # Fallback expansion created the child (legacy handler's handle_method also
-    # created the method sub-contract, so we check for "draft" specifically)
     children = [c for c in store.get_all_contracts() if c.parent_id == contract.id]
     draft = [c for c in children if c.name == "draft"]
-    assert len(draft) == 1
+    assert draft == []
+    missing = trace_store.get_by_event_type("method_handler_missing")
+    assert len(missing) == 1
+    assert missing[0].authority_result == "rejected"

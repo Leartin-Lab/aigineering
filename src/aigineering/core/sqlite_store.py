@@ -13,6 +13,7 @@ import sqlite3
 from pathlib import Path
 from typing import Optional
 
+from aigineering.core.crash import check_crash_point
 from aigineering.core.ids import compute_content_hash, now_iso
 from aigineering.core.provenance import verify_asset_seal
 from aigineering.protocol.types import Asset, Contract, TraceEntry
@@ -49,6 +50,7 @@ CREATE TABLE IF NOT EXISTS assets (
     minted_by TEXT NOT NULL DEFAULT '',
     source_uri TEXT NOT NULL DEFAULT '',
     signed_by TEXT NOT NULL DEFAULT '',
+    signer_kind TEXT NOT NULL DEFAULT 'deterministic',
     provenance_seal TEXT NOT NULL DEFAULT '',
     promptable INTEGER NOT NULL DEFAULT 1,
     disclosure_view TEXT NOT NULL DEFAULT 'original',
@@ -290,6 +292,7 @@ class SQLiteStore:
             minted_by=row["minted_by"],
             source_uri=row["source_uri"],
             signed_by=row["signed_by"],
+            signer_kind=row["signer_kind"],
             provenance_seal=row["provenance_seal"],
             promptable=bool(row["promptable"]),
             disclosure_view=row["disclosure_view"],
@@ -342,13 +345,13 @@ class SQLiteStore:
             """INSERT OR REPLACE INTO assets (
                     id, name, content, content_type, created_by,
                     origin, trust_tier, minted_by, source_uri,
-                    signed_by, provenance_seal, promptable, disclosure_view,
+                    signed_by, signer_kind, provenance_seal, promptable, disclosure_view,
                     definition_hash, content_hash,
                     keep_flag, tombstoned, tombstoned_at, lineage_id
                 ) VALUES (
                     :id, :name, :content, :content_type, :created_by,
                     :origin, :trust_tier, :minted_by, :source_uri,
-                    :signed_by, :provenance_seal, :promptable, :disclosure_view,
+                    :signed_by, :signer_kind, :provenance_seal, :promptable, :disclosure_view,
                     :definition_hash, :content_hash,
                     :keep_flag, :tombstoned, :tombstoned_at, :lineage_id
                 )""",
@@ -363,6 +366,7 @@ class SQLiteStore:
                 "minted_by": d["minted_by"],
                 "source_uri": d["source_uri"],
                 "signed_by": d["signed_by"],
+                "signer_kind": d["signer_kind"],
                 "provenance_seal": d["provenance_seal"],
                 "promptable": int(d["promptable"]),
                 "disclosure_view": d["disclosure_view"],
@@ -747,6 +751,8 @@ class SQLiteStore:
                         f"(signed_by={asset.signed_by!r})"
                     )
                 self._insert_asset(asset)
+            # Crash injection point: assets written, traces not yet written.
+            check_crash_point("after_asset_before_trace")
             for entry in trace_entries:
                 self._insert_trace_entry(entry)
             if idempotency_key:

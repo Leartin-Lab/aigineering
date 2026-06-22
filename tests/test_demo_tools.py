@@ -1,4 +1,4 @@
-"""Tests for demo tools — memory-backed built-in tools (v0.4.8)."""
+"""Tests for demo tools — memory-backed built-in tools (v0.4.10)."""
 
 from __future__ import annotations
 
@@ -7,8 +7,8 @@ import json
 import pytest
 
 from aigineering.agent.demo_tools import register_demo_tools, reset_demo_store
-from aigineering.agent.mcp_worker import MCPWorker
-from aigineering.agent.tool_worker import ToolWorker
+from aigineering.agent.mcp_executor import MCPExecutor
+from aigineering.agent.tool_executor import ToolExecutor
 from aigineering.core.capability_descriptors import create_tool_descriptor
 from aigineering.core.engine import Engine
 from aigineering.core.method_registry import MethodRegistry
@@ -97,11 +97,11 @@ def test_demo_file_read_write():
 
 
 def test_demo_file_read_write_via_tool_worker():
-    """ToolWorker.invoke() wraps file_read/file_write results as Candidates."""
+    """ToolExecutor.invoke() wraps file_read/file_write results as Candidates."""
     registry = _make_registry()
-    worker = ToolWorker(registry)
+    worker = ToolExecutor(registry)
 
-    # write via ToolWorker
+    # write via ToolExecutor
     wc = worker.invoke("file_write", {"path": "/a.txt", "content": "data"}, "c1")
     assert isinstance(wc, Candidate)
     w_obs = json.loads(wc.raw_output)
@@ -109,7 +109,7 @@ def test_demo_file_read_write_via_tool_worker():
     assert w_obs["tool"] == "file_write"
     assert w_obs["result"] == "ok"
 
-    # read via ToolWorker
+    # read via ToolExecutor
     rc = worker.invoke("file_read", {"path": "/a.txt"}, "c1")
     r_obs = json.loads(rc.raw_output)
     assert r_obs["ok"] is True
@@ -132,9 +132,9 @@ def test_demo_search_tool():
 
 
 def test_demo_search_tool_via_tool_worker():
-    """ToolWorker wraps search results as a Candidate."""
+    """ToolExecutor wraps search results as a Candidate."""
     registry = _make_registry()
-    worker = ToolWorker(registry)
+    worker = ToolExecutor(registry)
 
     candidate = worker.invoke("search", {"q": "hello"}, "c1")
     obs = json.loads(candidate.raw_output)
@@ -143,13 +143,13 @@ def test_demo_search_tool_via_tool_worker():
     assert "hello" in obs["result"]
 
 
-# ── Unit: demo search via MCPWorker pattern ─────────────────────────────
+# ── Unit: demo search via MCPExecutor pattern ────────────────────────────
 
 
 def test_demo_search_via_mcp_worker():
-    """Demo search tool exercised through MCPWorker pattern.
+    """Demo search tool exercised through MCPExecutor pattern.
 
-    MCPWorker uses server-prefixed tool names (e.g. ``search.query``)
+    MCPExecutor uses server-prefixed tool names (e.g. ``search.query``)
     and dispatches to server callables.  This tests the MCP pipeline
     with a mock search server.
     """
@@ -158,7 +158,7 @@ def test_demo_search_via_mcp_worker():
     def search_server(tool_name: str, args: dict) -> str:
         return json.dumps({"results": [f"hit: {args.get('q', '')}"]})
 
-    worker = MCPWorker(mcp_servers={"search": search_server})
+    worker = MCPExecutor(mcp_servers={"search": search_server})
     candidate = worker.invoke("search.query", {"q": "thermal"}, "contract_1")
 
     assert isinstance(candidate, Candidate)
@@ -177,9 +177,9 @@ def test_demo_search_via_mcp_worker():
 def test_demo_workflow_full_pipeline():
     """Full pipeline: plan→tool→resume→complete with demo tools.
 
-    Exercises the ToolWorker pipeline end-to-end through the engine:
+    Exercises the ToolExecutor pipeline end-to-end through the engine:
     1. Parent contract with tool_scope triggers /tool action
-    2. ToolMethodHandler + Engine execute tool via ToolWorker
+    2. ToolMethodHandler + Engine execute tool via ToolExecutor
     3. Observation asset is committed, parent resumes
     4. Parent completes with final output
     5. Trace shows tool_executed events

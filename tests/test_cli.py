@@ -990,3 +990,76 @@ def test_dag_output_valid_format():
         assert "fill:#90EE90" in output
         assert "fill:#FFD700" in output
         assert "fill:#87CEEB" in output
+
+
+# ---------------------------------------------------------------------------
+# v0.4.10 — version metadata
+# ---------------------------------------------------------------------------
+
+
+class TestVersionMetadata:
+    """Package version and release metadata."""
+
+    def test_package_version_is_defined(self):
+        """__version__ is a valid version string."""
+        from aigineering import __version__
+        assert __version__ is not None
+        assert isinstance(__version__, str)
+        assert len(__version__) > 0
+        # Must be parseable as at least MAJOR.MINOR.PATCH
+        parts = __version__.split(".")
+        assert len(parts) >= 3, f"Version '{__version__}' should have at least 3 parts"
+        assert parts[0].isdigit()
+        assert parts[1].isdigit()
+        assert parts[2].split("-")[0].isdigit()  # handle 0.5.0-alpha1
+
+    def test_package_version_matches_pyproject(self):
+        """pyproject.toml version matches __version__ (when installed in dev)."""
+        from aigineering import __version__
+        import tomllib
+        from pathlib import Path
+
+        pyproject = Path(__file__).parent.parent / "pyproject.toml"
+        if pyproject.exists():
+            with open(pyproject, "rb") as f:
+                data = tomllib.load(f)
+            expected = data["project"]["version"]
+            # In dev mode (pip install -e .), __version__ reads from metadata
+            # which should match pyproject.toml
+            assert __version__ == expected or __version__ == "0.0.0-dev", \
+                f"__version__={__version__}, pyproject.toml version={expected}"
+
+
+class TestTrustTierLegacyAliases:
+    """Verify TrustTier.from_str() accepts pre-unification tier names."""
+
+    def test_from_str_accepts_legacy_aliases(self):
+        """All legacy tier names resolve to canonical TrustTier members."""
+        from aigineering.protocol.types import TrustTier
+
+        # Legacy → Canonical mappings
+        assert TrustTier.from_str("low") == TrustTier.UNTRUSTED
+        assert TrustTier.from_str("medium") == TrustTier.CONFIGURED
+        assert TrustTier.from_str("high") == TrustTier.VERIFIED
+        assert TrustTier.from_str("worker") == TrustTier.UNTRUSTED
+        assert TrustTier.from_str("tool") == TrustTier.CONFIGURED
+        assert TrustTier.from_str("trusted") == TrustTier.VERIFIED
+
+    def test_from_str_rejects_unknown_tiers(self):
+        """Unknown tier names raise ValueError."""
+        from aigineering.protocol.types import TrustTier
+        import pytest
+
+        with pytest.raises(ValueError):
+            TrustTier.from_str("banana_tier")
+
+    def test_from_str_accepts_canonical_names(self):
+        """Canonical tier names resolve correctly."""
+        from aigineering.protocol.types import TrustTier
+
+        assert TrustTier.from_str("untrusted") == TrustTier.UNTRUSTED
+        assert TrustTier.from_str("observed") == TrustTier.OBSERVED
+        assert TrustTier.from_str("configured") == TrustTier.CONFIGURED
+        assert TrustTier.from_str("verified") == TrustTier.VERIFIED
+        assert TrustTier.from_str("system") == TrustTier.SYSTEM
+        assert TrustTier.from_str("human") == TrustTier.HUMAN

@@ -1,6 +1,6 @@
-"""Demo tools — memory-backed built-in tools for tests and examples (v0.4.8).
+"""Demo tools — memory-backed built-in tools for tests and examples (v0.4.10).
 
-These tools exercise the ToolWorker/MCPWorker pipeline without real
+These tools exercise the ToolExecutor/MCPExecutor pipeline without real
 filesystem access.  Not for production use.
 """
 

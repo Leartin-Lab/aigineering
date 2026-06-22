@@ -111,3 +111,106 @@ def test_engine_discloses_label_injected_assets_and_traces_resolution():
     assert len(disclosure_entries) == 1
     assert input_asset.id in disclosure_entries[0].disclosed_assets
     assert skill.id in disclosure_entries[0].disclosed_assets
+
+
+class TestLabelPlaceholderSafety:
+    """Placeholders must not be treated as facts or satisfy trust/sensitive checks."""
+
+    def test_placeholder_is_not_promptable(self):
+        """Placeholder assets must not be disclosed to workers/LLMs."""
+        store = MemoryStore()
+        contract = _contract(name="review", labels=["reviewer"], outputs=["result"])
+
+        result = resolve_contract_labels(
+            contract,
+            {"reviewer": Label(name="reviewer", assets=["_skill_missing"])},
+            store,
+        )
+        placeholder = result.placeholder_assets[0]
+        assert placeholder.promptable is False, (
+            "Label placeholder must NOT be promptable — disclosure would leak "
+            "'missing dependency' placeholder content to LLM."
+        )
+
+    def test_placeholder_cannot_satisfy_sensitive_input_policy(self):
+        """Placeholder with trust_tier=untrusted must not pass sensitive policy."""
+        from aigineering.core.verification import check_sensitive_input_policy
+        from aigineering.core.store import MemoryStore
+
+        store = MemoryStore()
+        contract = _contract(name="review", labels=["reviewer"], outputs=["result"])
+
+        result = resolve_contract_labels(
+            contract,
+            {"reviewer": Label(name="reviewer", assets=["_skill_missing"])},
+            store,
+        )
+        placeholder = result.placeholder_assets[0]
+
+        # Placeholder as input to a contract with sensitive_input_policy
+        c = Contract(
+            id="task:label_placeholder_test",
+            name="label_test",
+            inputs=["_skill_missing"],
+            outputs=["result"],
+            activation="_skill_missing",
+            sensitive_input_policy={"required_trust_tier": "observed"},
+        )
+        store2 = MemoryStore()
+        store2.add_asset(placeholder)
+        policy_result = check_sensitive_input_policy(c, store2)
+        assert policy_result["compliant"] is False, (
+            "Placeholder with trust_tier=untrusted must NOT satisfy "
+            "required_trust_tier >= observed."
+        )
+
+    def test_placeholder_cannot_satisfy_trust_policy(self):
+        """Placeholder must fail TrustPolicy.evaluate with minimum_trust_tier."""
+        from aigineering.core.trust_policy import TrustPolicy
+        from aigineering.protocol.types import TrustTier
+
+        store = MemoryStore()
+        contract = _contract(name="review", labels=["reviewer"], outputs=["result"])
+
+        result = resolve_contract_labels(
+            contract,
+            {"reviewer": Label(name="reviewer", assets=["_skill_missing"])},
+            store,
+        )
+        placeholder = result.placeholder_assets[0]
+
+        policy = TrustPolicy(minimum_trust_tier=TrustTier.OBSERVED)
+        decision = policy.evaluate([placeholder])
+        assert decision.accepted is False, (
+            "Placeholder with trust_tier=untrusted (0) must NOT pass "
+            "minimum_trust_tier=OBSERVED (1)."
+        )
+        assert any("trust_tier" in r for r in decision.reasons)
+
+    def test_placeholder_cannot_satisfy_sufficiency(self):
+        """Placeholder must trigger trust gap in sufficiency check."""
+        from aigineering.core.sufficiency import check_sufficiency
+
+        store = MemoryStore()
+        contract = _contract(name="review", labels=["reviewer"], outputs=["result"])
+
+        result = resolve_contract_labels(
+            contract,
+            {"reviewer": Label(name="reviewer", assets=["_skill_missing"])},
+            store,
+        )
+        placeholder = result.placeholder_assets[0]
+
+        c = Contract(
+            id="task:placeholder_sufficiency",
+            name="sufficiency_test",
+            inputs=["_skill_missing"],
+            outputs=["result"],
+            activation="_skill_missing",
+        )
+        store2 = MemoryStore()
+        store2.add_asset(placeholder)
+        sufficiency = check_sufficiency(c, store2)
+        assert "_skill_missing" in sufficiency["trust_gaps"], (
+            "Placeholder with trust_tier=untrusted must appear in trust_gaps."
+        )

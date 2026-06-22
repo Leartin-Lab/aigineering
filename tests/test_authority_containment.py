@@ -477,18 +477,17 @@ def test_child_input_is_own_output_accepted():
 def test_missing_parent_fails_closed():
     """Parent not in store → no expansion, trace shows containment_rejected."""
     from aigineering.core.store import MemoryStore
-    from aigineering.core.engine import Engine
+    from aigineering.core.method_handlers.plan import PlanMethodHandler
+    from aigineering.core.method_runtime import MethodRuntime
     from aigineering.core.trace import TraceStore
-    from aigineering.agent.mock import MockWorker
 
     store = MemoryStore()
     trace_store = TraceStore()
-    worker = MockWorker()
 
     parent_id = "parent_not_in_store"
 
     # Create a method contract with parent_id pointing to non-existent parent.
-    # The description must encode {"method": "plan"} so _expand_plan_result
+    # The description must encode {"method": "plan"} so PlanMethodHandler
     # recognises it as a plan method.
     import json
 
@@ -546,8 +545,11 @@ def test_missing_parent_fails_closed():
         ]
     )
 
-    engine = Engine(store, worker, trace_store)
-    engine._expand_plan_result(method_contract, [plan_asset])
+    runtime = MethodRuntime(store, trace_store, {})
+    handled = PlanMethodHandler().handle_completion(
+        runtime, method_contract, [plan_asset]
+    )
+    assert handled is True
 
     # Verify no child contracts were created
     planned = [

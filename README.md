@@ -55,11 +55,13 @@ aig replay <session_id>   # replay a session
 
 ---
 
-## Status: v0.4 Single-Node Stable Kernel
+## Status: v0.4.10 — Single-Node alpha/experimental Kernel
 
-This release stabilizes the single-node kernel needed for v0.5 productivity expansion. It demonstrates the core invariant: **unauthorized worker outputs cannot become runtime facts.** The v0.4 kernel is focused on strong protocolization and single-node runtime infrastructure: immutable data models, capability containment, method-first extensibility, SQLite-backed transactional state, recoverable engine state, worker pull/submit protocol, and a modular JSON CLI.
+This release provides an experimental single-node kernel for local research and early integration work. It demonstrates the core invariant: **unauthorized worker outputs cannot become runtime facts.** The v0.4 kernel is focused on strong protocolization and single-node runtime infrastructure: immutable data models, capability containment, method-first extensibility, SQLite-backed transactional state, recoverable engine state, worker pull/submit protocol, and a modular JSON CLI.
 
 This is not a security-audited production release. It is intended for local experiments, research prototypes, and early integration work where auditable runtime boundaries matter.
+
+The transactional worker-submit guarantees (single active claim, idempotency, candidate envelope binding) apply to the `aig worker next` / `aig worker submit` protocol path. The `aig run` command is a local demo and direct execution path that does not exercise the full worker protocol; it is intended for quick experiments and smoke tests, not for evaluating distributed runtime safety.
 
 **Currently implemented:**
 - Deterministic SHA-256 content-addressed IDs

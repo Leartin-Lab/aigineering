@@ -21,7 +21,9 @@ if TYPE_CHECKING:
     from aigineering.protocol.actions import WorkerAction
     from aigineering.core.tools import ToolRegistry
     from aigineering.core.store import StoreProtocol
+    from aigineering.core.budget_manager import BudgetManager
     from aigineering.core.trace import TraceStoreProtocol
+    from aigineering.core.trace_manager import TraceManager
 
 
 class MethodRuntime:
@@ -37,15 +39,15 @@ class MethodRuntime:
     def __init__(
         self,
         store: StoreProtocol,
-        trace: TraceStoreProtocol,
-        budget: dict[str, int],
+        trace: TraceManager | TraceStoreProtocol,
+        budget: BudgetManager | dict[str, int],
         tools: ToolRegistry | None = None,
         suspended: set[str] | None = None,
         method_scheduled: set[str] | None = None,
     ) -> None:
         self._store = store
-        self._trace = trace
-        self._budget = budget
+        self._trace = _coerce_trace_manager(trace)
+        self._budget = _coerce_budget_manager(budget)
         self._tools = tools
         self._suspended: set[str] = suspended if suspended is not None else set()
         self._method_scheduled: set[str] = (
@@ -62,7 +64,7 @@ class MethodRuntime:
         and ``engine._budget[cid] = ...`` patterns.
         """
         self._store.add_contract(contract)
-        self._budget[contract.id] = max(contract.budget, 1)
+        self._budget.initialize(contract.id, contract.budget)
 
     def get_contract(self, contract_id: str) -> Contract | None:
         """Return the contract with *contract_id*, or ``None``."""
@@ -106,7 +108,7 @@ class MethodRuntime:
 
     def resolve_budget(self, contract_id: str) -> int:
         """Return the remaining budget for *contract_id*."""
-        return self._budget.get(contract_id, 0)
+        return self._budget.get_remaining(contract_id)
 
     # -- Trace ---------------------------------------------------------------
 
@@ -115,10 +117,7 @@ class MethodRuntime:
 
         Replaces direct ``engine._add_trace(...)`` calls.
         """
-        from aigineering.core.trace import create_entry
-
-        entry = create_entry(contract_id=contract_id, event_type=event_type, **kwargs)
-        self._trace.append(entry)
+        self._trace.record(contract_id, event_type, **kwargs)
 
     def record_rejection(self, contract_id: str, reason: str, **kwargs: object) -> None:
         """Record a rejection entry in the trace."""
@@ -188,7 +187,24 @@ class MethodRuntime:
 
     def consume_budget(self, contract_id: str, amount: int = 1) -> int:
         """Consume *amount* from the budget of *contract_id*. Returns remaining."""
-        current = self._budget.get(contract_id, 0)
-        remaining = max(0, current - amount)
-        self._budget[contract_id] = remaining
-        return remaining
+        return self._budget.consume(contract_id, amount)
+
+
+def _coerce_budget_manager(budget: BudgetManager | dict[str, int]) -> BudgetManager:
+    if hasattr(budget, "initialize") and hasattr(budget, "consume"):
+        return budget  # type: ignore[return-value]
+
+    from aigineering.core.budget_manager import BudgetManager
+
+    manager = BudgetManager()
+    manager.restore(dict(budget))
+    return manager
+
+
+def _coerce_trace_manager(trace: TraceManager | TraceStoreProtocol) -> TraceManager:
+    if hasattr(trace, "record") and hasattr(trace, "get_all_last_entries"):
+        return trace  # type: ignore[return-value]
+
+    from aigineering.core.trace_manager import TraceManager
+
+    return TraceManager(trace)  # type: ignore[arg-type]

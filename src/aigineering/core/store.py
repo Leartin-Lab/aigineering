@@ -120,6 +120,7 @@ class JsonLStore:
                     minted_by=data.get("minted_by", ""),
                     source_uri=data.get("source_uri", ""),
                     signed_by=data.get("signed_by", ""),
+                    signer_kind=data.get("signer_kind", "deterministic"),
                     provenance_seal=data.get(
                         "provenance_seal", data.get("signature", "")
                     ),

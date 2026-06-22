@@ -1409,7 +1409,7 @@ class TestDisclosureRedaction:
             definition_hash="def:unrel",
             content_hash="content:unrel",
             origin="human",
-            trust_tier="high",
+            trust_tier="verified",
             signed_by="trusted_signer",
         )
         unrelated = sign_asset(unrelated)
@@ -1768,20 +1768,55 @@ class TestPlanContainment:
 class TestWorkerProtocolFixes:
     """G4: Worker protocol alignment."""
 
-    def test_tool_worker_aligns_with_worker_protocol(self):
-        """ToolWorker.invoke must match Worker protocol signature.
+    def test_worker_classes_satisfy_worker_protocol(self):
+        """Real Workers (MockWorker, LLMWorker) must accept (contract, disclosed_assets).
 
         Gate: G4
-        Debt: N-P1.12 (tool_worker.py:24, mcp_worker.py:27)
+        Debt: N-P1.12 (ADR-006 Worker substitutability)
         """
         import inspect
-        from aigineering.agent.tool_worker import ToolWorker
+        from aigineering.agent.mock import MockWorker
 
-        # ToolWorker.invoke must accept (self, contract, disclosed_assets) like Worker protocol
-        sig = inspect.signature(ToolWorker.invoke)
+        # MockWorker.invoke must match Worker protocol: (self, contract, disclosed_assets)
+        sig = inspect.signature(MockWorker.invoke)
         params = list(sig.parameters.keys())
-        assert "contract" in params or len(params) >= 2, (
-            f"G4/N-P1.12: ToolWorker.invoke must accept contract + disclosed_assets. Params: {params}"
+        assert "contract" in params, (
+            f"G4/N-P1.12: MockWorker.invoke missing 'contract' param. Params: {params}"
+        )
+        assert "disclosed_assets" in params or "disclosed" in str(params), (
+            f"G4/N-P1.12: MockWorker.invoke must accept disclosed_assets. Params: {params}"
+        )
+
+    def test_tool_executor_is_not_a_worker(self):
+        """ToolExecutor and MCPExecutor are NOT Workers — they have custom signatures.
+
+        Gate: G4 (ADR-006 enforcement — executors ≠ workers)
+        Debt: N-P1.12 (tool_executor.py, mcp_executor.py)
+        """
+        import inspect
+        from aigineering.agent.tool_executor import ToolExecutor
+        from aigineering.agent.mcp_executor import MCPExecutor
+
+        # ToolExecutor.invoke expects (tool_name, args, contract_id) — NOT Worker protocol
+        sig_t = inspect.signature(ToolExecutor.invoke)
+        params_t = list(sig_t.parameters.keys())
+        assert "tool_name" in params_t, (
+            f"G4: ToolExecutor.invoke must accept 'tool_name'. Params: {params_t}"
+        )
+        assert "contract" not in params_t, (
+            "G4: ToolExecutor.invoke must NOT accept 'contract' — it is not a Worker. "
+            "See ADR-006."
+        )
+
+        # MCPExecutor.invoke expects (tool_name, args, contract_id) — NOT Worker protocol
+        sig_m = inspect.signature(MCPExecutor.invoke)
+        params_m = list(sig_m.parameters.keys())
+        assert "tool_name" in params_m, (
+            f"G4: MCPExecutor.invoke must accept 'tool_name'. Params: {params_m}"
+        )
+        assert "contract" not in params_m, (
+            "G4: MCPExecutor.invoke must NOT accept 'contract' — it is not a Worker. "
+            "See ADR-006."
         )
 
     def test_mock_worker_id_is_frozen_instance_attr(self):
@@ -1894,8 +1929,9 @@ class TestPublicDocs:
                 f"G11: README claims '{claim}' which is not yet true under 040 gate."
             )
         assert "not a security-audited production release" in readme.lower()
-        assert "v0.4 single-node stable kernel" in readme.lower()
-        assert "v0.5 productivity expansion" in readme.lower()
+        assert "alpha/experimental kernel" in readme.lower()
+        assert "v0.4.10" in readme.lower()
+        assert "experimental single-node kernel" in readme.lower()
         assert "transactional worker candidate submission" in readme.lower()
 
         # Check ROADMAP
@@ -1904,11 +1940,28 @@ class TestPublicDocs:
             roadmap = f.read()
 
         roadmap_lower = roadmap.lower()
-        assert "040 single-node stable kernel" in roadmap_lower
+        assert "alpha/experimental" in roadmap_lower
         assert "v0.5" in roadmap_lower
         assert "[x] transactional candidate submission" in roadmap_lower
         assert "not a security-audited production deployment" in roadmap_lower
         assert "[x] release packaging and distribution checks" in roadmap_lower
+
+        # G11: must NOT claim "stable kernel" in status descriptions
+        rejected_stable_claims = [
+            "single-node stable kernel",
+            "production stable",
+        ]
+        for claim in rejected_stable_claims:
+            assert claim not in readme.lower(), (
+                f"G11: README contains '{claim}' which implies production stability "
+                f"that 040 does not guarantee."
+            )
+
+        for claim in rejected_stable_claims:
+            assert claim not in roadmap_lower, (
+                f"G11: ROADMAP contains '{claim}' which implies production stability "
+                f"that 040 does not guarantee."
+            )
 
 
 # ============================================================================

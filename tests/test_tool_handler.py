@@ -393,8 +393,8 @@ def test_engine_uses_tool_handler():
     assert resumed[0].relation_type == "tool"
 
 
-def test_fallback_without_handler():
-    """Engine fallback works without ToolMethodHandler when descriptor is trusted."""
+def test_tool_without_handler_fails_closed():
+    """Engine must not execute tools without a registered ToolMethodHandler."""
     tools = ToolRegistry()
     tools.register(ToolSpec(name="lookup"), lambda args: f"value:{args['key']}")
 
@@ -426,20 +426,19 @@ def test_fallback_without_handler():
     engine.add_contract(contract)
     engine.run()
 
-    reports = store.get_assets_by_name("report")
-    assert len(reports) == 1
-
     obs_assets = store.get_assets_by_name(f"_tool_obs_{contract.id}")
-    assert len(obs_assets) == 1
-    assert "value:x" in obs_assets[0].content
+    assert obs_assets == []
 
     tool_events = trace_store.get_by_event_type("tool_executed")
-    assert len(tool_events) == 1
-    assert tool_events[0].authority_result == "accepted"
+    assert tool_events == []
+    missing = trace_store.get_by_event_type("method_handler_missing")
+    assert len(missing) == 1
+    assert missing[0].authority_result == "rejected"
+    assert missing[0].relation_type == "tool"
 
 
-def test_fallback_without_handler_requires_descriptor():
-    """Inline Engine tool fallback must not bypass descriptor verification."""
+def test_tool_without_handler_does_not_bypass_descriptor_gate():
+    """Missing ToolMethodHandler must fail before any tool execution."""
     calls: list[dict] = []
     tools = ToolRegistry()
 
@@ -466,13 +465,12 @@ def test_fallback_without_handler_requires_descriptor():
 
     assert calls == []
     obs_assets = store.get_assets_by_name(f"_tool_obs_{contract.id}")
-    assert len(obs_assets) == 1
-    content = json.loads(obs_assets[0].content)
-    assert content["ok"] is False
-    assert "descriptor is missing" in content["error"]
+    assert obs_assets == []
     tool_events = trace_store.get_by_event_type("tool_executed")
-    assert len(tool_events) == 1
-    assert tool_events[0].authority_result == "rejected"
+    assert tool_events == []
+    missing = trace_store.get_by_event_type("method_handler_missing")
+    assert len(missing) == 1
+    assert missing[0].authority_result == "rejected"
 
 
 def test_handler_satisfies_protocol():

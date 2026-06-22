@@ -1,4 +1,4 @@
-"""Tool worker — executes tool calls through ToolRegistry, returning Candidate results (v0.3.6)."""
+"""Tool executor — executes tool calls through ToolRegistry, returning Candidate results (not a Worker — see ADR-006, v0.3.6)."""
 
 from __future__ import annotations
 
@@ -9,13 +9,14 @@ from aigineering.core.tools import ToolRegistry
 from aigineering.protocol.types import Candidate
 
 
-class ToolWorker:
+class ToolExecutor:
     """Executes tool calls through ToolRegistry, returning Candidate results.
 
-    ToolWorker splits tool execution from the tool method lifecycle:
-    the handler owns validation (tool_name, tool_scope, registry existence)
-    and delegates execution to ToolWorker, which returns a Candidate.
-    The Candidate must go through projection before becoming a runtime fact.
+    ToolExecutor (not a Worker — see ADR-006) splits tool execution from
+    the tool method lifecycle: the handler owns validation (tool_name,
+    tool_scope, registry existence) and delegates execution to ToolExecutor,
+    which returns a Candidate. The Candidate must go through projection
+    before becoming a runtime fact.
     """
 
     def __init__(self, registry: ToolRegistry) -> None:

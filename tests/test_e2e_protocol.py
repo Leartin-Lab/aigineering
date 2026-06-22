@@ -1,7 +1,10 @@
 """End-to-end protocol tests with the LLM worker boundary."""
 
 from aigineering.agent.llm import LLMWorker
+from aigineering.core.capability_descriptors import create_tool_descriptor
 from aigineering.core.engine import Engine
+from aigineering.core.method_handlers.tool import ToolMethodHandler
+from aigineering.core.method_registry import MethodRegistry
 from aigineering.core.store import MemoryStore
 from aigineering.core.tools import ToolRegistry
 from aigineering.core.trace import TraceStore
@@ -21,7 +24,17 @@ def test_llm_worker_tool_then_exec_e2e():
     tools = ToolRegistry()
     tools.register(ToolSpec(name="lookup"), lambda args: f"value:{args['key']}")
     store = MemoryStore()
+    store.add_asset(
+        create_tool_descriptor(
+            "lookup",
+            "Lookup test values.",
+            {"type": "object"},
+            trust_tier="configured",
+        )
+    )
     trace_store = TraceStore()
+    registry = MethodRegistry()
+    registry.register("tool", ToolMethodHandler())
     contract = Contract(
         id="contract_root",
         name="root",
@@ -32,7 +45,7 @@ def test_llm_worker_tool_then_exec_e2e():
         tool_scope=["lookup"],
     )
 
-    engine = Engine(store, worker, trace_store, tools=tools)
+    engine = Engine(store, worker, trace_store, tools=tools, method_registry=registry)
     engine.add_contract(contract)
     engine.run()
 

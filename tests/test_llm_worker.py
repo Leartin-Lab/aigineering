@@ -702,6 +702,8 @@ def test_tool_calls_go_through_method_dispatch_e2e():
     """
     from aigineering.core.engine import Engine
     from aigineering.core.capability_descriptors import create_tool_descriptor
+    from aigineering.core.method_handlers.tool import ToolMethodHandler
+    from aigineering.core.method_registry import MethodRegistry
     from aigineering.core.store import MemoryStore
     from aigineering.core.tools import ToolRegistry
     from aigineering.core.trace import TraceStore
@@ -755,6 +757,8 @@ def test_tool_calls_go_through_method_dispatch_e2e():
         )
     )
     trace_store = TraceStore()
+    registry = MethodRegistry()
+    registry.register("tool", ToolMethodHandler())
     contract = Contract(
         id="contract_native_tool",
         name="native_tool_test",
@@ -765,7 +769,7 @@ def test_tool_calls_go_through_method_dispatch_e2e():
         tool_scope=["lookup"],
     )
 
-    engine = Engine(store, worker, trace_store, tools=tools)
+    engine = Engine(store, worker, trace_store, tools=tools, method_registry=registry)
     engine.add_contract(contract)
     engine.run()
 

@@ -16,11 +16,12 @@ class Asset:
     content_type: str = "text"
     created_by: str = ""
     origin: str = ""
-    trust_tier: str = "untrusted"
+    trust_tier: str = "untrusted"  # TrustTier enum value; see TrustTier.from_str()
     minted_by: str = ""
     source_uri: str = ""
     signed_by: str = ""
     provenance_seal: str = ""
+    signer_kind: str = "deterministic"
     promptable: bool = True
     disclosure_view: str = "original"
     definition_hash: str = ""
@@ -128,6 +129,74 @@ class ProjectionStatus(Enum):
     ACCEPTED = "accepted"
     PARTIAL = "partial"
     REJECTED = "rejected"
+
+
+# Legacy alias table — maps pre-unification tier names to canonical members.
+_TRUST_TIER_LEGACY = {
+    "low": 0,        # TrustTier.UNTRUSTED
+    "medium": 2,     # TrustTier.CONFIGURED
+    "high": 3,       # TrustTier.VERIFIED
+    "worker": 0,     # TrustTier.UNTRUSTED
+    "tool": 2,       # TrustTier.CONFIGURED
+    "trusted": 3,    # TrustTier.VERIFIED
+}
+
+
+class TrustTier(Enum):
+    """Canonical trust tier for assets and capability descriptors.
+
+    Tiers are ordered by increasing trust: UNTRUSTED < OBSERVED < CONFIGURED
+    < VERIFIED < SYSTEM < HUMAN.  The ordering is the integer ``.value``.
+
+    Legacy tier names (``low``, ``medium``, ``high``, ``worker``, ``tool``,
+    ``trusted``) are NOT enum members but are accepted by :meth:`from_str` for
+    backward compatibility.
+
+    Canonical members (G10 gate set):
+        UNTRUSTED     = 0  (default for unverified content)
+        OBSERVED      = 1  (passively observed, e.g. worker output)
+        CONFIGURED    = 2  (explicitly configured, e.g. tool descriptor)
+        VERIFIED      = 3  (verified by a trusted process)
+        SYSTEM        = 4  (runtime-internal, e.g. method system assets)
+        HUMAN         = 5  (human/control-plane attestation)
+    """
+
+    UNTRUSTED = 0
+    OBSERVED = 1
+    CONFIGURED = 2
+    VERIFIED = 3
+    SYSTEM = 4
+    HUMAN = 5
+
+    def __str__(self) -> str:
+        return self.name.lower()
+
+    def __repr__(self) -> str:
+        return f"TrustTier.{self.name}"
+
+    @classmethod
+    def from_str(cls, value: str) -> "TrustTier":
+        """Resolve a tier name string to a TrustTier member.
+
+        Accepts both canonical names (``"untrusted"``, ``"observed"``, …)
+        and legacy aliases (``"low"``, ``"medium"``, ``"high"``, ``"worker"``,
+        ``"tool"``, ``"trusted"``).
+
+        Raises:
+            ValueError: if *value* is not a recognised tier name.
+        """
+        canonical = value.lower()
+        try:
+            return cls[canonical.upper()]
+        except KeyError:
+            pass
+        mapped = _TRUST_TIER_LEGACY.get(canonical)
+        if mapped is not None:
+            return cls(mapped)
+        raise ValueError(
+            f"Unknown trust tier {value!r}. "
+            f"Valid tiers: {[t.name.lower() for t in cls]}"
+        )
 
 
 @dataclass(frozen=True)

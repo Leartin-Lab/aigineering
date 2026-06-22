@@ -32,7 +32,7 @@ def test_tool_descriptor_registration_and_query():
         name="web_search",
         description="Search the web for information.",
         input_schema={"type": "object", "properties": {"q": {"type": "string"}}},
-        trust_tier="trusted",
+        trust_tier="verified",
         source_uri="tool://web_search/1.0",
     )
 
@@ -62,7 +62,7 @@ def test_tool_descriptor_registration_and_query():
 
     # Verify provenance on the Asset object itself
     assert loaded.origin == "capability_registry"
-    assert loaded.trust_tier == "trusted"
+    assert loaded.trust_tier == "verified"
     assert loaded.minted_by == "capability_registry"
     assert loaded.source_uri == "tool://web_search/1.0"
 
@@ -79,7 +79,7 @@ def test_mcp_descriptor_sealed_config():
     descriptor = create_mcp_descriptor(
         name="github",
         source_uri="mcp://github/api",
-        trust_tier="trusted",
+        trust_tier="verified",
     )
 
     content = json.loads(descriptor.content)
@@ -201,32 +201,32 @@ def test_descriptor_disclosure_metadata_only():
         name="secure_api",
         description="Call secured API endpoint.",
         input_schema={"type": "object"},
-        trust_tier="trusted",
+        trust_tier="verified",
         source_uri="tool://secure_api/v2",
     )
 
     m = create_mcp_descriptor(
         name="private_registry",
         source_uri="mcp+https://private.example.com",
-        trust_tier="trusted",
+        trust_tier="verified",
     )
 
     s = create_skill_descriptor(
         name="deploy",
         content="Deploy to production.",
-        trust_tier="trusted",
+        trust_tier="verified",
     )
 
     mem = create_memory_descriptor(
         name="enterprise_db",
         source_uri="memory://enterprise/read",
-        trust_tier="trusted",
+        trust_tier="verified",
     )
 
     p = create_persona_descriptor(
         name="sudo_user",
         content="You are a privileged user.",
-        trust_tier="trusted",
+        trust_tier="verified",
     )
 
     all_descriptors = [t, m, s, mem, p]
@@ -287,7 +287,7 @@ def test_descriptors_carry_provenance():
         create_skill_descriptor(
             name="format",
             content="Format output.",
-            trust_tier="trusted",
+            trust_tier="verified",
         ),
         create_memory_descriptor(
             name="chat_history",
@@ -297,11 +297,11 @@ def test_descriptors_carry_provenance():
         create_persona_descriptor(
             name="reviewer",
             content="You are a code reviewer.",
-            trust_tier="trusted",
+            trust_tier="verified",
         ),
     ]
 
-    expected_trust_tiers = ["observed", "verified", "trusted", "observed", "trusted"]
+    expected_trust_tiers = ["observed", "verified", "verified", "observed", "verified"]
 
     for desc, expected_trust in zip(descriptors, expected_trust_tiers):
         # Core provenance fields are present
