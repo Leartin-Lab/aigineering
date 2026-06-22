@@ -44,6 +44,18 @@ class AssetCreateRequest(BaseModel):
     content_type: str = "text"
 
 
+class AssetSliceRequest(BaseModel):
+    slice_name: str
+    range: str = ""
+
+
+class ReplacementClaimCreateRequest(BaseModel):
+    source_asset_id: str
+    replacement_asset_id: str
+    claim_type: str = "replacement"
+    signed_by: str = ""
+
+
 class AssetResponse(BaseModel):
     id: str
     name: str
@@ -91,6 +103,16 @@ class ContractRunResponse(BaseModel):
     output_asset_ids: list[str]
 
 
+class ReplacementClaimResponse(BaseModel):
+    id: str
+    source_asset_id: str
+    replacement_asset_id: str
+    definition_hash: str
+    claim_type: str
+    signed_by: str
+    lineage_id: str
+
+
 # ── Endpoints ────────────────────────────────────────────────────────────────
 
 
@@ -128,6 +150,18 @@ def _trace_response(entry) -> TraceEntryResponse:
         event_type=entry.event_type,
         authority_result=entry.authority_result,
         timestamp=entry.timestamp,
+    )
+
+
+def _replacement_claim_response(claim) -> ReplacementClaimResponse:
+    return ReplacementClaimResponse(
+        id=claim.id,
+        source_asset_id=claim.source_asset_id,
+        replacement_asset_id=claim.replacement_asset_id,
+        definition_hash=claim.definition_hash,
+        claim_type=claim.claim_type,
+        signed_by=claim.signed_by,
+        lineage_id=claim.lineage_id,
     )
 
 
@@ -192,6 +226,105 @@ def list_assets():
     """List assets in the runtime store."""
     store = _persistent_store()
     return [_asset_response(a) for a in store.get_all_assets()]
+
+
+@app.get("/assets/{name}/versions", response_model=list[AssetResponse])
+def get_asset_versions(name: str):
+    """List all versions of an asset by name."""
+    from aigineering.core.asset_versions import list_versions
+
+    store = _persistent_store()
+    versions = list_versions(store, name)
+    if not versions:
+        raise HTTPException(status_code=404, detail=f"No asset named '{name}'")
+    return [_asset_response(a) for a in versions]
+
+
+@app.post("/assets/{name}/slice", response_model=AssetResponse, status_code=201)
+def slice_asset(name: str, body: AssetSliceRequest):
+    """Create a new asset from a line or character slice of an existing asset."""
+    from aigineering.core.asset_versions import create_slice_asset, resolve_latest
+
+    store = _persistent_store()
+    source = resolve_latest(store, name)
+    if source is None:
+        raise HTTPException(status_code=404, detail=f"No asset named '{name}'")
+    try:
+        asset = create_slice_asset(
+            source,
+            slice_name=body.slice_name,
+            range_spec=body.range,
+        )
+        store.add_asset(asset)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return _asset_response(asset)
+
+
+@app.post(
+    "/replacement-claims",
+    response_model=ReplacementClaimResponse,
+    status_code=201,
+)
+def create_replacement_claim(body: ReplacementClaimCreateRequest):
+    """Create a replacement/slice/summary/redaction claim between two assets."""
+    from aigineering.core.asset_versions import (
+        create_replacement_claim as make_replacement_claim,
+    )
+
+    store = _persistent_store()
+    source = store.get_asset(body.source_asset_id)
+    if source is None:
+        raise HTTPException(status_code=404, detail="Source asset not found")
+    replacement = store.get_asset(body.replacement_asset_id)
+    if replacement is None:
+        raise HTTPException(status_code=404, detail="Replacement asset not found")
+    try:
+        claim = make_replacement_claim(
+            source_asset_id=source.id,
+            replacement_asset_id=replacement.id,
+            definition_hash=source.definition_hash,
+            claim_type=body.claim_type,
+            signed_by=body.signed_by,
+        )
+        store.add_replacement_claim(claim)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return _replacement_claim_response(claim)
+
+
+@app.get("/replacement-claims", response_model=list[ReplacementClaimResponse])
+def list_replacement_claims(
+    definition_hash: Optional[str] = Query(None),
+    source_asset_id: Optional[str] = Query(None),
+):
+    """List replacement claims by definition hash or source asset."""
+    store = _persistent_store()
+    claims = []
+    seen: set[str] = set()
+
+    if definition_hash:
+        for claim in store.get_claims_by_definition(definition_hash):
+            claims.append(claim)
+            seen.add(claim.id)
+    if source_asset_id:
+        for claim in store.get_claims_for_asset(source_asset_id):
+            if claim.id not in seen:
+                claims.append(claim)
+                seen.add(claim.id)
+    if not definition_hash and not source_asset_id:
+        for asset in store.get_all_assets():
+            for claim in store.get_claims_for_asset(asset.id):
+                if claim.id not in seen:
+                    claims.append(claim)
+                    seen.add(claim.id)
+            if asset.definition_hash:
+                for claim in store.get_claims_by_definition(asset.definition_hash):
+                    if claim.id not in seen:
+                        claims.append(claim)
+                        seen.add(claim.id)
+
+    return [_replacement_claim_response(c) for c in claims]
 
 
 @app.get("/contracts/{contract_id}", response_model=ContractResponse)
