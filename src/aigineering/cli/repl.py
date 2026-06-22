@@ -17,6 +17,7 @@ def repl() -> None:
       /asset add --name X --content Y   Inject a control-plane asset
       /contract add --name X --input Y   Inject a contract
       /mcp add --name X --source-uri U  Add an MCP descriptor
+      /capability list                  List capability descriptors
       /run <goal>                       Execute a demo run
       /trace                            Show the latest trace
       /quit                             Exit the REPL
@@ -68,6 +69,8 @@ def _repl_loop() -> None:
             _dispatch(["behavior"] + argv)
         elif command == "mcp":
             _dispatch(["mcp"] + argv)
+        elif command == "capability":
+            _dispatch(["capability"] + argv)
         else:
             click.echo(f"Unknown command: /{command}. Type /help for available commands.")
 
@@ -97,6 +100,7 @@ def _show_repl_help() -> None:
     click.echo("  /mcp add --name X --source-uri U  Add an MCP descriptor")
     click.echo("  /mcp list                         List MCP descriptors")
     click.echo("  /mcp show <name>                  Show an MCP descriptor")
+    click.echo("  /capability list                  List capability descriptors")
     click.echo("  /run <goal> [options]             Execute a demo run")
     click.echo("  /trace [options]                  Show the latest trace")
     click.echo("  /quit                             Exit the REPL")
