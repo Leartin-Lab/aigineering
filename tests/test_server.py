@@ -57,3 +57,76 @@ def test_create_and_get_contract(tmp_path, monkeypatch):
     fetched = client.get(f"/contracts/{body['id']}")
     assert fetched.status_code == 200, fetched.text
     assert fetched.json()["id"] == body["id"]
+
+
+def test_list_assets_and_contracts(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    client = TestClient(app)
+
+    asset = client.post(
+        "/assets",
+        json={"name": "api_doc", "content": "hello", "trust_tier": "human"},
+    )
+    assert asset.status_code == 201, asset.text
+    contract = client.post(
+        "/contracts",
+        json={"name": "api_task", "inputs": ["api_doc"], "outputs": ["out"]},
+    )
+    assert contract.status_code == 201, contract.text
+
+    assets = client.get("/assets")
+    assert assets.status_code == 200, assets.text
+    assert [row["name"] for row in assets.json()] == ["api_doc"]
+
+    contracts = client.get("/contracts")
+    assert contracts.status_code == 200, contracts.text
+    assert [row["name"] for row in contracts.json()] == ["api_task"]
+
+
+def test_run_contract_persists_outputs_and_trace(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    client = TestClient(app)
+
+    created = client.post(
+        "/contracts",
+        json={"name": "api_task", "outputs": ["out"], "budget": 1},
+    )
+    assert created.status_code == 201, created.text
+    contract_id = created.json()["id"]
+
+    run = client.post(
+        f"/contracts/{contract_id}/run",
+        json={"worker": "mock", "output_content": "done"},
+    )
+    assert run.status_code == 200, run.text
+    body = run.json()
+    assert body["contract_id"] == contract_id
+    assert body["status"] == "complete"
+    assert body["trace_ids"]
+    assert len(body["output_asset_ids"]) == 1
+
+    output = client.get("/assets/out")
+    assert output.status_code == 200, output.text
+    assert output.json()[0]["content"] == "done"
+
+    trace = client.get("/trace")
+    assert trace.status_code == 200, trace.text
+    assert "complete" in [entry["event_type"] for entry in trace.json()]
+
+
+def test_run_contract_rejects_non_mock_worker(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    client = TestClient(app)
+
+    created = client.post(
+        "/contracts",
+        json={"name": "api_task", "outputs": ["out"], "budget": 1},
+    )
+    assert created.status_code == 201, created.text
+
+    run = client.post(
+        f"/contracts/{created.json()['id']}/run",
+        json={"worker": "llm"},
+    )
+    assert run.status_code == 400
+    assert "mock worker" in run.json()["detail"]
