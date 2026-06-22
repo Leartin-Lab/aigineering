@@ -42,7 +42,7 @@ class SkillManifest:
         self.version: str = data.get("version", "")
         self.capabilities: list[str] = data.get("capabilities", [])
         self.labels: list[str] = data.get("labels", [])
-        self.trust_tier: str = data.get("trust_tier", "untrusted")
+        self.trust_tier: str = data.get("trust_tier", "configured")
         self.description: str = data.get("description", "")
         self.content_file: str = data.get("content_file", "skill.md")
         self.directory: Path = directory
@@ -115,7 +115,7 @@ class SkillLoader:
                 f"{manifest_path}: unknown fields: {sorted(unknown)}"
             )
         try:
-            TrustTier.from_str(data.get("trust_tier", "untrusted"))
+            TrustTier.from_str(data.get("trust_tier", "configured"))
         except ValueError as e:
             raise ValueError(f"{manifest_path}: invalid trust_tier") from e
         for field_name in ("capabilities", "labels"):

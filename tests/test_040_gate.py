@@ -1929,7 +1929,7 @@ class TestPublicDocs:
                 f"G11: README claims '{claim}' which is not yet true under 040 gate."
             )
         assert "not a security-audited production release" in readme.lower()
-        assert "v0.5.0-alpha.1" in readme.lower()
+        assert "v0.5.0-alpha.2" in readme.lower()
         assert "local productivity alpha" in readme.lower()
         assert "transactional worker candidate submission" in readme.lower()
 

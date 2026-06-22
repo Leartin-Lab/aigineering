@@ -15,6 +15,7 @@ from aigineering.core.capability_descriptors import (
     create_tool_descriptor,
     verify_descriptor,
 )
+from aigineering.core.trace import create_entry
 
 _PREFIXES = (
     "_tool_capability_",
@@ -44,7 +45,28 @@ def _store_descriptor(descriptor, kind: str) -> None:
         raise click.ClickException(
             "Capability descriptor failed trust gate; use trust_tier >= configured."
         )
-    _persistent_store().add_asset(descriptor)
+    store = _persistent_store()
+    store.add_asset(descriptor)
+    if hasattr(store, "append"):
+        store.append(
+            create_entry(
+                contract_id="control_plane",
+                event_type="asset_injected",
+                parent_id=descriptor.id,
+                relation_type=f"{kind}_capability",
+                relation_target=descriptor.name,
+                accepted_fragments=[
+                    json.dumps(
+                        {
+                            "asset_id": descriptor.id,
+                            "origin": descriptor.origin,
+                            "trust_tier": descriptor.trust_tier,
+                        },
+                        sort_keys=True,
+                    )
+                ],
+            )
+        )
 
 
 def _descriptor_json(asset) -> dict[str, object]:

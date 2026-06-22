@@ -170,7 +170,7 @@ def run(
             click.echo(f"✓ contract {contract.name} activated")
         elif entry.event_type == "disclosure":
             names = _asset_names_for(entry.disclosed_assets, store)
-            worker_id = entry.worker_id or "mock_worker"
+            worker_id = entry.worker_id or "unknown_worker"
             click.echo(f"→ disclosed {names} to {worker_id}")
         elif entry.event_type == "projection":
             total = len(entry.accepted_fragments) + len(entry.rejected_fragments)

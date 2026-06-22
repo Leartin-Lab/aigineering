@@ -6,6 +6,7 @@ from pathlib import Path
 from click.testing import CliRunner
 
 from aigineering.cli.main import cli
+from aigineering.core.sqlite_store import SQLiteStore
 
 
 def test_mcp_add_list_show_json():
@@ -41,6 +42,14 @@ def test_mcp_add_list_show_json():
         assert shown_data["content"]["kind"] == "mcp"
         assert shown_data["content"]["tool_name"] == "search.query"
         assert shown_data["content"]["sealed_config_ref"] == ""
+
+        store = SQLiteStore(".aig/store.db")
+        injected = store.get_by_event_type("asset_injected")
+        assert any(
+            e.relation_type == "mcp_capability"
+            and e.relation_target == "_mcp_search"
+            for e in injected
+        )
 
 
 def test_mcp_add_loads_schema_files(tmp_path: Path):

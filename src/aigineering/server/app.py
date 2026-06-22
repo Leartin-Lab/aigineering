@@ -12,7 +12,7 @@ from aigineering.cli._common import (
     _persistent_store,
 )
 
-app = FastAPI(title="Aigineering API", version="0.5.0-alpha.1")
+app = FastAPI(title="Aigineering API", version="0.5.0-alpha.2")
 
 
 # ── Request / response models ────────────────────────────────────────────────

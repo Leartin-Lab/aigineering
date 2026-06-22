@@ -362,6 +362,11 @@ def test_retry_creates_deterministic_contract():
             c.id for c in store2.get_all_contracts() if c.id.startswith("retry:")
         ]
         assert expected_id in retry_ids_in_store
+        retry_events = store2.get_by_contract(original_id)
+        assert any(
+            e.event_type == "retry_created" and e.relation_target == expected_id
+            for e in retry_events
+        )
         store2.close()
 
 
@@ -531,6 +536,54 @@ def test_trace_dag_view():
         assert "classDef active" in output
         assert "suspended" in output
         assert "active" in output
+
+
+def test_trace_tree_and_dag_include_method_continuation_edges():
+    """Continuation contracts are first-class edges in trace projections."""
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        entries = [
+            TraceEntry(
+                id="evt_parent_tool",
+                contract_id="contract_parent",
+                event_type="method_continuation_scheduled",
+                relation_type="tool",
+                relation_target="contract_continue",
+                disclosed_assets=["asset_obs"],
+                timestamp="2025-01-01T00:00:00",
+            ),
+            TraceEntry(
+                id="evt_continue_act",
+                contract_id="contract_continue",
+                event_type="activation",
+                timestamp="2025-01-01T00:00:01",
+            ),
+        ]
+        _write_trace_entries(
+            Path(".aig/traces/session_continuation.jsonl"),
+            entries,
+        )
+
+        tree = runner.invoke(cli, ["trace", "--tree"])
+        assert tree.exit_code == 0
+        assert "contract: contract_parent" in tree.output
+        assert "contract: contract_continue" in tree.output
+        assert "tool continuation" in tree.output
+
+        lines = tree.output.split("\n")
+        parent_line = [line for line in lines if "contract: contract_parent" in line]
+        child_line = [line for line in lines if "contract: contract_continue" in line]
+        assert parent_line
+        assert child_line
+        parent_indent = len(parent_line[0]) - len(parent_line[0].lstrip())
+        child_indent = len(child_line[0]) - len(child_line[0].lstrip())
+        assert child_indent > parent_indent
+
+        dag = runner.invoke(cli, ["trace", "--dag"])
+        assert dag.exit_code == 0
+        assert "contract_parent" in dag.output
+        assert "contract_continue" in dag.output
+        assert "tool:continuation" in dag.output
 
 
 def test_trace_dag_empty():
@@ -993,7 +1046,7 @@ def test_dag_output_valid_format():
 
 
 # ---------------------------------------------------------------------------
-# v0.5.0-alpha.1 — version metadata
+# v0.5.0-alpha.2 — version metadata
 # ---------------------------------------------------------------------------
 
 

@@ -6,6 +6,7 @@ from pathlib import Path
 from click.testing import CliRunner
 
 from aigineering.cli.main import cli
+from aigineering.core.sqlite_store import SQLiteStore
 
 
 def _write_skill(root: Path, name: str) -> Path:
@@ -35,6 +36,12 @@ def test_skill_load_and_list_json(tmp_path: Path):
         assert len(rows) == 1
         assert rows[0]["skill"] == "reviewer"
         assert rows[0]["trust_tier"] == "configured"
+
+        store = SQLiteStore(".aig/store.db")
+        injected = store.get_by_event_type("asset_injected")
+        injected_names = {e.relation_target for e in injected}
+        assert "_skill_capability_reviewer" in injected_names
+        assert "_skill_content_reviewer" in injected_names
 
 
 def test_skill_load_invalid_manifest_fails(tmp_path: Path):

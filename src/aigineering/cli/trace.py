@@ -154,6 +154,11 @@ def _print_timeline_entry(entry: TraceEntry) -> None:
         method = entry.relation_type or "method"
         assets = entry.disclosed_assets or []
         click.echo(f"{prefix}← parent resumed after /{method}: {assets}")
+    elif entry.event_type == "method_continuation_scheduled":
+        method = entry.relation_type or "method"
+        target = entry.relation_target or "(unknown)"
+        assets = entry.disclosed_assets or []
+        click.echo(f"{prefix}← /{method} continuation scheduled {target}: {assets}")
     elif entry.event_type == "contracts_expanded":
         targets = entry.relation_target or ""
         click.echo(f"{prefix}← planner expanded contracts: {targets}")
@@ -200,9 +205,10 @@ def _build_contract_tree(
 ) -> dict[str, dict]:
     """Build a projection tree from trace entries: {contract_id: {entry, children}}.
 
-    Parent→child relationships are derived from method_scheduled and
-    contracts_expanded events.  This is a pure projection — no runtime truth
-    is stored, it is computed on the fly from trace entries every time.
+    Parent→child relationships are derived from method_scheduled,
+    method_continuation_scheduled, and contracts_expanded events.  This is a
+    pure projection — no runtime truth is stored, it is computed on the fly
+    from trace entries every time.
     """
     by_contract: dict[str, list[TraceEntry]] = {}
     for e in entries:
@@ -211,6 +217,11 @@ def _build_contract_tree(
     child_parent: dict[str, str] = {}
     for e in entries:
         if e.event_type == "method_scheduled" and e.relation_target:
+            child_parent[e.relation_target] = e.contract_id
+        elif (
+            e.event_type == "method_continuation_scheduled"
+            and e.relation_target
+        ):
             child_parent[e.relation_target] = e.contract_id
         elif e.event_type == "contracts_expanded" and e.relation_target:
             for child_id in e.relation_target.replace(",", " ").split():
@@ -331,6 +342,10 @@ def _entry_short_label(entry: TraceEntry) -> str:
     elif entry.event_type == "method_resumed":
         method = entry.relation_type or "method"
         return f"resumed after /{method}"
+    elif entry.event_type == "method_continuation_scheduled":
+        method = entry.relation_type or "method"
+        target = entry.relation_target or "(unknown)"
+        return f"/{method} continuation → {target}"
     elif entry.event_type == "contracts_expanded":
         target = entry.relation_target or ""
         return f"expanded → {target}"
@@ -370,6 +385,18 @@ def _build_contract_dag(
             if edge not in seen:
                 edges.append(edge)
                 seen.add(edge)
+        elif (
+            e.event_type == "method_continuation_scheduled"
+            and e.relation_target
+        ):
+            edge = (
+                e.contract_id,
+                f"{e.relation_type or 'method'}:continuation",
+                e.relation_target,
+            )
+            if edge not in seen:
+                edges.append(edge)
+                seen.add(edge)
         elif e.event_type == "contracts_expanded" and e.relation_target:
             for child_id in e.relation_target.replace(",", " ").split():
                 child_id = child_id.strip()
@@ -387,7 +414,7 @@ def _contract_status_map(entries: list[TraceEntry]) -> dict[str, str]:
 
     Status is determined from trace events only:
       - completed: contract has a ``complete`` event
-      - suspended: contract scheduled a method but has not yet resumed
+      - suspended: contract scheduled a method/continuation and has no complete
       - active: contract has events but no ``complete`` (still in progress)
     """
     by_contract: dict[str, list[TraceEntry]] = {}
@@ -400,7 +427,10 @@ def _contract_status_map(entries: list[TraceEntry]) -> dict[str, str]:
         if has_complete:
             status[cid] = "completed"
             continue
-        has_scheduled = any(e.event_type == "method_scheduled" for e in evts)
+        has_scheduled = any(
+            e.event_type in ("method_scheduled", "method_continuation_scheduled")
+            for e in evts
+        )
         has_resumed = any(e.event_type == "method_resumed" for e in evts)
         if has_scheduled and not has_resumed:
             status[cid] = "suspended"

@@ -6,6 +6,7 @@ from pathlib import Path
 from click.testing import CliRunner
 
 from aigineering.cli.main import cli
+from aigineering.core.sqlite_store import SQLiteStore
 
 
 def test_capability_add_tool_list_show(tmp_path: Path):
@@ -45,6 +46,14 @@ def test_capability_add_tool_list_show(tmp_path: Path):
         assert content["kind"] == "tool"
         assert content["description"] == "Lookup data"
         assert content["sealed_config_ref"] == ""
+
+        store = SQLiteStore(".aig/store.db")
+        injected = store.get_by_event_type("asset_injected")
+        assert any(
+            e.relation_type == "tool_capability"
+            and e.relation_target == "_tool_capability_lookup"
+            for e in injected
+        )
 
 
 def test_capability_add_memory_and_persona(tmp_path: Path):

@@ -13,6 +13,7 @@ from aigineering.core.capability_descriptors import (
     create_mcp_descriptor,
     verify_descriptor,
 )
+from aigineering.core.trace import create_entry
 
 MCP_PREFIX = "_mcp_"
 
@@ -89,6 +90,26 @@ def mcp_add(
 
     store = _persistent_store()
     store.add_asset(descriptor)
+    if hasattr(store, "append"):
+        store.append(
+            create_entry(
+                contract_id="control_plane",
+                event_type="asset_injected",
+                parent_id=descriptor.id,
+                relation_type="mcp_capability",
+                relation_target=descriptor.name,
+                accepted_fragments=[
+                    json.dumps(
+                        {
+                            "asset_id": descriptor.id,
+                            "origin": descriptor.origin,
+                            "trust_tier": descriptor.trust_tier,
+                        },
+                        sort_keys=True,
+                    )
+                ],
+            )
+        )
 
     if as_json:
         _output_json(

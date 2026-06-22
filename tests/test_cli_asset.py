@@ -6,6 +6,7 @@ from pathlib import Path
 from click.testing import CliRunner
 
 from aigineering.cli.main import cli
+from aigineering.core.sqlite_store import SQLiteStore
 
 
 class TestAssetAdd:
@@ -322,6 +323,14 @@ class TestAssetVersionWorkflow:
             sliced = json.loads(show.output)
             assert sliced["content"] == "two\nthree\n"
 
+            store = SQLiteStore(".aig/store.db")
+            injected = store.get_by_event_type("asset_injected")
+            assert any(
+                e.relation_type == "asset_slice"
+                and e.relation_target == "doc.middle"
+                for e in injected
+            )
+
     def test_slice_invalid_range_fails_closed(self):
         runner = CliRunner()
         with runner.isolated_filesystem():
@@ -368,3 +377,9 @@ class TestAssetVersionWorkflow:
             result = json.loads(verify.output)
             assert result["pass_count"] == 1
             assert result["fail_count"] == 0
+
+            store = SQLiteStore(".aig/store.db")
+            events = store.get_by_event_type("replacement_claim_created")
+            assert len(events) == 1
+            assert events[0].relation_type == "replacement"
+            assert events[0].relation_target == replacement_id

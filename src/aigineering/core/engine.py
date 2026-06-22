@@ -12,6 +12,7 @@ from aigineering.core.crash import check_crash_point
 from aigineering.core.context_overflow import ContextOverflowHandler
 from aigineering.core.disclosure import compute_disclosure, redact_for_disclosure
 from aigineering.core.labels import Label, resolve_contract_labels
+from aigineering.core.ids import hash_contract
 from aigineering.core.methods import (
     method_contract,
     method_context_content,
@@ -236,6 +237,7 @@ class Engine:
                     self._completed.add(contract.id)
                     check_crash_point("after_child_complete")
                     self._resume_parent_from_method(contract)
+                    self._complete_satisfied_ancestors(contract)
                     break
 
     def _resolve_budget(self, contract: Contract) -> int:
@@ -271,8 +273,7 @@ class Engine:
 
     def _all_outputs_satisfied(self, contract: Contract) -> bool:
         for output_name in contract.outputs:
-            matching = self._store.get_assets_by_name(output_name)
-            if not any(a.created_by == contract.id for a in matching):
+            if not self._store.get_assets_by_name(output_name):
                 return False
         return True
 
@@ -446,23 +447,6 @@ class Engine:
             for asset in self._store.get_assets_by_contract(contract.id)
             if asset.promptable
         ]
-        if method_assets:
-            existing = {asset.id for asset in self._method_context.get(parent_id, [])}
-            for asset in method_assets:
-                if asset.id not in existing:
-                    self._method_context.setdefault(parent_id, []).append(asset)
-                    existing.add(asset.id)
-
-        self._suspended.discard(parent_id)
-        self._add_trace(
-            parent_id,
-            "method_resumed",
-            disclosed_assets=[asset.id for asset in method_assets],
-            relation_type=method_payload(contract).get("method"),
-            relation_target=contract.id,
-            budget_remaining=self._budget_mgr.get_remaining(parent_id),
-        )
-
         method_type = method_payload(contract).get("method")
         if self._method_registry is not None and isinstance(method_type, str):
             handler = self._method_registry.get(method_type)
@@ -470,7 +454,27 @@ class Engine:
                 completion = getattr(handler, "handle_completion", None)
                 if callable(completion):
                     if completion(_make_runtime(self), contract, method_assets):
+                        parent = self._store.get_contract(parent_id)
+                        if parent is not None and self._all_outputs_satisfied(parent):
+                            self._complete_contract(parent)
+                            self._complete_satisfied_ancestors(parent)
+                        elif method_type == "tool" and parent is not None:
+                            self._schedule_continuation_contract(
+                                parent, contract, method_assets
+                            )
+                        else:
+                            self._complete_satisfied_ancestors(contract)
                         return
+
+        parent = self._store.get_contract(parent_id)
+        if parent is not None and self._all_outputs_satisfied(parent):
+            self._complete_contract(parent)
+            self._complete_satisfied_ancestors(parent)
+            return
+
+        if method_type == "tool" and parent is not None:
+            self._schedule_continuation_contract(parent, contract, method_assets)
+            return
 
         self._add_trace(
             parent_id,
@@ -483,6 +487,74 @@ class Engine:
                 f"no completion handler registered for {method_type!r}"
             ],
             budget_remaining=self._budget_mgr.get_remaining(parent_id),
+        )
+
+    def _complete_contract(self, contract: Contract) -> None:
+        if contract.id in self._completed:
+            return
+        self._add_trace(
+            contract.id,
+            "complete",
+            budget_remaining=self._resolve_budget(contract),
+        )
+        self._completed.add(contract.id)
+        self._suspended.discard(contract.id)
+
+    def _complete_satisfied_ancestors(self, contract: Contract) -> None:
+        parent_id = contract.parent_id
+        while parent_id is not None:
+            parent = self._store.get_contract(parent_id)
+            if parent is None or not self._all_outputs_satisfied(parent):
+                return
+            self._complete_contract(parent)
+            parent_id = parent.parent_id
+
+    def _schedule_continuation_contract(
+        self,
+        parent: Contract,
+        source_contract: Contract,
+        method_assets: list[Asset],
+    ) -> None:
+        method = method_payload(source_contract).get("method", "method")
+        budget = max(1, self._budget_mgr.get_remaining(parent.id))
+        name = f"{parent.name or parent.id}.{method}.continue.{source_contract.id}"
+        continuation = Contract(
+            id=hash_contract(
+                name=name,
+                description=parent.description,
+                inputs=[],
+                outputs=list(parent.outputs),
+                activation="",
+                budget=budget,
+                tool_scope=list(parent.tool_scope),
+                labels=list(parent.labels),
+                origin="continuation",
+            ),
+            parent_id=parent.id,
+            name=name,
+            description=parent.description,
+            outputs=parent.outputs,
+            activation="",
+            budget=budget,
+            tool_scope=parent.tool_scope,
+            labels=parent.labels,
+            origin="continuation",
+            minting_authority=parent.minting_authority,
+            sensitive_input_policy=parent.sensitive_input_policy,
+        )
+        if continuation.id not in self._method_scheduled:
+            self.add_contract(continuation)
+            self._method_scheduled.add(continuation.id)
+            if method_assets:
+                self._method_context[continuation.id] = list(method_assets)
+
+        self._add_trace(
+            parent.id,
+            "method_continuation_scheduled",
+            disclosed_assets=[asset.id for asset in method_assets],
+            relation_type=str(method),
+            relation_target=continuation.id,
+            budget_remaining=self._budget_mgr.get_remaining(parent.id),
         )
 
     # ── State persistence / recovery ──────────────────────────────────

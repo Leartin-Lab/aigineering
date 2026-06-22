@@ -57,7 +57,7 @@ def test_llm_worker_tool_then_exec_e2e():
     event_types = [entry.event_type for entry in trace_store.get_all()]
     assert "method_scheduled" in event_types
     assert "tool_executed" in event_types
-    assert "method_resumed" in event_types
+    assert "method_continuation_scheduled" in event_types
     assert "complete" in event_types
 
 

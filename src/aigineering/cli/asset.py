@@ -15,12 +15,18 @@ from aigineering.core.asset_versions import (
     resolve_latest,
 )
 from aigineering.core.control_plane import inject_asset
+from aigineering.core.trace import create_entry
 
 
 @click.group("asset")
 def asset_group() -> None:
     """Inject and inspect assets through the control plane."""
     pass
+
+
+def _append_trace_if_supported(store, entry) -> None:
+    if hasattr(store, "append"):
+        store.append(entry)
 
 
 @asset_group.command("add")
@@ -197,6 +203,27 @@ def asset_slice(name: str, slice_name: str, range_spec: str, as_json: bool) -> N
     except ValueError as e:
         raise click.ClickException(str(e))
     store.add_asset(sliced)
+    _append_trace_if_supported(
+        store,
+        create_entry(
+            contract_id="control_plane",
+            event_type="asset_injected",
+            parent_id=sliced.id,
+            relation_type="asset_slice",
+            relation_target=sliced.name,
+            accepted_fragments=[
+                json.dumps(
+                    {
+                        "asset_id": sliced.id,
+                        "origin": sliced.origin,
+                        "trust_tier": sliced.trust_tier,
+                        "lineage_id": sliced.lineage_id,
+                    },
+                    sort_keys=True,
+                )
+            ],
+        ),
+    )
 
     if as_json:
         _output_json(
@@ -249,6 +276,27 @@ def asset_replace(
         provenance_seal="",
     )
     store.add_replacement_claim(claim)
+    _append_trace_if_supported(
+        store,
+        create_entry(
+            contract_id="control_plane",
+            event_type="replacement_claim_created",
+            parent_id=claim.id,
+            relation_type=claim.claim_type,
+            relation_target=claim.replacement_asset_id,
+            accepted_fragments=[
+                json.dumps(
+                    {
+                        "claim_id": claim.id,
+                        "source_asset_id": claim.source_asset_id,
+                        "replacement_asset_id": claim.replacement_asset_id,
+                        "definition_hash": claim.definition_hash,
+                    },
+                    sort_keys=True,
+                )
+            ],
+        ),
+    )
 
     if as_json:
         _output_json(

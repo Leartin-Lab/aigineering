@@ -75,9 +75,11 @@ def test_handler_schedules_tool_child():
     child_contracts = [
         c for c in store.get_all_contracts() if c.parent_id == contract.id
     ]
-    assert len(child_contracts) == 1
-    assert child_contracts[0].name == "root.tool"
-    assert child_contracts[0].origin == "system"
+    system_children = [c for c in child_contracts if c.origin == "system"]
+    continuations = [c for c in child_contracts if c.origin == "continuation"]
+    assert len(system_children) == 1
+    assert system_children[0].name == "root.tool"
+    assert len(continuations) == 1
 
 
 def test_handler_executes_tool_on_completion():
@@ -449,9 +451,9 @@ def test_engine_uses_tool_handler():
     assert tool_events[0].relation_target == "lookup"
     assert tool_events[0].authority_result == "accepted"
 
-    resumed = trace_store.get_by_event_type("method_resumed")
-    assert len(resumed) == 1
-    assert resumed[0].relation_type == "tool"
+    continued = trace_store.get_by_event_type("method_continuation_scheduled")
+    assert len(continued) == 1
+    assert continued[0].relation_type == "tool"
 
 
 def test_tool_without_handler_fails_closed():

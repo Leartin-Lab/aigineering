@@ -8,6 +8,7 @@ import click
 
 from aigineering.cli._common import _output_json, _persistent_store
 from aigineering.core.skill_loader import SkillLoader
+from aigineering.core.trace import create_entry
 
 
 @click.group("skill")
@@ -27,6 +28,27 @@ def skill_load(directory: str, as_json: bool) -> None:
         assets = loader.load(store)
     except ValueError as e:
         raise click.ClickException(str(e))
+    if hasattr(store, "append"):
+        for asset in assets:
+            store.append(
+                create_entry(
+                    contract_id="control_plane",
+                    event_type="asset_injected",
+                    parent_id=asset.id,
+                    relation_type="skill_asset",
+                    relation_target=asset.name,
+                    accepted_fragments=[
+                        json.dumps(
+                            {
+                                "asset_id": asset.id,
+                                "origin": asset.origin,
+                                "trust_tier": asset.trust_tier,
+                            },
+                            sort_keys=True,
+                        )
+                    ],
+                )
+            )
 
     result = {
         "loaded_manifests": [m.name for m in manifests],

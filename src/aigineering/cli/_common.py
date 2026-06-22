@@ -23,7 +23,12 @@ from aigineering.core.method_registry import MethodRegistry
 from aigineering.core.session import SessionStore
 from aigineering.core.store import MemoryStore, StoreProtocol
 from aigineering.core.sqlite_store import SQLiteStore
-from aigineering.core.trace import JsonLTraceStore, MemoryTraceStore, TraceStoreProtocol
+from aigineering.core.trace import (
+    JsonLTraceStore,
+    MemoryTraceStore,
+    TraceStoreProtocol,
+    create_entry,
+)
 from aigineering.agent.llm import LLMWorker
 from aigineering.agent.mock import MockWorker
 from aigineering.protocol.types import Asset, Contract, TraceEntry
@@ -193,6 +198,26 @@ def _run_demo(
             capabilities=tuple(capabilities or ()),
         )
         store.add_asset(config_asset)
+        if hasattr(trace_store, "append"):
+            trace_store.append(
+                create_entry(
+                    contract_id="control_plane",
+                    event_type="asset_injected",
+                    parent_id=config_asset.id,
+                    relation_type="provider_config",
+                    relation_target=config_asset.name,
+                    accepted_fragments=[
+                        json.dumps(
+                            {
+                                "asset_id": config_asset.id,
+                                "origin": config_asset.origin,
+                                "trust_tier": config_asset.trust_tier,
+                            },
+                            sort_keys=True,
+                        )
+                    ],
+                )
+            )
 
     data_file = Asset(
         id=hash_asset_content("data_file", "Sample data for report generation"),

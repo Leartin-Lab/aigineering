@@ -113,6 +113,12 @@ class TraceStateRebuilder:
                 assets = _resolve_assets(store, entry.disclosed_assets)
                 if assets:
                     method_context.setdefault(cid, []).extend(assets)
+            elif entry.event_type == "method_continuation_scheduled":
+                if entry.relation_target:
+                    method_scheduled.add(entry.relation_target)
+                assets = _resolve_assets(store, entry.disclosed_assets)
+                if assets and entry.relation_target:
+                    method_context.setdefault(entry.relation_target, []).extend(assets)
             elif entry.event_type == "label_resolved":
                 assets = _resolve_assets(store, entry.disclosed_assets)
                 if assets:

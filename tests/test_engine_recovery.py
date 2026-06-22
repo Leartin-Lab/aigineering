@@ -30,6 +30,14 @@ class SequenceWorker:
         return Candidate(worker_id=self.worker_id, raw_output=raw_output)
 
 
+def _method_context_names(engine: Engine) -> set[str]:
+    return {
+        asset.name
+        for assets in engine._method_context.values()
+        for asset in assets
+    }
+
+
 def _method_registry(*methods: str) -> MethodRegistry:
     registry = MethodRegistry()
     if "plan" in methods:
@@ -143,10 +151,8 @@ def test_save_restore_preserves_method_context():
         method_registry=_method_registry("tool"),
     )
 
-    # Method context should contain the tool observation asset
-    assert contract.id in engine2._method_context
-    ctx_assets = engine2._method_context[contract.id]
-    obs_names = [a.name for a in ctx_assets]
+    # Method context should contain the tool observation asset.
+    obs_names = _method_context_names(engine2)
     assert any("_tool_obs_" in n for n in obs_names)
 
 
@@ -245,9 +251,8 @@ def test_recovery_after_tool_observation():
         method_registry=_method_registry("tool"),
     )
 
-    # Verify method context contains the tool observation asset (by name, not ID)
-    ctx_assets = engine2._method_context.get(contract.id, [])
-    obs_names = [a.name for a in ctx_assets]
+    # Verify method context contains the tool observation asset (by name, not ID).
+    obs_names = _method_context_names(engine2)
     assert any("_tool_obs_" in n for n in obs_names), (
         f"Expected tool observation in method context, got names: {obs_names}"
     )
@@ -550,9 +555,9 @@ def test_restore_from_store_with_tool_observation():
 
     assert contract.id in engine2._completed
     assert engine2._budget == engine._budget
-    # Method context should contain the tool observation asset
-    assert contract.id in engine2._method_context
-    obs_names = [a.name for a in engine2._method_context[contract.id]]
+    assert engine2._method_scheduled == engine._method_scheduled
+    # Method context should contain the tool observation asset.
+    obs_names = _method_context_names(engine2)
     assert any("_tool_obs_" in n for n in obs_names)
 
 

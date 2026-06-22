@@ -1,16 +1,28 @@
 """Tests for the skill loader (core/skill_loader.py)."""
 from pathlib import Path
+import json
 
 from aigineering.core.skill_loader import SkillLoader, load_skills
 from aigineering.core.store import MemoryStore
+
+
+def _toml_value(value):
+    if isinstance(value, str):
+        return json.dumps(value)
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int | float):
+        return str(value)
+    if isinstance(value, list) and all(isinstance(item, str) for item in value):
+        return "[" + ", ".join(json.dumps(item) for item in value) + "]"
+    raise TypeError(f"unsupported TOML test value: {value!r}")
 
 
 def _write_skill_toml(dir_path: Path, name: str, **kwargs) -> Path:
     """Helper to write a minimal skill.toml manifest."""
     manifest = {"name": name, "version": "0.1.0"}
     manifest.update(kwargs)
-    lines = [f'{k} = "{v}"' if isinstance(v, str) else "" for k, v in manifest.items()]
-    lines = [line for line in lines if line]
+    lines = [f"{k} = {_toml_value(v)}" for k, v in manifest.items()]
     toml_path = dir_path / "skill.toml"
     toml_path.write_text("\n".join(lines) + "\n")
     return toml_path
@@ -168,6 +180,24 @@ class TestSkillLoaderLoad:
         loader.scan([str(tmp_path)])
         descriptors = loader.load(store)
         assert len(descriptors) == 2
+
+    def test_load_default_skill_is_configured_and_preserves_lists(self, tmp_path: Path):
+        skill_dir = tmp_path / "listed_skill"
+        skill_dir.mkdir()
+        _write_skill_toml(
+            skill_dir,
+            "listed_skill",
+            version="0.1.0",
+            capabilities=["tool", "memory"],
+            labels=["local", "safe"],
+        )
+
+        loader = SkillLoader()
+        manifests = loader.scan([str(tmp_path)])
+
+        assert manifests[0].trust_tier == "configured"
+        assert manifests[0].capabilities == ["tool", "memory"]
+        assert manifests[0].labels == ["local", "safe"]
 
     def test_load_skills_entry_point(self, tmp_path: Path):
         """load_skills convenience function works."""

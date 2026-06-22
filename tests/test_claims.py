@@ -78,15 +78,13 @@ def test_submit_claim_transitions_to_submitted(store: ClaimStore):
     assert retrieved.status == "submitted"
 
 
-def test_submit_claim_frees_contract_for_reclaim(store: ClaimStore):
-    """After submit, the contract can be claimed again."""
+def test_submit_claim_does_not_free_contract_for_reclaim(store: ClaimStore):
+    """After submit, retry/recovery must create a new contract instead."""
     c1 = store.claim("contract-1", "worker-A")
     store.submit_claim(c1.claim_id)
 
     c2 = store.claim("contract-1", "worker-B")
-    assert c2 is not None
-    assert c2.contract_id == "contract-1"
-    assert c2.worker_id == "worker-B"
+    assert c2 is None
 
 
 def test_submit_claim_nonexistent_returns_false(store: ClaimStore):
@@ -143,13 +141,13 @@ def test_release_claim_transitions_to_released(store: ClaimStore):
     assert retrieved.status == "released"
 
 
-def test_release_claim_frees_contract(store: ClaimStore):
-    """After release, the contract can be claimed again."""
+def test_release_claim_does_not_free_contract(store: ClaimStore):
+    """Release records terminal claim state; recovery must create new contract."""
     c1 = store.claim("contract-1", "worker-A")
     store.release_claim(c1.claim_id)
 
     c2 = store.claim("contract-1", "worker-B")
-    assert c2 is not None
+    assert c2 is None
 
 
 def test_release_claim_nonexistent_no_error(store: ClaimStore):
@@ -196,13 +194,13 @@ def test_check_expired_returns_empty_when_none_expired(store: ClaimStore):
     assert expired == []
 
 
-def test_check_expired_frees_contract(store: ClaimStore):
-    """After expiry, the contract can be claimed again."""
+def test_check_expired_does_not_free_contract(store: ClaimStore):
+    """After expiry, retry/recovery must create a new contract instead."""
     store.claim("contract-1", "worker-A", lease_seconds=-1)
     store.check_expired()
 
     c2 = store.claim("contract-1", "worker-B")
-    assert c2 is not None
+    assert c2 is None
 
 
 def test_check_expired_only_expires_active(store: ClaimStore):

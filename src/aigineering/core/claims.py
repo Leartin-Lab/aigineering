@@ -58,6 +58,7 @@ class ClaimStore:
         self._claims: dict[str, Claim] = {}
         # contract_id → claim_id for currently active claims
         self._active_contracts: dict[str, str] = {}
+        self._claimed_contracts: set[str] = set()
 
     # ------------------------------------------------------------------
     # Public API
@@ -71,10 +72,11 @@ class ClaimStore:
     ) -> Claim | None:
         """Acquire an exclusive claim on *contract_id*.
 
-        Returns *None* when the contract already has an active claim
-        (duplicate prevention).
+        Returns *None* when the contract has ever been claimed.  Recovery or
+        retry must create a new contract instead of returning the same contract
+        to an unclaimed state.
         """
-        if contract_id in self._active_contracts:
+        if contract_id in self._claimed_contracts:
             return None
 
         leased_at = now_iso()
@@ -92,6 +94,7 @@ class ClaimStore:
         )
         self._claims[claim.claim_id] = claim
         self._active_contracts[contract_id] = claim.claim_id
+        self._claimed_contracts.add(contract_id)
         return claim
 
     def submit_claim(self, claim_id: str) -> bool:
@@ -121,7 +124,7 @@ class ClaimStore:
         return True
 
     def release_claim(self, claim_id: str) -> None:
-        """Release an active claim, freeing the contract for re-claim.
+        """Release an active claim without making the contract claimable again.
 
         Only transitions from *active* (idempotent for non-active claims).
         """
