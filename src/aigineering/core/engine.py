@@ -163,6 +163,29 @@ class Engine:
     def _add_trace(self, contract_id: str, event_type: str, **kwargs: object) -> None:
         self._trace_mgr.record(contract_id, event_type, **kwargs)
 
+    # ── Terminal event idempotency ────────────────────────────────────
+
+    _TERMINAL_EVENTS = frozenset({"complete", "failed", "cancelled", "unreachable"})
+
+    def _emit_terminal_event(
+        self, contract_id: str, event_type: str, **kwargs: object
+    ) -> None:
+        """Emit a terminal trace event with idempotency guard.
+
+        Terminal events (complete, failed, cancelled, unreachable) are
+        **immutable** — they must only be appended once per contract.
+        This guard checks the trace store before appending so that
+        replay and recovery always see exactly one terminal event.
+        """
+        existing = [
+            e
+            for e in self._trace_mgr.store.get_all()
+            if e.event_type == event_type and e.contract_id == contract_id
+        ]
+        if existing:
+            return
+        self._add_trace(contract_id, event_type, **kwargs)
+
     def _commit(self, result: ProjectionResult) -> None:
         for asset in result.accepted_assets:
             self._ingress.accept_asset(asset, source="projection", allow_protected=True)
@@ -210,7 +233,7 @@ class Engine:
                         budget_remaining=remaining,
                     )
                     if self._all_outputs_satisfied(contract):
-                        self._add_trace(
+                        self._emit_terminal_event(
                             contract.id,
                             "complete",
                             budget_remaining=self._resolve_budget(contract),
@@ -268,7 +291,7 @@ class Engine:
                 )
 
                 if self._all_outputs_satisfied(contract):
-                    self._add_trace(
+                    self._emit_terminal_event(
                         contract.id,
                         "complete",
                         budget_remaining=self._resolve_budget(contract),
@@ -530,7 +553,7 @@ class Engine:
     def _complete_contract(self, contract: Contract) -> None:
         if contract.id in self._completed:
             return
-        self._add_trace(
+        self._emit_terminal_event(
             contract.id,
             "complete",
             budget_remaining=self._resolve_budget(contract),
@@ -711,3 +734,19 @@ def _make_runtime(engine: Engine) -> MethodRuntime:
         suspended=engine._suspended,
         method_scheduled=engine._method_scheduled,
     )
+
+
+def derive_task_tree(contracts: list[Contract]) -> dict[str, list[str]]:
+    """Derive task tree outline from parent_id relationships.
+
+    Returns ``{parent_id: [child_ids]}`` mapping.  Root tasks have
+    ``parent_id=None`` and map to the ``"__root__"`` key.
+
+    This is a **projection**, not a second graph source.  The canonical
+    relationship lives in ``Contract.parent_id``.
+    """
+    tree: dict[str, list[str]] = {}
+    for c in contracts:
+        parent = c.parent_id or "__root__"
+        tree.setdefault(parent, []).append(c.id)
+    return tree

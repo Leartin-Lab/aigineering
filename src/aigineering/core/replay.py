@@ -1,4 +1,12 @@
-"""Replay module — reconstruct runtime state from persisted session data."""
+"""Replay module — reconstruct runtime state from persisted session data.
+
+.. admonition:: READ MODEL
+
+   This module is a **READ MODEL** — it observes facts from the append-only
+   trace, the durable store, and the session manifest.  It does **not** mutate
+   any of those sources.  Replay validates consistency (no duplicate accepted
+   asset ids, no seal mismatches) but never modifies the underlying records.
+"""
 
 from __future__ import annotations
 

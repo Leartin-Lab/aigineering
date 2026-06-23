@@ -1,4 +1,14 @@
-"""Session manifest store — one JSON file per session in .aig/sessions."""
+"""Session manifest store — one JSON file per session in .aig/sessions.
+
+.. admonition:: READ MODEL
+
+   Session manifests are **READ MODELS** — projections over contracts, assets,
+   and trace.  They are **NOT** authoritative lifecycle state.  Deleting or
+   rebuilding a session manifest does not change runtime facts.  The canonical
+   truth lives in the append-only trace (``trace.py``) and the durable store
+   (``StoreProtocol``).  The session manifest is a convenience snapshot
+   rebuilt on demand from those sources.
+"""
 
 from __future__ import annotations
 

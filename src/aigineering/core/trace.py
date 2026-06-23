@@ -1,4 +1,14 @@
-"""Append-only TraceStore — the runtime record."""
+"""Append-only TraceStore — the runtime record.
+
+.. admonition:: IMMUTABLE TERMINAL EVENTS
+
+   Terminal lifecycle events — ``"complete"``, ``"failed"``, ``"cancelled"``,
+   ``"unreachable"`` — are **immutable**.  Once appended, they must never be
+   deleted, modified, or duplicated.  Consumers (replay, state serialization,
+   CLI views) rely on every terminal event being present exactly once for a
+   given contract.  Idempotency guards in ``Engine._emit_terminal_event()``
+   enforce this at the emission boundary.
+"""
 
 from __future__ import annotations
 
