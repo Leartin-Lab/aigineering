@@ -66,6 +66,7 @@ class TestCrashAfterAssetBeforeTrace:
         # Subprocess: submit a candidate that triggers the crash
         script = '''
 import os as _os
+from aigineering.core.runtime_ingress import RuntimeIngress
 from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.core.submit import submit_candidate
 from aigineering.protocol.envelope import CandidateEnvelope
@@ -84,7 +85,8 @@ envelope = CandidateEnvelope(
     claim_id=claim["claim_id"],
     idempotency_key="idem-1",
 )
-result = submit_candidate(envelope, store, store)
+ingress = RuntimeIngress(store, store)
+result = submit_candidate(envelope, store, store, ingress=ingress)
 print("SUBMIT_RESULT", result)
 store.close()
 '''
@@ -289,6 +291,7 @@ class TestDoubleCrashRecovery:
         # First crash: submit a candidate that triggers after_asset_before_trace
         script1 = '''
 import os as _os
+from aigineering.core.runtime_ingress import RuntimeIngress
 from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.core.submit import submit_candidate
 from aigineering.protocol.envelope import CandidateEnvelope
@@ -304,7 +307,8 @@ envelope = CandidateEnvelope(
     claim_id=claim["claim_id"],
     idempotency_key="idem-double",
 )
-submit_candidate(envelope, store, store)
+ingress = RuntimeIngress(store, store)
+submit_candidate(envelope, store, store, ingress=ingress)
 store.close()
 '''
 
@@ -322,6 +326,7 @@ store.close()
         # Second crash: submit again (reuse same claim)
         script2 = '''
 import os as _os
+from aigineering.core.runtime_ingress import RuntimeIngress
 from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.core.submit import submit_candidate
 from aigineering.protocol.envelope import CandidateEnvelope
@@ -337,7 +342,8 @@ envelope = CandidateEnvelope(
     claim_id=claim["claim_id"],
     idempotency_key="idem-double",
 )
-submit_candidate(envelope, store, store)
+ingress = RuntimeIngress(store, store)
+submit_candidate(envelope, store, store, ingress=ingress)
 store.close()
 '''
 

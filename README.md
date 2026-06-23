@@ -55,12 +55,13 @@ aig replay <session_id>   # replay a session
 
 ---
 
-## Status: v0.5.0-alpha.2 — Local Productivity Alpha
+## Status: v0.5.0-alpha.3 — Local Productivity Alpha
 
 This release keeps the v0.4 single-node kernel constraint and adds a more
-practical local productivity layer. The important change in alpha.2 is that
-more control-plane state is now durable and replayable instead of living only
-in private in-memory engine fields.
+practical local productivity layer. The important change in alpha.3 is that
+the v0.5 boundary work is tighter: runtime ingress is the production mutation
+gate, declared-output completion is reactive, and output satisfaction now
+filters out observation/context assets.
 
 This is not a security-audited production release. It is intended for local
 experiments, research prototypes, and early integration work where auditable

@@ -2,7 +2,7 @@
 
 ## Asset-Causal Machines: A Runtime Boundary for Agentic Systems
 
-This document is intentionally short for the v0.5.0-alpha.2 local productivity alpha. The
+This document is intentionally short for the v0.5.0-alpha.3 local productivity alpha. The
 current implementation demonstrates one core invariant:
 
 > Models may hallucinate. The runtime does not have to believe them.

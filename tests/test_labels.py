@@ -7,8 +7,9 @@ from aigineering.core.engine import Engine
 from aigineering.core.ids import hash_asset_content, hash_contract
 from aigineering.core.labels import Label, resolve_contract_labels
 from aigineering.core.provenance import sign_asset
+from aigineering.core.runtime_ingress import RuntimeIngress
 from aigineering.core.store import MemoryStore
-from aigineering.core.trace import TraceStore
+from aigineering.core.trace import MemoryTraceStore, TraceStore
 from aigineering.protocol.types import Asset, Contract
 
 
@@ -55,6 +56,7 @@ def test_label_injects_existing_asset():
         contract,
         {"reviewer": Label(name="reviewer", assets=["_skill_review"])},
         store,
+        ingress=RuntimeIngress(store, MemoryTraceStore()),
     )
 
     assert result.injected_assets == [skill]
@@ -69,6 +71,7 @@ def test_label_missing_dependency_creates_placeholder_asset():
         contract,
         {"reviewer": Label(name="reviewer", assets=["_skill_missing"])},
         store,
+        ingress=RuntimeIngress(store, MemoryTraceStore()),
     )
 
     assert len(result.injected_assets) == 1
@@ -127,7 +130,7 @@ def test_behavior_label_injects_configured_behavior_asset():
     store.add_asset(behavior)
     contract = _contract(name="task", labels=["behavior:concise"], outputs=["result"])
 
-    result = resolve_contract_labels(contract, {}, store)
+    result = resolve_contract_labels(contract, {}, store, ingress=RuntimeIngress(store, MemoryTraceStore()))
 
     assert result.injected_assets == [behavior]
     assert result.placeholder_assets == []
@@ -146,7 +149,7 @@ def test_behavior_label_rejects_low_trust_behavior_asset():
     store.add_asset(low_trust)
     contract = _contract(name="task", labels=["behavior:unsafe"], outputs=["result"])
 
-    result = resolve_contract_labels(contract, {}, store)
+    result = resolve_contract_labels(contract, {}, store, ingress=RuntimeIngress(store, MemoryTraceStore()))
 
     assert low_trust not in result.injected_assets
     assert len(result.placeholder_assets) == 1
@@ -167,6 +170,7 @@ class TestLabelPlaceholderSafety:
             contract,
             {"reviewer": Label(name="reviewer", assets=["_skill_missing"])},
             store,
+            ingress=RuntimeIngress(store, MemoryTraceStore()),
         )
         placeholder = result.placeholder_assets[0]
         assert placeholder.promptable is False, (
@@ -186,6 +190,7 @@ class TestLabelPlaceholderSafety:
             contract,
             {"reviewer": Label(name="reviewer", assets=["_skill_missing"])},
             store,
+            ingress=RuntimeIngress(store, MemoryTraceStore()),
         )
         placeholder = result.placeholder_assets[0]
 
@@ -218,6 +223,7 @@ class TestLabelPlaceholderSafety:
             contract,
             {"reviewer": Label(name="reviewer", assets=["_skill_missing"])},
             store,
+            ingress=RuntimeIngress(store, MemoryTraceStore()),
         )
         placeholder = result.placeholder_assets[0]
 
@@ -240,6 +246,7 @@ class TestLabelPlaceholderSafety:
             contract,
             {"reviewer": Label(name="reviewer", assets=["_skill_missing"])},
             store,
+            ingress=RuntimeIngress(store, MemoryTraceStore()),
         )
         placeholder = result.placeholder_assets[0]
 

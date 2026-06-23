@@ -14,7 +14,7 @@ from aigineering.cli._common import (
 
 from aigineering.core.runtime_ingress import RuntimeIngress
 
-app = FastAPI(title="Aigineering API", version="0.5.0-alpha.2")
+app = FastAPI(title="Aigineering API", version="0.5.0-alpha.3")
 
 
 # ── Request / response models ────────────────────────────────────────────────

@@ -639,12 +639,14 @@ class TestTransactionalSubmit:
         from aigineering.core.store import MemoryStore
         from aigineering.core.trace import MemoryTraceStore
         from aigineering.core.idempotency_store import IdempotencyStore
+        from aigineering.core.runtime_ingress import RuntimeIngress
         from aigineering.core.submit import submit_candidate, SubmitConflictError
         from aigineering.protocol.envelope import CandidateEnvelope
         from aigineering.protocol.types import Contract
 
         store = MemoryStore()
         trace = MemoryTraceStore()
+        ingress = RuntimeIngress(store, trace)
         with tempfile.TemporaryDirectory() as tmp:
             idem = IdempotencyStore(path=os.path.join(tmp, "idem.jsonl"))
 
@@ -669,6 +671,7 @@ class TestTransactionalSubmit:
                 env,
                 store,
                 trace,
+                ingress,
                 idempotency_store=idem,
                 idempotency_key=env.idempotency_key,
             )
@@ -701,6 +704,7 @@ class TestTransactionalSubmit:
                 env,
                 store,
                 trace,
+                ingress,
                 idempotency_store=idem,
                 idempotency_key=env.idempotency_key,
             )
@@ -725,6 +729,7 @@ class TestTransactionalSubmit:
                     env3,
                     store,
                     trace,
+                    ingress,
                     idempotency_store=idem,
                     idempotency_key=env3.idempotency_key,
                 )
@@ -1212,6 +1217,7 @@ class TestClaimPersistence:
         import os
         from aigineering.core.claims import ClaimStore
         from aigineering.core.sqlite_store import SQLiteStore
+        from aigineering.core.runtime_ingress import RuntimeIngress
         from aigineering.core.submit import submit_candidate, SubmitClaimError
         from aigineering.core.trace import MemoryTraceStore
         from aigineering.protocol.envelope import CandidateEnvelope
@@ -1220,6 +1226,7 @@ class TestClaimPersistence:
         with tempfile.TemporaryDirectory() as tmp:
             store = SQLiteStore(db_path=os.path.join(tmp, "test.db"))
             trace = MemoryTraceStore()
+            ingress = RuntimeIngress(store, trace)
 
             contract = Contract(
                 id="c1",
@@ -1254,7 +1261,7 @@ class TestClaimPersistence:
                 raw_output='/exec {"out": "hello"}',
                 claim_id=claim.claim_id,
             )
-            result = submit_candidate(env, store, trace)
+            result = submit_candidate(env, store, trace, ingress)
             assert result["status"] in ("accepted", "partial"), (
                 f"G8/D-P1.2: valid claim+worker must accept, got {result['status']}"
             )
@@ -1267,7 +1274,7 @@ class TestClaimPersistence:
                 claim_id=claim.claim_id,
             )
             try:
-                submit_candidate(env2, store, trace)
+                submit_candidate(env2, store, trace, ingress)
             except SubmitClaimError as e:
                 assert "worker" in str(e).lower(), (
                     f"G8/D-P1.2: claim worker mismatch must raise SubmitClaimError, got: {e}"
@@ -1305,7 +1312,7 @@ class TestClaimPersistence:
                 claim_id="expired-claim-id",
             )
             try:
-                submit_candidate(env3, store, trace)
+                submit_candidate(env3, store, trace, ingress)
             except SubmitClaimError as e:
                 assert "expired" in str(e).lower(), (
                     f"G8/D-P1.2: expired lease must raise SubmitClaimError, got: {e}"
@@ -1342,7 +1349,7 @@ class TestClaimPersistence:
                 claim_id="released-claim-id",
             )
             try:
-                submit_candidate(env4, store, trace)
+                submit_candidate(env4, store, trace, ingress)
             except SubmitClaimError as e:
                 assert "status" in str(e).lower(), (
                     f"G8/D-P1.2: non-active claim must raise SubmitClaimError, got: {e}"
@@ -1929,7 +1936,7 @@ class TestPublicDocs:
                 f"G11: README claims '{claim}' which is not yet true under 040 gate."
             )
         assert "not a security-audited production release" in readme.lower()
-        assert "v0.5.0-alpha.2" in readme.lower()
+        assert "v0.5.0-alpha.3" in readme.lower()
         assert "local productivity alpha" in readme.lower()
         assert "transactional worker candidate submission" in readme.lower()
 

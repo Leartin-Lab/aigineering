@@ -16,6 +16,7 @@ from aigineering.core.ids import (
     hash_asset_content,
     hash_asset_definition,
     hash_contract,
+    hash_contract_v2,
 )
 from aigineering.core.methods import (
     method_contract,
@@ -607,7 +608,7 @@ class Engine:
         budget = max(1, self._budget_mgr.get_remaining(parent.id))
         name = f"{parent.name or parent.id}.{method}.continue.{source_contract.id}"
         continuation = Contract(
-            id=hash_contract(
+            id=hash_contract_v2(
                 name=name,
                 description=parent.description,
                 inputs=[],
@@ -617,6 +618,7 @@ class Engine:
                 tool_scope=list(parent.tool_scope),
                 labels=list(parent.labels),
                 origin="continuation",
+                parent_id=parent.id,
             ),
             parent_id=parent.id,
             name=name,

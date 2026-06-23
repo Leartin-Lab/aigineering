@@ -299,11 +299,18 @@ def _all_outputs_satisfied(
     store: StoreProtocol,
     extra_output_names: set[str] | None = None,
 ) -> bool:
-    """Return True when all declared contract outputs exist in the store."""
+    """Return True when declared outputs exist and are valid output facts."""
+    from aigineering.core.fact_reducer import _is_business_output
+
     extra_output_names = extra_output_names or set()
     for output_name in contract.outputs:
         if output_name in extra_output_names:
             continue
-        if not store.get_assets_by_name(output_name):
+        matching = store.get_assets_by_name(output_name)
+        if not matching:
+            return False
+        if contract.origin == "system":
+            continue
+        if not any(_is_business_output(asset, output_name) for asset in matching):
             return False
     return True

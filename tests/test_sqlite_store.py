@@ -676,6 +676,7 @@ def test_candidate_submission_rolls_back_on_mid_commit_failure(store, monkeypatc
 
 def test_candidate_submission_rolls_back_when_claim_predicate_fails(store, monkeypatch):
     """A stale claim state at commit time rejects and rolls back the submission."""
+    from aigineering.core.runtime_ingress import RuntimeIngress
     from aigineering.core.submit import SubmitCommitError, submit_candidate
     from aigineering.protocol.envelope import CandidateEnvelope
 
@@ -697,6 +698,7 @@ def test_candidate_submission_rolls_back_when_claim_predicate_fails(store, monke
         "released",
         "pkg:test",
     )
+    ingress = RuntimeIngress(store, store)
     monkeypatch.setattr(
         store,
         "get_claim",
@@ -719,7 +721,7 @@ def test_candidate_submission_rolls_back_when_claim_predicate_fails(store, monke
     )
 
     with pytest.raises(SubmitCommitError):
-        submit_candidate(envelope, store, store)
+        submit_candidate(envelope, store, store, ingress)
 
     assert store.get_assets_by_name("out") == []
     assert store.get_trace_events("c-submit") == []
@@ -730,6 +732,7 @@ def test_candidate_submission_rolls_back_when_claim_expires_at_commit(
     store, monkeypatch
 ):
     """A claim that expires between validation and commit rejects atomically."""
+    from aigineering.core.runtime_ingress import RuntimeIngress
     from aigineering.core.submit import SubmitCommitError, submit_candidate
     from aigineering.protocol.envelope import CandidateEnvelope
 
@@ -743,6 +746,7 @@ def test_candidate_submission_rolls_back_when_claim_expires_at_commit(
         "active",
         "pkg:expired",
     )
+    ingress = RuntimeIngress(store, store)
     monkeypatch.setattr(
         store,
         "get_claim",
@@ -765,7 +769,7 @@ def test_candidate_submission_rolls_back_when_claim_expires_at_commit(
     )
 
     with pytest.raises(SubmitCommitError):
-        submit_candidate(envelope, store, store)
+        submit_candidate(envelope, store, store, ingress)
 
     assert store.get_assets_by_name("out") == []
     assert store.get_trace_events("c-expire") == []

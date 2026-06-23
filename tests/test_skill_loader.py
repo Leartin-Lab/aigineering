@@ -2,8 +2,10 @@
 from pathlib import Path
 import json
 
+from aigineering.core.runtime_ingress import RuntimeIngress
 from aigineering.core.skill_loader import SkillLoader, load_skills
 from aigineering.core.store import MemoryStore
+from aigineering.core.trace import MemoryTraceStore
 
 
 def _toml_value(value):
@@ -153,9 +155,10 @@ class TestSkillLoaderLoad:
         (skill_dir / "skill.md").write_text("# Test Skill\n\nDo testing.")
 
         store = MemoryStore()
+        ingress = RuntimeIngress(store, MemoryTraceStore())
         loader = SkillLoader()
         loader.scan([str(tmp_path)])
-        descriptors = loader.load(store)
+        descriptors = loader.load(store, ingress=ingress)
 
         assert len(descriptors) == 2
 
@@ -176,9 +179,10 @@ class TestSkillLoaderLoad:
         # No skill.md — should create descriptor with empty content hash
 
         store = MemoryStore()
+        ingress = RuntimeIngress(store, MemoryTraceStore())
         loader = SkillLoader()
         loader.scan([str(tmp_path)])
-        descriptors = loader.load(store)
+        descriptors = loader.load(store, ingress=ingress)
         assert len(descriptors) == 2
 
     def test_load_default_skill_is_configured_and_preserves_lists(self, tmp_path: Path):
@@ -207,7 +211,8 @@ class TestSkillLoaderLoad:
         (skill_dir / "skill.md").write_text("Convenience test.")
 
         store = MemoryStore()
-        descriptors = load_skills(store, [str(tmp_path)])
+        ingress = RuntimeIngress(store, MemoryTraceStore())
+        descriptors = load_skills(store, [str(tmp_path)], ingress=ingress)
         assert len(descriptors) == 2
 
     def test_nested_skill_loaded_once(self, tmp_path: Path):
@@ -220,7 +225,8 @@ class TestSkillLoaderLoad:
         (child / "skill.md").write_text("Child skill.")
 
         store = MemoryStore()
-        descriptors = load_skills(store, [str(tmp_path)])
+        ingress = RuntimeIngress(store, MemoryTraceStore())
+        descriptors = load_skills(store, [str(tmp_path)], ingress=ingress)
 
         assert len(descriptors) == 4
         assert len(store.get_assets_by_name("_skill_capability_parent")) == 1
