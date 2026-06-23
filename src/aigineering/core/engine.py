@@ -11,8 +11,12 @@ from aigineering.core.budget_manager import BudgetManager
 from aigineering.core.crash import check_crash_point
 from aigineering.core.context_overflow import ContextOverflowHandler
 from aigineering.core.disclosure import compute_disclosure, redact_for_disclosure
-from aigineering.core.labels import Label, resolve_contract_labels
-from aigineering.core.ids import hash_contract
+from aigineering.core.labels import Label, LABEL_MODE_DEBUG, resolve_contract_labels
+from aigineering.core.ids import (
+    hash_asset_content,
+    hash_asset_definition,
+    hash_contract,
+)
 from aigineering.core.methods import (
     method_contract,
     method_context_content,
@@ -67,6 +71,7 @@ class Engine:
         method_registry: MethodRegistry | None = None,
         context_size_limit: int | None = None,
         ingress: RuntimeIngress | None = None,
+        label_mode: str = LABEL_MODE_DEBUG,
     ) -> None:
         self._store = store
         self._worker = worker
@@ -83,6 +88,7 @@ class Engine:
         self._completed: set[str] = set()
         self._suspended: set[str] = set()
         self._method_scheduled: set[str] = set()
+        self._label_mode = label_mode
         self._ingress = (
             ingress
             if ingress is not None
@@ -112,7 +118,9 @@ class Engine:
         self._ingress.accept_contract(contract)
         self._budget_mgr.initialize(contract.id, contract.budget)
         if contract.labels:
-            resolution = resolve_contract_labels(contract, self._labels, self._store)
+            resolution = resolve_contract_labels(
+                contract, self._labels, self._store, mode=self._label_mode
+            )
             self._label_context[contract.id] = resolution.injected_assets
             self._add_trace(
                 contract.id,
@@ -125,6 +133,32 @@ class Engine:
 
     def add_asset(self, asset: Asset) -> None:
         self._ingress.accept_asset(asset, source="engine")
+
+    def inject_north_star(self, goal: str) -> Asset:
+        """Inject a North Star goal as a protected system asset.
+
+        The ``_north_star_`` asset carries the top-level directive for the
+        runtime session.  It is minted with ``origin="system"``,
+        ``trust_tier="system"``, and is accepted with
+        ``allow_protected=True`` since ``_north_star_`` is a reserved prefix.
+
+        Returns the signed, persisted asset.
+        """
+        north_star = Asset(
+            id=hash_asset_content("_north_star_", goal),
+            name="_north_star_",
+            content=goal,
+            content_type="text/plain",
+            definition_hash=hash_asset_definition("_north_star_"),
+            content_hash=hash_asset_content("_north_star_", goal),
+            origin="system",
+            trust_tier="system",
+            minted_by="engine",
+            promptable=True,
+        )
+        return self._ingress.accept_asset(
+            north_star, source="engine", allow_protected=True
+        )
 
     def _add_trace(self, contract_id: str, event_type: str, **kwargs: object) -> None:
         self._trace_mgr.record(contract_id, event_type, **kwargs)

@@ -23,6 +23,7 @@ RESERVED_PREFIXES: frozenset[str] = frozenset(
         "_fail_report_",
         "_retry_",
         "_persona_",
+        "_north_star_",
     }
 )
 

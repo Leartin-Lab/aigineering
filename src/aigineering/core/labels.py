@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol
 
@@ -13,8 +14,13 @@ from aigineering.protocol.types import Asset, Contract, TrustTier
 if TYPE_CHECKING:
     from aigineering.core.runtime_ingress import RuntimeIngress
 
+_logger = logging.getLogger(__name__)
+
 BEHAVIOR_LABEL_PREFIX = "behavior:"
 MIN_BEHAVIOR_TRUST_TIER = TrustTier.CONFIGURED
+
+LABEL_MODE_RELEASE = "release"  # fail closed — no placeholders
+LABEL_MODE_DEBUG = "debug"  # create diagnostic placeholders (current behavior)
 
 
 class StoreLike(Protocol):
@@ -82,12 +88,19 @@ def resolve_contract_labels(
     labels: dict[str, Label],
     store: StoreLike,
     ingress: RuntimeIngress | None = None,
+    mode: str = LABEL_MODE_DEBUG,
 ) -> LabelResolution:
     """Resolve contract labels into context assets.
 
     Labels do not execute work and do not grant authority. They only inject
-    asset references into the contract-local context. Missing dependencies are
-    represented as placeholder assets so the runtime can trace the gap.
+    asset references into the contract-local context.
+
+    Missing dependencies are handled per *mode*:
+
+    - ``"debug"`` (default): create diagnostic placeholder assets so the
+      runtime can trace the gap (current behavior).
+    - ``"release"``: fail closed — emit a warning and skip the dependency;
+      no placeholder is created.
     """
     injected: list[Asset] = []
     placeholders: list[Asset] = []
@@ -101,6 +114,20 @@ def resolve_contract_labels(
         store.add_asset(signed)
         return signed
 
+    def _warn_or_placeholder(label_name: str, asset_name: str) -> Asset | None:
+        """In release mode, emit a warning and return None (skip).
+        In debug mode, create and persist a placeholder asset."""
+        if mode == LABEL_MODE_RELEASE:
+            _logger.warning(
+                "Label '%s' dependency '%s' not present in asset store "
+                "(label_mode=%s — skipping)",
+                label_name,
+                asset_name,
+                mode,
+            )
+            return None
+        return _persist(_placeholder_asset(label_name, asset_name))
+
     for label_name in contract.labels:
         # Behavior labels (behavior:*) are self-referencing — the label
         # name IS the asset name.  Resolve by looking up the asset
@@ -111,8 +138,8 @@ def resolve_contract_labels(
                 asset for asset in matches if is_behavior_asset_allowed(asset)
             ]
             if not allowed_matches:
-                placeholder = _persist(_placeholder_asset(label_name, label_name))
-                if placeholder.id not in seen_ids:
+                placeholder = _warn_or_placeholder(label_name, label_name)
+                if placeholder is not None and placeholder.id not in seen_ids:
                     placeholders.append(placeholder)
                     injected.append(placeholder)
                     seen_ids.add(placeholder.id)
@@ -125,10 +152,9 @@ def resolve_contract_labels(
 
         label = labels.get(label_name)
         if label is None:
-            placeholder = _persist(
-                _placeholder_asset(label_name, f"_label_missing_{label_name}")
-            )
-            if placeholder.id not in seen_ids:
+            missing_name = f"_label_missing_{label_name}"
+            placeholder = _warn_or_placeholder(label_name, missing_name)
+            if placeholder is not None and placeholder.id not in seen_ids:
                 placeholders.append(placeholder)
                 injected.append(placeholder)
                 seen_ids.add(placeholder.id)
@@ -137,7 +163,9 @@ def resolve_contract_labels(
         for asset_name in label.assets:
             matches = store.get_assets_by_name(asset_name)
             if not matches:
-                placeholder = _persist(_placeholder_asset(label.name, asset_name))
+                placeholder = _warn_or_placeholder(label.name, asset_name)
+                if placeholder is None:
+                    continue
                 matches = [placeholder]
                 placeholders.append(placeholder)
             for asset in matches:
