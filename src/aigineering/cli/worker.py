@@ -14,6 +14,7 @@ from aigineering.cli._common import (
 )
 from aigineering.core.activation import check_activation
 from aigineering.core.disclosure import compute_disclosure
+from aigineering.core.runtime_ingress import RuntimeIngress
 from aigineering.core.submit import (
     SubmitConflictError,
     _all_outputs_satisfied,
@@ -236,11 +237,13 @@ def worker_submit(envelope_json: str, idempotency_key: Optional[str]) -> None:
         _output_json({"error": f"Contract '{envelope.contract_id}' not found."})
         return
 
+    ingress = RuntimeIngress(store, store)
     try:
         result = submit_candidate(
             envelope=envelope,
             store=store,
             trace_store=store,
+            ingress=ingress,
             idempotency_store=None,
             idempotency_key=idempotency_key or "",
         )

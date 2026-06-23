@@ -13,6 +13,7 @@ import click
 
 from aigineering.cli._common import _output_json, _persistent_store
 from aigineering.core.control_plane import inject_asset
+from aigineering.core.runtime_ingress import RuntimeIngress
 
 
 BEHAVIOR_PREFIX = "behavior:"
@@ -25,7 +26,9 @@ def behavior_group() -> None:
 
 
 @behavior_group.command("add")
-@click.option("--name", required=True, help="Behavior name (stored as behavior:<name>).")
+@click.option(
+    "--name", required=True, help="Behavior name (stored as behavior:<name>)."
+)
 @click.option(
     "--file",
     "file_path",
@@ -57,6 +60,7 @@ def behavior_add(
 
     store = _persistent_store()
     trace_store = store
+    ingress = RuntimeIngress(store, trace_store)
     try:
         asset = inject_asset(
             store,
@@ -68,6 +72,7 @@ def behavior_add(
             source_uri=str(Path(file_path).resolve()),
             promptable=True,
             content_type="text",
+            ingress=ingress,
         )
     except ValueError as e:
         raise click.ClickException(str(e))

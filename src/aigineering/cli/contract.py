@@ -8,6 +8,7 @@ import click
 
 from aigineering.cli._common import _persistent_store, _output_json
 from aigineering.core.control_plane import inject_contract
+from aigineering.core.runtime_ingress import RuntimeIngress
 
 
 @click.group("contract")
@@ -18,21 +19,21 @@ def contract_group() -> None:
 
 @contract_group.command("add")
 @click.option("--name", required=True, help="Contract name.")
-@click.option("--input", "inputs", multiple=True, help="Input asset names (repeatable).")
+@click.option(
+    "--input", "inputs", multiple=True, help="Input asset names (repeatable)."
+)
 @click.option(
     "--output", "outputs", multiple=True, help="Output asset names (repeatable)."
 )
 @click.option("--activation", default="", help="Activation expression.")
 @click.option("--budget", type=int, default=5, help="Budget (default 5).")
 @click.option("--label", "labels", multiple=True, help="Labels (repeatable).")
-@click.option(
-    "--tool", "tool_scope", multiple=True, help="Tool scope (repeatable)."
-)
+@click.option("--tool", "tool_scope", multiple=True, help="Tool scope (repeatable).")
 @click.option(
     "--sensitive-input-policy",
     "sensitive_input_policy",
     default=None,
-    help="Sensitive input policy as JSON string (e.g. '{\"required_trust_tier\":\"verified\"}').",
+    help='Sensitive input policy as JSON string (e.g. \'{"required_trust_tier":"verified"}\').',
 )
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON.")
 def contract_add(
@@ -55,6 +56,7 @@ def contract_add(
             policy = json.loads(sensitive_input_policy)
         except json.JSONDecodeError as e:
             raise click.UsageError(f"--sensitive-input-policy is not valid JSON: {e}")
+    ingress = RuntimeIngress(store, store)
     try:
         contract = inject_contract(
             store,
@@ -67,6 +69,7 @@ def contract_add(
             labels=labels,
             tool_scope=tool_scope,
             sensitive_input_policy=policy,
+            ingress=ingress,
         )
     except ValueError as e:
         raise click.ClickException(str(e))

@@ -8,7 +8,6 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol
 
 from aigineering.core.ids import hash_asset_content, hash_asset_definition
-from aigineering.core.provenance import sign_asset
 from aigineering.protocol.types import Asset, Contract, TrustTier
 
 if TYPE_CHECKING:
@@ -87,7 +86,7 @@ def resolve_contract_labels(
     contract: Contract,
     labels: dict[str, Label],
     store: StoreLike,
-    ingress: RuntimeIngress | None = None,
+    ingress: RuntimeIngress,
     mode: str = LABEL_MODE_DEBUG,
 ) -> LabelResolution:
     """Resolve contract labels into context assets.
@@ -107,12 +106,10 @@ def resolve_contract_labels(
     seen_ids: set[str] = set()
 
     def _persist(asset: Asset) -> Asset:
-        """Persist a placeholder asset, routing through ingress when available."""
-        if ingress is not None:
-            return ingress.accept_asset(asset, source="label_resolver")
-        signed = sign_asset(asset)
-        store.add_asset(signed)
-        return signed
+        """Persist a placeholder asset through ingress."""
+        return ingress.accept_asset(
+            asset, source="label_resolver", allow_protected=True
+        )
 
     def _warn_or_placeholder(label_name: str, asset_name: str) -> Asset | None:
         """In release mode, emit a warning and return None (skip).

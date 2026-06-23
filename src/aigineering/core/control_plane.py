@@ -11,8 +11,6 @@ Protected runtime namespaces (``_sys_``, ``_tool_obs_``, ``_mcp_``,
 
 from __future__ import annotations
 
-import json
-
 from typing import TYPE_CHECKING
 
 from aigineering.core.authority import RESERVED_PREFIXES
@@ -21,8 +19,6 @@ from aigineering.core.ids import (
     hash_asset_content,
     hash_contract,
 )
-from aigineering.core.provenance import sign_asset
-from aigineering.core.trace import create_entry
 
 if TYPE_CHECKING:
     from aigineering.core.runtime_ingress import RuntimeIngress
@@ -65,16 +61,16 @@ def inject_asset(
     promptable: bool = True,
     content_type: str = "text",
     allow_protected: bool = False,
-    ingress: RuntimeIngress | None = None,
+    ingress: RuntimeIngress,
 ) -> Asset:
     """Inject an asset through the control plane.
 
     Parameters
     ----------
     store : StoreProtocol
-        Asset store for persistence.
+        Asset store for persistence (passed through to ingress).
     trace_store : TraceStoreProtocol
-        Trace store for the injection audit record.
+        Trace store for the injection audit record (passed through to ingress).
     name : str
         Asset name (must not start with a protected prefix unless
         *allow_protected* is ``True``).
@@ -93,6 +89,8 @@ def inject_asset(
     allow_protected : bool
         Explicit override for protected-prefix names.  When ``True``
         the injection trace records that the override was used.
+    ingress : RuntimeIngress
+        Required ingress for asset persistence and tracing.
 
     Returns
     -------
@@ -129,38 +127,9 @@ def inject_asset(
         content_hash=content_hash,
     )
 
-    if ingress is not None:
-        return ingress.accept_asset(
-            asset, source="control_plane", allow_protected=allow_protected
-        )
-
-    signed = sign_asset(asset)
-    store.add_asset(signed)
-
-    audit_data = json.dumps(
-        {"asset_id": asset.id, "origin": origin, "trust_tier": trust_tier}
+    return ingress.accept_asset(
+        asset, source="control_plane", allow_protected=allow_protected
     )
-    entry = create_entry(
-        contract_id="control_plane",
-        event_type="asset_injected",
-        sequence=0,
-        parent_id=asset.id,
-        relation_target=name,
-        accepted_fragments=[audit_data],
-    )
-    trace_store.append(entry)
-
-    if allow_protected and _is_protected_name(name):
-        protected_entry = create_entry(
-            contract_id="control_plane",
-            event_type="asset_injected_protected_override",
-            sequence=0,
-            parent_id=asset.id,
-            relation_target=name,
-        )
-        trace_store.append(protected_entry)
-
-    return signed
 
 
 # ---------------------------------------------------------------------------
@@ -182,7 +151,7 @@ def inject_contract(
     tool_scope: tuple[str, ...] = (),
     sensitive_input_policy: dict | None = None,
     allow_protected_outputs: bool = False,
-    ingress: RuntimeIngress | None = None,
+    ingress: RuntimeIngress,
 ) -> Contract:
     """Inject a contract through the control plane.
 
@@ -195,6 +164,8 @@ def inject_contract(
     allow_protected_outputs : bool
         When False (default), outputs starting with protected prefixes
         cause ValueError.  Set True only for system/admin use.
+    ingress : RuntimeIngress
+        Required ingress for contract persistence and tracing.
 
     Returns
     -------
@@ -211,6 +182,11 @@ def inject_contract(
                     f"Use allow_protected_outputs=True if intentional."
                 )
 
+    # Build minting_authority for protected outputs when explicitly allowed
+    minting_auth: tuple[str, ...] = ()
+    if allow_protected_outputs:
+        minting_auth = tuple(o for o in outputs if _is_protected_name(o))
+
     contract = Contract(
         id="",
         name=name,
@@ -222,6 +198,7 @@ def inject_contract(
         labels=labels,
         tool_scope=tool_scope,
         sensitive_input_policy=sensitive_input_policy or {},
+        minting_authority=minting_auth,
     )
     hashed = Contract(
         id=hash_contract(
@@ -238,29 +215,5 @@ def inject_contract(
         **{k: v for k, v in contract.__dict__.items() if k != "id"},
     )
 
-    if ingress is not None:
-        ingress.accept_contract(hashed)
-        return hashed
-
-    store.add_contract(hashed)
-
-    entry = create_entry(
-        contract_id="control_plane",
-        event_type="contract_injected",
-        sequence=0,
-        parent_id=hashed.id,
-        relation_target=hashed.id,
-        accepted_fragments=[
-            json.dumps(
-                {
-                    "contract_id": hashed.id,
-                    "name": hashed.name,
-                    "outputs": list(hashed.outputs),
-                    "budget": hashed.budget,
-                }
-            )
-        ],
-    )
-    trace_store.append(entry)
-
+    ingress.accept_contract(hashed)
     return hashed

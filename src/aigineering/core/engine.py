@@ -119,7 +119,11 @@ class Engine:
         self._budget_mgr.initialize(contract.id, contract.budget)
         if contract.labels:
             resolution = resolve_contract_labels(
-                contract, self._labels, self._store, mode=self._label_mode
+                contract,
+                self._labels,
+                self._store,
+                ingress=self._ingress,
+                mode=self._label_mode,
             )
             self._label_context[contract.id] = resolution.injected_assets
             self._add_trace(
@@ -186,11 +190,27 @@ class Engine:
             return
         self._add_trace(contract_id, event_type, **kwargs)
 
+    def _sync_completed_from_trace(self) -> None:
+        """Populate ``_completed`` from trace events emitted by the
+        RuntimeIngress/FactReducer when assets were injected externally.
+
+        This ensures that contracts completed via reactive projection
+        (not via the Engine's own run loop) are recognised as complete.
+        """
+        for entry in self._trace_mgr.store.get_all():
+            if entry.event_type in self._TERMINAL_EVENTS:
+                self._completed.add(entry.contract_id)
+
     def _commit(self, result: ProjectionResult) -> None:
         for asset in result.accepted_assets:
             self._ingress.accept_asset(asset, source="projection", allow_protected=True)
 
     def run(self) -> None:
+        # Sync completed contracts from trace events — the RuntimeIngress
+        # may have marked contracts complete via reactive FactReducer
+        # projection (e.g., external asset injection).
+        self._sync_completed_from_trace()
+
         while True:
             available_names: set[str] = {a.name for a in self._store.get_all_assets()}
 
@@ -646,12 +666,12 @@ class Engine:
     ) -> "Engine":
         """Restore engine from serialized state."""
         engine = cls(
-            store,
-            worker,
-            trace_store,
-            labels,
-            tools,
-            method_registry,
+            store=store,
+            worker=worker,
+            trace_store=trace_store,
+            labels=labels,
+            tools=tools,
+            method_registry=method_registry,
             context_size_limit=context_size_limit,
         )
         engine_state = StateSerializer.deserialize(store, state)
@@ -684,12 +704,12 @@ class Engine:
         consumption).
         """
         engine = cls(
-            store,
-            worker,
-            trace_store,
-            labels,
-            tools,
-            method_registry,
+            store=store,
+            worker=worker,
+            trace_store=trace_store,
+            labels=labels,
+            tools=tools,
+            method_registry=method_registry,
             context_size_limit=context_size_limit,
         )
 

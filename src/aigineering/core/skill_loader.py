@@ -19,7 +19,6 @@ else:
 
 from aigineering.core.capability_descriptors import create_skill_descriptor
 from aigineering.core.ids import hash_asset_content, hash_asset_definition
-from aigineering.core.provenance import sign_asset
 from aigineering.protocol.types import Asset, TrustTier
 
 if TYPE_CHECKING:
@@ -81,9 +80,7 @@ class SkillLoader:
         self._manifests = manifests
         return manifests
 
-    def load(
-        self, store: StoreLike, *, ingress: RuntimeIngress | None = None
-    ) -> list[Asset]:
+    def load(self, store: StoreLike, *, ingress: RuntimeIngress) -> list[Asset]:
         """Load all scanned skills into *store*.
 
         Returns the list of descriptor Assets created.
@@ -143,7 +140,7 @@ class SkillLoader:
         store: StoreLike,
         manifest: SkillManifest,
         *,
-        ingress: RuntimeIngress | None = None,
+        ingress: RuntimeIngress,
     ) -> list[Asset]:
         """Load a single skill into the store.  Returns descriptor Assets."""
         descriptors: list[Asset] = []
@@ -159,15 +156,11 @@ class SkillLoader:
             content=content,
             trust_tier=manifest.trust_tier,
         )
-        if ingress is not None:
-            descriptors.append(
-                ingress.accept_asset(
-                    descriptor, source="skill_loader", allow_protected=True
-                )
+        descriptors.append(
+            ingress.accept_asset(
+                descriptor, source="skill_loader", allow_protected=True
             )
-        else:
-            store.add_asset(descriptor)
-            descriptors.append(descriptor)
+        )
 
         # ── Create content Asset (promptable) ────────────────────────────
         content_asset_name = f"_skill_content_{manifest.name}"
@@ -184,13 +177,9 @@ class SkillLoader:
             source_uri=str(manifest.content_path.resolve()),
             promptable=True,
         )
-        if ingress is not None:
-            signed_content = ingress.accept_asset(
-                content_asset, source="skill_loader", allow_protected=True
-            )
-        else:
-            signed_content = sign_asset(content_asset)
-            store.add_asset(signed_content)
+        signed_content = ingress.accept_asset(
+            content_asset, source="skill_loader", allow_protected=True
+        )
         descriptors.append(signed_content)
 
         return descriptors
@@ -204,7 +193,7 @@ def load_skills(
     store: StoreLike,
     skill_dirs: list[str],
     *,
-    ingress: RuntimeIngress | None = None,
+    ingress: RuntimeIngress,
 ) -> list[Asset]:
     """Discover and load all skills from *skill_dirs* into *store*.
 

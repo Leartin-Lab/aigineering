@@ -85,6 +85,44 @@ def hash_contract(
     return f"task:{compute_content_hash(canonical)}"
 
 
+def hash_contract_v2(
+    name: str,
+    description: str,
+    inputs: list[str],
+    outputs: list[str],
+    activation: str,
+    budget: int,
+    tool_scope: list[str],
+    labels: list[str],
+    origin: str,
+    parent_id: str | None = None,
+) -> str:
+    """Deterministic contract identity **v2** with ``task:`` domain tag.
+
+    Unlike :func:`hash_contract`, this function includes ``parent_id`` in
+    the identity computation.  Two identical child definitions under
+    different parents will produce different contract IDs.
+
+    This is required by ADR-002 and the 050 runtime boundary plan.
+    Legacy ``hash_contract`` is preserved for backward compatibility.
+    """
+    fields: dict[str, object] = {
+        "activation": activation,
+        "budget": budget,
+        "description": description,
+        "inputs": sorted(inputs),
+        "labels": sorted(labels),
+        "name": name,
+        "origin": origin,
+        "outputs": sorted(outputs),
+        "tool_scope": sorted(tool_scope),
+    }
+    if parent_id is not None:
+        fields["parent_id"] = parent_id
+    canonical = canonical_json(fields)
+    return f"task:{compute_content_hash(canonical)}"
+
+
 def hash_asset_definition(name: str) -> str:
     """Identity of an asset *definition slot* (``def:`` tag).
 

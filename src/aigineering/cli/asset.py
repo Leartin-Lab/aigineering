@@ -94,6 +94,7 @@ def asset_add(
 
     store = _persistent_store()
     trace_store = store  # SQLiteStore implements TraceStoreProtocol
+    ingress = RuntimeIngress(store, trace_store)
     try:
         asset = inject_asset(
             store,
@@ -105,6 +106,7 @@ def asset_add(
             source_uri=source_uri,
             promptable=promptable,
             content_type="application/json" if content_json else "text",
+            ingress=ingress,
         )
     except ValueError as e:
         raise click.ClickException(str(e))

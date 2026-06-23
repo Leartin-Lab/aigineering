@@ -10,6 +10,7 @@ from aigineering.core.ids import (
     hash_asset_content,
     hash_asset_definition,
     hash_contract,
+    hash_contract_v2,
 )
 from aigineering.core.plan_scaffold import (
     _scaffold_tasks_to_raw_dicts,
@@ -81,7 +82,7 @@ def method_contract(parent: Contract, action: WorkerAction) -> Contract:
     tool_scope = list(parent.tool_scope)
     labels = list(parent.labels)
 
-    contract_id = hash_contract(
+    contract_id = hash_contract_v2(
         name=contract_name,
         description=description,
         inputs=inputs,
@@ -91,6 +92,7 @@ def method_contract(parent: Contract, action: WorkerAction) -> Contract:
         tool_scope=tool_scope,
         labels=labels,
         origin="system",
+        parent_id=parent.id,
     )
     return Contract(
         id=contract_id,
@@ -280,7 +282,7 @@ def contracts_from_plan_asset(
 
         if parent_contract is None:
             # Backward-compatible path: no validation
-            cid = hash_contract(
+            cid = hash_contract_v2(
                 name=name,
                 description=description,
                 inputs=inputs,
@@ -290,6 +292,7 @@ def contracts_from_plan_asset(
                 tool_scope=tool_scope,
                 labels=labels,
                 origin=origin,
+                parent_id=parent_id,
             )
             accepted.append(
                 Contract(
@@ -469,7 +472,7 @@ def contracts_from_plan_asset(
                     )
             _cumulative_budget += budget
 
-        cid = hash_contract(
+        cid = hash_contract_v2(
             name=name,
             description=description,
             inputs=inputs,
@@ -479,6 +482,7 @@ def contracts_from_plan_asset(
             tool_scope=tool_scope,
             labels=labels,
             origin=origin,
+            parent_id=parent_id,
         )
         accepted.append(
             Contract(

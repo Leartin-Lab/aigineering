@@ -154,8 +154,55 @@ class RuntimeIngress:
             _logger.debug(
                 "FactReducer produced %d events for asset %r", len(events), signed.name
             )
+            self._apply_reducer_events(events, signed)
 
         return signed
+
+    def _apply_reducer_events(
+        self, events: list[object], asset: Asset
+    ) -> None:
+        """Apply FactReducer events: append trace entries for every
+        detected consequence of the new asset.
+
+        For ``contract_complete`` events the engine's completion state is
+        also updated so that reactive parent completion actually works.
+        """
+        from aigineering.core.fact_reducer import FactReducerEvent
+
+        for event in events:
+            if not isinstance(event, FactReducerEvent):
+                continue
+
+            trace_event_type: str | None = None
+            trace_kwargs: dict[str, object] = {"relation_target": event.asset_name}
+
+            if event.type == "contract_complete":
+                trace_event_type = "complete"
+                if event.contract_id:
+                    trace_kwargs["budget_remaining"] = 0
+            elif event.type == "child_cancelled":
+                trace_event_type = "cancelled"
+                trace_kwargs["relation_type"] = "unreachable"
+                trace_kwargs["rejected_fragments"] = [
+                    "[unreachable] parent_complete: "
+                    f"parent {event.details.get('parent_id', '?')} completed"
+                ]
+            elif event.type == "output_satisfied":
+                trace_event_type = "output_satisfied"
+            elif event.type == "activation_active":
+                trace_event_type = "activation"
+            elif event.type == "method_result_detected":
+                trace_event_type = "method_result_detected"
+
+            if trace_event_type is not None and event.contract_id:
+                self._trace.append(
+                    create_entry(
+                        contract_id=event.contract_id,
+                        event_type=trace_event_type,
+                        parent_id=asset.id,
+                        **trace_kwargs,
+                    )
+                )
 
     # -- Contract acceptance ------------------------------------------------
 

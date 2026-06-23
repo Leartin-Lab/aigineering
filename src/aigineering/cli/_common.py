@@ -203,10 +203,7 @@ def _run_demo(
             max_retries=max_retries,
             capabilities=tuple(capabilities or ()),
         )
-        if ingress is not None:
-            ingress.accept_asset(config_asset, source="provider_config")
-        else:
-            store.add_asset(config_asset)
+        ingress.accept_asset(config_asset, source="provider_config")
         if hasattr(trace_store, "append"):
             trace_store.append(
                 create_entry(

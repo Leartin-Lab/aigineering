@@ -37,12 +37,6 @@ class TestParentCompletionByAssets:
     satisfaction, and only for contracts it executes.
     """
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="W1-P0: Engine.add_asset does not trigger reactive parent "
-        "completion.  Completed when RuntimeIngress + FactReducer route "
-        "all asset writes through unified ingress with reactive reducer.",
-    )
     def test_externally_injected_output_completes_parent(self):
         """DESIRED: Injecting a promised output asset reactively completes
         every parent contract whose declared outputs are now satisfied.
@@ -83,13 +77,6 @@ class TestParentCompletionByAssets:
             f"because its declared output 'report' now exists."
         )
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="W1-P0: Suspended parent not resumed when promised output "
-        "injected externally.  Engine.run() skips suspended contracts.  "
-        "Will be fixed by FactReducer reactively checking output "
-        "satisfaction for all contracts regardless of state.",
-    )
     def test_suspended_parent_completes_when_output_injected(self):
         """DESIRED: A parent suspended by a method child should complete
         when its promised output is injected externally, without needing
@@ -149,34 +136,41 @@ class TestParentCompletionByAssets:
 
 
 class TestTaskIdentityParentCollision:
-    """hash_contract() intentionally excludes parent_id (line 69-70 of ids.py),
-    violating ADR-002 which requires parent position in task identity.
+    """hash_contract_v2 includes parent_id in contract identity per ADR-002.
+    Two identical child definitions under different parents produce
+    different contract IDs.
     """
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="W3-P0: hash_contract excludes parent_id.  Two identical "
-        "child definitions under different parents collide (same contract "
-        "ID).  Fix: include parent_id in contract identity computation.",
-    )
     def test_identical_children_under_different_parents_have_distinct_ids(self):
-        """DESIRED: The same child definition placed under different parents
-        should produce different contract IDs.
-        """
+        """Same child definition placed under different parents should
+        produce different contract IDs via hash_contract_v2."""
+        from aigineering.core.ids import hash_contract_v2
+
         kwargs = dict(
             name="child_work", description="do work",
             inputs=["input_x"], outputs=["output_y"], activation="input_x",
             budget=3, tool_scope=["read"], labels=["label1"], origin="human",
         )
 
-        cid_under_parent_a = hash_contract(**kwargs)
-        cid_under_parent_b = hash_contract(**kwargs)
+        cid_under_parent_a = hash_contract_v2(**kwargs, parent_id="parent_aaa")
+        cid_under_parent_b = hash_contract_v2(**kwargs, parent_id="parent_bbb")
 
-        # CURRENT: same params → same ID (collision)
-        # DESIRED: different parents → different IDs
         assert cid_under_parent_a != cid_under_parent_b, (
-            f"Child contract IDs must differ across parents. "
-            f"Got identical: {cid_under_parent_a}"
+            f"Child contract IDs must differ across parents via hash_contract_v2. "
+            f"parent_aaa: {cid_under_parent_a}, parent_bbb: {cid_under_parent_b}"
+        )
+
+        # Same parent_id, same params → same ID (deterministic)
+        cid_a_again = hash_contract_v2(**kwargs, parent_id="parent_aaa")
+        assert cid_under_parent_a == cid_a_again, (
+            "hash_contract_v2 must be deterministic for same parent"
+        )
+
+        # Without parent_id (None), same params → same ID (legacy behavior)
+        cid_no_parent_1 = hash_contract_v2(**kwargs, parent_id=None)
+        cid_no_parent_2 = hash_contract_v2(**kwargs, parent_id=None)
+        assert cid_no_parent_1 == cid_no_parent_2, (
+            "Same params with parent_id=None should produce same ID"
         )
 
     def test_retry_contract_has_distinct_id(self):
@@ -452,12 +446,6 @@ class TestDirectWriteBan:
         "idempotency_store.py",
     })
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="W1A-P0: 11 remaining direct store writes in CLI, server, "
-        "skill_loader, and fallback paths.  To be removed in Phase B8 "
-        "when these modules are fully wired through RuntimeIngress.",
-    )
     def test_no_direct_store_write_in_production(self):
         """Scan src/aigineering/ for direct store.write calls in production
         modules.  Any violation outside the allowlist is a P0 architecture
