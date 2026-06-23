@@ -33,6 +33,41 @@ class StoreProtocol(Protocol):
     def add_replacement_claim(self, claim) -> None: ...
     def get_claims_by_definition(self, definition_hash: str) -> list: ...
     def get_claims_for_asset(self, asset_id: str) -> list: ...
+    def register_activation_refs(self, contract_id: str, asset_names: set[str]) -> None: ...
+    def unregister_activation_refs(self, contract_id: str) -> None: ...
+    def register_declared_outputs(self, contract_id: str, output_names: set[str]) -> None: ...
+    def unregister_declared_outputs(self, contract_id: str) -> None: ...
+    def get_contracts_waiting_for(self, asset_name: str) -> list[str]: ...
+    def get_contracts_declaring_output(self, asset_name: str) -> list[str]: ...
+
+
+# ---------------------------------------------------------------------------
+# Activation name extraction
+# ---------------------------------------------------------------------------
+
+_ACTIVATION_KEYWORDS: frozenset[str] = frozenset({"AND", "OR", "NOT"})
+
+
+def _extract_activation_names(expression: str) -> set[str]:
+    """Extract asset names from an activation expression.
+
+    Returns the set of non-keyword, non-punctuation tokens.
+    For complex/unparseable expressions returns an empty set (pass-through).
+    """
+    import re
+
+    if not expression or not expression.strip():
+        return set()
+    names: set[str] = set()
+    for token in re.split(r"\s+", expression.strip()):
+        token = token.strip("()")
+        if not token:
+            continue
+        if token.upper() in _ACTIVATION_KEYWORDS:
+            continue
+        if re.fullmatch(r"[a-zA-Z_][a-zA-Z0-9_-]*", token):
+            names.add(token)
+    return names
 
 
 class MemoryStore:
@@ -40,6 +75,9 @@ class MemoryStore:
         self.assets: dict[str, Asset] = {}
         self.contracts: dict[str, Contract] = {}
         self._claims: list = []
+        self._activation_index: dict[str, set[str]] = {}
+        self._reverse_activation_index: dict[str, set[str]] = {}
+        self._declared_outputs_index: dict[str, set[str]] = {}
 
     def add_asset(self, asset: Asset) -> None:
         if not asset.signed_by or not verify_asset_seal(asset):
@@ -63,6 +101,10 @@ class MemoryStore:
 
     def add_contract(self, contract: Contract) -> None:
         self.contracts[contract.id] = contract
+        self.register_activation_refs(
+            contract.id, _extract_activation_names(contract.activation)
+        )
+        self.register_declared_outputs(contract.id, set(contract.outputs))
 
     def get_contract(self, contract_id: str) -> Optional[Contract]:
         return self.contracts.get(contract_id)
@@ -91,6 +133,55 @@ class MemoryStore:
 
     def get_claims_for_asset(self, asset_id: str) -> list:
         return [c for c in self._claims if c.source_asset_id == asset_id]
+
+    # ------------------------------------------------------------------
+    # Activation / declared-output indexes
+    # ------------------------------------------------------------------
+
+    def register_activation_refs(
+        self, contract_id: str, asset_names: set[str]
+    ) -> None:
+        self.unregister_activation_refs(contract_id)
+        if not asset_names:
+            return
+        self._activation_index[contract_id] = asset_names.copy()
+        for name in asset_names:
+            self._reverse_activation_index.setdefault(name, set()).add(contract_id)
+
+    def unregister_activation_refs(self, contract_id: str) -> None:
+        old = self._activation_index.pop(contract_id, None)
+        if old:
+            for name in old:
+                targets = self._reverse_activation_index.get(name)
+                if targets:
+                    targets.discard(contract_id)
+                    if not targets:
+                        del self._reverse_activation_index[name]
+
+    def register_declared_outputs(
+        self, contract_id: str, output_names: set[str]
+    ) -> None:
+        self.unregister_declared_outputs(contract_id)
+        if not output_names:
+            return
+        for name in output_names:
+            self._declared_outputs_index.setdefault(name, set()).add(contract_id)
+
+    def unregister_declared_outputs(self, contract_id: str) -> None:
+        to_clean: list[str] = []
+        for name, cids in self._declared_outputs_index.items():
+            if contract_id in cids:
+                cids.discard(contract_id)
+                if not cids:
+                    to_clean.append(name)
+        for name in to_clean:
+            del self._declared_outputs_index[name]
+
+    def get_contracts_waiting_for(self, asset_name: str) -> list[str]:
+        return list(self._reverse_activation_index.get(asset_name, set()))
+
+    def get_contracts_declaring_output(self, asset_name: str) -> list[str]:
+        return list(self._declared_outputs_index.get(asset_name, set()))
 
 
 class JsonLStore:

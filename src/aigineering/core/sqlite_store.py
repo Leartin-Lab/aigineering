@@ -26,7 +26,30 @@ from aigineering.protocol.wire import (
 
 _logger = logging.getLogger(__name__)
 
-CURRENT_SCHEMA_VERSION = 3
+CURRENT_SCHEMA_VERSION = 4
+
+# ---------------------------------------------------------------------------
+# Activation name extraction (shared with store.py)
+# ---------------------------------------------------------------------------
+
+_ACTIVATION_KEYWORDS: frozenset[str] = frozenset({"AND", "OR", "NOT"})
+
+
+def _extract_activation_names(expression: str) -> set[str]:
+    import re
+
+    if not expression or not expression.strip():
+        return set()
+    names: set[str] = set()
+    for token in re.split(r"\s+", expression.strip()):
+        token = token.strip("()")
+        if not token:
+            continue
+        if token.upper() in _ACTIVATION_KEYWORDS:
+            continue
+        if re.fullmatch(r"[a-zA-Z_][a-zA-Z0-9_-]*", token):
+            names.add(token)
+    return names
 
 # ---------------------------------------------------------------------------
 # DDL
@@ -164,6 +187,22 @@ CREATE TABLE IF NOT EXISTS idempotency_records (
 )
 """
 
+_DDL_CREATE_ACTIVATION_REFS = """
+CREATE TABLE IF NOT EXISTS contract_activation_refs (
+    contract_id TEXT NOT NULL,
+    asset_name TEXT NOT NULL,
+    PRIMARY KEY (contract_id, asset_name)
+)
+"""
+
+_DDL_CREATE_DECLARED_OUTPUTS = """
+CREATE TABLE IF NOT EXISTS contract_declared_outputs (
+    contract_id TEXT NOT NULL,
+    output_name TEXT NOT NULL,
+    PRIMARY KEY (contract_id, output_name)
+)
+"""
+
 _DDL_INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_assets_definition_hash ON assets(definition_hash)",
     "CREATE INDEX IF NOT EXISTS idx_assets_content_hash ON assets(content_hash)",
@@ -177,6 +216,8 @@ _DDL_INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_worker_claims_contract_status ON worker_claims(contract_id, status)",
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_worker_claims_one_active ON worker_claims(contract_id) WHERE status = 'active'",
     "CREATE INDEX IF NOT EXISTS idx_idempotency_contract ON idempotency_records(contract_id)",
+    "CREATE INDEX IF NOT EXISTS idx_activation_refs_asset ON contract_activation_refs(asset_name)",
+    "CREATE INDEX IF NOT EXISTS idx_declared_outputs_name ON contract_declared_outputs(output_name)",
 ]
 
 # ---------------------------------------------------------------------------
@@ -237,6 +278,8 @@ class SQLiteStore:
             _DDL_CREATE_REPLACEMENT_CLAIMS,
             _DDL_CREATE_WORKER_CLAIMS,
             _DDL_CREATE_IDEMPOTENCY,
+            _DDL_CREATE_ACTIVATION_REFS,
+            _DDL_CREATE_DECLARED_OUTPUTS,
         ]:
             self._conn.execute(ddl)
         for idx_ddl in _DDL_INDEXES:
@@ -279,6 +322,9 @@ class SQLiteStore:
             if current < 3:
                 self._migrate_to_v3()
                 self._record_schema_version(3)
+            if current < 4:
+                self._migrate_to_v4()
+                self._record_schema_version(4)
 
     def _migrate_to_v2(self) -> None:
         """Add 040 transactional worker state and contract authority metadata."""
@@ -296,6 +342,42 @@ class SQLiteStore:
         }
         if "usage_metadata" not in existing:
             self._conn.execute("ALTER TABLE trace_events ADD COLUMN usage_metadata TEXT")
+
+    def _migrate_to_v4(self) -> None:
+        """Add dependency/output index tables and backfill from existing
+        contracts so upgraded databases do not return false negatives."""
+        for ddl in (_DDL_CREATE_ACTIVATION_REFS, _DDL_CREATE_DECLARED_OUTPUTS):
+            self._conn.execute(ddl)
+        for idx_ddl in _DDL_INDEXES:
+            self._conn.execute(idx_ddl)
+
+        # Backfill: register activation refs and declared outputs for every
+        # contract already in the database.
+        import json as _json
+
+        rows = list(self._conn.execute("SELECT id, activation, outputs FROM contracts"))
+        for row in rows:
+            contract_id = row["id"]
+            activation: str = row["activation"] or ""
+            outputs_raw: str = row["outputs"] or "[]"
+
+            for asset_name in _extract_activation_names(activation):
+                self._conn.execute(
+                    "INSERT OR IGNORE INTO contract_activation_refs "
+                    "(contract_id, asset_name) VALUES (?, ?)",
+                    (contract_id, asset_name),
+                )
+            try:
+                declared = _json.loads(outputs_raw)
+                if isinstance(declared, list):
+                    for output_name in declared:
+                        self._conn.execute(
+                            "INSERT OR IGNORE INTO contract_declared_outputs "
+                            "(contract_id, output_name) VALUES (?, ?)",
+                            (contract_id, str(output_name)),
+                        )
+            except _json.JSONDecodeError:
+                pass
 
     @property
     def schema_version(self) -> int:
@@ -480,6 +562,26 @@ class SQLiteStore:
                     ),
                 },
             )
+            self._conn.execute(
+                "DELETE FROM contract_activation_refs WHERE contract_id = ?",
+                (contract.id,),
+            )
+            for name in _extract_activation_names(contract.activation):
+                self._conn.execute(
+                    "INSERT INTO contract_activation_refs (contract_id, asset_name) "
+                    "VALUES (?, ?)",
+                    (contract.id, name),
+                )
+            self._conn.execute(
+                "DELETE FROM contract_declared_outputs WHERE contract_id = ?",
+                (contract.id,),
+            )
+            for name in contract.outputs:
+                self._conn.execute(
+                    "INSERT INTO contract_declared_outputs (contract_id, output_name) "
+                    "VALUES (?, ?)",
+                    (contract.id, name),
+                )
 
     def get_contract(self, contract_id: str) -> Optional[Contract]:
         cur = self._conn.execute("SELECT * FROM contracts WHERE id = ?", (contract_id,))
@@ -489,6 +591,68 @@ class SQLiteStore:
     def get_all_contracts(self) -> list[Contract]:
         cur = self._conn.execute("SELECT * FROM contracts")
         return [self._row_to_contract(row) for row in cur.fetchall()]
+
+    # ------------------------------------------------------------------
+    # Activation / declared-output indexes
+    # ------------------------------------------------------------------
+
+    def register_activation_refs(
+        self, contract_id: str, asset_names: set[str]
+    ) -> None:
+        with self._conn:
+            self._conn.execute(
+                "DELETE FROM contract_activation_refs WHERE contract_id = ?",
+                (contract_id,),
+            )
+            for name in asset_names:
+                self._conn.execute(
+                    "INSERT INTO contract_activation_refs (contract_id, asset_name) "
+                    "VALUES (?, ?)",
+                    (contract_id, name),
+                )
+
+    def unregister_activation_refs(self, contract_id: str) -> None:
+        with self._conn:
+            self._conn.execute(
+                "DELETE FROM contract_activation_refs WHERE contract_id = ?",
+                (contract_id,),
+            )
+
+    def register_declared_outputs(
+        self, contract_id: str, output_names: set[str]
+    ) -> None:
+        with self._conn:
+            self._conn.execute(
+                "DELETE FROM contract_declared_outputs WHERE contract_id = ?",
+                (contract_id,),
+            )
+            for name in output_names:
+                self._conn.execute(
+                    "INSERT INTO contract_declared_outputs (contract_id, output_name) "
+                    "VALUES (?, ?)",
+                    (contract_id, name),
+                )
+
+    def unregister_declared_outputs(self, contract_id: str) -> None:
+        with self._conn:
+            self._conn.execute(
+                "DELETE FROM contract_declared_outputs WHERE contract_id = ?",
+                (contract_id,),
+            )
+
+    def get_contracts_waiting_for(self, asset_name: str) -> list[str]:
+        cur = self._conn.execute(
+            "SELECT contract_id FROM contract_activation_refs WHERE asset_name = ?",
+            (asset_name,),
+        )
+        return [row[0] for row in cur.fetchall()]
+
+    def get_contracts_declaring_output(self, asset_name: str) -> list[str]:
+        cur = self._conn.execute(
+            "SELECT contract_id FROM contract_declared_outputs WHERE output_name = ?",
+            (asset_name,),
+        )
+        return [row[0] for row in cur.fetchall()]
 
     # ------------------------------------------------------------------
     # Trace operations (G3, 040 C3)
