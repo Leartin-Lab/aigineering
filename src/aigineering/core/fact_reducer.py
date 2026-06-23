@@ -127,9 +127,7 @@ class FactReducer:
         for prefix in _METHOD_RESULT_PREFIXES:
             if asset.name.startswith(prefix):
                 # Determine which prefix matched (longest match first order)
-                matched = self._longest_matching_prefix(
-                    asset.name, _METHOD_RESULT_PREFIXES
-                )
+                matched = _longest_matching_prefix(asset.name, _METHOD_RESULT_PREFIXES)
                 return [
                     FactReducerEvent(
                         type="method_result_detected",
@@ -155,7 +153,7 @@ class FactReducer:
             if not contract.activation or not contract.activation.strip():
                 continue
             # Only report activation if the expression references this asset.
-            if self._activation_references(contract.activation, asset.name):
+            if _activation_references(contract.activation, asset.name):
                 if check_activation(contract.activation, available_names):
                     events.append(
                         FactReducerEvent(

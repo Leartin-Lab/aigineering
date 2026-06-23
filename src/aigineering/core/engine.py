@@ -19,10 +19,11 @@ from aigineering.core.methods import (
     method_payload,
     system_asset,
 )
+from aigineering.core.fact_reducer import FactReducer
 from aigineering.core.projection import project_candidate
-from aigineering.core.provenance import sign_asset
 from aigineering.core.method_registry import MethodRegistry
 from aigineering.core.method_runtime import MethodRuntime
+from aigineering.core.runtime_ingress import RuntimeIngress
 from aigineering.core.state_serializer import StateSerializer, TraceStateRebuilder
 from aigineering.core.store import StoreProtocol
 from aigineering.core.trace import MemoryTraceStore, TraceStoreProtocol
@@ -61,6 +62,7 @@ class Engine:
         mcp_servers: dict[str, object] | None = None,
         method_registry: MethodRegistry | None = None,
         context_size_limit: int | None = None,
+        ingress: RuntimeIngress | None = None,
     ) -> None:
         self._store = store
         self._worker = worker
@@ -77,6 +79,11 @@ class Engine:
         self._completed: set[str] = set()
         self._suspended: set[str] = set()
         self._method_scheduled: set[str] = set()
+        self._ingress = (
+            ingress
+            if ingress is not None
+            else RuntimeIngress(store, self._trace, FactReducer(store, self._trace))
+        )
 
     @property
     def _budget(self) -> dict[str, int]:
@@ -98,7 +105,7 @@ class Engine:
         self._overflow_handler = ContextOverflowHandler(value)
 
     def add_contract(self, contract: Contract) -> None:
-        self._store.add_contract(contract)
+        self._ingress.accept_contract(contract)
         self._budget_mgr.initialize(contract.id, contract.budget)
         if contract.labels:
             resolution = resolve_contract_labels(contract, self._labels, self._store)
@@ -113,20 +120,14 @@ class Engine:
             )
 
     def add_asset(self, asset: Asset) -> None:
-        signed = sign_asset(asset)
-        if not signed.signed_by:
-            signed = sign_asset(asset, signed_by="engine")
-        self._store.add_asset(signed)
+        self._ingress.accept_asset(asset, source="engine")
 
     def _add_trace(self, contract_id: str, event_type: str, **kwargs: object) -> None:
         self._trace_mgr.record(contract_id, event_type, **kwargs)
 
     def _commit(self, result: ProjectionResult) -> None:
         for asset in result.accepted_assets:
-            signed = sign_asset(asset)
-            if not signed.signed_by:
-                signed = sign_asset(asset, signed_by="engine")
-            self._store.add_asset(signed)
+            self._ingress.accept_asset(asset, source="projection", allow_protected=True)
 
     def run(self) -> None:
         while True:
@@ -353,7 +354,7 @@ class Engine:
             content=method_context_content(contract, action, child),
             created_by=contract.id,
         )
-        self._store.add_asset(sign_asset(asset))
+        self._ingress.accept_asset(asset, source="engine", allow_protected=True)
 
     def _check_context_overflow(self, contract: Contract, scope: list[Asset]) -> bool:
         overflow = self._overflow_handler.check_overflow(contract, scope)
@@ -378,10 +379,8 @@ class Engine:
             budget_remaining=self._resolve_budget(contract),
         )
 
-        report_asset = sign_asset(
-            self._overflow_handler.create_report_asset(contract.id, overflow)
-        )
-        self._store.add_asset(report_asset)
+        report_asset = self._overflow_handler.create_report_asset(contract.id, overflow)
+        self._ingress.accept_asset(report_asset, source="engine")
 
         action = WorkerAction(
             type="replan",
