@@ -39,10 +39,11 @@ def retry(
 
     # Method ingress (G1): dispatch through RetryMethodHandler instead of
     # directly calling store.add_contract().
+    trace_store = store if hasattr(store, "new_entry") else MemoryTraceStore()
     runtime = MethodRuntime(
         store=store,
-        trace=MemoryTraceStore(),
-        budget={},
+        trace=trace_store,
+        budget={original.id: original.budget},
     )
     candidate = Candidate(
         worker_id="cli",

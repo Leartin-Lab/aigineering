@@ -12,6 +12,7 @@ from aigineering.core.capability_descriptors import (
     create_skill_descriptor,
     create_memory_descriptor,
     create_persona_descriptor,
+    verify_descriptor,
 )
 from aigineering.core.provenance import verify_asset_seal
 from aigineering.core.store import MemoryStore
@@ -186,6 +187,37 @@ def test_all_five_capability_kinds():
     # All IDs are distinct
     ids = [d.id for d in descriptors.values()]
     assert len(set(ids)) == 5
+
+
+def test_default_capability_descriptors_pass_g10_gate():
+    """Configured capability ingress should not create unusable descriptors."""
+    descriptors = {
+        "tool": create_tool_descriptor(
+            name="lookup",
+            description="Look up values.",
+            input_schema={"type": "object"},
+        ),
+        "mcp": create_mcp_descriptor(
+            name="filesystem",
+            source_uri="mcp://filesystem",
+        ),
+        "skill": create_skill_descriptor(
+            name="audit",
+            content="Perform security audit.",
+        ),
+        "memory": create_memory_descriptor(
+            name="conversation",
+            source_uri="memory://conversation",
+        ),
+        "persona": create_persona_descriptor(
+            name="helpful_assistant",
+            content="You are helpful.",
+        ),
+    }
+
+    for kind, descriptor in descriptors.items():
+        assert descriptor.trust_tier == "configured"
+        assert verify_descriptor(descriptor, kind=kind)
 
 
 # ---------------------------------------------------------------------------

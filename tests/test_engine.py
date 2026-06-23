@@ -8,6 +8,7 @@ from aigineering.core.capability_descriptors import create_tool_descriptor
 from aigineering.core.method_handlers.plan import PlanMethodHandler
 from aigineering.core.method_handlers.tool import ToolMethodHandler
 from aigineering.core.method_registry import MethodRegistry
+from aigineering.core.provenance import sign_asset
 from aigineering.core.tools import ToolRegistry
 from aigineering.core.trace import TraceStore
 from aigineering.agent.mock import MockWorker
@@ -279,8 +280,7 @@ def test_method_scheduling_uses_child_contract_identity():
         [
             '/tool {"name": "search", "args": {"q": "a"}}',
             '/tool {"name": "search", "args": {"q": "b"}}',
-            "",
-            "",
+            '/exec {"outputs": {"report": "done"}}',
         ]
     )
     tools = ToolRegistry()
@@ -296,6 +296,7 @@ def test_method_scheduling_uses_child_contract_identity():
     contract = Contract(
         id="contract_parent",
         name="root",
+        outputs=["report"],
         activation="",
         budget=5,
         tool_scope=["search"],
@@ -311,9 +312,13 @@ def test_method_scheduling_uses_child_contract_identity():
 
     engine.run()
 
-    children = [c for c in store.get_all_contracts() if c.parent_id == contract.id]
-    assert len(children) == 2
-    assert len({c.id for c in children}) == 2
+    method_children = [
+        c for c in store.get_all_contracts() if c.origin == "system"
+    ]
+    assert len(method_children) == 2
+    assert len({c.id for c in method_children}) == 2
+    assert method_children[0].parent_id == contract.id
+    assert method_children[1].parent_id != contract.id
 
 
 def test_tool_method_executes_registry_and_commits_observation():
@@ -444,14 +449,45 @@ def test_tool_observation_resumes_parent_without_satisfying_output():
     assert len(obs_assets) == 1
 
     parent_calls = [call for call in worker.calls if call[0].id == contract.id]
-    assert len(parent_calls) == 2
-    second_scope_names = {asset.name for asset in parent_calls[1][1]}
+    continuation_calls = [
+        call for call in worker.calls if call[0].origin == "continuation"
+    ]
+    assert len(parent_calls) == 1
+    assert len(continuation_calls) == 1
+    assert continuation_calls[0][0].parent_id == contract.id
+    second_scope_names = {asset.name for asset in continuation_calls[0][1]}
     assert f"_tool_obs_{contract.id}" in second_scope_names
 
-    resumed = trace_store.get_by_event_type("method_resumed")
-    assert len(resumed) == 1
-    assert resumed[0].relation_type == "tool"
-    assert resumed[0].relation_target != contract.id
+    continued = trace_store.get_by_event_type("method_continuation_scheduled")
+    assert len(continued) == 1
+    assert continued[0].relation_type == "tool"
+    assert continued[0].relation_target == continuation_calls[0][0].id
+    assert not trace_store.get_by_event_type("method_resumed")
+
+
+def test_parent_output_satisfied_by_child_created_asset_name():
+    """Parent completion is based on declared asset names, not created_by."""
+    store = MemoryStore()
+    trace_store = TraceStore()
+    engine = Engine(store, SequenceWorker([]), trace_store)
+    parent = Contract(
+        id="parent",
+        name="parent",
+        outputs=["report"],
+    )
+    store.add_asset(
+        sign_asset(
+            Asset(
+                id="child-report",
+                name="report",
+                content="done",
+                created_by="child",
+            ),
+            signed_by="test",
+        )
+    )
+
+    assert engine._all_outputs_satisfied(parent)
 
 
 def test_plan_result_expands_child_contracts_without_system_authority():

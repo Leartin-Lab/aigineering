@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from aigineering.core.labels import BEHAVIOR_LABEL_PREFIX
 from aigineering.protocol.types import Asset, Contract
 
 
@@ -23,6 +24,13 @@ def system_prompt() -> str:
 def contract_prompt(contract: Contract, assets: list[Asset]) -> str:
     """Render a contract and disclosed assets for a worker."""
 
+    behavior_assets = [
+        asset for asset in assets if asset.name.startswith(BEHAVIOR_LABEL_PREFIX)
+    ]
+    evidence_assets = [
+        asset for asset in assets if not asset.name.startswith(BEHAVIOR_LABEL_PREFIX)
+    ]
+
     lines = [
         f"Contract name: {contract.name}",
         f"Description: {contract.description}",
@@ -36,8 +44,17 @@ def contract_prompt(contract: Contract, assets: list[Asset]) -> str:
         '- /replan {"reason": "why recovery is required"}',
         '- /tool {"name": "tool_name", "args": {}}',
         "",
-        "Disclosed assets:",
+        "Behavior instructions:",
     ]
-    for asset in assets:
+    for asset in behavior_assets:
+        lines.append(f"- {asset.name}: {asset.content}")
+
+    lines.extend(
+        [
+            "",
+            "Disclosed assets:",
+        ]
+    )
+    for asset in evidence_assets:
         lines.append(f"- {asset.name}: {asset.content}")
     return "\n".join(lines)

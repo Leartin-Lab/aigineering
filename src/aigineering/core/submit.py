@@ -130,7 +130,7 @@ def submit_candidate(
             if claim.get("status") != "active":
                 raise SubmitClaimError(
                     f"claim status is '{claim.get('status')}', not 'active' — "
-                    f"worker must re-claim before submitting"
+                    "retry/recovery must create a new contract before submitting"
                 )
             lease_until = claim.get("lease_until", "")
             from datetime import datetime, timezone
@@ -153,7 +153,7 @@ def submit_candidate(
             if lease_dt < now:
                 raise SubmitClaimError(
                     f"claim lease expired at {lease_until} — "
-                    f"worker must re-claim before submitting"
+                    "retry/recovery must create a new contract before submitting"
                 )
             if claim.get("package_id") and not envelope.package_id:
                 raise SubmitClaimError(
@@ -232,9 +232,7 @@ def submit_candidate(
     }
 
     # ── Completion check ────────────────────────────────────────────
-    projected_output_names = {
-        a.name for a in signed_assets if a.created_by == contract.id
-    }
+    projected_output_names = {a.name for a in signed_assets}
     if _all_outputs_satisfied(
         contract, store, extra_output_names=projected_output_names
     ):
@@ -301,7 +299,6 @@ def _all_outputs_satisfied(
     for output_name in contract.outputs:
         if output_name in extra_output_names:
             continue
-        matching = store.get_assets_by_name(output_name)
-        if not any(a.created_by == contract.id for a in matching):
+        if not store.get_assets_by_name(output_name):
             return False
     return True

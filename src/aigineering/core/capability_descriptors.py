@@ -35,7 +35,7 @@ def _build_descriptor_asset(
     kind: str,
     name: str,
     disclosed_content: dict[str, Any],
-    trust_tier: str = "untrusted",
+    trust_tier: str = "configured",
     source_uri: str = "",
 ) -> Asset:
     """Internal helper that builds a signed capability descriptor Asset.
@@ -66,7 +66,7 @@ def create_tool_descriptor(
     name: str,
     description: str,
     input_schema: Mapping[str, Any],
-    trust_tier: str = "untrusted",
+    trust_tier: str = "configured",
     source_uri: str = "",
 ) -> Asset:
     """Create a capability descriptor Asset for a Tool.
@@ -80,7 +80,7 @@ def create_tool_descriptor(
     input_schema : Mapping
         JSON Schema describing the tool's input parameters.
     trust_tier : str
-        Trust tier for the tool (default ``"untrusted"``).
+        Trust tier for the tool (default ``"configured"``).
     source_uri : str
         URI identifying the tool's origin (e.g. ``"tool://web_search"``).
 
@@ -103,7 +103,7 @@ def create_tool_descriptor(
 def create_mcp_descriptor(
     name: str,
     source_uri: str,
-    trust_tier: str = "untrusted",
+    trust_tier: str = "configured",
     tool_name: str = "",
     input_schema: dict[str, Any] | None = None,
     output_schema: dict[str, Any] | None = None,
@@ -120,7 +120,7 @@ def create_mcp_descriptor(
     source_uri : str
         URI identifying the MCP endpoint (e.g. ``"mcp://filesystem"``).
     trust_tier : str
-        Trust tier for the MCP (default ``"untrusted"``).
+        Trust tier for the MCP (default ``"configured"``).
     tool_name : str
         Optional specific tool name within the MCP server
         (e.g. ``"search.query"``).  When empty, the descriptor covers
@@ -154,7 +154,7 @@ def create_mcp_descriptor(
 def create_skill_descriptor(
     name: str,
     content: str,
-    trust_tier: str = "untrusted",
+    trust_tier: str = "configured",
 ) -> Asset:
     """Create a capability descriptor Asset for a Skill / procedure.
 
@@ -170,7 +170,7 @@ def create_skill_descriptor(
     content : str
         The skill definition / procedure content (used to compute the hash only).
     trust_tier : str
-        Trust tier for the skill (default ``"untrusted"``).
+        Trust tier for the skill (default ``"configured"``).
 
     Returns
     -------
@@ -191,7 +191,7 @@ def create_skill_descriptor(
 def create_memory_descriptor(
     name: str,
     source_uri: str,
-    trust_tier: str = "untrusted",
+    trust_tier: str = "configured",
 ) -> Asset:
     """Create a capability descriptor Asset for a Memory / context provider.
 
@@ -202,7 +202,7 @@ def create_memory_descriptor(
     source_uri : str
         URI identifying the memory source (e.g. ``"memory://session"``).
     trust_tier : str
-        Trust tier for the memory capability (default ``"untrusted"``).
+        Trust tier for the memory capability (default ``"configured"``).
 
     Returns
     -------
@@ -222,7 +222,7 @@ def create_memory_descriptor(
 def create_persona_descriptor(
     name: str,
     content: str,
-    trust_tier: str = "untrusted",
+    trust_tier: str = "configured",
 ) -> Asset:
     """Create a capability descriptor Asset for a Persona / policy.
 
@@ -233,7 +233,7 @@ def create_persona_descriptor(
     content : str
         The persona definition / policy content.
     trust_tier : str
-        Trust tier for the persona (default ``"untrusted"``).
+        Trust tier for the persona (default ``"configured"``).
 
     Returns
     -------

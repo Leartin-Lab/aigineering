@@ -305,21 +305,26 @@ def test_usage_metadata_captured():
     assert usage["prompt_tokens"] == 42
     assert usage["completion_tokens"] == 7
     assert usage["total_tokens"] == 49
+    assert usage["model"] == "test-model"
+    assert "provider" in usage
 
 
-def test_usage_metadata_none_when_absent():
-    """No usage field in response — metadata should be None."""
+def test_usage_metadata_present_when_usage_absent():
+    """No usage field in response — metadata still contains model and provider."""
 
     def transport(url, headers, payload):
         return {"choices": [{"message": {"content": "report: ok"}}]}
 
     worker = LLMWorker(model="test-model", transport=transport)
     candidate = worker.invoke(_min_contract(), [])
-    assert candidate.metadata is None
+    assert candidate.metadata is not None
+    metadata = dict(candidate.metadata)
+    assert metadata["model"] == "test-model"
+    assert "provider" in metadata
 
 
 def test_usage_metadata_partial_tokens():
-    """Usage present but missing prompt/completion tokens — metadata should be None."""
+    """Usage present but missing prompt/completion tokens — metadata still has model/provider."""
 
     def transport(url, headers, payload):
         return {
@@ -329,7 +334,12 @@ def test_usage_metadata_partial_tokens():
 
     worker = LLMWorker(model="test-model", transport=transport)
     candidate = worker.invoke(_min_contract(), [])
-    assert candidate.metadata is None
+    # _extract_usage returns None for partial, but _build_usage_metadata
+    # still includes model and provider.
+    assert candidate.metadata is not None
+    metadata = dict(candidate.metadata)
+    assert metadata["model"] == "test-model"
+    assert "provider" in metadata
 
 
 def test_extract_usage_valid():
@@ -366,9 +376,10 @@ def test_candidate_metadata_is_mappingproxy():
 
     worker = LLMWorker(model="test-model", transport=transport)
     candidate = worker.invoke(_min_contract(), [])
-    assert candidate.metadata is None or isinstance(
-        candidate.metadata, MappingProxyType
-    )
+    assert candidate.metadata is not None
+    assert isinstance(candidate.metadata, MappingProxyType)
+    assert "model" in dict(candidate.metadata)
+    assert "provider" in dict(candidate.metadata)
 
 
 # ---------------------------------------------------------------------------
@@ -944,7 +955,7 @@ def test_provider_tool_call_mapping_preserves_authority():
 
 
 def test_multiple_tool_calls_in_one_response():
-    """Multiple tool_calls in one response → only the first is used for the action."""
+    """Multiple tool_calls in one response → multi-action envelope emitted."""
 
     def transport(url, headers, payload):
         return {
@@ -985,16 +996,20 @@ def test_multiple_tool_calls_in_one_response():
     worker = LLMWorker(model="test-model", transport=transport)
     candidate = worker.invoke(_min_contract(), [])
 
-    # Only the first tool call is mapped
-    assert candidate.raw_output.startswith("/tool ")
-    body = json.loads(candidate.raw_output.removeprefix("/tool ").strip())
-    assert body["name"] == "search"
-    assert body["args"] == {"q": "first"}
+    # Multi-action envelope is emitted — no calls silently dropped
+    assert candidate.raw_output.startswith("/multi ")
+    body = json.loads(candidate.raw_output.removeprefix("/multi ").strip())
+    assert body["type"] == "multi"
+    assert len(body["actions"]) == 3
+    assert body["actions"][0] == {"name": "search", "args": {"q": "first"}}
+    assert body["actions"][1] == {"name": "lookup", "args": {"key": "second"}}
+    assert body["actions"][2] == {"name": "fetch", "args": {"url": "third"}}
 
-    # parsed_action reflects only first tool call
+    # parsed_action reflects the multi envelope
     assert candidate.parsed_action is not None
-    assert candidate.parsed_action["type"] == "tool"
-    assert candidate.parsed_action["payload"]["name"] == "search"
+    assert candidate.parsed_action["type"] == "multi"
+    payload = dict(candidate.parsed_action["payload"])
+    assert len(payload["actions"]) == 3
 
 
 def test_no_api_key_leaked_in_error_messages():

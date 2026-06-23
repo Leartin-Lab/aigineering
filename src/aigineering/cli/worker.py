@@ -21,12 +21,36 @@ from aigineering.core.submit import (
 )
 from aigineering.protocol.envelope import CandidateEnvelope
 from aigineering.protocol.package import WorkerPackage
+from aigineering.protocol.types import Asset, Contract
 from aigineering.protocol.wire import asset_to_dict, contract_to_dict
 
 
 @click.group("worker")
 def worker() -> None:
     """Operational worker commands for contract execution."""
+
+
+def _method_context_assets_for(contract: Contract, store) -> tuple[dict, ...]:
+    """Resolve continuation method context from durable trace records."""
+    get_all = getattr(store, "get_all", None)
+    if get_all is None:
+        return ()
+
+    assets: list[Asset] = []
+    seen: set[str] = set()
+    for entry in get_all():
+        if (
+            entry.event_type != "method_continuation_scheduled"
+            or entry.relation_target != contract.id
+        ):
+            continue
+        for asset_id in entry.disclosed_assets:
+            asset = store.get_asset(asset_id)
+            if asset is None or asset.id in seen:
+                continue
+            assets.append(asset)
+            seen.add(asset.id)
+    return tuple(asset_to_dict(asset) for asset in assets)
 
 
 @worker.command("package")
@@ -52,11 +76,12 @@ def worker_package(contract_id: str, json_output: bool) -> None:
         return
 
     scope = compute_disclosure(contract, store)
+    method_context_assets = _method_context_assets_for(contract, store)
     pkg = WorkerPackage(
         contract_id=contract.id,
         contract=contract_to_dict(contract),
         disclosed_assets=tuple(asset_to_dict(a) for a in scope),
-        method_context_assets=(),
+        method_context_assets=method_context_assets,
         tool_scope=contract.tool_scope,
         budget_remaining=contract.budget,
     )
@@ -120,6 +145,8 @@ def worker_next(worker_id: str, lease_seconds: int, json_output: bool) -> None:
                 is_suspended = True
             elif entry.event_type == "method_resumed":
                 is_suspended = False
+            elif entry.event_type == "method_continuation_scheduled":
+                is_suspended = True
 
         if is_completed:
             continue
@@ -137,11 +164,12 @@ def worker_next(worker_id: str, lease_seconds: int, json_output: bool) -> None:
 
         # ── Build WorkerPackage ──────────────────────────────────────
         scope = compute_disclosure(contract, store)
+        method_context_assets = _method_context_assets_for(contract, store)
         pkg = WorkerPackage(
             contract_id=contract.id,
             contract=contract_to_dict(contract),
             disclosed_assets=tuple(asset_to_dict(a) for a in scope),
-            method_context_assets=(),
+            method_context_assets=method_context_assets,
             tool_scope=contract.tool_scope,
             budget_remaining=remaining_budget,
         )
@@ -159,7 +187,7 @@ def worker_next(worker_id: str, lease_seconds: int, json_output: bool) -> None:
                 contract_id=contract.id,
                 contract=contract_to_dict(contract),
                 disclosed_assets=tuple(asset_to_dict(a) for a in scope),
-                method_context_assets=(),
+                method_context_assets=method_context_assets,
                 tool_scope=contract.tool_scope,
                 budget_remaining=remaining_budget,
                 claim_id=claim["claim_id"],

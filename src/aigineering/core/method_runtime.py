@@ -44,11 +44,13 @@ class MethodRuntime:
         tools: ToolRegistry | None = None,
         suspended: set[str] | None = None,
         method_scheduled: set[str] | None = None,
+        mcp_servers: dict[str, object] | None = None,
     ) -> None:
         self._store = store
         self._trace = _coerce_trace_manager(trace)
         self._budget = _coerce_budget_manager(budget)
         self._tools = tools
+        self._mcp_servers: dict[str, object] = mcp_servers or {}
         self._suspended: set[str] = suspended if suspended is not None else set()
         self._method_scheduled: set[str] = (
             method_scheduled if method_scheduled is not None else set()
@@ -182,6 +184,13 @@ class MethodRuntime:
         This is a constrained accessor — handlers cannot mutate the registry.
         """
         return self._tools
+
+    def get_mcp_servers(self) -> dict[str, object]:
+        """Return the MCP server registry (server name → callable).
+
+        Returns an empty dict when no MCP servers are configured.
+        """
+        return dict(self._mcp_servers)
 
     # -- Budget consumption --------------------------------------------------
 

@@ -6,6 +6,7 @@ import json
 import logging
 import os
 from pathlib import Path
+from types import MappingProxyType
 from typing import Optional, Protocol, runtime_checkable
 
 from aigineering.core.ids import now_iso, hash_event
@@ -32,6 +33,7 @@ def create_entry(
     budget_remaining: int = 0,
     relation_type: Optional[str] = None,
     relation_target: Optional[str] = None,
+    usage_metadata: Optional[MappingProxyType] = None,
 ) -> TraceEntry:
     entry_id = hash_event(
         contract_id=contract_id,
@@ -58,6 +60,7 @@ def create_entry(
         relation_type=relation_type,
         relation_target=relation_target,
         timestamp=now_iso(),
+        usage_metadata=usage_metadata,
     )
 
 

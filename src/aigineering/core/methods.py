@@ -58,7 +58,15 @@ def method_contract(parent: Contract, action: WorkerAction) -> Contract:
     if action.type not in _METHOD_OUTPUT_PREFIX:
         raise ValueError(f"action '/{action.type}' is not a method action")
 
-    output_name = f"{_METHOD_OUTPUT_PREFIX[action.type]}{parent.id}"
+    output_prefix = _METHOD_OUTPUT_PREFIX[action.type]
+    if (
+        action.type == "tool"
+        and isinstance(action.payload, dict)
+        and isinstance(action.payload.get("name"), str)
+        and action.payload["name"].startswith("mcp:")
+    ):
+        output_prefix = "_mcp_obs_"
+    output_name = f"{output_prefix}{parent.id}"
     contract_name = f"{parent.name}.{action.type}" if parent.name else action.type
     description = _method_description(parent, action)
     outputs = [output_name]

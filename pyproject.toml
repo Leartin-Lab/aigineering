@@ -1,6 +1,6 @@
 [project]
 name = "aigineering"
-version = "0.4.10"
+version = "0.5.0a2"
 description = "Agent Runtime — structural hallucination containment for LLM-based agents"
 requires-python = ">=3.11"
 license = "MIT"
@@ -8,6 +8,20 @@ readme = "README.md"
 authors = [
     { name = "Aigineering Contributors" },
 ]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries :: Application Frameworks",
+    "Topic :: Security",
+]
+keywords = ["ai", "agents", "runtime", "hallucination", "zero-trust", "llm"]
 dependencies = [
     "click>=8.0",
 ]
@@ -23,8 +37,9 @@ build-backend = "hatchling.build"
 packages = ["src/aigineering"]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "pytest-asyncio>=0.24", "ruff>=0.8", "build>=1.2"]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.24", "ruff>=0.8", "build>=1.2", "twine>=5.0"]
 crypto = ["cryptography>=43"]
+api = ["fastapi>=0.115", "uvicorn[standard]>=0.34"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

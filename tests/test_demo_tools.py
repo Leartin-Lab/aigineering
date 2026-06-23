@@ -1,4 +1,4 @@
-"""Tests for demo tools — memory-backed built-in tools (v0.4.10)."""
+"""Tests for demo tools — memory-backed built-in tools (v0.5.0-alpha.2)."""
 
 from __future__ import annotations
 
@@ -226,12 +226,6 @@ def test_demo_workflow_full_pipeline():
     assert len(reports) == 1
     assert reports[0].content == "all steps complete"
 
-    # ── Verify tool observation assets were committed ────────────────────
-    # Each tool call produces an observation asset with the same name
-    # (derived from parent contract id), so 2 tool calls → 2 observations.
-    obs_assets = store.get_assets_by_name(f"_tool_obs_{contract.id}")
-    assert len(obs_assets) == 2
-
     # Both tool calls should produce call and obs assets
     call_assets = [
         a for a in store.get_all_assets() if a.name.startswith("_tool_call_")
@@ -252,15 +246,15 @@ def test_demo_workflow_full_pipeline():
     assert "disclosure" in event_types
     assert "method_scheduled" in event_types
     assert "tool_executed" in event_types
-    assert "method_resumed" in event_types
+    assert "method_continuation_scheduled" in event_types
     assert "complete" in event_types
 
 
 def test_demo_workflow_search_tool():
-    """Full pipeline with demo search tool: /tool search → resume → /exec.
+    """Full pipeline with demo search tool: /tool search → continuation → /exec.
 
     Contract with tool_scope=["search"] triggers search tool,
-    observation is made available to parent on resume, parent
+    observation is made available to a continuation contract, which
     produces final output.
     """
     registry = MethodRegistry()

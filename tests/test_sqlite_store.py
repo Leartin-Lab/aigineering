@@ -1,12 +1,14 @@
 """Tests for SQLiteStore — transactional SQLite implementation of StoreProtocol."""
 
 import sqlite3
+from types import MappingProxyType
 
 import pytest
 
 from aigineering.core.provenance import sign_asset
 from aigineering.core.sqlite_store import CURRENT_SCHEMA_VERSION, SQLiteStore
 from aigineering.core.store import StoreProtocol
+from aigineering.core.trace import create_entry
 from aigineering.protocol.types import Asset, Contract
 
 
@@ -301,6 +303,11 @@ def test_v1_schema_migrates_to_v2(tmp_path):
     }
     assert "minting_authority" in contract_columns
     assert "sensitive_input_policy" in contract_columns
+    trace_columns = {
+        row["name"]
+        for row in migrated._conn.execute("PRAGMA table_info(trace_events)").fetchall()
+    }
+    assert "usage_metadata" in trace_columns
 
     tables = {
         row["name"]
@@ -588,6 +595,51 @@ def test_claim_contract_rejects_second_connection_active_claim(tmp_path):
 
     first.close()
     second.close()
+
+
+def test_claim_contract_rejects_reclaim_after_expired_claim(store):
+    """A claimed contract never returns to the unclaimed pool."""
+    store.persist_claim(
+        "claim-old",
+        "c-expired",
+        "worker-1",
+        "2000-01-01T00:00:00+00:00",
+        "active",
+    )
+
+    claim = store.claim_contract("c-expired", "worker-2")
+
+    assert claim is None
+
+
+def test_trace_usage_metadata_round_trips(store):
+    """SQLite trace persistence keeps LLM token/cost metadata."""
+    entry = create_entry(
+        contract_id="c-usage",
+        event_type="projection",
+        sequence=0,
+        usage_metadata=MappingProxyType(
+            {
+                "prompt_tokens": 10,
+                "completion_tokens": 5,
+                "total_tokens": 15,
+                "model": "test-model",
+                "provider": "test-provider",
+            }
+        ),
+    )
+
+    store.append(entry)
+    restored = store.get_trace_events("c-usage")[0]
+
+    assert restored.usage_metadata is not None
+    assert dict(restored.usage_metadata) == {
+        "prompt_tokens": 10,
+        "completion_tokens": 5,
+        "total_tokens": 15,
+        "model": "test-model",
+        "provider": "test-provider",
+    }
 
 
 def test_candidate_submission_rolls_back_on_mid_commit_failure(store, monkeypatch):

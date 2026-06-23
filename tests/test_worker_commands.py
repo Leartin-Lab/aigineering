@@ -14,7 +14,7 @@ from aigineering.core.provenance import sign_asset
 from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.protocol.envelope import CandidateEnvelope
 from aigineering.protocol.package import WorkerPackage
-from aigineering.protocol.types import Asset, Contract
+from aigineering.protocol.types import Asset, Contract, TraceEntry
 
 
 def _seed_contract(store: SQLiteStore) -> Contract:
@@ -57,6 +57,55 @@ def _seed_contract_with_asset(store: SQLiteStore) -> tuple[Contract, Asset]:
     )
     store.add_asset(asset)
     return contract, asset
+
+
+def _seed_continuation_with_method_context(
+    store: SQLiteStore,
+) -> tuple[Contract, Contract, Asset]:
+    """Add parent, continuation, and durable method context observation."""
+    parent = Contract(
+        id="contract_parent",
+        name="root",
+        outputs=["report"],
+        activation="",
+        budget=5,
+    )
+    continuation = Contract(
+        id="contract_continue",
+        parent_id=parent.id,
+        name="root.tool.continue",
+        outputs=["report"],
+        activation="",
+        budget=4,
+        origin="continuation",
+    )
+    obs_name = "_tool_obs_contract_parent"
+    obs = sign_asset(
+        Asset(
+            id=hash_asset_content(obs_name, "value:x"),
+            name=obs_name,
+            content="value:x",
+            definition_hash=hash_asset_definition(obs_name),
+            content_hash=hash_asset_content(obs_name, "value:x"),
+            origin="system",
+            trust_tier="system",
+            created_by="tool_contract",
+        )
+    )
+    store.add_contract(parent)
+    store.add_contract(continuation)
+    store.add_asset(obs)
+    store.append_trace_entry(
+        TraceEntry(
+            id="evt_continue",
+            contract_id=parent.id,
+            event_type="method_continuation_scheduled",
+            relation_type="tool",
+            relation_target=continuation.id,
+            disclosed_assets=[obs.id],
+        )
+    )
+    return parent, continuation, obs
 
 
 def _valid_envelope_json(contract_id: str) -> str:
@@ -147,6 +196,23 @@ def test_worker_package_missing_contract():
         data = json.loads(result.output)
         assert "error" in data
         assert "not found" in data["error"]
+
+
+def test_worker_package_includes_continuation_method_context():
+    """Durable packages include method context assets for continuation tasks."""
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        store = SQLiteStore(".aig/store.db")
+        _parent, continuation, obs = _seed_continuation_with_method_context(store)
+
+        result = runner.invoke(
+            cli, ["worker", "package", "--contract", continuation.id, "--json"]
+        )
+
+        assert result.exit_code == 0, f"stderr: {result.output}"
+        data = json.loads(result.output)
+        assert data["contract_id"] == continuation.id
+        assert [a["name"] for a in data["method_context_assets"]] == [obs.name]
 
 
 # ---------------------------------------------------------------------------
@@ -458,6 +524,27 @@ def test_worker_next_returns_package():
         second = runner.invoke(cli, ["worker", "next", "--json"])
         assert second.exit_code == 0, f"stderr: {second.output}"
         assert json.loads(second.output) is None
+
+
+def test_worker_next_returns_continuation_with_method_context():
+    """worker next exposes continuation method context from durable trace."""
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        store = SQLiteStore(".aig/store.db")
+        _parent, continuation, obs = _seed_continuation_with_method_context(store)
+
+        result = runner.invoke(cli, ["worker", "next", "--json"])
+
+        assert result.exit_code == 0, f"stderr: {result.output}"
+        data = json.loads(result.output)
+        assert data["contract_id"] == continuation.id
+        assert [a["name"] for a in data["method_context_assets"]] == [obs.name]
+        assert data["claim_id"]
+
+        persisted = SQLiteStore(".aig/store.db")
+        claim = persisted.get_claim(continuation.id)
+        assert claim is not None
+        assert claim["package_id"] == data["package_id"]
 
 
 def test_worker_next_null_when_idle():

@@ -11,6 +11,7 @@ import json
 import logging
 import sqlite3
 from pathlib import Path
+from types import MappingProxyType
 from typing import Optional
 
 from aigineering.core.crash import check_crash_point
@@ -25,7 +26,7 @@ from aigineering.protocol.wire import (
 
 _logger = logging.getLogger(__name__)
 
-CURRENT_SCHEMA_VERSION = 2
+CURRENT_SCHEMA_VERSION = 3
 
 # ---------------------------------------------------------------------------
 # DDL
@@ -98,7 +99,8 @@ CREATE TABLE IF NOT EXISTS trace_events (
     budget_remaining INTEGER NOT NULL DEFAULT 0,
     relation_type TEXT,
     relation_target TEXT,
-    timestamp TEXT NOT NULL DEFAULT ''
+    timestamp TEXT NOT NULL DEFAULT '',
+    usage_metadata TEXT
 )
 """
 
@@ -125,6 +127,17 @@ CREATE TABLE IF NOT EXISTS claims (
     signed_by TEXT NOT NULL DEFAULT '',
     provenance_seal TEXT NOT NULL DEFAULT '',
     lineage_id TEXT NOT NULL DEFAULT ''
+)
+"""
+
+_DDL_CREATE_REPLACEMENT_CLAIMS = """
+CREATE TABLE IF NOT EXISTS replacement_claims (
+    claim_id TEXT PRIMARY KEY,
+    source_asset_id TEXT NOT NULL,
+    replacement_asset_id TEXT NOT NULL,
+    claim_type TEXT NOT NULL,
+    signed_by TEXT DEFAULT '',
+    provenance_seal TEXT DEFAULT ''
 )
 """
 
@@ -221,6 +234,7 @@ class SQLiteStore:
             _DDL_CREATE_TRACE_EVENTS,
             _DDL_CREATE_SESSIONS,
             _DDL_CREATE_CLAIMS,
+            _DDL_CREATE_REPLACEMENT_CLAIMS,
             _DDL_CREATE_WORKER_CLAIMS,
             _DDL_CREATE_IDEMPOTENCY,
         ]:
@@ -262,6 +276,9 @@ class SQLiteStore:
             if current < 2:
                 self._migrate_to_v2()
                 self._record_schema_version(2)
+            if current < 3:
+                self._migrate_to_v3()
+                self._record_schema_version(3)
 
     def _migrate_to_v2(self) -> None:
         """Add 040 transactional worker state and contract authority metadata."""
@@ -270,6 +287,15 @@ class SQLiteStore:
             self._conn.execute(ddl)
         for idx_ddl in _DDL_INDEXES:
             self._conn.execute(idx_ddl)
+
+    def _migrate_to_v3(self) -> None:
+        """Persist trace usage metadata for LLM token/cost accounting."""
+        existing = {
+            row["name"]
+            for row in self._conn.execute("PRAGMA table_info(trace_events)").fetchall()
+        }
+        if "usage_metadata" not in existing:
+            self._conn.execute("ALTER TABLE trace_events ADD COLUMN usage_metadata TEXT")
 
     @property
     def schema_version(self) -> int:
@@ -505,13 +531,13 @@ class SQLiteStore:
                     disclosed_assets, accepted_fragments, accepted_asset_names,
                     rejected_fragments, worker_id, candidate_raw,
                     authority_policy, authority_result, budget_remaining,
-                    relation_type, relation_target, timestamp
+                    relation_type, relation_target, timestamp, usage_metadata
                 ) VALUES (
                     :id, :parent_id, :contract_id, :event_type,
                     :disclosed_assets, :accepted_fragments, :accepted_asset_names,
                     :rejected_fragments, :worker_id, :candidate_raw,
                     :authority_policy, :authority_result, :budget_remaining,
-                    :relation_type, :relation_target, :timestamp
+                    :relation_type, :relation_target, :timestamp, :usage_metadata
                 )""",
             {
                 k: json.dumps(v) if isinstance(v, (list, dict, tuple)) else v
@@ -555,6 +581,9 @@ class SQLiteStore:
         from aigineering.protocol.types import TraceEntry
         import json as _json
 
+        usage_raw = row["usage_metadata"] if "usage_metadata" in row.keys() else None
+        usage = _json.loads(usage_raw) if usage_raw else None
+
         return TraceEntry(
             id=row["id"],
             parent_id=row["parent_id"],
@@ -572,6 +601,7 @@ class SQLiteStore:
             relation_type=row["relation_type"],
             relation_target=row["relation_target"],
             timestamp=row["timestamp"],
+            usage_metadata=MappingProxyType(usage) if isinstance(usage, dict) else None,
         )
 
     # ------------------------------------------------------------------
@@ -652,25 +682,13 @@ class SQLiteStore:
         claim_id = f"lease:{compute_content_hash(f'{contract_id}|{worker_id}|{now.isoformat()}')}"
         try:
             with self._conn:
-                active = self._conn.execute(
-                    "SELECT claim_id, lease_until FROM worker_claims "
-                    "WHERE contract_id = ? AND status = 'active' ORDER BY rowid DESC LIMIT 1",
+                existing = self._conn.execute(
+                    "SELECT claim_id, status FROM worker_claims "
+                    "WHERE contract_id = ? ORDER BY rowid DESC LIMIT 1",
                     (contract_id,),
                 ).fetchone()
-                if active is not None:
-                    try:
-                        active_until = datetime.fromisoformat(active["lease_until"])
-                        if active_until.tzinfo is None:
-                            active_until = active_until.replace(tzinfo=timezone.utc)
-                    except ValueError:
-                        active_until = now
-                    if active_until >= now:
-                        return None
-                    self._conn.execute(
-                        "UPDATE worker_claims SET status = 'expired', updated_at = ? "
-                        "WHERE claim_id = ?",
-                        (now_iso(), active["claim_id"]),
-                    )
+                if existing is not None:
+                    return None
                 self._conn.execute(
                     """INSERT INTO worker_claims (
                         claim_id, contract_id, worker_id, lease_until, status,
@@ -781,6 +799,53 @@ class SQLiteStore:
                         "active worker claim predicate failed during submit"
                     )
         return True
+
+    # ------------------------------------------------------------------
+    # Replacement claim persistence
+    # ------------------------------------------------------------------
+
+    def add_replacement_claim(self, claim) -> None:
+        with self._conn:
+            self._conn.execute(
+                """INSERT OR REPLACE INTO claims (
+                    id, source_asset_id, replacement_asset_id,
+                    definition_hash, claim_type, signed_by,
+                    provenance_seal, lineage_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (claim.id, claim.source_asset_id,
+                 claim.replacement_asset_id, claim.definition_hash,
+                 claim.claim_type, claim.signed_by,
+                 claim.provenance_seal, claim.lineage_id),
+            )
+
+    def get_claims_by_definition(self, definition_hash: str) -> list:
+        rows = self._conn.execute(
+            "SELECT * FROM claims WHERE definition_hash = ?",
+            (definition_hash,),
+        ).fetchall()
+        return [self._row_to_replacement_claim(r) for r in rows]
+
+    def get_claims_for_asset(self, asset_id: str) -> list:
+        rows = self._conn.execute(
+            "SELECT * FROM claims WHERE source_asset_id = ?",
+            (asset_id,),
+        ).fetchall()
+        return [self._row_to_replacement_claim(r) for r in rows]
+
+    @staticmethod
+    def _row_to_replacement_claim(row: sqlite3.Row):
+        from aigineering.protocol.types import ReplacementClaim
+
+        return ReplacementClaim(
+            id=row["id"],
+            source_asset_id=row["source_asset_id"],
+            replacement_asset_id=row["replacement_asset_id"],
+            definition_hash=row["definition_hash"],
+            claim_type=row["claim_type"],
+            signed_by=row["signed_by"],
+            provenance_seal=row["provenance_seal"],
+            lineage_id=row["lineage_id"],
+        )
 
     # ------------------------------------------------------------------
     # Lifecycle

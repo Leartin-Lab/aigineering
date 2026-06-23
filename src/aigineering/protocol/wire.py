@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from types import MappingProxyType
 from typing import Any
 
 from aigineering.protocol.types import Asset, Candidate, Contract, Session, TraceEntry
@@ -112,10 +113,17 @@ def trace_entry_to_dict(entry: TraceEntry) -> dict[str, Any]:
         "relation_type": entry.relation_type,
         "relation_target": entry.relation_target,
         "timestamp": entry.timestamp,
+        "usage_metadata": (
+            dict(entry.usage_metadata)
+            if entry.usage_metadata is not None
+            else None
+        ),
     }
 
 
 def trace_entry_from_dict(data: dict[str, Any]) -> TraceEntry:
+    usage = data.get("usage_metadata")
+
     return TraceEntry(
         id=data.get("id", ""),
         parent_id=data.get("parent_id"),
@@ -133,6 +141,7 @@ def trace_entry_from_dict(data: dict[str, Any]) -> TraceEntry:
         relation_type=data.get("relation_type"),
         relation_target=data.get("relation_target"),
         timestamp=data.get("timestamp", ""),
+        usage_metadata=MappingProxyType(usage) if isinstance(usage, dict) else None,
     )
 
 

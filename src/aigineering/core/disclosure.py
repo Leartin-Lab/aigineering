@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Protocol
 
+from aigineering.core.labels import BEHAVIOR_LABEL_PREFIX, is_behavior_asset_allowed
 from aigineering.protocol.types import Asset, Contract
 
 REDACTED_CONTENT = "[redacted]"
@@ -28,14 +29,24 @@ def redact_for_disclosure(asset: Asset) -> Asset:
 
 
 def compute_disclosure(contract: Contract, store: StoreLike) -> list[Asset]:
-    if not contract.inputs:
-        return []
-
     seen: set[str] = set()
     result: list[Asset] = []
 
     for input_name in contract.inputs:
         for asset in store.get_assets_by_name(input_name):
+            if not asset.promptable:
+                continue
+            if asset.id not in seen:
+                seen.add(asset.id)
+                result.append(redact_for_disclosure(asset))
+
+    # Include label-referenced assets (e.g. behavior:* labels) so that
+    # promptable behaviour assets are disclosed alongside declared inputs.
+    for label_name in contract.labels:
+        for asset in store.get_assets_by_name(label_name):
+            if asset.name.startswith(BEHAVIOR_LABEL_PREFIX):
+                if not is_behavior_asset_allowed(asset):
+                    continue
             if not asset.promptable:
                 continue
             if asset.id not in seen:

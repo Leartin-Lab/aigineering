@@ -23,6 +23,12 @@ logger = logging.getLogger(__name__)
 # API requests and how to interpret responses.
 SUPPORTED_CAPABILITIES = frozenset({"tool_calling", "json_schema"})
 
+# Multi-tool-call action type.  When a provider response contains more than
+# one tool_calls entry the worker emits this envelope so no calls are
+# silently dropped.  The engine does not yet dispatch multi-actions, so
+# they are recorded in the trace for auditability.
+_MULTI_ACTION_TYPE = "multi"
+
 Transport = Callable[
     [str, Mapping[str, str], Mapping[str, object]],
     Mapping[str, object],
@@ -110,6 +116,17 @@ class LLMWorker:
         """Return a safe model name for use in worker_id slugs."""
         return "".join(c if c.isalnum() or c in "-_" else "_" for c in self.model)[:64]
 
+    def _provider_name(self) -> str:
+        """Derive a logical provider name from the base URL."""
+        from urllib.parse import urlparse
+
+        try:
+            parsed = urlparse(self.base_url)
+            host = parsed.hostname or "unknown"
+            return host
+        except Exception:
+            return "unknown"
+
     def invoke(
         self,
         contract: Contract,
@@ -144,7 +161,11 @@ class LLMWorker:
 
         url = f"{self.base_url}/chat/completions"
         response = self._call_with_retry(url, headers, payload)
-        usage_metadata = _extract_usage(response)
+        usage_metadata = _build_usage_metadata(
+            response,
+            model=self.model,
+            provider=self._provider_name(),
+        )
 
         tool_calls = _extract_tool_calls(response)
         if tool_calls is not None:
@@ -250,35 +271,52 @@ class LLMWorker:
         Returns a ``(raw_output, parsed_action)`` tuple where *raw_output*
         is the ``/tool`` command string and *parsed_action* is the action
         dictionary that the engine will dispatch through the normal
-        authority/projection boundary.  Only the **first** tool call is
-        mapped — each candidate carries a single action.
+        authority/projection boundary.
+
+        When *tool_calls* contains more than one entry the worker emits a
+        ``multi`` envelope so no calls are silently dropped.
         """
         if not tool_calls:
             raise ValueError("tool_calls must not be empty")
 
-        first = tool_calls[0]
-        func = first.get("function")
-        if not isinstance(func, dict):
-            raise ValueError("tool call missing 'function' key")
-        name = func.get("name")
-        if not isinstance(name, str) or not name.strip():
-            raise ValueError("tool call missing valid 'name'")
-        args_str = func.get("arguments", "{}")
-        if isinstance(args_str, str):
-            try:
-                args = json.loads(args_str)
-            except json.JSONDecodeError:
+        actions: list[dict[str, object]] = []
+        for tc in tool_calls:
+            func = tc.get("function")
+            if not isinstance(func, dict):
+                raise ValueError("tool call missing 'function' key")
+            name = func.get("name")
+            if not isinstance(name, str) or not name.strip():
+                raise ValueError("tool call missing valid 'name'")
+            args_str = func.get("arguments", "{}")
+            if isinstance(args_str, str):
+                try:
+                    args = json.loads(args_str)
+                except json.JSONDecodeError:
+                    args = {}
+            elif isinstance(args_str, dict):
+                args = args_str
+            else:
                 args = {}
-        elif isinstance(args_str, dict):
-            args = args_str
-        else:
-            args = {}
+            actions.append({"name": name, "args": args})
 
-        raw_output = json.dumps({"name": name, "args": args}, ensure_ascii=False)
-        raw_output = f"/tool {raw_output}"
-        parsed_action: dict[str, object] = {
-            "type": "tool",
-            "payload": {"name": name, "args": args},
+        if len(actions) == 1:
+            raw_output = json.dumps(actions[0], ensure_ascii=False)
+            raw_output = f"/tool {raw_output}"
+            parsed_action: dict[str, object] = {
+                "type": "tool",
+                "payload": actions[0],
+            }
+            return raw_output, parsed_action
+
+        # Multiple tool calls: emit a multi-action envelope.
+        raw_output = json.dumps(
+            {"type": _MULTI_ACTION_TYPE, "actions": actions},
+            ensure_ascii=False,
+        )
+        raw_output = f"/multi {raw_output}"
+        parsed_action = {
+            "type": _MULTI_ACTION_TYPE,
+            "payload": {"actions": actions},
         }
         return raw_output, parsed_action
 
@@ -347,6 +385,30 @@ def _extract_usage(response: Mapping[str, object]) -> MappingProxyType | None:
     }
     if isinstance(total_tokens, int):
         result["total_tokens"] = total_tokens
+    return MappingProxyType(result)
+
+
+def _build_usage_metadata(
+    response: Mapping[str, object],
+    *,
+    model: str,
+    provider: str,
+) -> MappingProxyType | None:
+    """Build usage metadata with token counts, model, and provider.
+
+    API keys are never included in the returned metadata.
+    """
+    usage = _extract_usage(response)
+    if usage is None:
+        result: dict[str, object] = {
+            "model": model,
+            "provider": provider,
+        }
+        return MappingProxyType(result)
+
+    result = dict(usage)
+    result["model"] = model
+    result["provider"] = provider
     return MappingProxyType(result)
 
 

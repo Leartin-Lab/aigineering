@@ -5,11 +5,29 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 import pytest
 
 from aigineering.core.sqlite_store import SQLiteStore
+
+
+def rmtree_retrying_permissions(path: str | Path, retries: int = 5) -> None:
+    """Remove temp trees on Windows where SQLite/WAL handles close lazily."""
+    last_error: Exception | None = None
+    for attempt in range(retries):
+        try:
+            shutil.rmtree(path)
+            return
+        except FileNotFoundError:
+            return
+        except PermissionError as e:
+            last_error = e
+            time.sleep(0.05 * (attempt + 1))
+    shutil.rmtree(path, ignore_errors=True)
+    if last_error is not None and Path(path).exists():
+        raise last_error
 
 
 @pytest.fixture
@@ -22,7 +40,7 @@ def temp_sqlite_store():
         yield store
     finally:
         store.close()
-        shutil.rmtree(tmpdir, ignore_errors=True)
+        rmtree_retrying_permissions(tmpdir)
 
 
 def run_with_crash(
