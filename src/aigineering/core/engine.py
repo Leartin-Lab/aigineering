@@ -24,7 +24,11 @@ from aigineering.core.projection import project_candidate
 from aigineering.core.method_registry import MethodRegistry
 from aigineering.core.method_runtime import MethodRuntime
 from aigineering.core.runtime_ingress import RuntimeIngress
-from aigineering.core.state_serializer import StateSerializer, TraceStateRebuilder
+from aigineering.core.state_serializer import (
+    StateSerializer,
+    TraceStateRebuilder,
+    derive_lifecycle_from_store,
+)
 from aigineering.core.store import StoreProtocol
 from aigineering.core.trace import MemoryTraceStore, TraceStoreProtocol
 from aigineering.core.trace_manager import TraceManager
@@ -614,7 +618,14 @@ class Engine:
         method_registry: MethodRegistry | None = None,
         context_size_limit: int | None = None,
     ) -> "Engine":
-        """Reconstruct engine state from store records and trace events."""
+        """Reconstruct engine state from store records and trace events.
+
+        Completion is derived from **durable store facts** (output
+        satisfaction), not from trace ``complete`` events.  Trace-based
+        reconstruction runs as an overlay for method-level state
+        (suspended, method_scheduled, method/label context, and budget
+        consumption).
+        """
         engine = cls(
             store,
             worker,
@@ -625,14 +636,32 @@ class Engine:
             context_size_limit=context_size_limit,
         )
 
-        engine_state = TraceStateRebuilder.rebuild(store, trace_store)
-        engine._budget_mgr.restore(engine_state.budget)
-        engine._completed = engine_state.completed
-        engine._suspended = engine_state.suspended
-        engine._method_scheduled = engine_state.method_scheduled
-        engine._method_context = engine_state.method_context
-        engine._label_context = engine_state.label_context
-        engine._trace_mgr.restore_last_entries(engine_state.contract_last_entry)
+        # Primary: derive completion from durable store facts (output satisfaction).
+        durable_state = derive_lifecycle_from_store(store)
+
+        # Secondary: trace-based reconstruction for method-level state, budget
+        # consumption, context, and last-entry tracking.
+        trace_state = TraceStateRebuilder.rebuild(store, trace_store)
+
+        # Log any discrepancies between trace-derived and store-derived completion.
+        trace_only = trace_state.completed - durable_state.completed
+        durable_only = durable_state.completed - trace_state.completed
+        if trace_only or durable_only:
+            _logger.warning(
+                "restore_from_store: completion discrepancy — "
+                "trace has %d contracts not store-verified (missing output assets?), "
+                "store has %d contracts not in trace (outputs present without trace event)",
+                len(trace_only),
+                len(durable_only),
+            )
+
+        engine._budget_mgr.restore(trace_state.budget)
+        engine._completed = durable_state.completed | trace_state.completed
+        engine._suspended = trace_state.suspended
+        engine._method_scheduled = trace_state.method_scheduled
+        engine._method_context = trace_state.method_context
+        engine._label_context = trace_state.label_context
+        engine._trace_mgr.restore_last_entries(trace_state.contract_last_entry)
 
         return engine
 

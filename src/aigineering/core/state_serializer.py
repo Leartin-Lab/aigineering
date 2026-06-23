@@ -155,3 +155,92 @@ def _derive_budget(
         consumed = consumption_counts.get(contract.id, 0)
         budget[contract.id] = max(0, initial - consumed)
     return budget
+
+
+# ---------------------------------------------------------------------------
+# Durable lifecycle derivation from store records (Phase E)
+# ---------------------------------------------------------------------------
+
+
+def _all_outputs_present(contract: Contract, store: StoreProtocol) -> bool:
+    """Return True when all declared outputs of *contract* exist in the store.
+
+    This mirrors :meth:`FactReducer._all_outputs_satisfied` and uses the same
+    store-level check — a contract is complete when every declared output name
+    resolves to at least one asset in the store.
+    """
+    if not contract.outputs:
+        return False  # no-outputs contracts are never "complete" via output check
+    for output_name in contract.outputs:
+        if not store.has_asset_named(output_name):
+            return False
+    return True
+
+
+def _derive_budget_from_contracts(store: StoreProtocol) -> dict[str, int]:
+    """Derive initial budget state from contracts (without consumption tracking).
+
+    Consumption data lives in TraceStore events (``budget_consumed``), not in
+    the durable store.  Callers should overlay trace-derived budget for
+    accurate remaining-credit figures.
+    """
+    budget: dict[str, int] = {}
+    for contract in store.get_all_contracts():
+        budget[contract.id] = max(contract.budget, 1)
+    return budget
+
+
+def derive_lifecycle_from_store(store: StoreProtocol) -> EngineState:
+    """Derive Engine lifecycle state from durable store facts.
+
+    Completion is determined by output satisfaction: a contract is
+    **complete** when all its declared outputs exist as assets in the store.
+    This is the same logic as :meth:`FactReducer._all_outputs_satisfied`.
+
+    Suspended contracts are those with active method children, detectable
+    via ``_method_ctx_`` assets in the store.
+
+    Method-scheduled contracts are contracts whose activation references an
+    existing ``_method_ctx_`` asset.
+
+    Budget is derived from contract declarations only (no consumption info);
+    callers should overlay trace-derived budget for accurate remaining-credit.
+    """
+    completed: set[str] = set()
+    suspended: set[str] = set()
+    method_scheduled: set[str] = set()
+
+    all_asset_names: set[str] = {a.name for a in store.get_all_assets()}
+
+    for contract in store.get_all_contracts():
+        # Completion via output satisfaction
+        if _all_outputs_present(contract, store):
+            completed.add(contract.id)
+
+        # Method-scheduled: contracts whose activation references an
+        # existing _method_ctx_ asset
+        if (
+            contract.activation
+            and contract.activation.startswith("_method_ctx_")
+            and contract.activation in all_asset_names
+        ):
+            method_scheduled.add(contract.id)
+
+    # Suspended: contracts with active method children (have _method_ctx_ assets)
+    for name in all_asset_names:
+        if name.startswith("_method_ctx_"):
+            parent_id = name[len("_method_ctx_"):]
+            if parent_id:
+                suspended.add(parent_id)
+
+    budget = _derive_budget_from_contracts(store)
+
+    return EngineState(
+        budget=budget,
+        completed=completed,
+        suspended=suspended,
+        method_scheduled=method_scheduled,
+        method_context={},
+        label_context={},
+        contract_last_entry={},
+    )
