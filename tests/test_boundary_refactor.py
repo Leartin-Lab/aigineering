@@ -429,3 +429,83 @@ class TestObservationNotOutputSatisfaction:
         # not an output satisfier)
         stored = store.get_assets_by_name("report")
         assert len(stored) >= 1, "tool observation should exist as context asset"
+
+
+# ============================================================================
+# W1A — Direct-write eradication (Plan §W1A, §4 Phase A)
+# ============================================================================
+
+
+class TestDirectWriteBan:
+    """Production modules must not call ``store.add_asset`` or
+    ``store.add_contract`` directly.  Allowed exceptions:
+    store implementations, transaction helpers, RuntimeIngress, and
+    explicit test fixtures.
+    """
+
+    # Modules allowed to call add_asset/add_contract directly.
+    _ALLOWED: frozenset[str] = frozenset({
+        "store.py",
+        "sqlite_store.py",
+        "runtime_transaction.py",
+        "runtime_ingress.py",
+        "idempotency_store.py",
+    })
+
+    @pytest.mark.xfail(
+        strict=True,
+        reason="W1A-P0: 11 remaining direct store writes in CLI, server, "
+        "skill_loader, and fallback paths.  To be removed in Phase B8 "
+        "when these modules are fully wired through RuntimeIngress.",
+    )
+    def test_no_direct_store_write_in_production(self):
+        """Scan src/aigineering/ for direct store.write calls in production
+        modules.  Any violation outside the allowlist is a P0 architecture
+        gap.
+        """
+        import ast
+        from pathlib import Path
+
+        src_root = Path(__file__).parent.parent / "src" / "aigineering"
+        violations: list[str] = []
+
+        for py_file in src_root.rglob("*.py"):
+            rel = py_file.relative_to(src_root).as_posix()
+
+            # Skip tests, pycache, and allowed modules
+            if "test_" in rel or "__pycache__" in rel:
+                continue
+            if any(rel.endswith(allowed) for allowed in self._ALLOWED):
+                continue
+
+            source = py_file.read_text()
+            tree = ast.parse(source)
+
+            # Check for direct attribute access: something.add_asset(...)
+            # or something.add_contract(...)
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Call):
+                    if isinstance(node.func, ast.Attribute):
+                        method_name = node.func.attr
+                        if method_name in ("add_asset", "add_contract"):
+                            # Check if this is a self._store or store.* call
+                            if isinstance(node.func.value, ast.Attribute):
+                                inner = node.func.value.attr
+                                if inner in ("_store", "store"):
+                                    violations.append(
+                                        f"{rel}:{node.lineno}"
+                                        f"  {method_name}()"
+                                    )
+                            elif isinstance(node.func.value, ast.Name):
+                                inner = node.func.value.id
+                                if inner in ("store", "_store"):
+                                    violations.append(
+                                        f"{rel}:{node.lineno}"
+                                        f"  {method_name}()"
+                                    )
+
+        assert len(violations) == 0, (
+            f"Direct store writes found outside allowlist "
+            f"({sorted(self._ALLOWED)}):\n"
+            + "\n".join(f"  - {v}" for v in violations)
+        )
