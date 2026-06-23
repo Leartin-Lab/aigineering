@@ -28,6 +28,7 @@ from aigineering.core.fact_reducer import FactReducer
 from aigineering.core.projection import project_candidate
 from aigineering.core.method_registry import MethodRegistry
 from aigineering.core.method_runtime import MethodRuntime
+from aigineering.core.output_satisfaction import all_outputs_satisfied
 from aigineering.core.runtime_ingress import RuntimeIngress
 from aigineering.core.state_serializer import (
     StateSerializer,
@@ -355,17 +356,7 @@ class Engine:
         return scope
 
     def _all_outputs_satisfied(self, contract: Contract) -> bool:
-        from aigineering.core.fact_reducer import _is_business_output
-
-        for output_name in contract.outputs:
-            matching = self._store.get_assets_by_name(output_name)
-            if not matching:
-                return False
-            if contract.origin == "system":
-                continue
-            if not any(_is_business_output(a, output_name) for a in matching):
-                return False
-        return True
+        return all_outputs_satisfied(contract, self._store)
 
     def _dispatch_method(
         self,

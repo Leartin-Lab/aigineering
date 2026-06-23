@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from aigineering.core.budget_manager import BudgetManager
+from aigineering.core.output_satisfaction import all_outputs_satisfied
 from aigineering.core.store import StoreProtocol
 from aigineering.core.trace import TraceStoreProtocol
 from aigineering.core.trace_manager import TraceManager
@@ -169,19 +170,7 @@ def _all_outputs_present(contract: Contract, store: StoreProtocol) -> bool:
     This mirrors :meth:`FactReducer._all_outputs_satisfied` and uses the same
     store-level check with source class filtering.
     """
-    from aigineering.core.fact_reducer import _is_business_output
-
-    if not contract.outputs:
-        return False
-    for output_name in contract.outputs:
-        matching = store.get_assets_by_name(output_name)
-        if not matching:
-            return False
-        if contract.origin == "system":
-            continue
-        if not any(_is_business_output(a, output_name) for a in matching):
-            return False
-    return True
+    return all_outputs_satisfied(contract, store, require_outputs=True)
 
 
 def _derive_budget_from_contracts(store: StoreProtocol) -> dict[str, int]:

@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 
 from aigineering.core.disclosure import compute_disclosure
 from aigineering.core.idempotency_store import IdempotencyStore
+from aigineering.core.output_satisfaction import all_outputs_satisfied
 from aigineering.core.projection import project_candidate
 from aigineering.core.provenance import sign_asset
 from aigineering.core.store import StoreProtocol
@@ -300,17 +301,8 @@ def _all_outputs_satisfied(
     extra_output_names: set[str] | None = None,
 ) -> bool:
     """Return True when declared outputs exist and are valid output facts."""
-    from aigineering.core.fact_reducer import _is_business_output
-
-    extra_output_names = extra_output_names or set()
-    for output_name in contract.outputs:
-        if output_name in extra_output_names:
-            continue
-        matching = store.get_assets_by_name(output_name)
-        if not matching:
-            return False
-        if contract.origin == "system":
-            continue
-        if not any(_is_business_output(asset, output_name) for asset in matching):
-            return False
-    return True
+    return all_outputs_satisfied(
+        contract,
+        store,
+        extra_output_names=extra_output_names,
+    )
