@@ -354,8 +354,15 @@ class Engine:
         return scope
 
     def _all_outputs_satisfied(self, contract: Contract) -> bool:
+        from aigineering.core.fact_reducer import _is_business_output
+
         for output_name in contract.outputs:
-            if not self._store.get_assets_by_name(output_name):
+            matching = self._store.get_assets_by_name(output_name)
+            if not matching:
+                return False
+            if contract.origin == "system":
+                continue
+            if not any(_is_business_output(a, output_name) for a in matching):
                 return False
         return True
 

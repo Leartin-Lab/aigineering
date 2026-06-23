@@ -84,6 +84,47 @@ class FactReducerEvent:
 # ---------------------------------------------------------------------------
 
 
+# Origins that indicate context/observation assets, not business outputs.
+_NON_OUTPUT_ORIGINS: frozenset[str] = frozenset({"tool", "mcp", "label_placeholder"})
+
+# Name prefixes that indicate context/observation assets, not business outputs.
+# NOTE: _plan_result_, _replan_result_, _fail_result_, _sufficiency_result_
+# are INTENTIONALLY excluded — they are legitimate outputs of method
+# sub-contracts even though workers should never produce them directly.
+_NON_OUTPUT_PREFIXES: tuple[str, ...] = (
+    "_tool_obs_",
+    "_tool_call_",
+    "_mcp_obs_",
+    "_mcp_call_",
+    "_method_ctx_",
+    "_fail_context_",
+    "_fail_report_",
+    "_label_missing_",
+)
+
+
+def _is_business_output(asset: object, declared_output_name: str) -> bool:
+    """Return True when *asset* can satisfy a declared business output.
+
+    Context/observation assets (tool calls, MCP results, method context,
+    label placeholders) are NOT business outputs even if their name
+    matches a declared output.  This prevents tool/MCP observations
+    from accidentally completing contracts.
+    """
+    # duck-type access to name/origin fields (works with Asset and dicts)
+    name: str = getattr(asset, "name", "")
+    origin: str = getattr(asset, "origin", "")
+
+    if name != declared_output_name:
+        return False
+    if origin in _NON_OUTPUT_ORIGINS:
+        return False
+    for prefix in _NON_OUTPUT_PREFIXES:
+        if name.startswith(prefix):
+            return False
+    return True
+
+
 class FactReducer:
     """Deterministic projection of asset facts into structured events.
 
@@ -227,9 +268,19 @@ class FactReducer:
 
     def _all_outputs_satisfied(self, contract: Contract) -> bool:
         """Return True when all declared outputs of *contract* exist in
-        the store."""
+        the store AND are business outputs (not tool/MCP observations).
+
+        System method contracts (origin="system") intentionally produce
+        observation-like assets as their declared outputs, so source class
+        filtering is only applied to non-system contracts.
+        """
         for output_name in contract.outputs:
-            if not self._store.has_asset_named(output_name):
+            matching = self._store.get_assets_by_name(output_name)
+            if not matching:
+                return False
+            if contract.origin == "system":
+                continue  # system contracts produce observation assets legitimately
+            if not any(_is_business_output(a, output_name) for a in matching):
                 return False
         return True
 

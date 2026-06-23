@@ -163,16 +163,23 @@ def _derive_budget(
 
 
 def _all_outputs_present(contract: Contract, store: StoreProtocol) -> bool:
-    """Return True when all declared outputs of *contract* exist in the store.
+    """Return True when all declared outputs of *contract* exist in the store
+    AND are business outputs (not tool/MCP observations).
 
     This mirrors :meth:`FactReducer._all_outputs_satisfied` and uses the same
-    store-level check — a contract is complete when every declared output name
-    resolves to at least one asset in the store.
+    store-level check with source class filtering.
     """
+    from aigineering.core.fact_reducer import _is_business_output
+
     if not contract.outputs:
-        return False  # no-outputs contracts are never "complete" via output check
+        return False
     for output_name in contract.outputs:
-        if not store.has_asset_named(output_name):
+        matching = store.get_assets_by_name(output_name)
+        if not matching:
+            return False
+        if contract.origin == "system":
+            continue
+        if not any(_is_business_output(a, output_name) for a in matching):
             return False
     return True
 

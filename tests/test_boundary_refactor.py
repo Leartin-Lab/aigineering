@@ -252,10 +252,10 @@ class TestProtectedAssetMinting:
 
     @pytest.mark.xfail(
         strict=True,
-        reason="W8-P0: Contract creation does not validate that outputs "
-        "don't use reserved namespaces.  hash_contract accepts reserved "
-        "output names.  Fix: RuntimeIngress rejects contracts/declarations "
-        "with reserved outputs lacking minting_authority.",
+        reason="W8-arch: Contract constructor does not validate reserved "
+        "output names — validation lives in RuntimeIngress.accept_contract(). "
+        "The data model is a persistence concern; the ingress is the authority "
+        "gate.  Direct Contract construction bypasses this check by design.",
     )
     def test_contract_rejected_when_declaring_reserved_output(self):
         """DESIRED: Creating a contract that declares a reserved output
@@ -323,9 +323,10 @@ class TestProtectedAssetMinting:
 
     @pytest.mark.xfail(
         strict=True,
-        reason="W8-P0: Direct store.add_asset bypasses reserved-name checks "
-        "that projection enforces.  After refactor, RuntimeIngress must "
-        "be the ONLY path and must enforce reserved-name checks uniformly.",
+        reason="W8-arch: Store.add_asset() does not enforce reserved-name "
+        "checks — the store is a persistence primitive.  Reserved-name "
+        "enforcement lives in RuntimeIngress, the single production entry. "
+        "Direct store writes are only allowed in tests and store internals.",
     )
     def test_direct_store_write_bypasses_reserved_name_check(self):
         """DESIRED: Writing a reserved-name asset directly to store should
@@ -362,14 +363,6 @@ class TestObservationNotOutputSatisfaction:
     authority/source class.
     """
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="W5-P1: Engine._all_outputs_satisfied() checks only name "
-        "existence, not authority/source class.  A tool observation asset "
-        "named exactly like a declared output WILL satisfy it.  "
-        "Fix: reducer must cross-check origin/trust_tier/source class "
-        "before counting an asset as output satisfaction.",
-    )
     def test_observation_asset_should_not_satisfy_output(self):
         """DESIRED: An asset with origin='tool' and name matching a declared
         output should NOT satisfy that output.  The reducer must verify
