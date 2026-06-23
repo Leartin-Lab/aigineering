@@ -16,11 +16,16 @@ import json
 from typing import TYPE_CHECKING
 
 from aigineering.core.authority import RESERVED_PREFIXES
-from aigineering.core.ids import hash_asset_definition, hash_asset_content, hash_contract
+from aigineering.core.ids import (
+    hash_asset_definition,
+    hash_asset_content,
+    hash_contract,
+)
 from aigineering.core.provenance import sign_asset
 from aigineering.core.trace import create_entry
 
 if TYPE_CHECKING:
+    from aigineering.core.runtime_ingress import RuntimeIngress
     from aigineering.protocol.types import Asset, Contract
 
 # ---------------------------------------------------------------------------
@@ -47,6 +52,7 @@ def _is_protected_name(name: str) -> bool:
 # Asset injection
 # ---------------------------------------------------------------------------
 
+
 def inject_asset(
     store,
     trace_store,
@@ -59,6 +65,7 @@ def inject_asset(
     promptable: bool = True,
     content_type: str = "text",
     allow_protected: bool = False,
+    ingress: RuntimeIngress | None = None,
 ) -> Asset:
     """Inject an asset through the control plane.
 
@@ -122,6 +129,11 @@ def inject_asset(
         content_hash=content_hash,
     )
 
+    if ingress is not None:
+        return ingress.accept_asset(
+            asset, source="control_plane", allow_protected=allow_protected
+        )
+
     signed = sign_asset(asset)
     store.add_asset(signed)
 
@@ -155,6 +167,7 @@ def inject_asset(
 # Contract injection
 # ---------------------------------------------------------------------------
 
+
 def inject_contract(
     store,
     trace_store,
@@ -169,6 +182,7 @@ def inject_contract(
     tool_scope: tuple[str, ...] = (),
     sensitive_input_policy: dict | None = None,
     allow_protected_outputs: bool = False,
+    ingress: RuntimeIngress | None = None,
 ) -> Contract:
     """Inject a contract through the control plane.
 
@@ -221,11 +235,12 @@ def inject_contract(
             labels=list(contract.labels),
             origin=contract.origin,
         ),
-        **{
-            k: v for k, v in contract.__dict__.items()
-            if k != "id"
-        },
+        **{k: v for k, v in contract.__dict__.items() if k != "id"},
     )
+
+    if ingress is not None:
+        ingress.accept_contract(hashed)
+        return hashed
 
     store.add_contract(hashed)
 
@@ -236,12 +251,14 @@ def inject_contract(
         parent_id=hashed.id,
         relation_target=hashed.id,
         accepted_fragments=[
-            json.dumps({
-                "contract_id": hashed.id,
-                "name": hashed.name,
-                "outputs": list(hashed.outputs),
-                "budget": hashed.budget,
-            })
+            json.dumps(
+                {
+                    "contract_id": hashed.id,
+                    "name": hashed.name,
+                    "outputs": list(hashed.outputs),
+                    "budget": hashed.budget,
+                }
+            )
         ],
     )
     trace_store.append(entry)

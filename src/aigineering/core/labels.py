@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from aigineering.core.ids import hash_asset_content, hash_asset_definition
 from aigineering.core.provenance import sign_asset
 from aigineering.protocol.types import Asset, Contract, TrustTier
+
+if TYPE_CHECKING:
+    from aigineering.core.runtime_ingress import RuntimeIngress
 
 BEHAVIOR_LABEL_PREFIX = "behavior:"
 MIN_BEHAVIOR_TRUST_TIER = TrustTier.CONFIGURED
@@ -78,6 +81,7 @@ def resolve_contract_labels(
     contract: Contract,
     labels: dict[str, Label],
     store: StoreLike,
+    ingress: RuntimeIngress | None = None,
 ) -> LabelResolution:
     """Resolve contract labels into context assets.
 
@@ -89,6 +93,14 @@ def resolve_contract_labels(
     placeholders: list[Asset] = []
     seen_ids: set[str] = set()
 
+    def _persist(asset: Asset) -> Asset:
+        """Persist a placeholder asset, routing through ingress when available."""
+        if ingress is not None:
+            return ingress.accept_asset(asset, source="label_resolver")
+        signed = sign_asset(asset)
+        store.add_asset(signed)
+        return signed
+
     for label_name in contract.labels:
         # Behavior labels (behavior:*) are self-referencing — the label
         # name IS the asset name.  Resolve by looking up the asset
@@ -99,8 +111,7 @@ def resolve_contract_labels(
                 asset for asset in matches if is_behavior_asset_allowed(asset)
             ]
             if not allowed_matches:
-                placeholder = sign_asset(_placeholder_asset(label_name, label_name))
-                store.add_asset(placeholder)
+                placeholder = _persist(_placeholder_asset(label_name, label_name))
                 if placeholder.id not in seen_ids:
                     placeholders.append(placeholder)
                     injected.append(placeholder)
@@ -114,10 +125,9 @@ def resolve_contract_labels(
 
         label = labels.get(label_name)
         if label is None:
-            placeholder = sign_asset(
+            placeholder = _persist(
                 _placeholder_asset(label_name, f"_label_missing_{label_name}")
             )
-            store.add_asset(placeholder)
             if placeholder.id not in seen_ids:
                 placeholders.append(placeholder)
                 injected.append(placeholder)
@@ -127,8 +137,7 @@ def resolve_contract_labels(
         for asset_name in label.assets:
             matches = store.get_assets_by_name(asset_name)
             if not matches:
-                placeholder = sign_asset(_placeholder_asset(label.name, asset_name))
-                store.add_asset(placeholder)
+                placeholder = _persist(_placeholder_asset(label.name, asset_name))
                 matches = [placeholder]
                 placeholders.append(placeholder)
             for asset in matches:

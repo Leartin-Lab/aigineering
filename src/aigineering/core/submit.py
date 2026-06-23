@@ -8,6 +8,7 @@ standalone worker environments.
 from __future__ import annotations
 
 import json
+from typing import TYPE_CHECKING
 
 from aigineering.core.disclosure import compute_disclosure
 from aigineering.core.idempotency_store import IdempotencyStore
@@ -18,6 +19,9 @@ from aigineering.core.trace import TraceStoreProtocol, create_entry
 from aigineering.protocol.envelope import CandidateEnvelope
 from aigineering.protocol.types import Candidate, Contract, ProjectionResult
 from aigineering.protocol.wire import asset_to_dict
+
+if TYPE_CHECKING:
+    from aigineering.core.runtime_ingress import RuntimeIngress
 
 
 class SubmitConflictError(Exception):
@@ -38,6 +42,7 @@ def submit_candidate(
     trace_store: TraceStoreProtocol,
     idempotency_store: IdempotencyStore | None = None,
     idempotency_key: str = "",
+    ingress: RuntimeIngress | None = None,
 ) -> dict:
     """Process a candidate envelope through the commitment boundary.
 
@@ -279,8 +284,12 @@ def submit_candidate(
                 f"claim '{envelope.claim_id}' could not be atomically submitted"
             )
     else:
-        for asset in signed_assets:
-            store.add_asset(asset)
+        if ingress is not None:
+            for asset in signed_assets:
+                ingress.accept_asset(asset, source="candidate")
+        else:
+            for asset in signed_assets:
+                store.add_asset(asset)
         for trace_entry in trace_entries:
             trace_store.append(trace_entry)
         if effective_idempotency_key:
