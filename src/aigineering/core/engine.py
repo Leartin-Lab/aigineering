@@ -304,6 +304,7 @@ class Engine:
                 mcp_servers=self._mcp_servers,
                 suspended=self._suspended,
                 method_scheduled=self._method_scheduled,
+                ingress=self._ingress,
             )
             handled = handler.handle_method(runtime, contract, action.type, candidate)
 

@@ -14,7 +14,6 @@ from aigineering.core.methods import (
     method_contract,
     system_asset,
 )
-from aigineering.core.provenance import sign_asset
 
 if TYPE_CHECKING:
     from aigineering.protocol.types import Asset, Contract, Candidate
@@ -24,6 +23,7 @@ if TYPE_CHECKING:
     from aigineering.core.budget_manager import BudgetManager
     from aigineering.core.trace import TraceStoreProtocol
     from aigineering.core.trace_manager import TraceManager
+    from aigineering.core.runtime_ingress import RuntimeIngress
 
 
 class MethodRuntime:
@@ -45,6 +45,7 @@ class MethodRuntime:
         suspended: set[str] | None = None,
         method_scheduled: set[str] | None = None,
         mcp_servers: dict[str, object] | None = None,
+        ingress: RuntimeIngress | None = None,
     ) -> None:
         self._store = store
         self._trace = _coerce_trace_manager(trace)
@@ -55,6 +56,15 @@ class MethodRuntime:
         self._method_scheduled: set[str] = (
             method_scheduled if method_scheduled is not None else set()
         )
+        if ingress is not None:
+            self._ingress = ingress
+        else:
+            from aigineering.core.fact_reducer import FactReducer
+            from aigineering.core.runtime_ingress import RuntimeIngress
+
+            self._ingress = RuntimeIngress(
+                store, self._trace.store, FactReducer(store, self._trace.store)
+            )
 
     # -- Contract management -------------------------------------------------
 
@@ -65,7 +75,7 @@ class MethodRuntime:
         method handling.  It replaces direct ``engine._store.add_contract()``
         and ``engine._budget[cid] = ...`` patterns.
         """
-        self._store.add_contract(contract)
+        self._ingress.accept_contract(contract)
         self._budget.initialize(contract.id, contract.budget)
 
     def get_contract(self, contract_id: str) -> Contract | None:
@@ -102,9 +112,7 @@ class MethodRuntime:
             promptable=promptable,
             source_uri=source_uri,
         )
-        signed = sign_asset(asset)
-        self._store.add_asset(signed)
-        return signed
+        return self._ingress.accept_asset(asset, source="method", allow_protected=True)
 
     # -- Budget --------------------------------------------------------------
 
@@ -158,8 +166,7 @@ class MethodRuntime:
             content=method_context_content(parent_contract, action, child),
             created_by=parent_contract.id,
         )
-        signed_ctx = sign_asset(ctx)
-        self._store.add_asset(signed_ctx)
+        self._ingress.accept_asset(ctx, source="method", allow_protected=True)
 
         self._method_scheduled.add(child.id)
 
