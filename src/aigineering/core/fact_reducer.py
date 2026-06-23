@@ -1,0 +1,257 @@
+"""FactReducer — deterministic asset event projection.
+
+Every accepted asset entering the store is a fact.  The FactReducer reads
+the current store state and returns a list of structured events describing
+what that fact implies: method-result detection, activation readiness,
+declared-output satisfaction, contract completion, and cascading child
+cancellation.
+
+The reducer is **pure** — it never mutates store, trace, budget, or any
+other shared state.  It only reads the store and returns events.  The
+caller (RuntimeIngress) applies those events.
+
+References: W1 (Fact Ingress And Reactive Reducer) of
+``.omo/plans/050-runtime-boundary-refactor-plan.md``.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from types import MappingProxyType
+from typing import TYPE_CHECKING
+
+from aigineering.core.activation import check_activation
+
+if TYPE_CHECKING:
+    from aigineering.protocol.types import Asset, Contract
+    from aigineering.core.store import StoreProtocol
+    from aigineering.core.trace import TraceStoreProtocol
+
+# ---------------------------------------------------------------------------
+# Method-result asset name prefixes that trigger method completion handling.
+# ---------------------------------------------------------------------------
+
+_METHOD_RESULT_PREFIXES: tuple[str, ...] = (
+    "_plan_result_",
+    "_replan_result_",
+    "_fail_result_",
+    "_sufficiency_result_",
+    "_file_content_",
+)
+
+# ---------------------------------------------------------------------------
+# FactReducerEvent
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class FactReducerEvent:
+    """A structured event produced by :class:`FactReducer` in response to a
+    new asset entering the store.
+
+    Each event describes one consequence of the asset: method-result
+    detection, activation becoming active, output satisfaction, contract
+    completion, or child cancellation.
+    """
+
+    type: str
+    """Event category:
+
+    - ``"method_result_detected"`` — the asset is a recognised method-result
+      asset.
+    - ``"activation_active"`` — the asset name appears in the contract's
+      activation expression and the expression is now true.
+    - ``"output_satisfied"`` — the asset name matches a declared output of
+      the contract.
+    - ``"contract_complete"`` — all declared outputs of the contract are
+      present in the store.
+    - ``"child_cancelled"`` — an unfinished child of a completed parent
+      should be cancelled.
+    """
+
+    contract_id: str
+    """The contract affected by this event."""
+
+    asset_name: str
+    """The asset name that triggered this event."""
+
+    details: MappingProxyType = field(default_factory=lambda: MappingProxyType({}))
+    """Additional event-specific metadata."""
+
+
+# ---------------------------------------------------------------------------
+# FactReducer
+# ---------------------------------------------------------------------------
+
+
+class FactReducer:
+    """Deterministic projection of asset facts into structured events.
+
+    Called by :class:`RuntimeIngress` after every accepted asset is
+    committed to the store.  The reducer reads the current store state and
+    returns a flat list of :class:`FactReducerEvent` describing what the
+    new asset implies.
+
+    The reducer is **pure** — it never writes to store, trace, budget, or
+    any other shared state.  State changes happen in the caller.
+    """
+
+    def __init__(self, store: StoreProtocol, trace: TraceStoreProtocol) -> None:
+        self._store = store
+        self._trace = trace
+
+    # -- Public API ---------------------------------------------------------
+
+    def on_asset_created(self, asset: Asset) -> list[FactReducerEvent]:
+        """Project the consequences of *asset* entering the store.
+
+        Returns a deterministic list of events.  The caller applies them.
+        """
+        events: list[FactReducerEvent] = []
+
+        # 1. Method result detection
+        events.extend(self._detect_method_result(asset))
+
+        # 2. Activation satisfaction
+        events.extend(self._detect_activation(asset))
+
+        # 3. Output satisfaction + contract completion + child cancel
+        events.extend(self._detect_output_satisfaction(asset))
+
+        return events
+
+    # -- Method result detection --------------------------------------------
+
+    def _detect_method_result(self, asset: Asset) -> list[FactReducerEvent]:
+        """If *asset* name starts with a method-result prefix, emit an event."""
+        for prefix in _METHOD_RESULT_PREFIXES:
+            if asset.name.startswith(prefix):
+                # Determine which prefix matched (longest match first order)
+                matched = self._longest_matching_prefix(
+                    asset.name, _METHOD_RESULT_PREFIXES
+                )
+                return [
+                    FactReducerEvent(
+                        type="method_result_detected",
+                        contract_id=asset.created_by,
+                        asset_name=asset.name,
+                        details=MappingProxyType({"prefix": matched}),
+                    )
+                ]
+        return []
+
+    # -- Activation detection -----------------------------------------------
+
+    def _detect_activation(self, asset: Asset) -> list[FactReducerEvent]:
+        """Find contracts whose activation expression references *asset.name*
+        and is now satisfied."""
+        events: list[FactReducerEvent] = []
+
+        # Build the set of currently available asset names (after this asset).
+        available_names: set[str] = {a.name for a in self._store.get_all_assets()}
+
+        # The new asset is already in the store, so its name is included.
+        for contract in self._store.get_all_contracts():
+            if not contract.activation or not contract.activation.strip():
+                continue
+            # Only report activation if the expression references this asset.
+            if self._activation_references(contract.activation, asset.name):
+                if check_activation(contract.activation, available_names):
+                    events.append(
+                        FactReducerEvent(
+                            type="activation_active",
+                            contract_id=contract.id,
+                            asset_name=asset.name,
+                            details=MappingProxyType(
+                                {"activation": contract.activation}
+                            ),
+                        )
+                    )
+        return events
+
+    # -- Output satisfaction ------------------------------------------------
+
+    def _detect_output_satisfaction(self, asset: Asset) -> list[FactReducerEvent]:
+        """Find contracts that declare *asset.name* as an output and are
+        now fully satisfied."""
+        events: list[FactReducerEvent] = []
+
+        for contract in self._store.get_all_contracts():
+            if asset.name not in contract.outputs:
+                continue
+
+            events.append(
+                FactReducerEvent(
+                    type="output_satisfied",
+                    contract_id=contract.id,
+                    asset_name=asset.name,
+                )
+            )
+
+            # Check full output satisfaction.
+            if self._all_outputs_satisfied(contract):
+                events.append(
+                    FactReducerEvent(
+                        type="contract_complete",
+                        contract_id=contract.id,
+                        asset_name=asset.name,
+                        details=MappingProxyType({"trigger": "output_satisfied"}),
+                    )
+                )
+                # For newly-completed contracts, identify unfinished children.
+                events.extend(self._detect_unfinished_children(contract))
+
+        return events
+
+    def _detect_unfinished_children(
+        self, completed_contract: Contract
+    ) -> list[FactReducerEvent]:
+        """Find child contracts that should be cancelled after *completed_contract*
+        finishes."""
+        events: list[FactReducerEvent] = []
+
+        for contract in self._store.get_all_contracts():
+            if contract.parent_id != completed_contract.id:
+                continue
+            # If the child still has outstanding outputs, it's unfinished.
+            if not self._all_outputs_satisfied(contract):
+                events.append(
+                    FactReducerEvent(
+                        type="child_cancelled",
+                        contract_id=contract.id,
+                        asset_name=completed_contract.id,
+                        details=MappingProxyType({"parent_id": completed_contract.id}),
+                    )
+                )
+        return events
+
+    # -- Helpers ------------------------------------------------------------
+
+    def _all_outputs_satisfied(self, contract: Contract) -> bool:
+        """Return True when all declared outputs of *contract* exist in
+        the store."""
+        for output_name in contract.outputs:
+            if not self._store.has_asset_named(output_name):
+                return False
+        return True
+
+
+# ---------------------------------------------------------------------------
+# Module-level helpers (usable without a FactReducer instance)
+# ---------------------------------------------------------------------------
+
+
+def _activation_references(expression: str, name: str) -> bool:
+    """Return True when *name* appears as a token in the activation
+    expression."""
+    tokens = expression.split()
+    return name in tokens
+
+
+def _longest_matching_prefix(name: str, prefixes: tuple[str, ...]) -> str:
+    """Return the longest prefix from *prefixes* that matches *name*."""
+    best = ""
+    for prefix in prefixes:
+        if name.startswith(prefix) and len(prefix) > len(best):
+            best = prefix
+    return best
