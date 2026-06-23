@@ -16,6 +16,7 @@ from aigineering.core.ids import (
     hash_contract,
 )
 from aigineering.core.runtime_ingress import RuntimeIngress
+from aigineering.core.method_handlers.fail import FailMethodHandler
 from aigineering.core.method_handlers.plan import PlanMethodHandler
 from aigineering.core.method_handlers.replan import ReplanMethodHandler
 from aigineering.core.method_handlers.retry import RetryMethodHandler
@@ -57,6 +58,7 @@ def _default_method_registry() -> MethodRegistry:
     registry.register("replan", ReplanMethodHandler())
     registry.register("retry", RetryMethodHandler())
     registry.register("tool", ToolMethodHandler())
+    registry.register("fail", FailMethodHandler())
     return registry
 
 

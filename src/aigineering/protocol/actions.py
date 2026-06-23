@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from aigineering.protocol.types import Candidate
 
-_SUPPORTED_ACTIONS = {"exec", "plan", "replan", "tool", "retry"}
+_SUPPORTED_ACTIONS = {"exec", "plan", "replan", "tool", "retry", "fail"}
 
 
 class ActionParseError(ValueError):
@@ -77,6 +77,7 @@ def parse_method_action(candidate: "Candidate") -> WorkerAction | None:
         "replan",
         "tool",
         "retry",
+        "fail",
     }:
         try:
             return action_from_dict(parsed)
@@ -89,7 +90,7 @@ def parse_method_action(candidate: "Candidate") -> WorkerAction | None:
         action = parse_action(candidate.raw_output)
     except (ActionParseError, json.JSONDecodeError):
         return None
-    if action.type in {"plan", "replan", "tool", "retry"}:
+    if action.type in {"plan", "replan", "tool", "retry", "fail"}:
         return action
     return None
 

@@ -23,6 +23,7 @@ _METHOD_OUTPUT_PREFIX: dict[str, str] = {
     "plan": "_plan_result_",
     "replan": "_replan_result_",
     "tool": "_tool_obs_",
+    "fail": "_fail_result_",
 }
 
 # Plan-specific reserved prefixes (superset of authority.RESERVED_PREFIXES).
