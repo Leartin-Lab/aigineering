@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 if sys.version_info >= (3, 11):
     import tomllib
@@ -21,6 +21,9 @@ from aigineering.core.capability_descriptors import create_skill_descriptor
 from aigineering.core.ids import hash_asset_content, hash_asset_definition
 from aigineering.core.provenance import sign_asset
 from aigineering.protocol.types import Asset, TrustTier
+
+if TYPE_CHECKING:
+    from aigineering.core.runtime_ingress import RuntimeIngress
 
 _REQUIRED_MANIFEST_FIELDS = frozenset({"name", "version"})
 _OPTIONAL_MANIFEST_FIELDS = frozenset(
@@ -78,14 +81,16 @@ class SkillLoader:
         self._manifests = manifests
         return manifests
 
-    def load(self, store: StoreLike) -> list[Asset]:
+    def load(
+        self, store: StoreLike, *, ingress: RuntimeIngress | None = None
+    ) -> list[Asset]:
         """Load all scanned skills into *store*.
 
         Returns the list of descriptor Assets created.
         """
         descriptors: list[Asset] = []
         for manifest in self._manifests:
-            descriptors.extend(self._load_one(store, manifest))
+            descriptors.extend(self._load_one(store, manifest, ingress=ingress))
         return descriptors
 
     def _parse_manifest(self, manifest_path: Path) -> SkillManifest:
@@ -94,14 +99,10 @@ class SkillLoader:
             raw = manifest_path.read_bytes()
             data = tomllib.loads(raw.decode("utf-8"))
         except Exception as e:
-            raise ValueError(
-                f"Failed to parse {manifest_path}: {e}"
-            ) from e
+            raise ValueError(f"Failed to parse {manifest_path}: {e}") from e
 
         if not isinstance(data, dict):
-            raise ValueError(
-                f"{manifest_path}: skill.toml must contain a TOML table"
-            )
+            raise ValueError(f"{manifest_path}: skill.toml must contain a TOML table")
 
         missing = _REQUIRED_MANIFEST_FIELDS - set(data.keys())
         if missing:
@@ -111,9 +112,7 @@ class SkillLoader:
 
         unknown = set(data.keys()) - _VALID_FIELDS
         if unknown:
-            raise ValueError(
-                f"{manifest_path}: unknown fields: {sorted(unknown)}"
-            )
+            raise ValueError(f"{manifest_path}: unknown fields: {sorted(unknown)}")
         try:
             TrustTier.from_str(data.get("trust_tier", "configured"))
         except ValueError as e:
@@ -139,7 +138,13 @@ class SkillLoader:
 
         return SkillManifest(data, manifest_path.parent)
 
-    def _load_one(self, store: StoreLike, manifest: SkillManifest) -> list[Asset]:
+    def _load_one(
+        self,
+        store: StoreLike,
+        manifest: SkillManifest,
+        *,
+        ingress: RuntimeIngress | None = None,
+    ) -> list[Asset]:
         """Load a single skill into the store.  Returns descriptor Assets."""
         descriptors: list[Asset] = []
 
@@ -154,8 +159,15 @@ class SkillLoader:
             content=content,
             trust_tier=manifest.trust_tier,
         )
-        store.add_asset(descriptor)
-        descriptors.append(descriptor)
+        if ingress is not None:
+            descriptors.append(
+                ingress.accept_asset(
+                    descriptor, source="skill_loader", allow_protected=True
+                )
+            )
+        else:
+            store.add_asset(descriptor)
+            descriptors.append(descriptor)
 
         # ── Create content Asset (promptable) ────────────────────────────
         content_asset_name = f"_skill_content_{manifest.name}"
@@ -172,8 +184,13 @@ class SkillLoader:
             source_uri=str(manifest.content_path.resolve()),
             promptable=True,
         )
-        signed_content = sign_asset(content_asset)
-        store.add_asset(signed_content)
+        if ingress is not None:
+            signed_content = ingress.accept_asset(
+                content_asset, source="skill_loader", allow_protected=True
+            )
+        else:
+            signed_content = sign_asset(content_asset)
+            store.add_asset(signed_content)
         descriptors.append(signed_content)
 
         return descriptors
@@ -183,7 +200,12 @@ def _is_string_list(value: object) -> bool:
     return isinstance(value, list) and all(isinstance(item, str) for item in value)
 
 
-def load_skills(store: StoreLike, skill_dirs: list[str]) -> list[Asset]:
+def load_skills(
+    store: StoreLike,
+    skill_dirs: list[str],
+    *,
+    ingress: RuntimeIngress | None = None,
+) -> list[Asset]:
     """Discover and load all skills from *skill_dirs* into *store*.
 
     Convenience entry point that scans and loads in one call.  Returns
@@ -191,4 +213,4 @@ def load_skills(store: StoreLike, skill_dirs: list[str]) -> list[Asset]:
     """
     loader = SkillLoader()
     loader.scan(skill_dirs)
-    return loader.load(store)
+    return loader.load(store, ingress=ingress)

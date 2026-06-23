@@ -15,6 +15,7 @@ from aigineering.core.ids import (
     hash_asset_definition,
     hash_contract,
 )
+from aigineering.core.runtime_ingress import RuntimeIngress
 from aigineering.core.method_handlers.plan import PlanMethodHandler
 from aigineering.core.method_handlers.replan import ReplanMethodHandler
 from aigineering.core.method_handlers.retry import RetryMethodHandler
@@ -169,6 +170,9 @@ def _run_demo(
         store = MemoryStore()
     if trace_store is None:
         trace_store = MemoryTraceStore()
+
+    ingress = RuntimeIngress(store, trace_store)
+
     worker = _build_worker(
         worker_kind,
         model,
@@ -197,7 +201,10 @@ def _run_demo(
             max_retries=max_retries,
             capabilities=tuple(capabilities or ()),
         )
-        store.add_asset(config_asset)
+        if ingress is not None:
+            ingress.accept_asset(config_asset, source="provider_config")
+        else:
+            store.add_asset(config_asset)
         if hasattr(trace_store, "append"):
             trace_store.append(
                 create_entry(
@@ -260,7 +267,11 @@ def _run_demo(
     )
 
     engine = Engine(
-        store, worker, trace_store, method_registry=_default_method_registry()
+        store,
+        worker,
+        trace_store,
+        method_registry=_default_method_registry(),
+        ingress=ingress,
     )
     engine.add_contract(contract)
     engine.add_asset(data_file)

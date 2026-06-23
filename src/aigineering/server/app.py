@@ -12,6 +12,8 @@ from aigineering.cli._common import (
     _persistent_store,
 )
 
+from aigineering.core.runtime_ingress import RuntimeIngress
+
 app = FastAPI(title="Aigineering API", version="0.5.0-alpha.2")
 
 
@@ -171,6 +173,7 @@ def create_contract(body: ContractCreateRequest):
     from aigineering.core.control_plane import inject_contract
 
     store = _persistent_store()
+    ingress = RuntimeIngress(store, store)
     try:
         contract = inject_contract(
             store,
@@ -183,6 +186,7 @@ def create_contract(body: ContractCreateRequest):
             labels=tuple(body.labels),
             tool_scope=tuple(body.tool_scope),
             description=body.description,
+            ingress=ingress,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -196,6 +200,7 @@ def create_asset(body: AssetCreateRequest):
     from aigineering.core.control_plane import inject_asset
 
     store = _persistent_store()
+    ingress = RuntimeIngress(store, store)
     try:
         asset = inject_asset(
             store,
@@ -207,6 +212,7 @@ def create_asset(body: AssetCreateRequest):
             source_uri=body.source_uri,
             promptable=body.promptable,
             content_type=body.content_type,
+            ingress=ingress,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -255,7 +261,8 @@ def slice_asset(name: str, body: AssetSliceRequest):
             slice_name=body.slice_name,
             range_spec=body.range,
         )
-        store.add_asset(asset)
+        ingress = RuntimeIngress(store, store)
+        ingress.accept_asset(asset, source="asset_slice")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return _asset_response(asset)

@@ -15,6 +15,7 @@ from aigineering.core.asset_versions import (
     resolve_latest,
 )
 from aigineering.core.control_plane import inject_asset
+from aigineering.core.runtime_ingress import RuntimeIngress
 from aigineering.core.trace import create_entry
 
 
@@ -182,7 +183,9 @@ def asset_show(name: str, as_json: bool) -> None:
 @asset_group.command("slice")
 @click.argument("name")
 @click.option("--slice-name", required=True, help="Name for the sliced asset.")
-@click.option("--range", "range_spec", default="", help="Range specifier for the slice.")
+@click.option(
+    "--range", "range_spec", default="", help="Range specifier for the slice."
+)
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON.")
 def asset_slice(name: str, slice_name: str, range_spec: str, as_json: bool) -> None:
     """Create a new asset that is a slice of an existing asset.
@@ -202,7 +205,8 @@ def asset_slice(name: str, slice_name: str, range_spec: str, as_json: bool) -> N
         )
     except ValueError as e:
         raise click.ClickException(str(e))
-    store.add_asset(sliced)
+    ingress = RuntimeIngress(store, store)
+    ingress.accept_asset(sliced, source="asset_slice")
     _append_trace_if_supported(
         store,
         create_entry(
@@ -341,7 +345,9 @@ def asset_versions(name: str, as_json: bool) -> None:
         click.echo(f"Versions of '{name}':")
         for v in versions:
             marker = "→" if v.id == versions[-1].id else " "
-            click.echo(f"  {marker} {v.id[:24]:<26} content_hash={v.content_hash[:16]}...")
+            click.echo(
+                f"  {marker} {v.id[:24]:<26} content_hash={v.content_hash[:16]}..."
+            )
 
 
 @asset_group.command("lineage")

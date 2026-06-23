@@ -7,6 +7,7 @@ import json
 import click
 
 from aigineering.cli._common import _output_json, _persistent_store
+from aigineering.core.runtime_ingress import RuntimeIngress
 from aigineering.core.skill_loader import SkillLoader
 from aigineering.core.trace import create_entry
 
@@ -22,10 +23,11 @@ def skill_group() -> None:
 def skill_load(directory: str, as_json: bool) -> None:
     """Load skills from DIRECTORY into the local store."""
     store = _persistent_store()
+    ingress = RuntimeIngress(store, store)
     loader = SkillLoader()
     try:
         manifests = loader.scan([directory])
-        assets = loader.load(store)
+        assets = loader.load(store, ingress=ingress)
     except ValueError as e:
         raise click.ClickException(str(e))
     if hasattr(store, "append"):
@@ -69,8 +71,7 @@ def skill_list(as_json: bool) -> None:
     """List skill capability descriptors in the local store."""
     store = _persistent_store()
     skills = [
-        a for a in store.get_all_assets()
-        if a.name.startswith("_skill_capability_")
+        a for a in store.get_all_assets() if a.name.startswith("_skill_capability_")
     ]
     result = []
     for asset in skills:

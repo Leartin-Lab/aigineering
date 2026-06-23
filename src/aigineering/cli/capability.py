@@ -15,6 +15,7 @@ from aigineering.core.capability_descriptors import (
     create_tool_descriptor,
     verify_descriptor,
 )
+from aigineering.core.runtime_ingress import RuntimeIngress
 from aigineering.core.trace import create_entry
 
 _PREFIXES = (
@@ -46,7 +47,8 @@ def _store_descriptor(descriptor, kind: str) -> None:
             "Capability descriptor failed trust gate; use trust_tier >= configured."
         )
     store = _persistent_store()
-    store.add_asset(descriptor)
+    ingress = RuntimeIngress(store, store)
+    ingress.accept_asset(descriptor, source=f"{kind}_capability", allow_protected=True)
     if hasattr(store, "append"):
         store.append(
             create_entry(
@@ -217,4 +219,6 @@ def _emit_descriptor(asset, as_json: bool) -> None:
     click.echo(f"definition_hash: {asset.definition_hash}")
     click.echo(f"content_hash:    {asset.content_hash}")
     click.echo("--- descriptor ---")
-    click.echo(json.dumps(data["content"], ensure_ascii=False, indent=2, sort_keys=True))
+    click.echo(
+        json.dumps(data["content"], ensure_ascii=False, indent=2, sort_keys=True)
+    )

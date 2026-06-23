@@ -13,6 +13,7 @@ from aigineering.core.capability_descriptors import (
     create_mcp_descriptor,
     verify_descriptor,
 )
+from aigineering.core.runtime_ingress import RuntimeIngress
 from aigineering.core.trace import create_entry
 
 MCP_PREFIX = "_mcp_"
@@ -89,7 +90,8 @@ def mcp_add(
         )
 
     store = _persistent_store()
-    store.add_asset(descriptor)
+    ingress = RuntimeIngress(store, store)
+    ingress.accept_asset(descriptor, source="mcp_capability", allow_protected=True)
     if hasattr(store, "append"):
         store.append(
             create_entry(
@@ -121,7 +123,9 @@ def mcp_add(
             }
         )
     else:
-        click.echo(f"MCP descriptor injected: {descriptor.name} ({descriptor.id[:16]}...)")
+        click.echo(
+            f"MCP descriptor injected: {descriptor.name} ({descriptor.id[:16]}...)"
+        )
         click.echo(f"  trust_tier: {descriptor.trust_tier}")
         click.echo(f"  source_uri: {descriptor.source_uri}")
 
@@ -152,7 +156,9 @@ def mcp_list(as_json: bool) -> None:
         return
     for descriptor in descriptors:
         display_name = descriptor.name[len(MCP_PREFIX) :]
-        click.echo(f"{descriptor.id[:20]:<22} {descriptor.trust_tier:<12} {display_name}")
+        click.echo(
+            f"{descriptor.id[:20]:<22} {descriptor.trust_tier:<12} {display_name}"
+        )
 
 
 @mcp_group.command("show")
