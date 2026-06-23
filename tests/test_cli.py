@@ -79,7 +79,7 @@ def test_run_creates_trace_file():
     """aig run writes a session_*.jsonl file with valid JSON lines."""
     runner = CliRunner()
     with runner.isolated_filesystem():
-        result = runner.invoke(cli, ["run", "test"])
+        result = runner.invoke(cli, ["run", "test", "--worker", "mock"])
 
         assert result.exit_code == 0
         assert "Trace saved to" in result.output
@@ -104,7 +104,7 @@ def test_run_persists_assets_contracts_and_session_manifest():
     """aig run persists trace, asset/contract store, and session manifest under one session id."""
     runner = CliRunner()
     with runner.isolated_filesystem():
-        result = runner.invoke(cli, ["run", "test"])
+        result = runner.invoke(cli, ["run", "test", "--worker", "mock"])
 
         assert result.exit_code == 0
 
@@ -300,7 +300,7 @@ def test_replay_valid_session():
     """aig run → aig replay <session_id> shows replay output with consistency."""
     runner = CliRunner()
     with runner.isolated_filesystem():
-        run_result = runner.invoke(cli, ["run", "test"])
+        run_result = runner.invoke(cli, ["run", "test", "--worker", "mock"])
         assert run_result.exit_code == 0
 
         # Find the session ID
@@ -332,7 +332,7 @@ def test_retry_creates_deterministic_contract():
     """aig retry --contract <id> creates a contract with deterministic retry ID."""
     runner = CliRunner()
     with runner.isolated_filesystem():
-        run_result = runner.invoke(cli, ["run", "test"])
+        run_result = runner.invoke(cli, ["run", "test", "--worker", "mock"])
         assert run_result.exit_code == 0
 
         store = SQLiteStore(".aig/store.db")
@@ -374,7 +374,7 @@ def test_retry_json_output():
     """aig retry --contract <id> --json returns deterministic retry ID in JSON."""
     runner = CliRunner()
     with runner.isolated_filesystem():
-        run_result = runner.invoke(cli, ["run", "test"])
+        run_result = runner.invoke(cli, ["run", "test", "--worker", "mock"])
         assert run_result.exit_code == 0
 
         store = SQLiteStore(".aig/store.db")

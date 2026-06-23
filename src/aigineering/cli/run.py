@@ -54,9 +54,8 @@ def _output_run_json(
     "--worker",
     "worker_kind",
     type=click.Choice(["mock", "llm"]),
-    default="mock",
-    show_default=True,
-    help="Worker implementation to use.",
+    default=None,
+    help="Worker implementation to use (required for non-demo runs).",
 )
 @click.option("--model", default=None, help="LLM model name when --worker llm.")
 @click.option(
@@ -108,7 +107,7 @@ def _output_run_json(
 )
 def run(
     goal: str,
-    worker_kind: str,
+    worker_kind: Optional[str],
     model: Optional[str],
     base_url: str,
     timeout: float,
@@ -118,7 +117,13 @@ def run(
     save_config: bool,
     json_output: bool,
 ) -> None:
-    """Execute a demo contract and persist the trace to JSONL."""
+    """Execute a contract and persist the trace to JSONL."""
+    if worker_kind is None:
+        raise click.UsageError(
+            "--worker is required.  Use 'mock' for deterministic testing, "
+            "'llm' for OpenAI-compatible models, or 'aig demo' for the "
+            "quickstart experience."
+        )
     capabilities = _parse_capabilities(capabilities_str)
     session_id = _session_id()
     trace_path = _get_trace_dir() / f"{session_id}.jsonl"
