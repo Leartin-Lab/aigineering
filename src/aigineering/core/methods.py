@@ -11,6 +11,11 @@ from aigineering.core.ids import (
     hash_asset_definition,
     hash_contract,
 )
+from aigineering.core.plan_scaffold import (
+    _scaffold_tasks_to_raw_dicts,
+    parse_plan_scaffold,
+    validate_plan_scaffold,
+)
 from aigineering.protocol.actions import WorkerAction
 from aigineering.protocol.types import Asset, Contract
 
@@ -204,9 +209,20 @@ def contracts_from_plan_asset(
     if not isinstance(payload, dict):
         return [], []
 
-    raw_contracts = payload.get("contracts", [])
-    if not isinstance(raw_contracts, list):
-        return [], []
+    # Try structured plan scaffold first (ADR-018 / v0.5.0)
+    scaffold = parse_plan_scaffold(asset)
+    if scaffold is not None:
+        errors = validate_plan_scaffold(scaffold, parent_contract)
+        if errors:
+            return [], errors
+        raw_contracts = _scaffold_tasks_to_raw_dicts(scaffold)
+        # Append legacy final_contracts if mixed format
+        if scaffold.final_contracts:
+            raw_contracts = raw_contracts + list(scaffold.final_contracts)
+    else:
+        raw_contracts = payload.get("contracts", [])
+        if not isinstance(raw_contracts, list):
+            return [], []
 
     accepted: list[Contract] = []
     rejected: list[dict] = []
