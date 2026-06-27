@@ -603,3 +603,49 @@ def test_plan_result_bad_budget_defaults_without_crashing():
     ]
     assert len(planned) == 1
     assert planned[0].budget == 1
+
+
+def test_rejected_worker_output_schedules_recovery_contract():
+    worker = SequenceWorker(
+        [
+            "wrong_output: bad",
+            '/exec {"outputs": {"report": "fixed report"}}',
+        ]
+    )
+    store = MemoryStore()
+    trace_store = TraceStore()
+    contract = Contract(
+        id="contract_projection_recovery",
+        name="write_report",
+        outputs=["report"],
+        activation="",
+        budget=3,
+    )
+    engine = Engine(store, worker, trace_store)
+    engine.add_contract(contract)
+
+    engine.run()
+
+    reports = store.get_assets_by_name("report")
+    assert len(reports) == 1
+    assert reports[0].content == "fixed report"
+
+    recovery_contracts = [
+        c for c in store.get_all_contracts() if c.name == "write_report.recover"
+    ]
+    assert len(recovery_contracts) == 1
+    assert recovery_contracts[0].outputs == ("report",)
+    assert recovery_contracts[0].origin == "recovery"
+
+    contexts = [
+        a for a in store.get_all_assets() if a.name.startswith("_fail_context_")
+    ]
+    assert len(contexts) == 1
+    assert contexts[0].name in recovery_contracts[0].inputs
+
+    failed = trace_store.get_by_event_type("failed")
+    assert len(failed) == 1
+    assert failed[0].contract_id == contract.id
+    recovery_events = trace_store.get_by_event_type("recovery_scheduled")
+    assert len(recovery_events) == 1
+    assert recovery_events[0].relation_target == recovery_contracts[0].id

@@ -5,6 +5,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from aigineering.core.disclosure import compute_disclosure
+from aigineering.core.method_handlers.recovery import (
+    has_recoverable_method_result_rejection,
+    schedule_method_result_recovery,
+)
 from aigineering.core.methods import contracts_from_plan_asset, method_payload
 from aigineering.protocol.actions import parse_method_action
 
@@ -88,6 +92,7 @@ class PlanMethodHandler:
 
         expanded = False
         created: list[str] = []
+        recovery_scheduled = False
         for asset in method_assets:
             if not asset.name.startswith("_plan_result_"):
                 continue
@@ -118,6 +123,20 @@ class PlanMethodHandler:
                     authority_result=entry.get("action", "rejected"),
                     budget_remaining=runtime.resolve_budget(parent_id),
                 )
+            if (
+                parent_id is not None
+                and not children
+                and has_recoverable_method_result_rejection(rejections)
+            ):
+                recovery = schedule_method_result_recovery(
+                    runtime,
+                    method_type="plan",
+                    parent_id=parent_id,
+                    failed_contract=contract,
+                    result_asset=asset,
+                    rejections=rejections,
+                )
+                recovery_scheduled = recovery_scheduled or recovery is not None
 
         if created and parent_id is not None:
             runtime.append_trace(
@@ -128,4 +147,4 @@ class PlanMethodHandler:
                 budget_remaining=runtime.resolve_budget(parent_id),
             )
 
-        return expanded
+        return expanded or recovery_scheduled

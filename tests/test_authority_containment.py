@@ -26,6 +26,14 @@ def _scaffold_asset(payload: dict) -> Asset:
     )
 
 
+def _raw_plan_asset(content: str) -> Asset:
+    return Asset(
+        id="asset_plan",
+        name="_plan_result_parent",
+        content=content,
+    )
+
+
 def _basic_child(**overrides: object) -> dict:
     child: dict = {
         "name": "draft",
@@ -675,6 +683,36 @@ def test_scaffold_placeholder_names_compile_before_containment():
     assert draft.inputs == ("notes",)
     assert draft.activation == "notes"
     assert not [r for r in rejected if r.get("field") in {"inputs", "activation"}]
+
+
+def test_unsupported_plan_result_schema_is_recoverable_rejection():
+    parent = _parent()
+    asset = _raw_plan_asset(
+        json.dumps(
+            {
+                "plan_name": "bad_shape",
+                "child_contracts": [
+                    {
+                        "contract_name": "draft",
+                        "expected_outputs": ["draft_report"],
+                    }
+                ],
+            },
+            sort_keys=True,
+        )
+    )
+
+    accepted, rejected = contracts_from_plan_asset(
+        asset,
+        parent.id,
+        parent_contract=parent,
+        allowed_input_names={"source"},
+    )
+
+    assert accepted == []
+    assert len(rejected) == 1
+    assert rejected[0]["field"] == "schema"
+    assert rejected[0]["recoverable"] is True
 
 
 # ---------------------------------------------------------------------------

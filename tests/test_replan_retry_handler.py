@@ -47,10 +47,17 @@ def test_replan_handler_schedules_child():
 
     store = MemoryStore()
     trace_store = TraceStore()
-    worker = SequenceWorker(['/replan {"reason": "try again"}', ""])
+    contract_id = hash_contract("root", "", [], ["report"], "", 5, [], [], "human")
+    empty_replan = json.dumps({"contracts": []}, sort_keys=True)
+    worker = SequenceWorker(
+        [
+            '/replan {"reason": "try again"}',
+            f'/exec {{"outputs": {{"_replan_result_{contract_id}": {json.dumps(empty_replan)}}}}}',
+        ]
+    )
 
     contract = Contract(
-        id=hash_contract("root", "", [], ["report"], "", 5, [], [], "human"),
+        id=contract_id,
         name="root",
         inputs=[],
         outputs=["report"],

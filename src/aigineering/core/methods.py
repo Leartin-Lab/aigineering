@@ -216,10 +216,30 @@ def contracts_from_plan_asset(
 
     try:
         payload = json.loads(asset.content)
-    except json.JSONDecodeError:
-        return [], []
+    except json.JSONDecodeError as e:
+        return [], [
+            {
+                "child_name": "(plan_result)",
+                "field": "content",
+                "reason": f"plan result content is not valid JSON: {e}",
+                "action": "rejected",
+                "expected": "JSON object with 'contracts' or scaffold fields",
+                "actual": asset.content[:200],
+                "recoverable": True,
+            }
+        ]
     if not isinstance(payload, dict):
-        return [], []
+        return [], [
+            {
+                "child_name": "(plan_result)",
+                "field": "content",
+                "reason": "plan result content must be a JSON object",
+                "action": "rejected",
+                "expected": "JSON object with 'contracts' or scaffold fields",
+                "actual": type(payload).__name__,
+                "recoverable": True,
+            }
+        ]
 
     # Try structured plan scaffold first (ADR-018 / v0.5.0)
     scaffold = parse_plan_scaffold(asset)
@@ -235,7 +255,32 @@ def contracts_from_plan_asset(
     else:
         raw_contracts = payload.get("contracts", [])
         if not isinstance(raw_contracts, list):
-            return [], []
+            return [], [
+                {
+                    "child_name": "(plan_result)",
+                    "field": "contracts",
+                    "reason": "plan result 'contracts' field must be a list",
+                    "action": "rejected",
+                    "expected": "list of child contract objects",
+                    "actual": type(raw_contracts).__name__,
+                    "recoverable": True,
+                }
+            ]
+        if "contracts" not in payload:
+            return [], [
+                {
+                    "child_name": "(plan_result)",
+                    "field": "schema",
+                    "reason": (
+                        "unsupported plan result schema; expected legacy "
+                        "'contracts' list or structured scaffold fields"
+                    ),
+                    "action": "rejected",
+                    "expected": "JSON object with 'contracts' or scaffold fields",
+                    "actual": str(sorted(payload.keys())),
+                    "recoverable": True,
+                }
+            ]
 
     accepted: list[Contract] = []
     rejected: list[dict] = []

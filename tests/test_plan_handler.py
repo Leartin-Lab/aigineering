@@ -45,10 +45,17 @@ def test_handler_schedules_plan_child():
 
     store = MemoryStore()
     trace_store = TraceStore()
-    worker = SequenceWorker(['/plan {"reason": "split work"}', ""])
+    contract_id = hash_contract("root", "", [], ["report"], "", 5, [], [], "human")
+    empty_plan = json.dumps({"contracts": []}, sort_keys=True)
+    worker = SequenceWorker(
+        [
+            '/plan {"reason": "split work"}',
+            f'/exec {{"outputs": {{"_plan_result_{contract_id}": {json.dumps(empty_plan)}}}}}',
+        ]
+    )
 
     contract = Contract(
-        id=hash_contract("root", "", [], ["report"], "", 5, [], [], "human"),
+        id=contract_id,
         name="root",
         inputs=[],
         outputs=["report"],
@@ -189,6 +196,164 @@ def test_handler_expands_plan_results():
     assert len(expanded) == 1
     assert expanded[0].relation_type == "plan"
     assert expanded[0].relation_target == planned[0].id
+
+
+def test_malformed_plan_result_schedules_recovery_and_expands_repaired_result():
+    """Rejected plan-result schema is returned to a new Worker recovery task."""
+    registry = MethodRegistry()
+    registry.register("plan", PlanMethodHandler())
+
+    malformed_plan = json.dumps(
+        {
+            "plan_name": "wrong_shape",
+            "child_contracts": [
+                {
+                    "contract_name": "draft",
+                    "expected_outputs": ["draft_report"],
+                }
+            ],
+        },
+        sort_keys=True,
+    )
+    repaired_plan = json.dumps(
+        {
+            "contracts": [
+                {
+                    "name": "draft",
+                    "description": "Draft the report.",
+                    "inputs": ["source"],
+                    "outputs": ["draft_report"],
+                    "activation": "source",
+                    "budget": 1,
+                    "tool_scope": [],
+                    "labels": [],
+                }
+            ]
+        },
+        sort_keys=True,
+    )
+    worker = SequenceWorker(
+        [
+            '/plan {"reason": "split work"}',
+            f'/exec {{"outputs": {{"_plan_result_contract_parent": {json.dumps(malformed_plan)}}}}}',
+            f'/exec {{"outputs": {{"_plan_result_contract_parent": {json.dumps(repaired_plan)}}}}}',
+            '/exec {"outputs": {"draft_report": "draft content"}}',
+            "",
+        ]
+    )
+    store = MemoryStore()
+    trace_store = TraceStore()
+    contract = Contract(
+        id="contract_parent",
+        name="root",
+        inputs=["source"],
+        outputs=["report"],
+        activation="",
+        budget=5,
+    )
+    engine = Engine(store, worker, trace_store, method_registry=registry)
+    engine.add_contract(contract)
+    engine.add_asset(Asset(id="asset_source", name="source", content="observed"))
+    engine.run()
+
+    recovery_contracts = [
+        c
+        for c in store.get_all_contracts()
+        if c.parent_id == contract.id and c.name.endswith(".recover")
+    ]
+    assert len(recovery_contracts) == 1
+    assert recovery_contracts[0].outputs == ("_plan_result_contract_parent",)
+
+    failure_contexts = [
+        a for a in store.get_all_assets() if a.name.startswith("_fail_context_")
+    ]
+    assert len(failure_contexts) == 1
+    assert failure_contexts[0].name in recovery_contracts[0].inputs
+
+    planned = [
+        c
+        for c in store.get_all_contracts()
+        if c.parent_id == contract.id and c.name == "draft"
+    ]
+    assert len(planned) == 1
+
+    recovery_events = trace_store.get_by_event_type("method_recovery_scheduled")
+    assert len(recovery_events) == 1
+    assert recovery_events[0].relation_target == recovery_contracts[0].id
+
+
+def test_plan_method_action_schedules_recovery_instead_of_nested_plan():
+    """A .plan task returning /plan is repaired instead of nested indefinitely."""
+    registry = MethodRegistry()
+    registry.register("plan", PlanMethodHandler())
+
+    repaired_plan = json.dumps(
+        {
+            "contracts": [
+                {
+                    "name": "draft",
+                    "description": "Draft the report.",
+                    "inputs": ["source"],
+                    "outputs": ["draft_report"],
+                    "activation": "source",
+                    "budget": 1,
+                    "tool_scope": [],
+                    "labels": [],
+                }
+            ]
+        },
+        sort_keys=True,
+    )
+    worker = SequenceWorker(
+        [
+            '/plan {"reason": "split work"}',
+            '/plan {"reason": "I need to plan the plan"}',
+            f'/exec {{"outputs": {{"_plan_result_contract_parent": {json.dumps(repaired_plan)}}}}}',
+            '/exec {"outputs": {"draft_report": "draft content"}}',
+            "",
+        ]
+    )
+    store = MemoryStore()
+    trace_store = TraceStore()
+    contract = Contract(
+        id="contract_parent",
+        name="root",
+        inputs=["source"],
+        outputs=["report"],
+        activation="",
+        budget=5,
+    )
+    engine = Engine(store, worker, trace_store, method_registry=registry)
+    engine.add_contract(contract)
+    engine.add_asset(Asset(id="asset_source", name="source", content="observed"))
+    engine.run()
+
+    nested_plan_contracts = [
+        c for c in store.get_all_contracts() if c.name == "root.plan.plan"
+    ]
+    assert nested_plan_contracts == []
+
+    recovery_contracts = [
+        c
+        for c in store.get_all_contracts()
+        if c.parent_id == contract.id and c.name == "root.plan.recover"
+    ]
+    assert len(recovery_contracts) == 1
+
+    planned = [
+        c
+        for c in store.get_all_contracts()
+        if c.parent_id == contract.id and c.name == "draft"
+    ]
+    assert len(planned) == 1
+
+    failed = [
+        entry
+        for entry in trace_store.get_by_event_type("failed")
+        if entry.relation_type == "plan"
+    ]
+    assert len(failed) == 1
+    assert failed[0].relation_target == "plan"
 
 
 def test_handler_respects_containment():

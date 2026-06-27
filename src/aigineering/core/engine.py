@@ -12,6 +12,10 @@ from aigineering.core.crash import check_crash_point
 from aigineering.core.context_overflow import ContextOverflowHandler
 from aigineering.core.disclosure import compute_disclosure, redact_for_disclosure
 from aigineering.core.labels import Label, LABEL_MODE_DEBUG, resolve_contract_labels
+from aigineering.core.method_handlers.recovery import (
+    schedule_method_result_recovery,
+    schedule_projection_recovery,
+)
 from aigineering.core.ids import (
     hash_asset_content,
     hash_asset_definition,
@@ -267,6 +271,10 @@ class Engine:
                 candidate: Candidate = self._worker.invoke(contract, scope)
                 action = parse_method_action(candidate)
                 if action is not None:
+                    if self._recover_method_contract_action(
+                        contract, candidate, action
+                    ):
+                        break
                     self._dispatch_method(contract, action, candidate)
                     break
 
@@ -321,6 +329,10 @@ class Engine:
                     check_crash_point("after_child_complete")
                     self._resume_parent_from_method(contract)
                     self._complete_satisfied_ancestors(contract)
+                    break
+                if self._recover_rejected_projection(
+                    contract, candidate, result, rejected_dicts, remaining
+                ):
                     break
 
     def _resolve_budget(self, contract: Contract) -> int:
@@ -399,6 +411,156 @@ class Engine:
             budget_remaining=remaining,
         )
         self._suspended.add(contract.id)
+
+    def _recover_method_contract_action(
+        self,
+        contract: Contract,
+        candidate: Candidate,
+        action: WorkerAction,
+    ) -> bool:
+        method_type = method_payload(contract).get("method")
+        if (
+            contract.origin != "system"
+            or contract.parent_id is None
+            or method_type not in {"plan", "replan"}
+        ):
+            return False
+        handler = (
+            self._method_registry.get(str(method_type))
+            if self._method_registry is not None
+            else None
+        )
+        if handler is None or not handler.can_handle(str(method_type)):
+            return False
+
+        runtime = _make_runtime(self)
+        schedule_method_result_recovery(
+            runtime,
+            method_type=str(method_type),
+            parent_id=contract.parent_id,
+            failed_contract=contract,
+            result_asset=Asset(
+                id=f"candidate:{contract.id}",
+                name=f"/{action.type}",
+                content=candidate.raw_output,
+                created_by=contract.id,
+                origin="candidate",
+            ),
+            rejections=[
+                {
+                    "child_name": "(method_result)",
+                    "field": "action",
+                    "reason": (
+                        f"method contract must produce its declared "
+                        f"_{method_type}_result asset, not /{action.type}"
+                    ),
+                    "action": "rejected",
+                    "expected": f"/exec with declared output {contract.outputs!r}",
+                    "actual": candidate.raw_output[:200],
+                    "recoverable": True,
+                }
+            ],
+        )
+        self._add_trace(
+            contract.id,
+            "projection",
+            disclosed_assets=[],
+            worker_id=candidate.worker_id,
+            candidate_raw=candidate.raw_output,
+            rejected_fragments=[
+                f"[parse_error] /{action.type}: method contract must produce "
+                f"declared output {contract.outputs!r}"
+            ],
+            authority_result="rejected",
+            budget_remaining=self._resolve_budget(contract),
+            usage_metadata=candidate.metadata,
+        )
+        remaining = self._budget_mgr.consume(contract.id)
+        self._add_trace(
+            contract.id,
+            "budget_consumed",
+            relation_type=str(method_type),
+            budget_remaining=remaining,
+        )
+        self._emit_terminal_event(
+            contract.id,
+            "failed",
+            relation_type=str(method_type),
+            relation_target=action.type,
+            budget_remaining=remaining,
+        )
+        self._completed.add(contract.id)
+        self._suspended.discard(contract.id)
+        return True
+
+    def _recover_rejected_projection(
+        self,
+        contract: Contract,
+        candidate: Candidate,
+        result: ProjectionResult,
+        rejected_dicts: list[dict],
+        budget_remaining: int,
+    ) -> bool:
+        if result.status.value != "rejected" or not rejected_dicts:
+            return False
+
+        method_type = method_payload(contract).get("method")
+        runtime = _make_runtime(self)
+        if (
+            contract.origin == "system"
+            and contract.parent_id is not None
+            and method_type in {"plan", "replan"}
+        ):
+            handler = (
+                self._method_registry.get(str(method_type))
+                if self._method_registry is not None
+                else None
+            )
+            if handler is None or not handler.can_handle(str(method_type)):
+                return False
+            schedule_method_result_recovery(
+                runtime,
+                method_type=str(method_type),
+                parent_id=contract.parent_id,
+                failed_contract=contract,
+                result_asset=Asset(
+                    id=f"candidate:{contract.id}",
+                    name=f"_{method_type}_result_rejected",
+                    content=candidate.raw_output,
+                    created_by=contract.id,
+                    origin="candidate",
+                ),
+                rejections=[
+                    {
+                        "child_name": "(method_result)",
+                        "field": entry["category"],
+                        "reason": entry["reject_reason"],
+                        "action": "rejected",
+                        "expected": f"/exec with declared output {contract.outputs!r}",
+                        "actual": entry["content"][:200],
+                        "recoverable": True,
+                    }
+                    for entry in rejected_dicts
+                ],
+            )
+        else:
+            schedule_projection_recovery(
+                runtime,
+                failed_contract=contract,
+                candidate_raw=candidate.raw_output,
+                rejections=rejected_dicts,
+            )
+
+        self._emit_terminal_event(
+            contract.id,
+            "failed",
+            relation_type="projection",
+            relation_target="recovery",
+            budget_remaining=budget_remaining,
+        )
+        self._completed.add(contract.id)
+        self._suspended.discard(contract.id)
+        return True
 
     def _schedule_method_contract(
         self,

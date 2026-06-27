@@ -106,7 +106,7 @@ class TraceStateRebuilder:
                 suspended.add(cid)
                 if entry.relation_target:
                     method_scheduled.add(entry.relation_target)
-            elif entry.event_type == "complete":
+            elif entry.event_type in {"complete", "failed", "cancelled", "unreachable"}:
                 completed.add(cid)
                 suspended.discard(cid)
             elif entry.event_type == "method_resumed":
@@ -225,7 +225,7 @@ def derive_lifecycle_from_store(store: StoreProtocol) -> EngineState:
     # Suspended: contracts with active method children (have _method_ctx_ assets)
     for name in all_asset_names:
         if name.startswith("_method_ctx_"):
-            parent_id = name[len("_method_ctx_"):]
+            parent_id = name[len("_method_ctx_") :]
             if parent_id:
                 suspended.add(parent_id)
 
