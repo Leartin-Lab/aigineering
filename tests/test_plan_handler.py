@@ -162,6 +162,7 @@ def test_handler_expands_plan_results():
     contract = Contract(
         id="contract_parent",
         name="root",
+        inputs=["source"],
         outputs=["report"],
         activation="",
         budget=5,
@@ -170,6 +171,7 @@ def test_handler_expands_plan_results():
     )
     engine = Engine(store, worker, trace_store, method_registry=registry)
     engine.add_contract(contract)
+    engine.add_asset(Asset(id="asset_source", name="source", content="observed"))
     engine.run()
 
     planned = [

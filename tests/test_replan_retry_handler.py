@@ -156,6 +156,7 @@ def test_replan_handler_expands_replan_results():
     contract = Contract(
         id="contract_parent",
         name="root",
+        inputs=["source"],
         outputs=["report"],
         activation="",
         budget=5,
@@ -164,6 +165,7 @@ def test_replan_handler_expands_replan_results():
     )
     engine = Engine(store, worker, trace_store, method_registry=registry)
     engine.add_contract(contract)
+    engine.add_asset(Asset(id="asset_source", name="source", content="observed"))
     engine.run()
 
     planned = [

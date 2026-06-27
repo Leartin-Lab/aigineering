@@ -9,11 +9,11 @@ from aigineering.core.authority import RESERVED_PREFIXES
 from aigineering.core.ids import (
     hash_asset_content,
     hash_asset_definition,
-    hash_contract,
     hash_contract_v2,
 )
 from aigineering.core.plan_scaffold import (
     _scaffold_tasks_to_raw_dicts,
+    compile_placeholder_names,
     parse_plan_scaffold,
     validate_plan_scaffold,
 )
@@ -26,6 +26,7 @@ _METHOD_OUTPUT_PREFIX: dict[str, str] = {
     "tool": "_tool_obs_",
     "fail": "_fail_result_",
 }
+_METHOD_LABEL_PREFIX = "method:"
 
 # Plan-specific reserved prefixes (superset of authority.RESERVED_PREFIXES).
 _PLAN_RESERVED_PREFIXES: frozenset[str] = RESERVED_PREFIXES | frozenset({"_persona_"})
@@ -80,7 +81,7 @@ def method_contract(parent: Contract, action: WorkerAction) -> Contract:
     activation = f"_method_ctx_{parent.id}"
     inputs = list(parent.inputs)
     tool_scope = list(parent.tool_scope)
-    labels = list(parent.labels)
+    labels = _append_method_label(parent.labels, action.type)
 
     contract_id = hash_contract_v2(
         name=contract_name,
@@ -122,6 +123,14 @@ def _method_description(parent: Contract, action: WorkerAction) -> str:
         sort_keys=True,
         ensure_ascii=False,
     )
+
+
+def _append_method_label(labels: tuple[str, ...], action_type: str) -> list[str]:
+    method_label = f"{_METHOD_LABEL_PREFIX}{action_type}"
+    merged = list(labels)
+    if method_label not in merged:
+        merged.append(method_label)
+    return merged
 
 
 def method_context_content(
@@ -215,6 +224,7 @@ def contracts_from_plan_asset(
     # Try structured plan scaffold first (ADR-018 / v0.5.0)
     scaffold = parse_plan_scaffold(asset)
     if scaffold is not None:
+        scaffold = compile_placeholder_names(scaffold)
         errors = validate_plan_scaffold(scaffold, parent_contract)
         if errors:
             return [], errors
@@ -233,8 +243,13 @@ def contracts_from_plan_asset(
     parent_tools = (
         set(parent_contract.tool_scope) if parent_contract is not None else None
     )
-    parent_labels = set(parent_contract.labels) if parent_contract is not None else None
     parent_budget = parent_contract.budget if parent_contract is not None else None
+    sibling_promises = _accepted_sibling_output_promises(
+        raw_contracts,
+        parent_tools=parent_tools,
+        parent_contract=parent_contract,
+        allowed_input_names=allowed_input_names,
+    )
 
     _cumulative_budget = 0
 
@@ -311,14 +326,14 @@ def contracts_from_plan_asset(
             )
             continue
 
-        # --- Input containment: child inputs must be in parent's disclosure scope ---
-        if allowed_input_names is not None and allowed_input_names:
+        # --- Input containment: child inputs must be in parent's disclosure scope
+        #     or promised by an independently accepted sibling producer in the
+        #     same plan/replan batch.  A promise grants reachability only; it
+        #     does not disclose sibling content before the asset is committed.
+        if allowed_input_names is not None:
             child_output_set = set(outputs)
-            unauthorized_inputs = [
-                inp
-                for inp in inputs
-                if inp not in allowed_input_names and inp not in child_output_set
-            ]
+            reachable_inputs = allowed_input_names | sibling_promises | child_output_set
+            unauthorized_inputs = [inp for inp in inputs if inp not in reachable_inputs]
             if unauthorized_inputs:
                 rejected.append(
                     {
@@ -327,10 +342,16 @@ def contracts_from_plan_asset(
                         "reason": (
                             f"inputs {sorted(unauthorized_inputs)} are not in "
                             f"parent disclosure scope ({sorted(allowed_input_names)}) "
-                            f"nor in child outputs ({sorted(outputs)})"
+                            f"nor promised sibling outputs "
+                            f"({sorted(sibling_promises)}) nor in child outputs "
+                            f"({sorted(outputs)})"
                         ),
                         "action": "rejected",
-                        "expected": f"subset of {sorted(allowed_input_names)} ∪ child outputs",
+                        "expected": (
+                            f"subset of {sorted(allowed_input_names)} ∪ "
+                            f"sibling promises {sorted(sibling_promises)} ∪ "
+                            "child outputs"
+                        ),
                         "actual": str(sorted(unauthorized_inputs)),
                     }
                 )
@@ -355,23 +376,6 @@ def contracts_from_plan_asset(
                 )
                 continue
 
-        # --- Label containment: reject if not subset ---
-        if parent_labels is not None and not set(labels).issubset(parent_labels):
-            rejected.append(
-                {
-                    "child_name": name,
-                    "field": "labels",
-                    "reason": (
-                        f"labels {sorted(labels)} are not a subset "
-                        f"of parent {sorted(parent_labels)}"
-                    ),
-                    "action": "rejected",
-                    "expected": f"subset of {sorted(parent_labels)}",
-                    "actual": str(sorted(labels)),
-                }
-            )
-            continue
-
         # --- Protected output check ---
         violated_outputs = [
             o for o in outputs if any(o.startswith(p) for p in _PLAN_RESERVED_PREFIXES)
@@ -389,13 +393,14 @@ def contracts_from_plan_asset(
             )
             continue
 
-        # --- Activation containment: activation refs checked against allowed names ---
-        if allowed_input_names is not None and allowed_input_names and activation:
+        # --- Activation containment: activation refs checked against reachable names ---
+        if allowed_input_names is not None and activation:
             activation_names = _extract_activation_names(activation)
             child_output_set = set(outputs)
-            unknown_activation_names = (
-                activation_names - allowed_input_names - child_output_set
+            reachable_activation_names = (
+                allowed_input_names | sibling_promises | child_output_set
             )
+            unknown_activation_names = activation_names - reachable_activation_names
             if unknown_activation_names:
                 # Names outside allowed inputs and child outputs are likely
                 # sibling-output scheduling references — benign for containment
@@ -410,7 +415,11 @@ def contracts_from_plan_asset(
                             f"scheduling references (benign)"
                         ),
                         "action": "noted",
-                        "expected": f"subset of {sorted(allowed_input_names)} ∪ child outputs",
+                        "expected": (
+                            f"subset of {sorted(allowed_input_names)} ∪ "
+                            f"sibling promises {sorted(sibling_promises)} ∪ "
+                            "child outputs"
+                        ),
                         "actual": str(sorted(unknown_activation_names)),
                     }
                 )
@@ -506,6 +515,77 @@ def contracts_from_plan_asset(
             )
         )
     return accepted, rejected
+
+
+def _accepted_sibling_output_promises(
+    raw_contracts: list[object],
+    *,
+    parent_tools: set[str] | None,
+    parent_contract: Contract | None,
+    allowed_input_names: set[str] | None,
+) -> set[str]:
+    """Return outputs from siblings reachable from parent disclosure.
+
+    The promise set is a fixed point: a child contributes its outputs only after
+    it passes independent containment and its inputs are reachable from parent
+    disclosure, its own outputs, or promises contributed by earlier fixed-point
+    rounds. This keeps batch ordering irrelevant without letting rejected
+    producers launder hidden input names.
+    """
+
+    if parent_contract is None:
+        return set()
+
+    promises: set[str] = set()
+    candidates = [
+        raw
+        for raw in raw_contracts
+        if _can_contribute_sibling_promises(raw, parent_tools=parent_tools)
+    ]
+    if allowed_input_names is None:
+        for raw in candidates:
+            promises.update(_string_list(raw.get("outputs", [])))
+        return promises
+
+    changed = True
+    while changed:
+        changed = False
+        for raw in candidates:
+            outputs = set(_string_list(raw.get("outputs", [])))
+            if outputs.issubset(promises):
+                continue
+            inputs = set(_string_list(raw.get("inputs", [])))
+            activation_names = _extract_activation_names(str(raw.get("activation", "")))
+            reachable = allowed_input_names | promises | outputs
+            if inputs.issubset(reachable) and activation_names.issubset(reachable):
+                promises.update(outputs)
+                changed = True
+    return promises
+
+
+def _can_contribute_sibling_promises(
+    raw: object,
+    *,
+    parent_tools: set[str] | None,
+) -> bool:
+    if not isinstance(raw, dict):
+        return False
+    name = str(raw.get("name", ""))
+    if not name or not name.strip():
+        return False
+    if _PLAN_PROTECTED_FIELDS & set(raw.keys()):
+        return False
+
+    tool_scope = _string_list(raw.get("tool_scope", []))
+    outputs = _string_list(raw.get("outputs", []))
+
+    if parent_tools is not None and not set(tool_scope).issubset(parent_tools):
+        return False
+    return not any(
+        output.startswith(prefix)
+        for output in outputs
+        for prefix in _PLAN_RESERVED_PREFIXES
+    )
 
 
 def _string_list(value: object) -> list[str]:

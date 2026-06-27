@@ -14,10 +14,13 @@ def system_prompt() -> str:
         "not committed state. Return exactly one structured action. To "
         'produce final outputs, use `/exec {"outputs": {"asset_name": '
         '"content"}}`. Use only declared output names. If you need task '
-        'decomposition, use `/plan {"reason": "..."}`. If you need '
-        'recovery, use `/replan {"reason": "..."}`. If you need an '
-        'allowed tool, use `/tool {"name": "...", "args": {}}`. Do '
-        "not add markdown, explanations, or undeclared assets."
+        "decomposition because the current task needs more information, use "
+        '`/plan {"reason": "..."}`. If the current task has already gone '
+        "off course because an assumption, path, or result is invalid, use "
+        '`/replan {"reason": "..."}`. If you need an allowed tool, use '
+        '`/tool {"name": "...", "args": {}}`. Do not use /replan for '
+        "missing information. Do not add markdown, explanations, or "
+        "undeclared assets."
     )
 
 
@@ -40,9 +43,14 @@ def contract_prompt(contract: Contract, assets: list[Asset]) -> str:
         "",
         "Return format:",
         '- /exec {"outputs": {"declared_output": "content"}}',
-        '- /plan {"reason": "why decomposition is required"}',
-        '- /replan {"reason": "why recovery is required"}',
+        '- /plan {"reason": "why the current task needs more information"}',
+        '- /replan {"reason": "why the current task has already gone off course"}',
         '- /tool {"name": "tool_name", "args": {}}',
+        "",
+        "Decision boundary:",
+        "- Use /plan when disclosed information is insufficient.",
+        "- Use /replan only after an assumption, path, or result is invalid.",
+        "- Do not use /replan for missing information.",
         "",
         "Behavior instructions:",
     ]

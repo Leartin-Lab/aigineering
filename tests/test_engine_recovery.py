@@ -32,9 +32,7 @@ class SequenceWorker:
 
 def _method_context_names(engine: Engine) -> set[str]:
     return {
-        asset.name
-        for assets in engine._method_context.values()
-        for asset in assets
+        asset.name for assets in engine._method_context.values() for asset in assets
     }
 
 
@@ -125,6 +123,7 @@ def test_save_restore_preserves_method_context():
     contract = Contract(
         id="contract_parent",
         name="root",
+        inputs=["source"],
         outputs=["report"],
         activation="",
         budget=5,
@@ -138,6 +137,7 @@ def test_save_restore_preserves_method_context():
         method_registry=_method_registry("tool"),
     )
     engine.add_contract(contract)
+    engine.add_asset(Asset(id="asset_source", name="source", content="observed"))
     engine.run()
 
     state = engine.save_state()
@@ -294,6 +294,7 @@ def test_recovery_after_plan_expansion():
     contract = Contract(
         id="contract_parent",
         name="root",
+        inputs=["source"],
         outputs=["report"],
         activation="",
         budget=5,
@@ -305,6 +306,7 @@ def test_recovery_after_plan_expansion():
         method_registry=_method_registry("plan"),
     )
     engine.add_contract(contract)
+    engine.add_asset(Asset(id="asset_source", name="source", content="observed"))
     engine.run()
 
     planned = [

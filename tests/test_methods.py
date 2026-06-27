@@ -27,7 +27,7 @@ def test_plan_action_creates_system_sub_contract():
     assert child.outputs == ("_plan_result_contract_parent",)
     assert child.activation == "_method_ctx_contract_parent"
     assert child.tool_scope == ("search",)
-    assert child.labels == ("research",)
+    assert child.labels == ("research", "method:plan")
 
 
 def test_method_contract_ids_are_deterministic():

@@ -296,6 +296,7 @@ def test_method_scheduling_uses_child_contract_identity():
     contract = Contract(
         id="contract_parent",
         name="root",
+        inputs=["source"],
         outputs=["report"],
         activation="",
         budget=5,
@@ -309,12 +310,11 @@ def test_method_scheduling_uses_child_contract_identity():
         method_registry=_method_registry("tool"),
     )
     engine.add_contract(contract)
+    engine.add_asset(Asset(id="asset_source", name="source", content="observed"))
 
     engine.run()
 
-    method_children = [
-        c for c in store.get_all_contracts() if c.origin == "system"
-    ]
+    method_children = [c for c in store.get_all_contracts() if c.origin == "system"]
     assert len(method_children) == 2
     assert len({c.id for c in method_children}) == 2
     assert method_children[0].parent_id == contract.id
@@ -338,6 +338,7 @@ def test_tool_method_executes_registry_and_commits_observation():
     contract = Contract(
         id="contract_parent",
         name="root",
+        inputs=["source"],
         outputs=["report"],
         activation="",
         budget=5,
@@ -351,6 +352,7 @@ def test_tool_method_executes_registry_and_commits_observation():
         method_registry=_method_registry("tool"),
     )
     engine.add_contract(contract)
+    engine.add_asset(Asset(id="asset_source", name="source", content="observed"))
 
     engine.run()
 
@@ -520,6 +522,7 @@ def test_plan_result_expands_child_contracts_without_system_authority():
     contract = Contract(
         id="contract_parent",
         name="root",
+        inputs=["source"],
         outputs=["report"],
         activation="",
         budget=5,
@@ -533,6 +536,7 @@ def test_plan_result_expands_child_contracts_without_system_authority():
         method_registry=_method_registry("plan"),
     )
     engine.add_contract(contract)
+    engine.add_asset(Asset(id="asset_source", name="source", content="observed"))
 
     engine.run()
 

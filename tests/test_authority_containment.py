@@ -18,6 +18,14 @@ def _plan_asset(contracts: list[dict]) -> Asset:
     )
 
 
+def _scaffold_asset(payload: dict) -> Asset:
+    return Asset(
+        id="asset_plan",
+        name="_plan_result_parent",
+        content=json.dumps(payload, sort_keys=True),
+    )
+
+
 def _basic_child(**overrides: object) -> dict:
     child: dict = {
         "name": "draft",
@@ -147,12 +155,12 @@ def test_planner_system_origin_clamped():
 
 
 # ---------------------------------------------------------------------------
-# Label laundering → rejected
+# Labels select context assets, not business authority
 # ---------------------------------------------------------------------------
 
 
-def test_label_laundering_blocked():
-    """Parent labels=['user']; planner emits ['admin'] → rejected."""
+def test_child_label_may_select_context_without_business_authority_check():
+    """Planner labels are preserved for asset injection, not used as authority."""
     parent = _parent(labels=["user"])
     asset = _plan_asset([_basic_child(labels=["admin"])])
     accepted, rejected = contracts_from_plan_asset(
@@ -161,14 +169,13 @@ def test_label_laundering_blocked():
         parent_contract=parent,
     )
 
-    assert len(accepted) == 0
-    assert len(rejected) == 1
-    assert rejected[0]["field"] == "labels"
-    assert rejected[0]["action"] == "rejected"
+    assert len(accepted) == 1
+    assert len(rejected) == 0
+    assert accepted[0].labels == ("admin",)
 
 
-def test_label_superset_blocked():
-    """Parent labels=['user']; planner emits ['user', 'admin'] → rejected."""
+def test_child_label_superset_is_preserved_for_context_injection():
+    """Label subsets are not a business containment rule."""
     parent = _parent(labels=["user"])
     asset = _plan_asset([_basic_child(labels=["user", "admin"])])
     accepted, rejected = contracts_from_plan_asset(
@@ -177,9 +184,9 @@ def test_label_superset_blocked():
         parent_contract=parent,
     )
 
-    assert len(accepted) == 0
-    assert len(rejected) == 1
-    assert rejected[0]["action"] == "rejected"
+    assert len(accepted) == 1
+    assert len(rejected) == 0
+    assert accepted[0].labels == ("user", "admin")
 
 
 # ---------------------------------------------------------------------------
@@ -389,13 +396,13 @@ def test_mixed_valid_and_rejected_children():
         parent_contract=parent,
     )
 
-    assert len(accepted) == 2
+    assert len(accepted) == 3
     accepted_names = {c.name for c in accepted}
-    assert accepted_names == {"good", "good2"}
+    assert accepted_names == {"good", "bad_labels", "good2"}
 
-    assert len(rejected) == 2
+    assert len(rejected) == 1
     rejected_names = {r["child_name"] for r in rejected}
-    assert rejected_names == {"bad_labels", "bad_output"}
+    assert rejected_names == {"bad_output"}
 
 
 # ---------------------------------------------------------------------------
@@ -468,6 +475,206 @@ def test_child_input_is_own_output_accepted():
     # No input-related rejections
     input_rejections = [r for r in rejected if r["field"] == "inputs"]
     assert len(input_rejections) == 0
+
+
+def test_child_input_from_accepted_sibling_output_is_accepted():
+    """A plan batch may wire one accepted child output into another child."""
+    parent = _parent()
+    allowed = {"source"}
+    asset = _plan_asset(
+        [
+            _basic_child(
+                name="gather",
+                inputs=["source"],
+                outputs=["notes"],
+                activation="source",
+            ),
+            _basic_child(
+                name="draft",
+                inputs=["notes"],
+                outputs=["draft_report"],
+                activation="notes",
+            ),
+        ]
+    )
+
+    accepted, rejected = contracts_from_plan_asset(
+        asset,
+        parent.id,
+        parent_contract=parent,
+        allowed_input_names=allowed,
+    )
+
+    assert [c.name for c in accepted] == ["gather", "draft"]
+    assert not [r for r in rejected if r.get("field") == "inputs"]
+    assert not [r for r in rejected if r.get("field") == "activation"]
+
+
+def test_rejected_sibling_output_does_not_authorize_consumer_input():
+    """Only independently accepted siblings contribute future-output promises."""
+    parent = _parent(tool_scope=["read"])
+    allowed = {"source"}
+    asset = _plan_asset(
+        [
+            _basic_child(
+                name="bad_gather",
+                inputs=["source"],
+                outputs=["notes"],
+                activation="source",
+                tool_scope=["write"],
+            ),
+            _basic_child(
+                name="draft",
+                inputs=["notes"],
+                outputs=["draft_report"],
+                activation="notes",
+                labels=["user"],
+            ),
+        ]
+    )
+
+    accepted, rejected = contracts_from_plan_asset(
+        asset,
+        parent.id,
+        parent_contract=parent,
+        allowed_input_names=allowed,
+    )
+
+    assert accepted == []
+    rejected_fields = {(r["child_name"], r["field"]) for r in rejected}
+    assert ("bad_gather", "tool_scope") in rejected_fields
+    assert ("draft", "inputs") in rejected_fields
+
+
+def test_sibling_output_from_unreachable_input_producer_does_not_authorize_consumer():
+    """A producer rejected for hidden inputs must not contribute output promises."""
+    parent = _parent()
+    allowed = {"source"}
+    asset = _plan_asset(
+        [
+            _basic_child(
+                name="bad_gather",
+                inputs=["hidden_source"],
+                outputs=["notes"],
+                activation="hidden_source",
+            ),
+            _basic_child(
+                name="draft",
+                inputs=["notes"],
+                outputs=["draft_report"],
+                activation="notes",
+            ),
+        ]
+    )
+
+    accepted, rejected = contracts_from_plan_asset(
+        asset,
+        parent.id,
+        parent_contract=parent,
+        allowed_input_names=allowed,
+    )
+
+    assert accepted == []
+    rejected_fields = {(r["child_name"], r["field"]) for r in rejected}
+    assert ("bad_gather", "inputs") in rejected_fields
+    assert ("draft", "inputs") in rejected_fields
+
+
+def test_sibling_output_promise_is_order_independent():
+    """A consumer may appear before its producer in the same accepted batch."""
+    parent = _parent()
+    allowed = {"source"}
+    asset = _plan_asset(
+        [
+            _basic_child(
+                name="draft",
+                inputs=["notes"],
+                outputs=["draft_report"],
+                activation="notes",
+            ),
+            _basic_child(
+                name="gather",
+                inputs=["source"],
+                outputs=["notes"],
+                activation="source",
+            ),
+        ]
+    )
+
+    accepted, rejected = contracts_from_plan_asset(
+        asset,
+        parent.id,
+        parent_contract=parent,
+        allowed_input_names=allowed,
+    )
+
+    assert {c.name for c in accepted} == {"gather", "draft"}
+    assert not [r for r in rejected if r.get("field") in {"inputs", "activation"}]
+
+
+def test_scaffold_placeholder_names_compile_before_containment():
+    """Structured plans may use symbolic names that compile before validation."""
+    parent = _parent(inputs=["source"], outputs=["final_report"])
+    asset = _scaffold_asset(
+        {
+            "reason": "need intermediate evidence",
+            "goal_outline": "produce final report",
+            "intermediate_assets": ["{notes}"],
+            "step_1_tasks": [
+                {
+                    "name": "gather",
+                    "description": "Gather notes.",
+                    "budget": 1,
+                    "tool_scope": ["read"],
+                    "labels": ["user"],
+                },
+                {
+                    "name": "draft",
+                    "description": "Draft final report.",
+                    "budget": 1,
+                    "tool_scope": ["read"],
+                    "labels": ["user"],
+                },
+            ],
+            "step_2_data_flow": [
+                {
+                    "task_name": "gather",
+                    "consumes": ["source"],
+                    "produces": ["{notes}"],
+                },
+                {
+                    "task_name": "draft",
+                    "consumes": ["{notes}"],
+                    "produces": ["final_report"],
+                },
+            ],
+            "step_3_activation": [
+                {
+                    "task_name": "gather",
+                    "expression": "source",
+                    "depends_on": ["source"],
+                },
+                {
+                    "task_name": "draft",
+                    "expression": "{notes}",
+                    "depends_on": ["{notes}"],
+                },
+            ],
+        }
+    )
+
+    accepted, rejected = contracts_from_plan_asset(
+        asset,
+        parent.id,
+        parent_contract=parent,
+        allowed_input_names={"source"},
+    )
+
+    assert {c.name for c in accepted} == {"gather", "draft"}
+    draft = next(c for c in accepted if c.name == "draft")
+    assert draft.inputs == ("notes",)
+    assert draft.activation == "notes"
+    assert not [r for r in rejected if r.get("field") in {"inputs", "activation"}]
 
 
 # ---------------------------------------------------------------------------

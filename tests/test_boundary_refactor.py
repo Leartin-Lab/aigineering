@@ -11,8 +11,6 @@ Plan reference: .omo/plans/050-runtime-boundary-refactor-plan.md
 
 from __future__ import annotations
 
-import json
-
 import pytest
 
 from aigineering.core.store import MemoryStore

@@ -16,6 +16,15 @@ def test_system_prompt_preserves_candidate_boundary():
     assert "declared output names" in prompt
 
 
+def test_system_prompt_preserves_plan_replan_boundary():
+    prompt = system_prompt()
+
+    assert "needs more information" in prompt
+    assert "use `/plan" in prompt
+    assert "gone off course" in prompt
+    assert "use `/replan" in prompt
+
+
 def test_contract_prompt_renders_declared_scope():
     contract = Contract(
         id="contract_1",
@@ -36,6 +45,15 @@ def test_contract_prompt_renders_declared_scope():
     assert "Allowed tools: search" in prompt
     assert '/exec {"outputs": {"declared_output": "content"}}' in prompt
     assert "- evidence: observed" in prompt
+
+
+def test_contract_prompt_preserves_plan_replan_boundary():
+    contract = Contract(id="contract_1", name="write_report")
+    prompt = contract_prompt(contract, [])
+
+    assert "current task needs more information" in prompt
+    assert "current task has already gone off course" in prompt
+    assert "Do not use /replan for missing information" in prompt
 
 
 def test_contract_prompt_separates_behavior_instructions_from_assets():

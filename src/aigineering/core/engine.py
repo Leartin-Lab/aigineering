@@ -15,7 +15,6 @@ from aigineering.core.labels import Label, LABEL_MODE_DEBUG, resolve_contract_la
 from aigineering.core.ids import (
     hash_asset_content,
     hash_asset_definition,
-    hash_contract,
     hash_contract_v2,
 )
 from aigineering.core.methods import (
