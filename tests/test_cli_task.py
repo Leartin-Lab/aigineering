@@ -5,6 +5,8 @@ import json
 from click.testing import CliRunner
 
 from aigineering.cli.main import cli
+from aigineering.core.sqlite_store import SQLiteStore
+from aigineering.core.trace import create_entry
 
 
 def _seed_build_report_task(runner: CliRunner) -> str:
@@ -212,3 +214,49 @@ def test_run_task_rejected_output_schedules_recovery():
         event_types = {entry["event_type"] for entry in data["trace"]}
         assert "recovery_scheduled" in event_types
         assert data["task"]["recovery_count"] == 1
+
+
+def test_task_status_reports_submitted_without_recovery_risk():
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        create = runner.invoke(
+            cli,
+            [
+                "task",
+                "create",
+                "--name",
+                "orphan_projection",
+                "--output",
+                "report",
+                "--json",
+            ],
+        )
+        assert create.exit_code == 0, create.output
+        contract_id = json.loads(create.output)["contract_id"]
+
+        store = SQLiteStore(".aig/store.db")
+        store.append(
+            create_entry(
+                contract_id=contract_id,
+                event_type="projection",
+                rejected_fragments=["[parse_error] (empty): no output"],
+                authority_result="rejected",
+                budget_remaining=0,
+            )
+        )
+        store.append(
+            create_entry(
+                contract_id=contract_id,
+                event_type="budget_consumed",
+                budget_remaining=0,
+            )
+        )
+
+        status = runner.invoke(cli, ["task", "status", contract_id, "--json"])
+        assert status.exit_code == 0, status.output
+        data = json.loads(status.output)
+        assert data["status"] == "submitted"
+        assert data["ok"] is False
+        codes = {risk["code"] for risk in data["silent_failure_risks"]}
+        assert "budget_exhausted" in codes
+        assert "submitted_without_recovery" in codes

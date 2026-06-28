@@ -39,13 +39,16 @@ def project_task_status(contract: Contract, store) -> dict:
     ]
 
     status = _status_from_entries(contract, store, entries, terminal)
+    risks = _silent_failure_risks(contract, store, entries, status)
     return {
         "contract_id": contract.id,
         "name": contract.name,
         "status": status,
         "terminal": status in TERMINAL_EVENTS or status == "completed",
+        "ok": status == "completed",
         "outputs_satisfied": _all_outputs_satisfied(contract, store),
         "outputs": output_assets,
+        "silent_failure_risks": risks,
         "rejection_count": len(rejections),
         "rejections": rejections,
         "recovery_count": len(recoveries),
@@ -107,3 +110,51 @@ def _status_from_entries(
     ):
         return "blocked"
     return "ready"
+
+
+def _silent_failure_risks(
+    contract: Contract,
+    store,
+    entries: list[TraceEntry],
+    status: str,
+) -> list[dict[str, str]]:
+    if status in {"completed", "failed", "cancelled", "unreachable"}:
+        return []
+    risks: list[dict[str, str]] = []
+    if (
+        not _all_outputs_satisfied(contract, store)
+        and _budget_remaining(contract, entries) <= 0
+    ):
+        risks.append(
+            {
+                "code": "budget_exhausted",
+                "message": "budget is exhausted before declared outputs are satisfied",
+            }
+        )
+    if status == "submitted" and not _has_active_recovery(contract, store):
+        risks.append(
+            {
+                "code": "submitted_without_recovery",
+                "message": "task has worker projection but no terminal event or active recovery",
+            }
+        )
+    return risks
+
+
+def _budget_remaining(contract: Contract, entries: list[TraceEntry]) -> int:
+    remaining = max(contract.budget, 1)
+    for entry in entries:
+        if entry.event_type in {"budget_initialized", "budget_consumed"}:
+            remaining = entry.budget_remaining
+    return remaining
+
+
+def _has_active_recovery(contract: Contract, store) -> bool:
+    for candidate in store.get_all_contracts():
+        if candidate.origin != "recovery":
+            continue
+        if candidate.parent_id == contract.id or candidate.name.startswith(
+            f"{contract.name}.recover"
+        ):
+            return True
+    return False

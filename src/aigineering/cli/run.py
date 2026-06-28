@@ -362,6 +362,8 @@ def _run_task_pool(
         if time.monotonic() >= deadline or not new_entries:
             status = project_task_status(target, store)
             status["ok"] = status["status"] == "completed"
+            if status.get("silent_failure_risks"):
+                status["status"] = "stalled"
             if not status["terminal"]:
                 status["timed_out"] = time.monotonic() >= deadline
             status["cycles"] = cycles
