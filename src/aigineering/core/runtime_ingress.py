@@ -26,7 +26,13 @@ from aigineering.core.trace import create_entry
 
 if TYPE_CHECKING:
     from aigineering.core.fact_reducer import FactReducer
-    from aigineering.protocol.types import Asset, Candidate, Contract, ProjectionResult
+    from aigineering.protocol.types import (
+        Asset,
+        Candidate,
+        Contract,
+        ProjectionResult,
+        ReplacementClaim,
+    )
     from aigineering.core.store import StoreProtocol
     from aigineering.core.trace import TraceStoreProtocol
 
@@ -252,6 +258,45 @@ class RuntimeIngress:
         )
 
         return contract
+
+    # -- Replacement claim acceptance ---------------------------------------
+
+    def accept_replacement_claim(
+        self,
+        claim: ReplacementClaim,
+        *,
+        source: str = "ingress",
+    ) -> ReplacementClaim:
+        """Accept an additive asset replacement/version claim.
+
+        Replacement claims are control facts.  They do not mutate either
+        referenced asset; they record an auditable relationship that readers
+        may use for version resolution, slicing, summaries, or redactions.
+        """
+        self._store.add_replacement_claim(claim)
+        self._trace.append(
+            create_entry(
+                contract_id="runtime_ingress",
+                event_type="replacement_claim_created",
+                parent_id=claim.id,
+                relation_type=claim.claim_type,
+                relation_target=claim.replacement_asset_id,
+                accepted_fragments=[
+                    json.dumps(
+                        {
+                            "claim_id": claim.id,
+                            "source_asset_id": claim.source_asset_id,
+                            "replacement_asset_id": claim.replacement_asset_id,
+                            "definition_hash": claim.definition_hash,
+                            "claim_type": claim.claim_type,
+                            "source": source,
+                        },
+                        sort_keys=True,
+                    )
+                ],
+            )
+        )
+        return claim
 
     # -- Candidate submission -----------------------------------------------
 

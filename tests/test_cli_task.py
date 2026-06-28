@@ -58,8 +58,12 @@ def test_run_once_executes_next_ready_task():
         assert result.exit_code == 0, result.output
         data = json.loads(result.output)
         assert data["ok"] is True
-        assert data["cycles"][0]["contract_id"] == contract_id
-        assert data["accepted_assets"][0]["name"] == "final_report"
+        assert data["status"] == "ran"
+        assert contract_id in data["cycles"][0]["contracts"]
+
+        status_result = runner.invoke(cli, ["task", "status", contract_id, "--json"])
+        status = json.loads(status_result.output)
+        assert status["outputs"]["final_report"]
 
 
 def test_run_task_waits_until_target_complete():
@@ -106,3 +110,105 @@ def test_task_wait_and_audit_json_after_run():
         assert audit_data["task"]["contract_id"] == contract_id
         assert audit_data["task"]["outputs"]["final_report"]
         assert len(audit_data["trace"]) > 0
+
+
+def test_run_task_uses_engine_method_path_for_plan():
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        create = runner.invoke(
+            cli,
+            [
+                "task",
+                "create",
+                "--name",
+                "root",
+                "--output",
+                "report",
+                "--json",
+            ],
+        )
+        assert create.exit_code == 0, create.output
+        contract_id = json.loads(create.output)["contract_id"]
+        empty_plan = json.dumps({"contracts": []}, sort_keys=True)
+        plan_result = (
+            f'/exec {{"outputs": {{"_plan_result_{contract_id}": '
+            f"{json.dumps(empty_plan)}}}}}"
+        )
+
+        result = runner.invoke(
+            cli,
+            [
+                "run",
+                "--task",
+                contract_id,
+                "--worker",
+                "mock",
+                "--mock-preset",
+                'root=/plan {"reason": "need context"}',
+                "--mock-preset",
+                f"root.plan={plan_result}",
+                "--wait-timeout",
+                "1",
+                "--json",
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+        audit = runner.invoke(cli, ["task", "audit", contract_id, "--json"])
+        data = json.loads(audit.output)
+        event_types = {entry["event_type"] for entry in data["trace"]}
+        assert "method_scheduled" in event_types
+        store_audit = runner.invoke(cli, ["task", "audit", contract_id, "--json"])
+        trace = json.loads(store_audit.output)["trace"]
+        child_id = next(
+            entry["relation_target"]
+            for entry in trace
+            if entry["event_type"] == "method_scheduled"
+        )
+        child_audit = runner.invoke(cli, ["task", "audit", child_id, "--json"])
+        child_data = json.loads(child_audit.output)
+        child_events = {entry["event_type"] for entry in child_data["trace"]}
+        assert "projection" in child_events
+        assert child_data["task"]["status"] == "completed"
+
+
+def test_run_task_rejected_output_schedules_recovery():
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        create = runner.invoke(
+            cli,
+            [
+                "task",
+                "create",
+                "--name",
+                "write_report",
+                "--output",
+                "report",
+                "--json",
+            ],
+        )
+        assert create.exit_code == 0, create.output
+        contract_id = json.loads(create.output)["contract_id"]
+
+        result = runner.invoke(
+            cli,
+            [
+                "run",
+                "--task",
+                contract_id,
+                "--worker",
+                "mock",
+                "--mock-preset",
+                "write_report=wrong_output: nope",
+                "--wait-timeout",
+                "0",
+                "--json",
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+        audit = runner.invoke(cli, ["task", "audit", contract_id, "--json"])
+        data = json.loads(audit.output)
+        event_types = {entry["event_type"] for entry in data["trace"]}
+        assert "recovery_scheduled" in event_types
+        assert data["task"]["recovery_count"] == 1

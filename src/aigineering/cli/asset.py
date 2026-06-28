@@ -281,28 +281,8 @@ def asset_replace(
         signed_by=signed_by,
         provenance_seal="",
     )
-    store.add_replacement_claim(claim)
-    _append_trace_if_supported(
-        store,
-        create_entry(
-            contract_id="control_plane",
-            event_type="replacement_claim_created",
-            parent_id=claim.id,
-            relation_type=claim.claim_type,
-            relation_target=claim.replacement_asset_id,
-            accepted_fragments=[
-                json.dumps(
-                    {
-                        "claim_id": claim.id,
-                        "source_asset_id": claim.source_asset_id,
-                        "replacement_asset_id": claim.replacement_asset_id,
-                        "definition_hash": claim.definition_hash,
-                    },
-                    sort_keys=True,
-                )
-            ],
-        ),
-    )
+    ingress = RuntimeIngress(store, store)
+    ingress.accept_replacement_claim(claim, source="asset_replace")
 
     if as_json:
         _output_json(

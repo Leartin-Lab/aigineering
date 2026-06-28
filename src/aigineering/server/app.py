@@ -294,7 +294,8 @@ def create_replacement_claim(body: ReplacementClaimCreateRequest):
             claim_type=body.claim_type,
             signed_by=body.signed_by,
         )
-        store.add_replacement_claim(claim)
+        ingress = RuntimeIngress(store, store)
+        ingress.accept_replacement_claim(claim, source="server")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return _replacement_claim_response(claim)

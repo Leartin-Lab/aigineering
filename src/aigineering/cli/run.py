@@ -9,6 +9,7 @@ import click
 
 from aigineering.cli._common import (
     _asset_names_for,
+    _default_method_registry,
     _get_trace_dir,
     _output_json,
     _persistent_store,
@@ -16,11 +17,8 @@ from aigineering.cli._common import (
     _session_id,
 )
 from aigineering.cli.task_state import project_task_status
-from aigineering.cli.worker_runtime import (
-    build_worker,
-    claim_next_package,
-    execute_claimed_package,
-)
+from aigineering.cli.worker_runtime import build_worker
+from aigineering.core.engine import Engine
 from aigineering.core.session import SessionStore
 from aigineering.core.trace import JsonLTraceStore
 from aigineering.protocol.types import Session, TraceEntry
@@ -85,16 +83,15 @@ def _output_run_json(
     help="Polling interval when waiting for --task.",
 )
 @click.option(
-    "--worker-id",
+    "--mock-output",
     default=None,
-    help="Worker identity for claim ownership. Defaults to the worker implementation id.",
+    help="Explicit mock worker output for deterministic dry runs.",
 )
 @click.option(
-    "--lease-seconds",
-    type=int,
-    default=60,
-    show_default=True,
-    help="Claim lease duration for task-pool execution.",
+    "--mock-preset",
+    "mock_presets",
+    multiple=True,
+    help="Explicit mock preset as contract_name=raw_output (repeatable).",
 )
 @click.option(
     "--worker",
@@ -157,8 +154,8 @@ def run(
     target_task_id: Optional[str],
     wait_timeout: float,
     interval: float,
-    worker_id: Optional[str],
-    lease_seconds: int,
+    mock_output: Optional[str],
+    mock_presets: tuple[str, ...],
     worker_kind: Optional[str],
     model: Optional[str],
     base_url: str,
@@ -186,8 +183,8 @@ def run(
             timeout=timeout,
             max_retries=max_retries,
             capabilities=capabilities,
-            worker_id=worker_id,
-            lease_seconds=lease_seconds,
+            mock_output=mock_output,
+            mock_presets=mock_presets,
             wait_timeout=wait_timeout,
             interval=interval,
             json_output=json_output,
@@ -273,8 +270,8 @@ def _run_task_pool(
     timeout: float,
     max_retries: int,
     capabilities: frozenset[str] | None,
-    worker_id: str | None,
-    lease_seconds: int,
+    mock_output: str | None,
+    mock_presets: tuple[str, ...],
     wait_timeout: float,
     interval: float,
     json_output: bool,
@@ -291,11 +288,46 @@ def _run_task_pool(
         )
     except ValueError as e:
         raise click.ClickException(str(e))
-    claim_worker_id = worker_id or getattr(worker, "worker_id", "cli-worker")
+    if mock_output is not None or mock_presets:
+        if worker_kind != "mock":
+            raise click.ClickException(
+                "--mock-output/--mock-preset requires --worker mock"
+            )
+        set_output = getattr(worker, "set_output", None)
+        if set_output is not None:
+            if mock_output is not None:
+                for contract in store.get_all_contracts():
+                    set_output(contract.name, mock_output)
+            for preset in mock_presets:
+                name, sep, output = preset.partition("=")
+                if sep != "=" or not name:
+                    raise click.ClickException(
+                        "--mock-preset must use contract_name=raw_output"
+                    )
+                set_output(name, output)
     deadline = time.monotonic() + wait_timeout
     cycles: list[dict] = []
 
     while True:
+        before_trace_count = len(getattr(store, "get_all", lambda: [])())
+        engine = Engine.restore_from_store(
+            store=store,
+            worker=worker,
+            trace_store=store,
+            method_registry=_default_method_registry(),
+        )
+        engine.run()
+        after_entries = getattr(store, "get_all", lambda: [])()
+        new_entries = after_entries[before_trace_count:]
+        touched_contracts = sorted({entry.contract_id for entry in new_entries})
+        if touched_contracts:
+            cycles.append(
+                {
+                    "contracts": touched_contracts,
+                    "trace_events": len(new_entries),
+                }
+            )
+
         if target_task_id:
             target = store.get_contract(target_task_id)
             if target is None:
@@ -316,49 +348,26 @@ def _run_task_pool(
                 _emit_run_result(status, json_output)
                 return
 
-        claimed = claim_next_package(
-            store,
-            worker_id=claim_worker_id,
-            lease_seconds=lease_seconds,
-        )
-        if claimed is None:
-            if not target_task_id:
-                _emit_run_result(
-                    {
-                        "ok": True,
-                        "status": "idle",
-                        "cycles": cycles,
-                    },
-                    json_output,
-                )
-                return
-            if time.monotonic() >= deadline:
-                status = project_task_status(target, store)
-                status["ok"] = False
-                status["timed_out"] = True
-                status["cycles"] = cycles
-                _emit_run_result(status, json_output)
-                return
-            time.sleep(max(interval, 0.05))
-            store = _persistent_store()
-            continue
-
-        result = execute_claimed_package(claimed, worker, store)
-        cycles.append(
-            {
-                "contract_id": claimed.contract.id,
-                "contract_name": claimed.contract.name,
-                "status": result.get("status"),
-                "accepted_count": len(result.get("accepted_assets", [])),
-                "rejected_count": len(result.get("rejected_candidates", [])),
-            }
-        )
         if not target_task_id:
-            result = dict(result)
-            result["ok"] = result.get("status") in {"accepted", "partial"}
-            result["cycles"] = cycles
-            _emit_run_result(result, json_output)
+            _emit_run_result(
+                {
+                    "ok": True,
+                    "status": "ran",
+                    "cycles": cycles,
+                },
+                json_output,
+            )
             return
+
+        if time.monotonic() >= deadline or not new_entries:
+            status = project_task_status(target, store)
+            status["ok"] = status["status"] == "completed"
+            if not status["terminal"]:
+                status["timed_out"] = time.monotonic() >= deadline
+            status["cycles"] = cycles
+            _emit_run_result(status, json_output)
+            return
+        time.sleep(max(interval, 0.05))
         store = _persistent_store()
 
 
