@@ -291,9 +291,7 @@ class TestSensitiveInputPolicy:
         from aigineering.core.ids import hash_asset_definition
 
         store = MemoryStore()
-        store.add_asset(
-            _make_asset("bad_asset", "content", trust_tier="banana_tier")
-        )
+        store.add_asset(_make_asset("bad_asset", "content", trust_tier="banana_tier"))
         def_hash = hash_asset_definition("bad_asset")
 
         contract = Contract(

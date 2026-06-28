@@ -138,12 +138,12 @@ class ProjectionStatus(Enum):
 
 # Legacy alias table — maps pre-unification tier names to canonical members.
 _TRUST_TIER_LEGACY = {
-    "low": 0,        # TrustTier.UNTRUSTED
-    "medium": 2,     # TrustTier.CONFIGURED
-    "high": 3,       # TrustTier.VERIFIED
-    "worker": 0,     # TrustTier.UNTRUSTED
-    "tool": 2,       # TrustTier.CONFIGURED
-    "trusted": 3,    # TrustTier.VERIFIED
+    "low": 0,  # TrustTier.UNTRUSTED
+    "medium": 2,  # TrustTier.CONFIGURED
+    "high": 3,  # TrustTier.VERIFIED
+    "worker": 0,  # TrustTier.UNTRUSTED
+    "tool": 2,  # TrustTier.CONFIGURED
+    "trusted": 3,  # TrustTier.VERIFIED
 }
 
 

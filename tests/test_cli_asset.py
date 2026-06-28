@@ -33,8 +33,12 @@ class TestAssetAdd:
             result = runner.invoke(
                 cli,
                 [
-                    "asset", "add", "--name", "from_file",
-                    "--content-file", str(content_file),
+                    "asset",
+                    "add",
+                    "--name",
+                    "from_file",
+                    "--content-file",
+                    str(content_file),
                 ],
             )
             assert result.exit_code == 0, result.output
@@ -50,8 +54,12 @@ class TestAssetAdd:
             result = runner.invoke(
                 cli,
                 [
-                    "asset", "add", "--name", "json_asset",
-                    "--content-json", str(json_file),
+                    "asset",
+                    "add",
+                    "--name",
+                    "json_asset",
+                    "--content-json",
+                    str(json_file),
                 ],
             )
             assert result.exit_code == 0, result.output
@@ -67,8 +75,12 @@ class TestAssetAdd:
             result = runner.invoke(
                 cli,
                 [
-                    "asset", "add", "--name", "bad",
-                    "--content-json", str(json_file),
+                    "asset",
+                    "add",
+                    "--name",
+                    "bad",
+                    "--content-json",
+                    str(json_file),
                 ],
             )
             assert result.exit_code != 0
@@ -97,9 +109,14 @@ class TestAssetAdd:
             result = runner.invoke(
                 cli,
                 [
-                    "asset", "add", "--name", "conflict",
-                    "--content-file", str(txt),
-                    "--content-json", str(json_file),
+                    "asset",
+                    "add",
+                    "--name",
+                    "conflict",
+                    "--content-file",
+                    str(txt),
+                    "--content-json",
+                    str(json_file),
                 ],
             )
             assert result.exit_code != 0
@@ -115,9 +132,14 @@ class TestAssetAdd:
             result = runner.invoke(
                 cli,
                 [
-                    "asset", "add", "--name", "conflict",
-                    "--content", "inline",
-                    "--content-file", str(txt),
+                    "asset",
+                    "add",
+                    "--name",
+                    "conflict",
+                    "--content",
+                    "inline",
+                    "--content-file",
+                    str(txt),
                 ],
             )
             assert result.exit_code != 0
@@ -153,10 +175,16 @@ class TestAssetAdd:
             result = runner.invoke(
                 cli,
                 [
-                    "asset", "add", "--name", "trusted",
-                    "--content", "data",
-                    "--origin", "admin",
-                    "--trust-tier", "verified",
+                    "asset",
+                    "add",
+                    "--name",
+                    "trusted",
+                    "--content",
+                    "data",
+                    "--origin",
+                    "admin",
+                    "--trust-tier",
+                    "verified",
                 ],
             )
             assert result.exit_code == 0, result.output
@@ -169,8 +197,12 @@ class TestAssetAdd:
             result = runner.invoke(
                 cli,
                 [
-                    "asset", "add", "--name", "secret",
-                    "--content", "secret_data",
+                    "asset",
+                    "add",
+                    "--name",
+                    "secret",
+                    "--content",
+                    "secret_data",
                     "--no-promptable",
                 ],
             )
@@ -200,12 +232,8 @@ class TestAssetList:
         """aig asset ls shows injected assets."""
         runner = CliRunner()
         with runner.isolated_filesystem():
-            runner.invoke(
-                cli, ["asset", "add", "--name", "alpha", "--content", "a"]
-            )
-            runner.invoke(
-                cli, ["asset", "add", "--name", "beta", "--content", "b"]
-            )
+            runner.invoke(cli, ["asset", "add", "--name", "alpha", "--content", "a"])
+            runner.invoke(cli, ["asset", "add", "--name", "beta", "--content", "b"])
             result = runner.invoke(cli, ["asset", "ls"])
             assert result.exit_code == 0
             assert "alpha" in result.output
@@ -215,9 +243,7 @@ class TestAssetList:
         """aig asset ls --json returns valid JSON array."""
         runner = CliRunner()
         with runner.isolated_filesystem():
-            runner.invoke(
-                cli, ["asset", "add", "--name", "x", "--content", "y"]
-            )
+            runner.invoke(cli, ["asset", "add", "--name", "x", "--content", "y"])
             result = runner.invoke(cli, ["asset", "ls", "--json"])
             assert result.exit_code == 0
             data = json.loads(result.output)
@@ -233,9 +259,7 @@ class TestAssetShow:
         """aig asset show <name> displays metadata and content."""
         runner = CliRunner()
         with runner.isolated_filesystem():
-            runner.invoke(
-                cli, ["asset", "add", "--name", "foo", "--content", "bar"]
-            )
+            runner.invoke(cli, ["asset", "add", "--name", "foo", "--content", "bar"])
             result = runner.invoke(cli, ["asset", "show", "foo"])
             assert result.exit_code == 0
             assert "name:            foo" in result.output
@@ -254,9 +278,7 @@ class TestAssetShow:
         """aig asset show <name> --json returns valid JSON."""
         runner = CliRunner()
         with runner.isolated_filesystem():
-            runner.invoke(
-                cli, ["asset", "add", "--name", "foo", "--content", "bar"]
-            )
+            runner.invoke(cli, ["asset", "add", "--name", "foo", "--content", "bar"])
             result = runner.invoke(cli, ["asset", "show", "foo", "--json"])
             assert result.exit_code == 0
             data = json.loads(result.output)
@@ -274,9 +296,7 @@ class TestAssetShow:
         """aig asset show --json output is parseable as valid JSON."""
         runner = CliRunner()
         with runner.isolated_filesystem():
-            runner.invoke(
-                cli, ["asset", "add", "--name", "foo", "--content", "bar"]
-            )
+            runner.invoke(cli, ["asset", "add", "--name", "foo", "--content", "bar"])
             result = runner.invoke(cli, ["asset", "show", "foo", "--json"])
             assert result.exit_code == 0
             json.loads(result.output)  # does not raise
@@ -326,8 +346,7 @@ class TestAssetVersionWorkflow:
             store = SQLiteStore(".aig/store.db")
             injected = store.get_by_event_type("asset_injected")
             assert any(
-                e.relation_type == "asset_slice"
-                and e.relation_target == "doc.middle"
+                e.relation_type == "asset_slice" and e.relation_target == "doc.middle"
                 for e in injected
             )
 

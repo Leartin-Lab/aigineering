@@ -131,18 +131,8 @@ def contract_show(contract_id: str, as_json: bool) -> None:
 @contract_group.command("run")
 @click.argument("contract_id")
 def contract_run(contract_id: str) -> None:
-    """Execute a contract through the Engine (requires a worker)."""
-    from aigineering.agent.mock import MockWorker
-    from aigineering.core.engine import Engine
-
-    store = _persistent_store()
-    contract = store.get_contract(contract_id)
-    if contract is None:
-        raise click.ClickException(f"No contract with id '{contract_id}'")
-
-    worker = MockWorker()
-    engine = Engine(store=store, worker=worker, trace_store=store)
-    engine.add_contract(contract)
-    engine.run()
-
-    click.echo(f"Contract {contract_id[:20]}... completed.")
+    """Deprecated direct execution entry."""
+    raise click.ClickException(
+        "aig contract run is deprecated. Use 'aig run --task "
+        f"{contract_id} --worker <mock|llm>' or 'aig run --once'."
+    )

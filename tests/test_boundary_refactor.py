@@ -47,9 +47,7 @@ class TestParentCompletionByAssets:
         engine = Engine(store, worker, trace_store)
 
         parent = Contract(
-            id=hash_contract(
-                "parent_task", "", [], ["report"], "", 3, [], [], "human"
-            ),
+            id=hash_contract("parent_task", "", [], ["report"], "", 3, [], [], "human"),
             name="parent_task",
             inputs=[],
             outputs=["report"],
@@ -119,9 +117,7 @@ class TestParentCompletionByAssets:
         complete_events = [
             e for e in trace_store.get_all() if e.event_type == "complete"
         ]
-        parent_complete = [
-            e for e in complete_events if e.contract_id == parent.id
-        ]
+        parent_complete = [e for e in complete_events if e.contract_id == parent.id]
         assert len(parent_complete) >= 1, (
             f"Parent {parent.id} should complete after 'final_report' "
             f"was injected externally."
@@ -145,9 +141,15 @@ class TestTaskIdentityParentCollision:
         from aigineering.core.ids import hash_contract_v2
 
         kwargs = dict(
-            name="child_work", description="do work",
-            inputs=["input_x"], outputs=["output_y"], activation="input_x",
-            budget=3, tool_scope=["read"], labels=["label1"], origin="human",
+            name="child_work",
+            description="do work",
+            inputs=["input_x"],
+            outputs=["output_y"],
+            activation="input_x",
+            budget=3,
+            tool_scope=["read"],
+            labels=["label1"],
+            origin="human",
         )
 
         cid_under_parent_a = hash_contract_v2(**kwargs, parent_id="parent_aaa")
@@ -176,7 +178,15 @@ class TestTaskIdentityParentCollision:
         from aigineering.core.ids import hash_retry
 
         original_id = hash_contract(
-            "retry_test", "", [], ["out"], "", 3, [], [], "human",
+            "retry_test",
+            "",
+            [],
+            ["out"],
+            "",
+            3,
+            [],
+            [],
+            "human",
         )
         retry_id = hash_retry(original_id)
 
@@ -233,9 +243,7 @@ class TestClaimLifecycleMonotonicity:
 
         # Contract still cannot be re-claimed
         claim2 = store.claim("contract_y", "worker_2", lease_seconds=60)
-        assert claim2 is None, (
-            "Submitted claim should still prevent re-claiming"
-        )
+        assert claim2 is None, "Submitted claim should still prevent re-claiming"
 
 
 # ============================================================================
@@ -272,7 +280,15 @@ class TestProtectedAssetMinting:
         with pytest.raises(ValueError, match="reserved"):
             Contract(
                 id=hash_contract(
-                    "bad", "", [], [reserved_name], "", 3, [], [], "human",
+                    "bad",
+                    "",
+                    [],
+                    [reserved_name],
+                    "",
+                    3,
+                    [],
+                    [],
+                    "human",
                 ),
                 name="bad",
                 inputs=[],
@@ -297,7 +313,15 @@ class TestProtectedAssetMinting:
 
         contract = Contract(
             id=hash_contract(
-                "worker_test", "", [], ["_tool_obs_test"], "", 3, [], [], "human",
+                "worker_test",
+                "",
+                [],
+                ["_tool_obs_test"],
+                "",
+                3,
+                [],
+                [],
+                "human",
             ),
             name="worker_test",
             inputs=[],
@@ -375,9 +399,7 @@ class TestObservationNotOutputSatisfaction:
         engine = Engine(store, worker, trace_store)
 
         contract = Contract(
-            id=hash_contract(
-                "obs_test", "", [], ["report"], "", 1, [], [], "human"
-            ),
+            id=hash_contract("obs_test", "", [], ["report"], "", 1, [], [], "human"),
             name="obs_test",
             inputs=[],
             outputs=["report"],
@@ -429,13 +451,15 @@ class TestDirectWriteBan:
     """
 
     # Modules allowed to call add_asset/add_contract directly.
-    _ALLOWED: frozenset[str] = frozenset({
-        "store.py",
-        "sqlite_store.py",
-        "runtime_transaction.py",
-        "runtime_ingress.py",
-        "idempotency_store.py",
-    })
+    _ALLOWED: frozenset[str] = frozenset(
+        {
+            "store.py",
+            "sqlite_store.py",
+            "runtime_transaction.py",
+            "runtime_ingress.py",
+            "idempotency_store.py",
+        }
+    )
 
     def test_no_direct_store_write_in_production(self):
         """Scan src/aigineering/ for direct store.write calls in production
@@ -472,19 +496,16 @@ class TestDirectWriteBan:
                                 inner = node.func.value.attr
                                 if inner in ("_store", "store"):
                                     violations.append(
-                                        f"{rel}:{node.lineno}"
-                                        f"  {method_name}()"
+                                        f"{rel}:{node.lineno}  {method_name}()"
                                     )
                             elif isinstance(node.func.value, ast.Name):
                                 inner = node.func.value.id
                                 if inner in ("store", "_store"):
                                     violations.append(
-                                        f"{rel}:{node.lineno}"
-                                        f"  {method_name}()"
+                                        f"{rel}:{node.lineno}  {method_name}()"
                                     )
 
         assert len(violations) == 0, (
             f"Direct store writes found outside allowlist "
-            f"({sorted(self._ALLOWED)}):\n"
-            + "\n".join(f"  - {v}" for v in violations)
+            f"({sorted(self._ALLOWED)}):\n" + "\n".join(f"  - {v}" for v in violations)
         )

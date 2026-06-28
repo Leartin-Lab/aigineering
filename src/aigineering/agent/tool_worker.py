@@ -53,7 +53,9 @@ class ToolWorker:
         """
         payload = method_payload(contract)
         tool_payload = (
-            payload.get("payload", {}) if isinstance(payload.get("payload"), dict) else {}
+            payload.get("payload", {})
+            if isinstance(payload.get("payload"), dict)
+            else {}
         )
         tool_name = tool_payload.get("name", "")
         args = tool_payload.get("args", {})

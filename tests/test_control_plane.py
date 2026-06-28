@@ -1,10 +1,15 @@
 """Tests for control-plane asset injection."""
+
 import json
 
 import pytest
 
 from aigineering.core.authority import RESERVED_PREFIXES
-from aigineering.core.control_plane import inject_asset, inject_contract, _is_protected_name
+from aigineering.core.control_plane import (
+    inject_asset,
+    inject_contract,
+    _is_protected_name,
+)
 from aigineering.core.ids import hash_asset_definition, hash_asset_content
 from aigineering.core.runtime_ingress import RuntimeIngress
 from aigineering.core.store import MemoryStore
@@ -21,7 +26,9 @@ class TestInjectAsset:
         trace = MemoryTraceStore()
         ingress = _make_ingress(store, trace)
 
-        asset = inject_asset(store, trace, name="data_file", content="hello world", ingress=ingress)
+        asset = inject_asset(
+            store, trace, name="data_file", content="hello world", ingress=ingress
+        )
 
         assert asset.name == "data_file"
         assert asset.content == "hello world"
@@ -47,11 +54,15 @@ class TestInjectAsset:
         ingress = _make_ingress(store, trace)
 
         asset = inject_asset(
-            store, trace,
-            name="config", content="{}",
-            origin="imported", trust_tier="configured",
+            store,
+            trace,
+            name="config",
+            content="{}",
+            origin="imported",
+            trust_tier="configured",
             source_uri="file://config.json",
-            promptable=False, content_type="application/json",
+            promptable=False,
+            content_type="application/json",
             ingress=ingress,
         )
 
@@ -66,7 +77,12 @@ class TestInjectAsset:
         trace = MemoryTraceStore()
         ingress = _make_ingress(store, trace)
 
-        for name in ("_sys_secret", "_tool_obs_lookup", "_mcp_filesystem", "_skill_review"):
+        for name in (
+            "_sys_secret",
+            "_tool_obs_lookup",
+            "_mcp_filesystem",
+            "_skill_review",
+        ):
             with pytest.raises(ValueError, match="protected prefix"):
                 inject_asset(store, trace, name=name, content="test", ingress=ingress)
 
@@ -76,8 +92,10 @@ class TestInjectAsset:
         ingress = _make_ingress(store, trace)
 
         asset = inject_asset(
-            store, trace,
-            name="_sys_admin_config", content="admin",
+            store,
+            trace,
+            name="_sys_admin_config",
+            content="admin",
             allow_protected=True,
             ingress=ingress,
         )
@@ -109,7 +127,9 @@ class TestInjectAsset:
         trace = MemoryTraceStore()
         ingress = _make_ingress(store, trace)
 
-        asset = inject_asset(store, trace, name="doc", content="important data", ingress=ingress)
+        asset = inject_asset(
+            store, trace, name="doc", content="important data", ingress=ingress
+        )
 
         expected_hash = hash_asset_content("doc", "important data")
         assert asset.content_hash == expected_hash
@@ -121,9 +141,12 @@ class TestInjectAsset:
         ingress = _make_ingress(store, trace)
 
         inject_asset(
-            store, trace,
-            name="audit_test", content="data",
-            origin="imported", trust_tier="configured",
+            store,
+            trace,
+            name="audit_test",
+            content="data",
+            origin="imported",
+            trust_tier="configured",
             ingress=ingress,
         )
 
@@ -136,7 +159,9 @@ class TestInjectAsset:
         audit = json.loads(entry.accepted_fragments[0])
         assert "asset_id" in audit
         assert audit.get("origin") == "imported" or audit.get("origin") is None
-        assert audit.get("trust_tier") == "configured" or audit.get("trust_tier") is None
+        assert (
+            audit.get("trust_tier") == "configured" or audit.get("trust_tier") is None
+        )
 
     def test_trace_ids_are_unique(self):
         """Each trace entry must have a unique ID (no collisions from duplicate sequence)."""
@@ -147,8 +172,10 @@ class TestInjectAsset:
         inject_asset(store, trace, name="alpha", content="a", ingress=ingress)
         inject_asset(store, trace, name="beta", content="b", ingress=ingress)
         inject_asset(
-            store, trace,
-            name="_sys_override", content="c",
+            store,
+            trace,
+            name="_sys_override",
+            content="c",
             allow_protected=True,
             ingress=ingress,
         )
@@ -228,7 +255,8 @@ class TestInjectContract:
         trace = MemoryTraceStore()
         ingress = _make_ingress(store, trace)
         contract = inject_contract(
-            store, trace,
+            store,
+            trace,
             name="build_report",
             inputs=("data_file",),
             outputs=("final_report",),
@@ -248,14 +276,17 @@ class TestInjectContract:
         ingress = _make_ingress(store, trace)
         for output in ("_sys_config", "_mcp_filesystem", "_skill_review"):
             with pytest.raises(ValueError, match="protected"):
-                inject_contract(store, trace, name="bad", outputs=(output,), ingress=ingress)
+                inject_contract(
+                    store, trace, name="bad", outputs=(output,), ingress=ingress
+                )
 
     def test_protected_output_allowed_with_override(self):
         store = MemoryStore()
         trace = MemoryTraceStore()
         ingress = _make_ingress(store, trace)
         contract = inject_contract(
-            store, trace,
+            store,
+            trace,
             name="admin",
             outputs=("_sys_config",),
             allow_protected_outputs=True,
@@ -275,6 +306,10 @@ class TestInjectContract:
         store = MemoryStore()
         trace = MemoryTraceStore()
         ingress = _make_ingress(store, trace)
-        c1 = inject_contract(store, trace, name="foo", outputs=("x",), budget=3, ingress=ingress)
-        c2 = inject_contract(store, trace, name="foo", outputs=("x",), budget=3, ingress=ingress)
+        c1 = inject_contract(
+            store, trace, name="foo", outputs=("x",), budget=3, ingress=ingress
+        )
+        c2 = inject_contract(
+            store, trace, name="foo", outputs=("x",), budget=3, ingress=ingress
+        )
         assert c1.id == c2.id

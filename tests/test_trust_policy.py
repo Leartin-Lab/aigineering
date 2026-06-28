@@ -1,13 +1,16 @@
 """Tests for the unified TrustPolicy engine."""
+
 import pytest
 from aigineering.core.trust_policy import TrustDecision, TrustPolicy
 from aigineering.protocol.types import Asset, TrustTier
 
 
-def _asset(name="test_asset", trust_tier="untrusted", signed_by="",
-           origin="", labels=None):
+def _asset(
+    name="test_asset", trust_tier="untrusted", signed_by="", origin="", labels=None
+):
     """Helper to create a minimal Asset for trust policy tests."""
     from aigineering.core.ids import hash_asset_definition, hash_asset_content
+
     content = f"content of {name}"
     def_hash = hash_asset_definition(name)
     cont_hash = hash_asset_content(name, content)
@@ -100,11 +103,13 @@ class TestTrustPolicyEvaluate:
 
 class TestTrustPolicyFromConfig:
     def test_full_config(self):
-        policy = TrustPolicy.from_config({
-            "minimum_trust_tier": "verified",
-            "allowed_signers": ["alice"],
-            "reserved_prefixes": ["_sys_"],
-        })
+        policy = TrustPolicy.from_config(
+            {
+                "minimum_trust_tier": "verified",
+                "allowed_signers": ["alice"],
+                "reserved_prefixes": ["_sys_"],
+            }
+        )
         assert policy.minimum_trust_tier == TrustTier.VERIFIED
         assert policy.allowed_signers == frozenset(["alice"])
         assert policy.reserved_prefixes == frozenset(["_sys_"])

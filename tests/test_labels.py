@@ -130,7 +130,9 @@ def test_behavior_label_injects_configured_behavior_asset():
     store.add_asset(behavior)
     contract = _contract(name="task", labels=["behavior:concise"], outputs=["result"])
 
-    result = resolve_contract_labels(contract, {}, store, ingress=RuntimeIngress(store, MemoryTraceStore()))
+    result = resolve_contract_labels(
+        contract, {}, store, ingress=RuntimeIngress(store, MemoryTraceStore())
+    )
 
     assert result.injected_assets == [behavior]
     assert result.placeholder_assets == []
@@ -149,7 +151,9 @@ def test_behavior_label_rejects_low_trust_behavior_asset():
     store.add_asset(low_trust)
     contract = _contract(name="task", labels=["behavior:unsafe"], outputs=["result"])
 
-    result = resolve_contract_labels(contract, {}, store, ingress=RuntimeIngress(store, MemoryTraceStore()))
+    result = resolve_contract_labels(
+        contract, {}, store, ingress=RuntimeIngress(store, MemoryTraceStore())
+    )
 
     assert low_trust not in result.injected_assets
     assert len(result.placeholder_assets) == 1

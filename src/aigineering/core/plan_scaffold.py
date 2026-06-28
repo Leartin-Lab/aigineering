@@ -188,7 +188,9 @@ def _dict_to_scaffold(d: dict, has_final_contracts: bool) -> PlanScaffold:
     return PlanScaffold(
         reason=str(d.get("reason", "")),
         goal_outline=str(d.get("goal_outline", "")),
-        intermediate_assets=tuple(str(s) for s in intermediate_raw if isinstance(s, str)),
+        intermediate_assets=tuple(
+            str(s) for s in intermediate_raw if isinstance(s, str)
+        ),
         step_1_tasks=tasks,
         step_2_data_flow=data_flows,
         step_3_activation=activations,
@@ -249,7 +251,9 @@ def validate_plan_scaffold(
     act_map = {a.task_name: a for a in scaffold.step_3_activation}
 
     # --- Collect the declared universe of asset names ---
-    parent_outputs: set[str] = set(parent_contract.outputs) if parent_contract else set()
+    parent_outputs: set[str] = (
+        set(parent_contract.outputs) if parent_contract else set()
+    )
     parent_inputs: set[str] = set(parent_contract.inputs) if parent_contract else set()
     intermediate_set: set[str] = set(scaffold.intermediate_assets)
     sibling_outputs: set[str] = set()
@@ -270,9 +274,7 @@ def validate_plan_scaffold(
 
         # Protected output names
         violated = [
-            o
-            for o in produces
-            if any(o.startswith(p) for p in _PLAN_RESERVED_PREFIXES)
+            o for o in produces if any(o.startswith(p) for p in _PLAN_RESERVED_PREFIXES)
         ]
         if violated:
             errors.append(
@@ -305,9 +307,7 @@ def validate_plan_scaffold(
             )
 
         # Activation reachability: every activation dependency must be declared
-        missing_activation_deps = (
-            set(activation_deps) - all_provided - set(produces)
-        )
+        missing_activation_deps = set(activation_deps) - all_provided - set(produces)
         if missing_activation_deps:
             errors.append(
                 {
@@ -523,9 +523,7 @@ def contracts_from_scaffold(
                 {"contracts": list(scaffold.final_contracts)}, sort_keys=True
             )
             temp_asset = _temp_asset(temp_content)
-            return contracts_from_plan_asset(
-                temp_asset, parent_id, parent_contract
-            )
+            return contracts_from_plan_asset(temp_asset, parent_id, parent_contract)
         return [], []
 
     # Build raw contract dicts from scaffold tasks

@@ -140,8 +140,10 @@ class TestContractShow:
         runner = CliRunner()
         with runner.isolated_filesystem():
             add_result = _add_contract(
-                runner, "show_ct",
-                inputs=("in_a",), outputs=("out_a",),
+                runner,
+                "show_ct",
+                inputs=("in_a",),
+                outputs=("out_a",),
             )
             assert add_result.exit_code == 0
             # Extract contract ID from output
@@ -160,7 +162,8 @@ class TestContractShow:
         runner = CliRunner()
         with runner.isolated_filesystem():
             result = runner.invoke(
-                cli, ["contract", "show", "nonexistent123"],
+                cli,
+                ["contract", "show", "nonexistent123"],
             )
             assert result.exit_code != 0
             assert "No contract with id" in result.output
@@ -170,9 +173,12 @@ class TestContractShow:
         runner = CliRunner()
         with runner.isolated_filesystem():
             add_result = _add_contract(
-                runner, "json_show_ct",
-                inputs=("in",), outputs=("out",),
-                labels=("l1",), tool_scope=("t1",),
+                runner,
+                "json_show_ct",
+                inputs=("in",),
+                outputs=("out",),
+                labels=("l1",),
+                tool_scope=("t1",),
             )
             assert add_result.exit_code == 0
             cid = add_result.output.strip().split()[-1].strip("()")
@@ -193,30 +199,10 @@ class TestContractShow:
 class TestContractRun:
     """Tests for aig contract run."""
 
-    def test_run_build_report(self):
-        """aig contract run executes a contract through the engine."""
+    def test_contract_run_is_deprecated(self):
+        """aig contract run is not the agent-facing execution path."""
         runner = CliRunner()
         with runner.isolated_filesystem():
-            # Add input assets so contract activation is satisfied
-            runner.invoke(
-                cli,
-                ["asset", "add", "--name", "data_file", "--content", "sample data"],
-            )
-            runner.invoke(
-                cli,
-                ["asset", "add", "--name", "citation_db", "--content", "citations"],
-            )
-            # Add contract named "build_report" matching mock preset
-            add_result = _add_contract(
-                runner,
-                "build_report",
-                inputs=("data_file", "citation_db"),
-                outputs=("final_report",),
-                activation="data_file AND citation_db",
-            )
-            assert add_result.exit_code == 0
-            cid = add_result.output.strip().split()[-1].strip("()")
-
-            result = runner.invoke(cli, ["contract", "run", cid])
-            assert result.exit_code == 0
-            assert "completed" in result.output
+            result = runner.invoke(cli, ["contract", "run", "contract_x"])
+            assert result.exit_code != 0
+            assert "deprecated" in result.output

@@ -227,8 +227,9 @@ def check_sensitive_input_policy(
             # Existential semantics: at least ONE input asset must satisfy
             # signer and tier requirements (matching pre-TrustPolicy behaviour).
             if trust_policy.allowed_signers is not None:
-                if not any(a.signed_by in trust_policy.allowed_signers
-                           for a in input_assets):
+                if not any(
+                    a.signed_by in trust_policy.allowed_signers for a in input_assets
+                ):
                     violations.append(
                         f"required_signer '{effective_policy.get('required_signer', '')}' "
                         f"has not signed any input asset of contract '{contract.id}'"

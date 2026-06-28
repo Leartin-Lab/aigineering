@@ -93,7 +93,6 @@ class FactReducerEvent:
 _is_business_output = is_business_output
 
 
-
 class FactReducer:
     """Deterministic projection of asset facts into structured events.
 

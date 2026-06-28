@@ -1,0 +1,97 @@
+# Aigineering CLI Gateway
+
+Use this skill when a task needs an auditable, recoverable execution result
+instead of an unstructured chat answer. Aigineering manages tasks, assets,
+candidate outputs, trace records, and declared-output commitment boundaries.
+
+## When To Use
+
+Use Aigineering for:
+
+- ADR or boundary reviews that should return a durable report.
+- Long-running planning, replanning, or recovery tasks.
+- Release readiness checks that need traceable inputs and outputs.
+- Any task where the result should be a committed asset with an audit trail.
+
+Do not use Aigineering as a shell sandbox. Worker sandboxing is a worker
+execution policy; Aigineering's boundary is candidate-to-fact commitment.
+
+## Core Flow
+
+1. Add input assets.
+
+```bash
+aig asset add --name adr_005 --content-file docs/adr/ADR-005-unified-feature-ingress.md --json
+```
+
+2. Create a task with declared outputs.
+
+```bash
+aig task create \
+  --name boundary_review \
+  --description "Review the implementation against ADR-005." \
+  --input adr_005 \
+  --output boundary_report \
+  --label review \
+  --json
+```
+
+3. Run a CLI worker until the task reaches a terminal status.
+
+```bash
+aig run --task <contract_id> --worker llm --model <model> --json
+```
+
+For deterministic local checks, use mock explicitly:
+
+```bash
+aig run --once --worker mock --json
+```
+
+4. Read the committed output asset.
+
+```bash
+aig asset show boundary_report --json
+```
+
+5. Read the audit projection.
+
+```bash
+aig task audit <contract_id> --json
+```
+
+## Command Contract
+
+Prefer these commands:
+
+- `aig asset add/show/ls --json`
+- `aig task create/status/wait/audit --json`
+- `aig run --once --worker <mock|llm> --json`
+- `aig run --task <contract_id> --worker <mock|llm> --json`
+- `aig worker next/submit --json` only when implementing a custom worker loop.
+
+Avoid these commands for normal agent delegation:
+
+- `aig demo`: quickstart only.
+- `aig contract run`: deprecated direct execution entry.
+- Direct store writes or scripts that mutate `.aig/store.db`.
+
+## Interpretation Rules
+
+- Treat `status: completed` with declared outputs as the normal success case.
+- Treat `failed`, `cancelled`, and `unreachable` as terminal failures.
+- Treat `blocked`, `ready`, `waiting`, and `submitted` as non-terminal states.
+- Do not claim a task is complete unless `task status` or `run --task` reports
+  terminal completion and the expected output asset exists.
+- If `rejection_count` is nonzero, read `task audit` before trusting the result.
+- If `run --task` times out, report the timeout and current projected status.
+
+## Boundary Rules
+
+- Worker output is a candidate, not a fact.
+- Only declared task outputs can become committed facts.
+- Labels select context/asset injection; labels do not grant business authority.
+- A claimed/submitted task must not be returned to an unclaimed state. Recovery
+  or retry must create a new task.
+- Parent task completion is based on declared output satisfaction, not on all
+  child tasks finishing.

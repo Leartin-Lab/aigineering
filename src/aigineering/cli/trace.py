@@ -218,10 +218,7 @@ def _build_contract_tree(
     for e in entries:
         if e.event_type == "method_scheduled" and e.relation_target:
             child_parent[e.relation_target] = e.contract_id
-        elif (
-            e.event_type == "method_continuation_scheduled"
-            and e.relation_target
-        ):
+        elif e.event_type == "method_continuation_scheduled" and e.relation_target:
             child_parent[e.relation_target] = e.contract_id
         elif e.event_type == "contracts_expanded" and e.relation_target:
             for child_id in e.relation_target.replace(",", " ").split():
@@ -385,10 +382,7 @@ def _build_contract_dag(
             if edge not in seen:
                 edges.append(edge)
                 seen.add(edge)
-        elif (
-            e.event_type == "method_continuation_scheduled"
-            and e.relation_target
-        ):
+        elif e.event_type == "method_continuation_scheduled" and e.relation_target:
             edge = (
                 e.contract_id,
                 f"{e.relation_type or 'method'}:continuation",

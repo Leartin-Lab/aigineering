@@ -40,8 +40,12 @@ class TestConcurrentClaims:
         db_path = str(tmp_path / "aig_c1.db")
         # Set up contracts in main thread store
         setup_store = SQLiteStore(db_path)
-        setup_store.add_contract(Contract(id="task:a", name="task_a", outputs=("out",), activation=""))
-        setup_store.add_contract(Contract(id="task:b", name="task_b", outputs=("out",), activation=""))
+        setup_store.add_contract(
+            Contract(id="task:a", name="task_a", outputs=("out",), activation="")
+        )
+        setup_store.add_contract(
+            Contract(id="task:b", name="task_b", outputs=("out",), activation="")
+        )
         setup_store.close()
 
         results = {}
@@ -72,14 +76,22 @@ class TestConcurrentClaims:
         t1.join(timeout=15)
         t2.join(timeout=15)
 
-        assert results.get("worker_a") == "claimed", f"Worker A: {results.get('worker_a')}"
-        assert results.get("worker_b") == "claimed", f"Worker B: {results.get('worker_b')}"
+        assert results.get("worker_a") == "claimed", (
+            f"Worker A: {results.get('worker_a')}"
+        )
+        assert results.get("worker_b") == "claimed", (
+            f"Worker B: {results.get('worker_b')}"
+        )
 
     def test_two_workers_claim_same_contract_one_fails(self, tmp_path):
         """Two workers claiming the same contract → only one succeeds."""
         db_path = str(tmp_path / "aig_c2.db")
         setup_store = SQLiteStore(db_path)
-        setup_store.add_contract(Contract(id="task:shared", name="shared_task", outputs=("out",), activation=""))
+        setup_store.add_contract(
+            Contract(
+                id="task:shared", name="shared_task", outputs=("out",), activation=""
+            )
+        )
         setup_store.close()
 
         results = {}
@@ -129,8 +141,11 @@ class TestConcurrentClaims:
         for i in range(10):
             cid = f"task:conc_{i}"
             c = Contract(
-                id=cid, name=f"task_{i}",
-                inputs=("shared_input",), outputs=("out",), activation="shared_input",
+                id=cid,
+                name=f"task_{i}",
+                inputs=("shared_input",),
+                outputs=("out",),
+                activation="shared_input",
             )
             setup_store.add_contract(c)
             claim = setup_store.claim_contract(cid, f"worker_{i}")
@@ -147,8 +162,10 @@ class TestConcurrentClaims:
                 from aigineering.core.trace import create_entry
 
                 entry = create_entry(
-                    contract_id=cid, event_type="projection",
-                    sequence=0, worker_id=f"worker_{i}",
+                    contract_id=cid,
+                    event_type="projection",
+                    sequence=0,
+                    worker_id=f"worker_{i}",
                 )
                 store.commit_candidate_submission(
                     accepted_assets=[_mk_asset(f"out_{i}", f"result_{i}")],
@@ -189,7 +206,9 @@ class TestConcurrentClaims:
         """Concurrent reads while writes are in progress do not deadlock (WAL mode)."""
         db_path = str(tmp_path / "aig_c4.db")
         setup_store = SQLiteStore(db_path)
-        setup_store.add_contract(Contract(id="task:r1", name="reader_test", outputs=("out",), activation=""))
+        setup_store.add_contract(
+            Contract(id="task:r1", name="reader_test", outputs=("out",), activation="")
+        )
         setup_store.add_asset(_mk_asset("reader_asset"))
         setup_store.close()
 

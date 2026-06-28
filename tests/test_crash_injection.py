@@ -64,7 +64,7 @@ class TestCrashAfterAssetBeforeTrace:
         store.close()
 
         # Subprocess: submit a candidate that triggers the crash
-        script = '''
+        script = """
 import os as _os
 from aigineering.core.runtime_ingress import RuntimeIngress
 from aigineering.core.sqlite_store import SQLiteStore
@@ -89,7 +89,7 @@ ingress = RuntimeIngress(store, store)
 result = submit_candidate(envelope, store, store, ingress=ingress)
 print("SUBMIT_RESULT", result)
 store.close()
-'''
+"""
 
         result = _run_crash_script("after_asset_before_trace", script, db_path)
 
@@ -103,15 +103,11 @@ store.close()
 
         # Since the transaction was rolled back, no assets from the candidate should exist
         assets = store2.get_assets_by_name("out")
-        assert len(assets) == 0, (
-            f"Expected 0 assets after rollback, got {len(assets)}"
-        )
+        assert len(assets) == 0, f"Expected 0 assets after rollback, got {len(assets)}"
 
         # Trace should also be empty for this contract
         traces = store2.get_trace_events("crash:task1")
-        assert len(traces) == 0, (
-            f"Expected 0 traces after rollback, got {len(traces)}"
-        )
+        assert len(traces) == 0, f"Expected 0 traces after rollback, got {len(traces)}"
 
         # Claim should still be active (not transitioned to submitted)
         claim2 = store2.get_claim("crash:task1")
@@ -141,7 +137,7 @@ class TestCrashAfterMethodSchedule:
 
         # Subprocess: Engine runs a contract, worker returns /plan, crash at
         # after_method_schedule (between method_scheduled and parent suspend)
-        script = '''
+        script = """
 import os as _os
 from aigineering.core.engine import Engine
 from aigineering.core.sqlite_store import SQLiteStore
@@ -165,7 +161,7 @@ c = Contract(
 engine.add_contract(c)
 engine.run()
 store.close()
-'''
+"""
 
         result = _run_crash_script("after_method_schedule", script, db_path)
         assert result.returncode == 1, (
@@ -184,8 +180,7 @@ store.close()
 
         # The child contract should exist (created by _schedule_method_contract before crash)
         child_contracts = [
-            c for c in store2.get_all_contracts()
-            if c.parent_id == "crash:plan1"
+            c for c in store2.get_all_contracts() if c.parent_id == "crash:plan1"
         ]
         assert len(child_contracts) >= 1, (
             f"Expected >= 1 child contract for parent crash:plan1, got {len(child_contracts)}"
@@ -197,8 +192,7 @@ store.close()
         # so it should not exist. But Engine.add_contract may add a budget_initialized trace.
         # We check that no budget_consumed with relation_type=plan exists.
         plan_budget = [
-            t for t in budget_consumed
-            if getattr(t, "relation_type", "") == "plan"
+            t for t in budget_consumed if getattr(t, "relation_type", "") == "plan"
         ]
         assert len(plan_budget) == 0, (
             f"Expected 0 plan budget_consumed traces (after crash point), got {len(plan_budget)}"
@@ -216,7 +210,7 @@ class TestCrashAfterChildComplete:
 
         # Subprocess: Engine runs a contract, worker returns /exec that completes,
         # crash at after_child_complete
-        script = '''
+        script = """
 import os as _os
 from aigineering.core.engine import Engine
 from aigineering.core.sqlite_store import SQLiteStore
@@ -240,7 +234,7 @@ c = Contract(
 engine.add_contract(c)
 engine.run()
 store.close()
-'''
+"""
 
         result = _run_crash_script("after_child_complete", script, db_path)
         assert result.returncode == 1, (
@@ -289,7 +283,7 @@ class TestDoubleCrashRecovery:
         store.close()
 
         # First crash: submit a candidate that triggers after_asset_before_trace
-        script1 = '''
+        script1 = """
 import os as _os
 from aigineering.core.runtime_ingress import RuntimeIngress
 from aigineering.core.sqlite_store import SQLiteStore
@@ -310,7 +304,7 @@ envelope = CandidateEnvelope(
 ingress = RuntimeIngress(store, store)
 submit_candidate(envelope, store, store, ingress=ingress)
 store.close()
-'''
+"""
 
         result1 = _run_crash_script("after_asset_before_trace", script1, db_path)
         assert result1.returncode == 1
@@ -324,7 +318,7 @@ store.close()
         store_r1.close()
 
         # Second crash: submit again (reuse same claim)
-        script2 = '''
+        script2 = """
 import os as _os
 from aigineering.core.runtime_ingress import RuntimeIngress
 from aigineering.core.sqlite_store import SQLiteStore
@@ -345,7 +339,7 @@ envelope = CandidateEnvelope(
 ingress = RuntimeIngress(store, store)
 submit_candidate(envelope, store, store, ingress=ingress)
 store.close()
-'''
+"""
 
         result2 = _run_crash_script("after_asset_before_trace", script2, db_path)
         assert result2.returncode == 1

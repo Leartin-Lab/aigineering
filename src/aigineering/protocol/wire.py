@@ -114,9 +114,7 @@ def trace_entry_to_dict(entry: TraceEntry) -> dict[str, Any]:
         "relation_target": entry.relation_target,
         "timestamp": entry.timestamp,
         "usage_metadata": (
-            dict(entry.usage_metadata)
-            if entry.usage_metadata is not None
-            else None
+            dict(entry.usage_metadata) if entry.usage_metadata is not None else None
         ),
     }
 

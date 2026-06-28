@@ -72,7 +72,9 @@ def _repl_loop() -> None:
         elif command == "capability":
             _dispatch(["capability"] + argv)
         else:
-            click.echo(f"Unknown command: /{command}. Type /help for available commands.")
+            click.echo(
+                f"Unknown command: /{command}. Type /help for available commands."
+            )
 
 
 def _dispatch(cli_args: list[str]) -> None:

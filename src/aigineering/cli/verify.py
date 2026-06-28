@@ -6,7 +6,10 @@ import click
 
 from aigineering.cli._common import _output_json, _persistent_store
 from aigineering.core.sufficiency import check_sufficiency
-from aigineering.core.verification import batch_verify_definition, verify_replacement_claims
+from aigineering.core.verification import (
+    batch_verify_definition,
+    verify_replacement_claims,
+)
 
 
 @click.group("verify")
@@ -56,7 +59,12 @@ def verify_hash(def_hash: str, json_output: bool) -> None:
 
 
 @verify.command("replacements")
-@click.option("--definition-hash", "def_hash", default=None, help="Filter claims by definition hash.")
+@click.option(
+    "--definition-hash",
+    "def_hash",
+    default=None,
+    help="Filter claims by definition hash.",
+)
 @click.option(
     "--json",
     "json_output",
@@ -77,9 +85,7 @@ def verify_replacements(def_hash: str | None, json_output: bool) -> None:
                 all_ids.update(
                     c.id for c in store.get_claims_by_definition(asset.definition_hash)
                 )
-            all_ids.update(
-                c.id for c in store.get_claims_for_asset(asset.id)
-            )
+            all_ids.update(c.id for c in store.get_claims_for_asset(asset.id))
         claims = []
         seen: set[str] = set()
         for asset in store.get_all_assets():
@@ -105,7 +111,9 @@ def verify_replacements(def_hash: str | None, json_output: bool) -> None:
         _output_json(result)
         return
 
-    click.echo(f"Replacement claims: {result['pass_count']} pass, {result['fail_count']} fail")
+    click.echo(
+        f"Replacement claims: {result['pass_count']} pass, {result['fail_count']} fail"
+    )
     for r in result["results"]:
         status = "✓" if r["valid"] else "✗"
         click.echo(f"  {status} {r['claim_id'][:32]}... ({r['claim_type']})")

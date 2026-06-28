@@ -17,12 +17,12 @@ from abc import ABC, abstractmethod
 # Abstract interfaces
 # ---------------------------------------------------------------------------
 
+
 class Signer(ABC):
     """Abstract signer: produces a signature string for arbitrary data."""
 
     @abstractmethod
-    def sign(self, data: bytes) -> str:
-        ...
+    def sign(self, data: bytes) -> str: ...
 
     @property
     @abstractmethod
@@ -41,13 +41,13 @@ class Verifier(ABC):
     """Abstract verifier: checks a signature against data and signer identity."""
 
     @abstractmethod
-    def verify(self, data: bytes, signature: str, signer_id: str) -> bool:
-        ...
+    def verify(self, data: bytes, signature: str, signer_id: str) -> bool: ...
 
 
 # ---------------------------------------------------------------------------
 # Deterministic signer (existing behaviour — not cryptographic)
 # ---------------------------------------------------------------------------
+
 
 class DeterministicSigner(Signer):
     """SHA-256 content-hash seal — NOT a public-key signature.
@@ -87,6 +87,7 @@ class DeterministicVerifier(Verifier):
 try:
     from cryptography.hazmat.primitives.asymmetric import ed25519
     from cryptography.hazmat.primitives import serialization
+
     _CRYPTO_AVAILABLE = True
 except ImportError:
     _CRYPTO_AVAILABLE = False
@@ -129,16 +130,14 @@ class Ed25519Verifier(Verifier):
 
     def verify(self, data: bytes, signature: str, signer_id: str) -> bool:
         if not _CRYPTO_AVAILABLE:
-            raise ImportError(
-                "Ed25519Verifier requires the 'cryptography' package."
-            )
+            raise ImportError("Ed25519Verifier requires the 'cryptography' package.")
         if not signature.startswith("ed25519:"):
             return False
         try:
             pub_key = ed25519.Ed25519PublicKey.from_public_bytes(
                 bytes.fromhex(signer_id)
             )
-            raw_sig = base64.b64decode(signature[len("ed25519:"):])
+            raw_sig = base64.b64decode(signature[len("ed25519:") :])
             pub_key.verify(raw_sig, data)
             return True
         except Exception:

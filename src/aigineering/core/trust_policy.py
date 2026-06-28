@@ -23,6 +23,7 @@ class TrustDecision:
         accepted: True if all evaluated dimensions pass.
         reasons: Human-readable reasons for rejection (empty if accepted).
     """
+
     accepted: bool
     reasons: frozenset[str] = field(default_factory=frozenset)
 
@@ -50,6 +51,7 @@ class TrustPolicy:
         allowed_tool_scope: Only tools in this scope are allowed.
         reserved_prefixes: Asset names starting with these prefixes are rejected.
     """
+
     minimum_trust_tier: Optional[TrustTier] = None
     allowed_signers: Optional[frozenset[str]] = None
     allowed_origins: Optional[frozenset[str]] = None
@@ -57,7 +59,9 @@ class TrustPolicy:
     allowed_tool_scope: Optional[frozenset[str]] = None
     reserved_prefixes: Optional[frozenset[str]] = None
 
-    def evaluate(self, assets: list[Asset], contract: Optional[Contract] = None) -> TrustDecision:
+    def evaluate(
+        self, assets: list[Asset], contract: Optional[Contract] = None
+    ) -> TrustDecision:
         """Evaluate a list of assets against this policy.
 
         Returns TrustDecision.accept() if all checks pass, or
@@ -116,7 +120,7 @@ class TrustPolicy:
 
         # --- Label check (contract-level) ---
         if self.required_labels is not None and contract is not None:
-            contract_labels = set(getattr(contract, 'labels', ()))
+            contract_labels = set(getattr(contract, "labels", ()))
             missing = self.required_labels - contract_labels
             if missing:
                 reasons.append(
@@ -126,7 +130,7 @@ class TrustPolicy:
 
         # --- Tool scope check (contract-level) ---
         if self.allowed_tool_scope is not None and contract is not None:
-            contract_scope = getattr(contract, 'tool_scope', None)
+            contract_scope = getattr(contract, "tool_scope", None)
             if contract_scope:
                 if not set(contract_scope).issubset(self.allowed_tool_scope):
                     extra = set(contract_scope) - self.allowed_tool_scope
@@ -159,7 +163,10 @@ class TrustPolicy:
         """
         # Normalize legacy keys to canonical keys
         normalized: dict = dict(config)
-        if "required_trust_tier" in normalized and "minimum_trust_tier" not in normalized:
+        if (
+            "required_trust_tier" in normalized
+            and "minimum_trust_tier" not in normalized
+        ):
             normalized["minimum_trust_tier"] = normalized.pop("required_trust_tier")
         if "required_signer" in normalized and "allowed_signers" not in normalized:
             normalized["allowed_signers"] = [normalized.pop("required_signer")]
@@ -167,10 +174,17 @@ class TrustPolicy:
         kwargs: dict = {}
 
         if "minimum_trust_tier" in normalized:
-            kwargs["minimum_trust_tier"] = TrustTier.from_str(normalized["minimum_trust_tier"])
+            kwargs["minimum_trust_tier"] = TrustTier.from_str(
+                normalized["minimum_trust_tier"]
+            )
 
-        for field_name in ("allowed_signers", "allowed_origins", "required_labels",
-                           "allowed_tool_scope", "reserved_prefixes"):
+        for field_name in (
+            "allowed_signers",
+            "allowed_origins",
+            "required_labels",
+            "allowed_tool_scope",
+            "reserved_prefixes",
+        ):
             if field_name in normalized:
                 value = normalized[field_name]
                 if isinstance(value, str):

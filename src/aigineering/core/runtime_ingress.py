@@ -158,9 +158,7 @@ class RuntimeIngress:
 
         return signed
 
-    def _apply_reducer_events(
-        self, events: list[object], asset: Asset
-    ) -> None:
+    def _apply_reducer_events(self, events: list[object], asset: Asset) -> None:
         """Apply FactReducer events: append trace entries for every
         detected consequence of the new asset.
 

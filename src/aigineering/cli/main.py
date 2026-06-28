@@ -23,6 +23,7 @@ from aigineering.cli.retry import retry  # noqa: E402
 from aigineering.cli.verify import verify, readiness  # noqa: E402
 from aigineering.cli.asset import asset_group  # noqa: E402
 from aigineering.cli.contract import contract_group  # noqa: E402
+from aigineering.cli.task import task_group  # noqa: E402
 from aigineering.cli.behavior import behavior_group  # noqa: E402
 from aigineering.cli.repl import repl  # noqa: E402
 from aigineering.cli.serve import serve  # noqa: E402
@@ -47,6 +48,7 @@ cli.add_command(retry)
 cli.add_command(verify)
 cli.add_command(readiness)
 cli.add_command(asset_group)
+cli.add_command(task_group)
 cli.add_command(contract_group)
 
 

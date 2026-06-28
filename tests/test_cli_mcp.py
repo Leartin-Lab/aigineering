@@ -46,8 +46,7 @@ def test_mcp_add_list_show_json():
         store = SQLiteStore(".aig/store.db")
         injected = store.get_by_event_type("asset_injected")
         assert any(
-            e.relation_type == "mcp_capability"
-            and e.relation_target == "_mcp_search"
+            e.relation_type == "mcp_capability" and e.relation_target == "_mcp_search"
             for e in injected
         )
 

@@ -47,7 +47,7 @@ def content_slice(content: str, range_spec: str) -> str:
         if start < 1:
             raise ValueError("line ranges are 1-based")
         lines = content.splitlines(keepends=True)
-        return "".join(lines[start - 1:end])
+        return "".join(lines[start - 1 : end])
     if kind == "chars":
         return content[start:end]
     raise ValueError("range_spec kind must be 'lines' or 'chars'")
@@ -77,7 +77,9 @@ def create_slice_asset(
         id=hash_asset_content(slice_name, slice_content),
         name=slice_name,
         content=slice_content,
-        origin=f"slice_of:{source.name}:{range_spec}" if range_spec else f"slice_of:{source.name}",
+        origin=f"slice_of:{source.name}:{range_spec}"
+        if range_spec
+        else f"slice_of:{source.name}",
         trust_tier=source.trust_tier,
         source_uri=source.source_uri,
         lineage_id=lineage_id,

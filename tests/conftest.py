@@ -51,7 +51,11 @@ def run_with_crash(
     Returns the CompletedProcess.  The subprocess is expected to exit
     with code 1 (os._exit).
     """
-    full_env = {**os.environ, "AIG_ENABLE_CRASH_INJECTION": "1", "AIG_CRASH_POINT": crash_point}
+    full_env = {
+        **os.environ,
+        "AIG_ENABLE_CRASH_INJECTION": "1",
+        "AIG_CRASH_POINT": crash_point,
+    }
     if env:
         full_env.update(env)
     return subprocess.run(

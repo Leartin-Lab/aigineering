@@ -12,12 +12,11 @@ from aigineering.cli._common import (
     _persistent_store,
     _redact_sealed,
 )
-from aigineering.core.activation import check_activation
+from aigineering.cli.worker_runtime import claim_next_package
 from aigineering.core.disclosure import compute_disclosure
 from aigineering.core.runtime_ingress import RuntimeIngress
 from aigineering.core.submit import (
     SubmitConflictError,
-    _all_outputs_satisfied,
     submit_candidate,
 )
 from aigineering.protocol.envelope import CandidateEnvelope
@@ -119,83 +118,13 @@ def worker_next(worker_id: str, lease_seconds: int, json_output: bool) -> None:
       - It is not suspended (no outstanding method_scheduled)
     """
     store = _persistent_store()
-    available_names = {a.name for a in store.get_all_assets()}
-
-    for contract in store.get_all_contracts():
-        # ── Activation check ────────────────────────────────────────
-        if contract.activation and not check_activation(
-            contract.activation, available_names
-        ):
-            continue
-
-        # ── Trace-based state checks ─────────────────────────────────
-        budget_consumed_count = 0
-        is_completed = False
-        is_suspended = False
-
-        get_by_contract = getattr(store, "get_by_contract", None)
-        trace_entries = (
-            get_by_contract(contract.id) if get_by_contract is not None else []
-        )
-        for entry in trace_entries:
-            if entry.event_type == "budget_consumed":
-                budget_consumed_count += 1
-            elif entry.event_type == "complete":
-                is_completed = True
-            elif entry.event_type == "method_scheduled":
-                is_suspended = True
-            elif entry.event_type == "method_resumed":
-                is_suspended = False
-            elif entry.event_type == "method_continuation_scheduled":
-                is_suspended = True
-
-        if is_completed:
-            continue
-
-        if is_suspended:
-            continue
-
-        remaining_budget = contract.budget - budget_consumed_count
-        if remaining_budget <= 0:
-            continue
-
-        # ── Outputs-satisfied check ──────────────────────────────────
-        if _all_outputs_satisfied(contract, store):
-            continue
-
-        # ── Build WorkerPackage ──────────────────────────────────────
-        scope = compute_disclosure(contract, store)
-        method_context_assets = _method_context_assets_for(contract, store)
-        pkg = WorkerPackage(
-            contract_id=contract.id,
-            contract=contract_to_dict(contract),
-            disclosed_assets=tuple(asset_to_dict(a) for a in scope),
-            method_context_assets=method_context_assets,
-            tool_scope=contract.tool_scope,
-            budget_remaining=remaining_budget,
-        )
-        claim_contract = getattr(store, "claim_contract", None)
-        if claim_contract is not None:
-            claim = claim_contract(
-                contract.id,
-                worker_id,
-                lease_seconds=lease_seconds,
-                package_id=pkg.package_id,
-            )
-            if claim is None:
-                continue
-            pkg = WorkerPackage(
-                contract_id=contract.id,
-                contract=contract_to_dict(contract),
-                disclosed_assets=tuple(asset_to_dict(a) for a in scope),
-                method_context_assets=method_context_assets,
-                tool_scope=contract.tool_scope,
-                budget_remaining=remaining_budget,
-                claim_id=claim["claim_id"],
-                lease_until=claim["lease_until"],
-                package_id=pkg.package_id,
-            )
-
+    claimed = claim_next_package(
+        store,
+        worker_id=worker_id,
+        lease_seconds=lease_seconds,
+    )
+    if claimed is not None:
+        pkg = claimed.package
         if json_output:
             result = json.loads(pkg.to_json())
             _output_json(result)
@@ -203,7 +132,6 @@ def worker_next(worker_id: str, lease_seconds: int, json_output: bool) -> None:
             click.echo(pkg.to_json())
         return
 
-    # No ready contracts
     if json_output:
         _output_json(None)
     else:

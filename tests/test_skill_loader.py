@@ -1,4 +1,5 @@
 """Tests for the skill loader (core/skill_loader.py)."""
+
 from pathlib import Path
 import json
 
@@ -110,9 +111,7 @@ class TestSkillLoaderScan:
         skill_dir = tmp_path / "escaping"
         skill_dir.mkdir()
         (skill_dir / "skill.toml").write_text(
-            'name = "escaping"\n'
-            'version = "0.1.0"\n'
-            'content_file = "../outside.md"\n'
+            'name = "escaping"\nversion = "0.1.0"\ncontent_file = "../outside.md"\n'
         )
 
         loader = SkillLoader()
@@ -127,9 +126,7 @@ class TestSkillLoaderScan:
         skill_dir.mkdir()
         outside = tmp_path / "outside.md"
         (skill_dir / "skill.toml").write_text(
-            'name = "absolute"\n'
-            'version = "0.1.0"\n'
-            f'content_file = "{outside}"\n'
+            f'name = "absolute"\nversion = "0.1.0"\ncontent_file = "{outside}"\n'
         )
 
         loader = SkillLoader()
@@ -148,7 +145,8 @@ class TestSkillLoaderLoad:
         skill_dir = tmp_path / "test_skill"
         skill_dir.mkdir()
         _write_skill_toml(
-            skill_dir, "test_skill",
+            skill_dir,
+            "test_skill",
             version="0.1.0",
             trust_tier="configured",
         )

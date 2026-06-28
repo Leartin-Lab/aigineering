@@ -1,4 +1,5 @@
 """Tests for cryptographic signer/verifier interfaces."""
+
 import pytest
 
 from aigineering.core.signing import (

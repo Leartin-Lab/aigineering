@@ -36,7 +36,9 @@ def _seal_gap(asset: Asset) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def check_sufficiency(contract: Contract, store: StoreProtocol, trust_policy: TrustPolicy | None = None) -> dict[str, Any]:
+def check_sufficiency(
+    contract: Contract, store: StoreProtocol, trust_policy: TrustPolicy | None = None
+) -> dict[str, Any]:
     """Check contract readiness. Returns a report dict.
 
     The report is a **recommendation** — it does NOT alter runtime state,

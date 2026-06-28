@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from typing import Optional
 
 import click
@@ -13,6 +14,12 @@ from aigineering.cli._common import (
     _persistent_store,
     _run_demo,
     _session_id,
+)
+from aigineering.cli.task_state import project_task_status
+from aigineering.cli.worker_runtime import (
+    build_worker,
+    claim_next_package,
+    execute_claimed_package,
 )
 from aigineering.core.session import SessionStore
 from aigineering.core.trace import JsonLTraceStore
@@ -49,7 +56,46 @@ def _output_run_json(
 
 
 @click.command("run")
-@click.argument("goal")
+@click.argument("goal", required=False)
+@click.option(
+    "--once",
+    "run_once",
+    is_flag=True,
+    default=False,
+    help="Claim and execute one ready task from the local task pool.",
+)
+@click.option(
+    "--task",
+    "target_task_id",
+    default=None,
+    help="Run worker cycles until this task reaches a terminal status.",
+)
+@click.option(
+    "--wait-timeout",
+    type=float,
+    default=60.0,
+    show_default=True,
+    help="Maximum seconds to wait when --task is used.",
+)
+@click.option(
+    "--interval",
+    type=float,
+    default=1.0,
+    show_default=True,
+    help="Polling interval when waiting for --task.",
+)
+@click.option(
+    "--worker-id",
+    default=None,
+    help="Worker identity for claim ownership. Defaults to the worker implementation id.",
+)
+@click.option(
+    "--lease-seconds",
+    type=int,
+    default=60,
+    show_default=True,
+    help="Claim lease duration for task-pool execution.",
+)
 @click.option(
     "--worker",
     "worker_kind",
@@ -106,7 +152,13 @@ def _output_run_json(
     help="Output machine-readable JSON instead of human-readable text.",
 )
 def run(
-    goal: str,
+    goal: Optional[str],
+    run_once: bool,
+    target_task_id: Optional[str],
+    wait_timeout: float,
+    interval: float,
+    worker_id: Optional[str],
+    lease_seconds: int,
     worker_kind: Optional[str],
     model: Optional[str],
     base_url: str,
@@ -117,7 +169,7 @@ def run(
     save_config: bool,
     json_output: bool,
 ) -> None:
-    """Execute a contract and persist the trace to JSONL."""
+    """Run a CLI worker cycle or execute the legacy quick contract demo."""
     if worker_kind is None:
         raise click.UsageError(
             "--worker is required.  Use 'mock' for deterministic testing, "
@@ -125,6 +177,26 @@ def run(
             "quickstart experience."
         )
     capabilities = _parse_capabilities(capabilities_str)
+    if run_once or target_task_id:
+        _run_task_pool(
+            target_task_id=target_task_id,
+            worker_kind=worker_kind,
+            model=model,
+            base_url=base_url,
+            timeout=timeout,
+            max_retries=max_retries,
+            capabilities=capabilities,
+            worker_id=worker_id,
+            lease_seconds=lease_seconds,
+            wait_timeout=wait_timeout,
+            interval=interval,
+            json_output=json_output,
+        )
+        return
+
+    if goal is None:
+        raise click.UsageError("Provide GOAL, --once, or --task <contract_id>.")
+
     session_id = _session_id()
     trace_path = _get_trace_dir() / f"{session_id}.jsonl"
     jsonl_store = JsonLTraceStore(str(trace_path))
@@ -190,6 +262,114 @@ def run(
             click.echo("✓ contract complete")
 
     click.echo(f"Trace saved to {trace_path}")
+
+
+def _run_task_pool(
+    *,
+    target_task_id: str | None,
+    worker_kind: str,
+    model: str | None,
+    base_url: str,
+    timeout: float,
+    max_retries: int,
+    capabilities: frozenset[str] | None,
+    worker_id: str | None,
+    lease_seconds: int,
+    wait_timeout: float,
+    interval: float,
+    json_output: bool,
+) -> None:
+    store = _persistent_store()
+    try:
+        worker = build_worker(
+            worker_kind,
+            model=model,
+            base_url=base_url,
+            timeout=timeout,
+            max_retries=max_retries,
+            capabilities=capabilities,
+        )
+    except ValueError as e:
+        raise click.ClickException(str(e))
+    claim_worker_id = worker_id or getattr(worker, "worker_id", "cli-worker")
+    deadline = time.monotonic() + wait_timeout
+    cycles: list[dict] = []
+
+    while True:
+        if target_task_id:
+            target = store.get_contract(target_task_id)
+            if target is None:
+                _emit_run_result(
+                    {
+                        "ok": False,
+                        "status": "error",
+                        "error": f"Task '{target_task_id}' not found.",
+                        "cycles": cycles,
+                    },
+                    json_output,
+                )
+                return
+            status = project_task_status(target, store)
+            if status["terminal"]:
+                status["ok"] = status["status"] == "completed"
+                status["cycles"] = cycles
+                _emit_run_result(status, json_output)
+                return
+
+        claimed = claim_next_package(
+            store,
+            worker_id=claim_worker_id,
+            lease_seconds=lease_seconds,
+        )
+        if claimed is None:
+            if not target_task_id:
+                _emit_run_result(
+                    {
+                        "ok": True,
+                        "status": "idle",
+                        "cycles": cycles,
+                    },
+                    json_output,
+                )
+                return
+            if time.monotonic() >= deadline:
+                status = project_task_status(target, store)
+                status["ok"] = False
+                status["timed_out"] = True
+                status["cycles"] = cycles
+                _emit_run_result(status, json_output)
+                return
+            time.sleep(max(interval, 0.05))
+            store = _persistent_store()
+            continue
+
+        result = execute_claimed_package(claimed, worker, store)
+        cycles.append(
+            {
+                "contract_id": claimed.contract.id,
+                "contract_name": claimed.contract.name,
+                "status": result.get("status"),
+                "accepted_count": len(result.get("accepted_assets", [])),
+                "rejected_count": len(result.get("rejected_candidates", [])),
+            }
+        )
+        if not target_task_id:
+            result = dict(result)
+            result["ok"] = result.get("status") in {"accepted", "partial"}
+            result["cycles"] = cycles
+            _emit_run_result(result, json_output)
+            return
+        store = _persistent_store()
+
+
+def _emit_run_result(payload: dict, json_output: bool) -> None:
+    if json_output:
+        _output_json(payload)
+        return
+    status = payload.get("status", "unknown")
+    click.echo(f"run {status}")
+    if payload.get("contract_id"):
+        click.echo(f"contract_id: {payload['contract_id']}")
 
 
 @click.command("demo")

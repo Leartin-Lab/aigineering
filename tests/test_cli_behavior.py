@@ -21,9 +21,12 @@ class TestBehaviorAdd:
             result = runner.invoke(
                 cli,
                 [
-                    "behavior", "add",
-                    "--name", "helpful",
-                    "--file", str(md_file),
+                    "behavior",
+                    "add",
+                    "--name",
+                    "helpful",
+                    "--file",
+                    str(md_file),
                 ],
             )
             assert result.exit_code == 0, result.output
@@ -39,9 +42,12 @@ class TestBehaviorAdd:
             result = runner.invoke(
                 cli,
                 [
-                    "behavior", "add",
-                    "--name", "concise",
-                    "--file", str(md_file),
+                    "behavior",
+                    "add",
+                    "--name",
+                    "concise",
+                    "--file",
+                    str(md_file),
                     "--json",
                 ],
             )
@@ -61,10 +67,14 @@ class TestBehaviorAdd:
             result = runner.invoke(
                 cli,
                 [
-                    "behavior", "add",
-                    "--name", "verified_behavior",
-                    "--file", str(md_file),
-                    "--trust-tier", "verified",
+                    "behavior",
+                    "add",
+                    "--name",
+                    "verified_behavior",
+                    "--file",
+                    str(md_file),
+                    "--trust-tier",
+                    "verified",
                 ],
             )
             assert result.exit_code == 0, result.output
@@ -77,9 +87,12 @@ class TestBehaviorAdd:
             result = runner.invoke(
                 cli,
                 [
-                    "behavior", "add",
-                    "--name", "bad",
-                    "--file", "/nonexistent/path.md",
+                    "behavior",
+                    "add",
+                    "--name",
+                    "bad",
+                    "--file",
+                    "/nonexistent/path.md",
                 ],
             )
             assert result.exit_code != 0

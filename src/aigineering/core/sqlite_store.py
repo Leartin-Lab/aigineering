@@ -51,6 +51,7 @@ def _extract_activation_names(expression: str) -> set[str]:
             names.add(token)
     return names
 
+
 # ---------------------------------------------------------------------------
 # DDL
 # ---------------------------------------------------------------------------
@@ -341,7 +342,9 @@ class SQLiteStore:
             for row in self._conn.execute("PRAGMA table_info(trace_events)").fetchall()
         }
         if "usage_metadata" not in existing:
-            self._conn.execute("ALTER TABLE trace_events ADD COLUMN usage_metadata TEXT")
+            self._conn.execute(
+                "ALTER TABLE trace_events ADD COLUMN usage_metadata TEXT"
+            )
 
     def _migrate_to_v4(self) -> None:
         """Add dependency/output index tables and backfill from existing
@@ -596,9 +599,7 @@ class SQLiteStore:
     # Activation / declared-output indexes
     # ------------------------------------------------------------------
 
-    def register_activation_refs(
-        self, contract_id: str, asset_names: set[str]
-    ) -> None:
+    def register_activation_refs(self, contract_id: str, asset_names: set[str]) -> None:
         with self._conn:
             self._conn.execute(
                 "DELETE FROM contract_activation_refs WHERE contract_id = ?",
@@ -976,10 +977,16 @@ class SQLiteStore:
                     definition_hash, claim_type, signed_by,
                     provenance_seal, lineage_id
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                (claim.id, claim.source_asset_id,
-                 claim.replacement_asset_id, claim.definition_hash,
-                 claim.claim_type, claim.signed_by,
-                 claim.provenance_seal, claim.lineage_id),
+                (
+                    claim.id,
+                    claim.source_asset_id,
+                    claim.replacement_asset_id,
+                    claim.definition_hash,
+                    claim.claim_type,
+                    claim.signed_by,
+                    claim.provenance_seal,
+                    claim.lineage_id,
+                ),
             )
 
     def get_claims_by_definition(self, definition_hash: str) -> list:

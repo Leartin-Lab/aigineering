@@ -333,8 +333,9 @@ _ORIGIN_PREFIX_MAP: dict[str, str] = {
 }
 
 
-def verify_descriptor(descriptor: Asset, kind: str | None = None,
-                      policy: TrustPolicy | None = None) -> bool:
+def verify_descriptor(
+    descriptor: Asset, kind: str | None = None, policy: TrustPolicy | None = None
+) -> bool:
     """Verify a capability descriptor asset meets the 040 trust gate (G10).
 
     Returns True if:

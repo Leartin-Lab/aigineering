@@ -1056,6 +1056,7 @@ class TestVersionMetadata:
     def test_package_version_is_defined(self):
         """__version__ is a valid version string."""
         from aigineering import __version__
+
         assert __version__ is not None
         assert isinstance(__version__, str)
         assert len(__version__) > 0
@@ -1080,8 +1081,9 @@ class TestVersionMetadata:
             expected = data["project"]["version"]
             # In dev mode (pip install -e .), __version__ reads from metadata
             # which should match pyproject.toml
-            assert __version__ == expected or __version__ == "0.0.0-dev", \
+            assert __version__ == expected or __version__ == "0.0.0-dev", (
                 f"__version__={__version__}, pyproject.toml version={expected}"
+            )
 
 
 class TestTrustTierLegacyAliases:
