@@ -649,3 +649,90 @@ def test_rejected_worker_output_schedules_recovery_contract():
     recovery_events = trace_store.get_by_event_type("recovery_scheduled")
     assert len(recovery_events) == 1
     assert recovery_events[0].relation_target == recovery_contracts[0].id
+
+
+class TestEngineDirectExecutionIsTransactional:
+    """Crash injection tests for the atomic commit path in Engine.run()."""
+
+    def test_atomic_asset_and_trace_rollback(self, tmp_path):
+        """Crash mid-transaction: assets and traces roll back atomically."""
+        import os
+        import subprocess
+        import sys
+        from aigineering.core.sqlite_store import SQLiteStore
+
+        db_path = str(tmp_path / "aig.db")
+
+        # Subprocess: Engine.run() with crash point in commit_direct_execution
+        script = """
+import os as _os
+from aigineering.core.engine import Engine
+from aigineering.core.sqlite_store import SQLiteStore
+from aigineering.agent.mock import MockWorker
+from aigineering.protocol.types import Asset, Contract
+from aigineering.core.ids import hash_asset_content, hash_contract
+
+db = _os.environ["AIG_TEST_DB"]
+store = SQLiteStore(db)
+
+worker = MockWorker({"crash_task": "result_out: crash_output_data"})
+engine = Engine(store=store, worker=worker, trace_store=store)
+
+# Setup: add input asset and contract
+input_asset = Asset(
+    id=hash_asset_content("input_file", "test data"),
+    name="input_file",
+    content="test data",
+)
+c = Contract(
+    id=hash_contract(
+        "crash_task", "", ["input_file"], ["result_out"],
+        "input_file", 5, [], [], "human",
+    ),
+    name="crash_task",
+    inputs=["input_file"],
+    outputs=["result_out"],
+    activation="input_file",
+    budget=5,
+)
+engine.add_asset(input_asset)
+engine.add_contract(c)
+engine.run()
+store.close()
+"""
+        env = {
+            **os.environ,
+            "AIG_ENABLE_CRASH_INJECTION": "1",
+            "AIG_CRASH_POINT": "after_asset_before_trace",
+            "AIG_TEST_DB": db_path,
+        }
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+
+        # Should have exited with code 1 (os._exit from crash point)
+        assert result.returncode == 1, (
+            f"Expected exit code 1, got {result.returncode}: "
+            f"stdout={result.stdout!r} stderr={result.stderr!r}"
+        )
+
+        # Recover: open a new store and verify no partial state
+        store2 = SQLiteStore(db_path)
+
+        # No assets should exist (transaction rolled back)
+        assets = store2.get_assets_by_name("result_out")
+        assert len(assets) == 0, (
+            f"Expected 0 assets after transaction rollback, got {len(assets)}"
+        )
+
+        # No trace events should exist for this contract
+        traces = store2.get_trace_events("crash_task")
+        assert len(traces) == 0, (
+            f"Expected 0 traces after transaction rollback, got {len(traces)}"
+        )
+
+        store2.close()

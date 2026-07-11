@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import logging
+import time as _time_module
+from typing import Callable
 
 from aigineering.agent.worker import Worker
 from aigineering.core.activation import check_activation
@@ -25,7 +27,6 @@ from aigineering.core.methods import (
     method_contract,
     method_context_content,
     method_payload,
-    system_asset,
 )
 from aigineering.core.fact_reducer import FactReducer
 from aigineering.core.projection import project_candidate
@@ -46,7 +47,13 @@ from aigineering.protocol.actions import (
     WorkerAction,
     parse_method_action,
 )
-from aigineering.protocol.types import Asset, Candidate, Contract, ProjectionResult
+from aigineering.protocol.types import (
+    Asset,
+    Candidate,
+    Contract,
+    ProjectionResult,
+    TraceEntry,
+)
 
 _logger = logging.getLogger(__name__)
 
@@ -62,6 +69,60 @@ def _safe_check_activation(expression: str, available_names: set[str]) -> bool:
     except (ValueError, RecursionError) as e:
         _logger.warning("Invalid activation expression: %s", e)
         return False
+
+
+class _TraceManagerProxy(TraceManager):
+    def __init__(self, delegate: TraceManager) -> None:
+        self._delegate = delegate
+
+    @property
+    def store(self) -> TraceStoreProtocol:
+        return self._delegate.store
+
+    def record(self, contract_id: str, event_type: str, **kwargs: object) -> TraceEntry:
+        return self._delegate.record(contract_id, event_type, **kwargs)
+
+    def get_last_entry_id(self, contract_id: str) -> str | None:
+        return self._delegate.get_last_entry_id(contract_id)
+
+    def get_all_last_entries(self) -> dict[str, str]:
+        return self._delegate.get_all_last_entries()
+
+    def restore_last_entries(self, entries: dict[str, str]) -> None:
+        self._delegate.restore_last_entries(entries)
+
+
+class _CapturingMemoryTraceStore:
+    def __init__(self, pending: list[TraceEntry]) -> None:
+        self._inner = MemoryTraceStore()
+        self._pending = pending
+
+    @property
+    def entries(self) -> list[TraceEntry]:
+        return self._inner.entries
+
+    def append(self, entry: TraceEntry) -> None:
+        self._inner.append(entry)
+        self._pending.append(entry)
+
+    def get_all(self) -> list[TraceEntry]:
+        return self._inner.get_all()
+
+    def get_by_contract(self, contract_id: str) -> list[TraceEntry]:
+        return self._inner.get_by_contract(contract_id)
+
+    def get_by_event_type(self, event_type: str) -> list[TraceEntry]:
+        return self._inner.get_by_event_type(event_type)
+
+    def get_reverse_lineage(self, asset_id: str) -> list[TraceEntry]:
+        return self._inner.get_reverse_lineage(asset_id)
+
+    def new_entry(
+        self, contract_id: str, event_type: str, **kwargs: object
+    ) -> TraceEntry:
+        entry = self._inner.new_entry(contract_id, event_type, **kwargs)
+        self._pending.append(entry)
+        return entry
 
 
 class Engine:
@@ -80,8 +141,11 @@ class Engine:
     ) -> None:
         self._store = store
         self._worker = worker
-        self._trace = trace_store if trace_store is not None else MemoryTraceStore()
-        self._trace_mgr = TraceManager(self._trace)
+        self._pending_trace_entries: list[TraceEntry] = []
+        self._pending_assets: list[Asset] = []
+        self._persist_trace: TraceStoreProtocol | None = trace_store
+        self._trace = _CapturingMemoryTraceStore(self._pending_trace_entries)
+        self._trace_mgr = _TraceManagerProxy(TraceManager(self._trace))
         self._labels = labels if labels is not None else {}
         self._tools = tools
         self._mcp_servers: dict[str, object] = mcp_servers or {}
@@ -139,9 +203,11 @@ class Engine:
                 relation_target=",".join(resolution.label_names),
                 budget_remaining=self._resolve_budget(contract),
             )
+        self._write_pending_traces()
 
     def add_asset(self, asset: Asset) -> None:
         self._ingress.accept_asset(asset, source="engine")
+        self._write_pending_traces()
 
     def inject_north_star(self, goal: str) -> Asset:
         """Inject a North Star goal as a protected system asset.
@@ -171,6 +237,13 @@ class Engine:
 
     def _add_trace(self, contract_id: str, event_type: str, **kwargs: object) -> None:
         self._trace_mgr.record(contract_id, event_type, **kwargs)
+
+    def _write_pending_traces(self) -> None:
+        if not self._pending_trace_entries or self._persist_trace is None:
+            return
+        for entry in self._pending_trace_entries:
+            self._persist_trace.append(entry)
+        self._pending_trace_entries.clear()
 
     # ── Terminal event idempotency ────────────────────────────────────
 
@@ -208,13 +281,36 @@ class Engine:
 
     def _commit(self, result: ProjectionResult) -> None:
         for asset in result.accepted_assets:
-            self._ingress.accept_asset(asset, source="projection", allow_protected=True)
+            self._pending_assets.append(asset)
 
-    def run(self) -> None:
+    def _flush_pending(self) -> None:
+        if not self._pending_assets and not self._pending_trace_entries:
+            return
+        trace_snapshot = list(self._pending_trace_entries)
+        self._ingress.commit_execution_batch(
+            assets=list(self._pending_assets),
+            engine_trace_entries=trace_snapshot,
+            source="projection",
+            allow_protected=True,
+        )
+        # Mirror to external trace store so callers reading trace_store
+        # (e.g. tests) see the committed entries.
+        if self._persist_trace is not None:
+            for entry in trace_snapshot:
+                self._persist_trace.append(entry)
+        self._pending_assets.clear()
+        self._pending_trace_entries.clear()
+
+    def run(self, heartbeat_callback: Callable[[], None] | None = None) -> None:
         # Sync completed contracts from trace events — the RuntimeIngress
         # may have marked contracts complete via reactive FactReducer
         # projection (e.g., external asset injection).
         self._sync_completed_from_trace()
+
+        _heartbeat_contract_interval = 5
+        _heartbeat_time_interval_s = 30.0
+        contract_count = 0
+        last_heartbeat = _time_module.monotonic()
 
         while True:
             available_names: set[str] = {a.name for a in self._store.get_all_assets()}
@@ -232,6 +328,19 @@ class Engine:
                 break
 
             for contract in enabled:
+                # ── heartbeat: best-effort periodic renewal ──────────
+                if heartbeat_callback is not None:
+                    contract_count += 1
+                    if (
+                        contract_count % _heartbeat_contract_interval == 0
+                        or _time_module.monotonic() - last_heartbeat
+                        >= _heartbeat_time_interval_s
+                    ):
+                        try:
+                            heartbeat_callback()
+                        except Exception:
+                            pass
+                        last_heartbeat = _time_module.monotonic()
                 self._add_trace(
                     contract.id,
                     "activation",
@@ -264,6 +373,7 @@ class Engine:
                             budget_remaining=self._resolve_budget(contract),
                         )
                         self._completed.add(contract.id)
+                        self._write_pending_traces()
                         check_crash_point("after_child_complete")
                         self._resume_parent_from_method(contract)
                     break
@@ -319,21 +429,28 @@ class Engine:
                     budget_remaining=remaining,
                 )
 
-                if self._all_outputs_satisfied(contract):
+                pending_names = {a.name for a in self._pending_assets}
+                if self._all_outputs_satisfied(
+                    contract, extra_output_names=pending_names
+                ):
                     self._emit_terminal_event(
                         contract.id,
                         "complete",
                         budget_remaining=self._resolve_budget(contract),
                     )
                     self._completed.add(contract.id)
+                    self._flush_pending()
                     check_crash_point("after_child_complete")
                     self._resume_parent_from_method(contract)
                     self._complete_satisfied_ancestors(contract)
                     break
+                self._flush_pending()
                 if self._recover_rejected_projection(
                     contract, candidate, result, rejected_dicts, remaining
                 ):
                     break
+
+        self._write_pending_traces()
 
     def _resolve_budget(self, contract: Contract) -> int:
         if contract.id not in self._budget_mgr.get_all():
@@ -366,8 +483,12 @@ class Engine:
                 scope.append(redact_for_disclosure(asset))
         return scope
 
-    def _all_outputs_satisfied(self, contract: Contract) -> bool:
-        return all_outputs_satisfied(contract, self._store)
+    def _all_outputs_satisfied(
+        self, contract: Contract, *, extra_output_names: set[str] | None = None
+    ) -> bool:
+        return all_outputs_satisfied(
+            contract, self._store, extra_output_names=extra_output_names
+        )
 
     def _dispatch_method(
         self,
@@ -402,6 +523,7 @@ class Engine:
         if not handled:
             self._schedule_method_contract(contract, action, candidate)
 
+        self._write_pending_traces()
         check_crash_point("after_method_schedule")
         remaining = self._budget_mgr.consume(contract.id)
         self._add_trace(
@@ -591,12 +713,13 @@ class Engine:
         child: Contract,
     ) -> None:
         name = f"_method_ctx_{contract.id}"
-        asset = system_asset(
+        runtime = _make_runtime(self)
+        runtime.mint_authorized_system_asset(
+            child,
             name=name,
             content=method_context_content(contract, action, child),
             created_by=contract.id,
         )
-        self._ingress.accept_asset(asset, source="engine", allow_protected=True)
 
     def _check_context_overflow(self, contract: Contract, scope: list[Asset]) -> bool:
         overflow = self._overflow_handler.check_overflow(contract, scope)
@@ -873,6 +996,14 @@ class Engine:
             method_registry=method_registry,
             context_size_limit=context_size_limit,
         )
+
+        # Load persisted trace events into the engine's runtime trace store
+        # (always MemoryTraceStore) so that _emit_terminal_event idempotency
+        # checks and _sync_completed_from_trace work correctly after restore.
+        for entry in trace_store.get_all():
+            engine._trace.append(entry)
+        # Clear pending — loaded historical trace must not be re-committed.
+        engine._pending_trace_entries.clear()
 
         # Primary: derive completion from durable store facts (output satisfaction).
         durable_state = derive_lifecycle_from_store(store)

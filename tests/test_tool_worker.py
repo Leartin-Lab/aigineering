@@ -109,6 +109,7 @@ def test_tool_handler_uses_tool_worker():
         budget=1,
         tool_scope=["lookup"],
         origin="system",
+        minting_authority=("_tool_obs_tool_child_1", "_tool_call_tool_child_1"),
     )
 
     result = handler.handle_completion(runtime, tool_contract, [])

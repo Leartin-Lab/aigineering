@@ -94,7 +94,7 @@ def _seed_continuation_with_method_context(
     )
     store.add_contract(parent)
     store.add_contract(continuation)
-    store.add_asset(obs)
+    store._add_system_asset(obs)
     store.append_trace_entry(
         TraceEntry(
             id="evt_continue",

@@ -77,9 +77,9 @@ def submit_candidate(
             else idem.get(contract.id, effective_idempotency_key)
         )
         if cached is not None:
-            result = dict(cached)
-            result["duplicate"] = True
-            return result
+            cached_response = dict(cached)
+            cached_response["duplicate"] = True
+            return cached_response
 
         store_has_any = getattr(store, "has_any_idempotency", None)
         has_any = (
@@ -186,9 +186,9 @@ def submit_candidate(
     )
 
     # ── Projection (commitment boundary) ─────────────────────────────
-    result: ProjectionResult = project_candidate(contract, candidate)
+    projection_result: ProjectionResult = project_candidate(contract, candidate)
 
-    signed_assets = [sign_asset(asset) for asset in result.accepted_assets]
+    signed_assets = [sign_asset(asset) for asset in projection_result.accepted_assets]
 
     # ── Build rejection dicts ────────────────────────────────────────
     rejected_dicts = [
@@ -198,7 +198,7 @@ def submit_candidate(
             "reject_reason": r.reject_reason,
             "category": r.category.value,
         }
-        for r in result.rejected_candidates
+        for r in projection_result.rejected_candidates
     ]
 
     # ── Trace entry ──────────────────────────────────────────────────
@@ -213,16 +213,16 @@ def submit_candidate(
         disclosed_assets=scope_ids,
         worker_id=candidate.worker_id,
         candidate_raw=candidate.raw_output,
-        accepted_fragments=[a.id for a in result.accepted_assets],
-        accepted_asset_names=[a.name for a in result.accepted_assets],
+        accepted_fragments=[a.id for a in projection_result.accepted_assets],
+        accepted_asset_names=[a.name for a in projection_result.accepted_assets],
         rejected_fragments=[
             f"[{r['category']}] {r['name']}: {r['reject_reason']}"
             for r in rejected_dicts
         ],
-        authority_result=result.status.value,
+        authority_result=projection_result.status.value,
         authority_policy=(
-            json.dumps(dict(result.authority_policy), sort_keys=True)
-            if result.authority_policy is not None
+            json.dumps(dict(projection_result.authority_policy), sort_keys=True)
+            if projection_result.authority_policy is not None
             else None
         ),
         budget_remaining=contract.budget,
@@ -230,7 +230,7 @@ def submit_candidate(
     # ── Build response ───────────────────────────────────────────────
     response: dict = {
         "contract_id": contract.id,
-        "status": result.status.value,
+        "status": projection_result.status.value,
         "accepted_assets": [asset_to_dict(a) for a in signed_assets],
         "rejected_candidates": rejected_dicts,
         "trace_id": entry.id,

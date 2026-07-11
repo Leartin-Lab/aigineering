@@ -28,6 +28,27 @@ RESERVED_PREFIXES: frozenset[str] = frozenset(
 )
 
 
+def _is_protected_name(name: str) -> bool:
+    """Return True when *name* starts with a protected prefix."""
+    for prefix in RESERVED_PREFIXES:
+        if name.startswith(prefix):
+            return True
+        if prefix.endswith("_") and name == prefix.rstrip("_"):
+            return True
+    return False
+
+
+class ReservedNamespaceError(ValueError):
+    """Raised when an asset name collides with a reserved runtime prefix."""
+
+    def __init__(self, name: str, prefix: str) -> None:
+        self.name = name
+        self.prefix = prefix
+        super().__init__(
+            f"Asset name {name!r} collides with reserved prefix {prefix!r}"
+        )
+
+
 def check_authority(
     contract: Contract,
     candidate_assets: list[dict],

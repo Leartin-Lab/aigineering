@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from aigineering.core.authority import _is_protected_name
 from aigineering.core.methods import (
     method_context_content,
     method_contract,
@@ -86,15 +87,22 @@ class MethodRuntime:
         """Return all assets matching *name*."""
         return self._store.get_assets_by_name(name)
 
-    @property
-    def store(self) -> StoreProtocol:
-        """The underlying store — for passing to disclosure computation."""
-        return self._store
+    # -- Disclosure ----------------------------------------------------------
 
-    # -- System asset minting ------------------------------------------------
+    def compute_disclosure(self, contract: Contract) -> list[Asset]:
+        """Compute the disclosure scope for *contract*.
 
-    def mint_system_asset(
+        Wraps :func:`disclosure.compute_disclosure` with the runtime's store.
+        """
+        from aigineering.core.disclosure import compute_disclosure as _compute
+
+        return _compute(contract, self._store)
+
+    # -- System asset minting (authorized) -----------------------------------
+
+    def mint_authorized_system_asset(
         self,
+        method_contract: Contract,
         name: str,
         content: str,
         created_by: str,
@@ -103,8 +111,18 @@ class MethodRuntime:
     ) -> Asset:
         """Create and sign a system asset, then add it to the store.
 
+        Validates that the *method_contract* has minting authority for
+        *name* when *name* starts with a reserved runtime prefix.
+
         Replaces direct ``engine._store.add_asset(sign_asset(...))`` patterns.
         """
+        if _is_protected_name(name):
+            if name not in method_contract.minting_authority:
+                raise ValueError(
+                    f"Contract '{method_contract.id}' lacks minting authority "
+                    f"for reserved name '{name}'. "
+                    f"minting_authority={list(method_contract.minting_authority)!r}"
+                )
         asset = system_asset(
             name=name,
             content=content,
@@ -166,7 +184,14 @@ class MethodRuntime:
             content=method_context_content(parent_contract, action, child),
             created_by=parent_contract.id,
         )
-        self._ingress.accept_asset(ctx, source="method", allow_protected=True)
+        self.mint_authorized_system_asset(
+            child,
+            name=ctx.name,
+            content=ctx.content,
+            created_by=ctx.created_by,
+            promptable=ctx.promptable,
+            source_uri=ctx.source_uri,
+        )
 
         self._method_scheduled.add(child.id)
 
@@ -204,6 +229,33 @@ class MethodRuntime:
     def consume_budget(self, contract_id: str, amount: int = 1) -> int:
         """Consume *amount* from the budget of *contract_id*. Returns remaining."""
         return self._budget.consume(contract_id, amount)
+
+    def cancel_contract(
+        self,
+        contract: Contract,
+        *,
+        reason: str,
+        relation_target: str = "",
+    ) -> bool:
+        """Record one terminal cancellation through the method runtime.
+
+        Recovery is execution control, not a CLI-only state mutation.  A
+        terminal event is therefore emitted through this constrained runtime
+        API, with an idempotency check against durable trace history.
+        """
+        terminal_events = {"complete", "failed", "cancelled", "unreachable"}
+        existing = self._trace.store.get_by_contract(contract.id)
+        if any(entry.event_type in terminal_events for entry in existing):
+            return False
+        self.append_trace(
+            contract.id,
+            "cancelled",
+            relation_type="recover",
+            relation_target=relation_target or contract.id,
+            rejected_fragments=[f"[cancelled] recovery: {reason}"],
+            budget_remaining=self.resolve_budget(contract.id),
+        )
+        return True
 
 
 def _coerce_budget_manager(budget: BudgetManager | dict[str, int]) -> BudgetManager:

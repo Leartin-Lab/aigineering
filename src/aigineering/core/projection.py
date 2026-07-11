@@ -117,8 +117,8 @@ def project_candidate(
         status = ProjectionStatus.PARTIAL
 
     return ProjectionResult(
-        accepted_assets=accepted_assets,
-        rejected_candidates=all_rejected,
+        accepted_assets=tuple(accepted_assets),
+        rejected_candidates=tuple(all_rejected),
         raw_candidate=candidate.raw_output,
         status=status,
         authority_policy=authority_policy,

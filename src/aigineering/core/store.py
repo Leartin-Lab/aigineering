@@ -8,6 +8,11 @@ import os
 from pathlib import Path
 from typing import Optional, Protocol, runtime_checkable
 
+from aigineering.core.authority import (
+    RESERVED_PREFIXES,
+    ReservedNamespaceError,
+    _is_protected_name,
+)
 from aigineering.core.provenance import verify_asset_seal
 from aigineering.protocol.types import Asset, Contract
 from aigineering.protocol.wire import asset_to_dict, contract_to_dict
@@ -84,6 +89,25 @@ class MemoryStore:
         self._declared_outputs_index: dict[str, set[str]] = {}
 
     def add_asset(self, asset: Asset) -> None:
+        if not asset.signed_by or not verify_asset_seal(asset):
+            raise ValueError(
+                f"G3/N-P1.6: Asset '{asset.id}' rejected — missing or invalid canonical seal "
+                f"(signed_by={asset.signed_by!r})"
+            )
+        if _is_protected_name(asset.name):
+            prefix = next(
+                (
+                    p
+                    for p in RESERVED_PREFIXES
+                    if asset.name.startswith(p)
+                    or (p.endswith("_") and asset.name == p.rstrip("_"))
+                ),
+                "?",
+            )
+            raise ReservedNamespaceError(asset.name, prefix)
+        self.assets[asset.id] = asset
+
+    def _add_system_asset(self, asset: Asset) -> None:
         if not asset.signed_by or not verify_asset_seal(asset):
             raise ValueError(
                 f"G3/N-P1.6: Asset '{asset.id}' rejected — missing or invalid canonical seal "

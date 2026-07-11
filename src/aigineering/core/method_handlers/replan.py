@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from aigineering.core.disclosure import compute_disclosure
 from aigineering.core.method_handlers.recovery import (
     has_recoverable_method_result_rejection,
     schedule_method_result_recovery,
@@ -85,7 +84,7 @@ class ReplanMethodHandler:
         allowed_input_names: set[str] | None = None
         parent_budget_remaining: int | None = None
         if parent_contract is not None:
-            scope = compute_disclosure(parent_contract, runtime.store)
+            scope = runtime.compute_disclosure(parent_contract)
             allowed_input_names = {a.name for a in scope}
             parent_budget_remaining = runtime.resolve_budget(parent_contract.id)
 

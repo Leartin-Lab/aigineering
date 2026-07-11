@@ -184,7 +184,7 @@ def test_mcp_descriptor_carries_provenance():
     # Provenance is preserved through store round-trip
     store = MemoryStore()
     for desc in descriptors:
-        store.add_asset(desc)
+        store._add_system_asset(desc)
 
     for desc in descriptors:
         reloaded = store.get_asset(desc.id)
@@ -343,7 +343,7 @@ def test_mcp_descriptor_store_round_trip():
     )
 
     store = MemoryStore()
-    store.add_asset(descriptor)
+    store._add_system_asset(descriptor)
 
     # Query by ID
     loaded = store.get_asset(descriptor.id)

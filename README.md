@@ -55,10 +55,10 @@ aig replay <session_id>   # replay a session
 
 ---
 
-## Status: v0.5.0-alpha.3 — Local Productivity Alpha
+## Status: v0.5.0 — Local Productivity Formal Release
 
 This release keeps the v0.4 single-node kernel constraint and adds a more
-practical local productivity layer. The important change in alpha.3 is that
+practical local productivity layer. The important change in v0.5.0 is that
 the v0.5 boundary work is tighter: runtime ingress is the production mutation
 gate, declared-output completion is reactive, and output satisfaction now
 filters out observation/context assets.
@@ -98,7 +98,6 @@ command remains a local direct execution path for demos and smoke tests.
 **Still Explicitly Out of Scope**
 - Distributed runtime across shared stores.
 - External security audit and deployment hardening.
-- Stable PyPI release channel.
 - Full self-modifying control plane where every policy/config item is an authorized asset update.
 - Multi-node lease recovery, queueing, and scheduler fairness guarantees.
 

@@ -10,10 +10,16 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
+from collections.abc import Callable
 from pathlib import Path
 from types import MappingProxyType
 from typing import Optional
 
+from aigineering.core.authority import (
+    RESERVED_PREFIXES,
+    ReservedNamespaceError,
+    _is_protected_name,
+)
 from aigineering.core.crash import check_crash_point
 from aigineering.core.ids import compute_content_hash, now_iso
 from aigineering.core.provenance import verify_asset_seal
@@ -196,6 +202,16 @@ CREATE TABLE IF NOT EXISTS contract_activation_refs (
 )
 """
 
+_DDL_CREATE_RUNTIME_LIFECYCLE = """
+CREATE TABLE IF NOT EXISTS runtime_lifecycle (
+    runtime_id TEXT PRIMARY KEY,
+    heartbeat_at TEXT NOT NULL,
+    state TEXT NOT NULL DEFAULT 'active',
+    started_at TEXT NOT NULL,
+    stopped_at TEXT
+)
+"""
+
 _DDL_CREATE_DECLARED_OUTPUTS = """
 CREATE TABLE IF NOT EXISTS contract_declared_outputs (
     contract_id TEXT NOT NULL,
@@ -281,6 +297,7 @@ class SQLiteStore:
             _DDL_CREATE_IDEMPOTENCY,
             _DDL_CREATE_ACTIVATION_REFS,
             _DDL_CREATE_DECLARED_OUTPUTS,
+            _DDL_CREATE_RUNTIME_LIFECYCLE,
         ]:
             self._conn.execute(ddl)
         for idx_ddl in _DDL_INDEXES:
@@ -349,7 +366,11 @@ class SQLiteStore:
     def _migrate_to_v4(self) -> None:
         """Add dependency/output index tables and backfill from existing
         contracts so upgraded databases do not return false negatives."""
-        for ddl in (_DDL_CREATE_ACTIVATION_REFS, _DDL_CREATE_DECLARED_OUTPUTS):
+        for ddl in (
+            _DDL_CREATE_ACTIVATION_REFS,
+            _DDL_CREATE_DECLARED_OUTPUTS,
+            _DDL_CREATE_RUNTIME_LIFECYCLE,
+        ):
             self._conn.execute(ddl)
         for idx_ddl in _DDL_INDEXES:
             self._conn.execute(idx_ddl)
@@ -381,6 +402,51 @@ class SQLiteStore:
                         )
             except _json.JSONDecodeError:
                 pass
+
+    # ── Runtime Lifecycle ─────────────────────────────────────────────────
+
+    def upsert_runtime_lifecycle(
+        self, runtime_id: str, heartbeat_at: str, state: str
+    ) -> None:
+        """Insert or update a runtime lifecycle record."""
+        with self._conn:
+            self._conn.execute(
+                "INSERT INTO runtime_lifecycle (runtime_id, heartbeat_at, state, started_at) "
+                "VALUES (?, ?, ?, COALESCE((SELECT started_at FROM runtime_lifecycle "
+                "WHERE runtime_id = ?), ?)) "
+                "ON CONFLICT(runtime_id) DO UPDATE SET "
+                "heartbeat_at = excluded.heartbeat_at, state = excluded.state"
+                + (", stopped_at = ?" if state == "stopped" else ""),
+                (runtime_id, heartbeat_at, state, runtime_id, heartbeat_at)
+                + ((heartbeat_at,) if state == "stopped" else ()),
+            )
+
+    def get_runtime_lifecycle(self, runtime_id: str) -> dict | None:
+        """Return the lifecycle record for *runtime_id*, or None."""
+        row = self._conn.execute(
+            "SELECT runtime_id, heartbeat_at, state, started_at, stopped_at "
+            "FROM runtime_lifecycle WHERE runtime_id = ?",
+            (runtime_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return dict(row)
+
+    def get_orphaned_runtimes(self, ttl_seconds: int) -> list[dict]:
+        """Return lifecycle records for active runtimes whose heartbeat
+        is older than *ttl_seconds* seconds from now."""
+        from datetime import datetime, timedelta, timezone
+
+        cutoff = (
+            datetime.now(timezone.utc) - timedelta(seconds=ttl_seconds)
+        ).isoformat()
+        rows = self._conn.execute(
+            "SELECT runtime_id, heartbeat_at, state, started_at, stopped_at "
+            "FROM runtime_lifecycle "
+            "WHERE state = 'active' AND heartbeat_at < ?",
+            (cutoff,),
+        ).fetchall()
+        return [dict(r) for r in rows]
 
     @property
     def schema_version(self) -> int:
@@ -442,6 +508,26 @@ class SQLiteStore:
     # ------------------------------------------------------------------
 
     def add_asset(self, asset: Asset) -> None:
+        if not asset.signed_by or not verify_asset_seal(asset):
+            raise ValueError(
+                f"G3/N-P1.6: Asset '{asset.id}' rejected — missing or invalid canonical seal "
+                f"(signed_by={asset.signed_by!r})"
+            )
+        if _is_protected_name(asset.name):
+            prefix = next(
+                (
+                    p
+                    for p in RESERVED_PREFIXES
+                    if asset.name.startswith(p)
+                    or (p.endswith("_") and asset.name == p.rstrip("_"))
+                ),
+                "?",
+            )
+            raise ReservedNamespaceError(asset.name, prefix)
+        with self._conn:
+            self._insert_asset(asset)
+
+    def _add_system_asset(self, asset: Asset) -> None:
         if not asset.signed_by or not verify_asset_seal(asset):
             raise ValueError(
                 f"G3/N-P1.6: Asset '{asset.id}' rejected — missing or invalid canonical seal "
@@ -532,59 +618,63 @@ class SQLiteStore:
     # StoreProtocol: contracts
     # ------------------------------------------------------------------
 
-    def add_contract(self, contract: Contract) -> None:
+    def _insert_contract(self, contract: Contract) -> None:
+        """Insert or replace a contract row + index rows (no transaction)."""
         d = contract_to_dict(contract)
+        self._conn.execute(
+            """INSERT OR REPLACE INTO contracts (
+                id, parent_id, name, description,
+                inputs, outputs, activation, budget,
+                tool_scope, labels, origin, minting_authority, sensitive_input_policy
+            ) VALUES (
+                :id, :parent_id, :name, :description,
+                :inputs, :outputs, :activation, :budget,
+                :tool_scope, :labels, :origin, :minting_authority, :sensitive_input_policy
+            )""",
+            {
+                "id": d["id"],
+                "parent_id": d["parent_id"],
+                "name": d["name"],
+                "description": d["description"],
+                "inputs": json.dumps(list(d["inputs"])),
+                "outputs": json.dumps(list(d["outputs"])),
+                "activation": d["activation"],
+                "budget": d["budget"],
+                "tool_scope": json.dumps(list(d["tool_scope"])),
+                "labels": json.dumps(list(d["labels"])),
+                "origin": d["origin"],
+                "minting_authority": json.dumps(list(d["minting_authority"])),
+                "sensitive_input_policy": (
+                    json.dumps(d["sensitive_input_policy"], sort_keys=True)
+                    if d["sensitive_input_policy"] is not None
+                    else None
+                ),
+            },
+        )
+        self._conn.execute(
+            "DELETE FROM contract_activation_refs WHERE contract_id = ?",
+            (contract.id,),
+        )
+        for name in _extract_activation_names(contract.activation):
+            self._conn.execute(
+                "INSERT INTO contract_activation_refs (contract_id, asset_name) "
+                "VALUES (?, ?)",
+                (contract.id, name),
+            )
+        self._conn.execute(
+            "DELETE FROM contract_declared_outputs WHERE contract_id = ?",
+            (contract.id,),
+        )
+        for name in contract.outputs:
+            self._conn.execute(
+                "INSERT INTO contract_declared_outputs (contract_id, output_name) "
+                "VALUES (?, ?)",
+                (contract.id, name),
+            )
+
+    def add_contract(self, contract: Contract) -> None:
         with self._conn:
-            self._conn.execute(
-                """INSERT OR REPLACE INTO contracts (
-                    id, parent_id, name, description,
-                    inputs, outputs, activation, budget,
-                    tool_scope, labels, origin, minting_authority, sensitive_input_policy
-                ) VALUES (
-                    :id, :parent_id, :name, :description,
-                    :inputs, :outputs, :activation, :budget,
-                    :tool_scope, :labels, :origin, :minting_authority, :sensitive_input_policy
-                )""",
-                {
-                    "id": d["id"],
-                    "parent_id": d["parent_id"],
-                    "name": d["name"],
-                    "description": d["description"],
-                    "inputs": json.dumps(list(d["inputs"])),
-                    "outputs": json.dumps(list(d["outputs"])),
-                    "activation": d["activation"],
-                    "budget": d["budget"],
-                    "tool_scope": json.dumps(list(d["tool_scope"])),
-                    "labels": json.dumps(list(d["labels"])),
-                    "origin": d["origin"],
-                    "minting_authority": json.dumps(list(d["minting_authority"])),
-                    "sensitive_input_policy": (
-                        json.dumps(d["sensitive_input_policy"], sort_keys=True)
-                        if d["sensitive_input_policy"] is not None
-                        else None
-                    ),
-                },
-            )
-            self._conn.execute(
-                "DELETE FROM contract_activation_refs WHERE contract_id = ?",
-                (contract.id,),
-            )
-            for name in _extract_activation_names(contract.activation):
-                self._conn.execute(
-                    "INSERT INTO contract_activation_refs (contract_id, asset_name) "
-                    "VALUES (?, ?)",
-                    (contract.id, name),
-                )
-            self._conn.execute(
-                "DELETE FROM contract_declared_outputs WHERE contract_id = ?",
-                (contract.id,),
-            )
-            for name in contract.outputs:
-                self._conn.execute(
-                    "INSERT INTO contract_declared_outputs (contract_id, output_name) "
-                    "VALUES (?, ?)",
-                    (contract.id, name),
-                )
+            self._insert_contract(contract)
 
     def get_contract(self, contract_id: str) -> Optional[Contract]:
         cur = self._conn.execute("SELECT * FROM contracts WHERE id = ?", (contract_id,))
@@ -965,29 +1055,67 @@ class SQLiteStore:
                     )
         return True
 
+    def commit_direct_execution(
+        self,
+        accepted_assets: list[Asset],
+        trace_entries: list[TraceEntry],
+        *,
+        contract: Contract | None = None,
+        reducer_callback: Callable[[], list[TraceEntry]] | None = None,
+    ) -> None:
+        with self._conn:
+            if contract is not None:
+                self._insert_contract(contract)
+            for asset in accepted_assets:
+                if not asset.signed_by or not verify_asset_seal(asset):
+                    raise ValueError(
+                        f"G3/N-P1.6: Asset '{asset.id}' rejected — "
+                        f"missing or invalid canonical seal "
+                        f"(signed_by={asset.signed_by!r})"
+                    )
+                self._insert_asset(asset)
+            check_crash_point("after_asset_before_trace")
+            if reducer_callback is not None:
+                reducer_traces: list[TraceEntry] = reducer_callback()
+                trace_entries = list(trace_entries) + reducer_traces
+            for entry in trace_entries:
+                self._insert_trace_entry(entry)
+            check_crash_point("after_trace_before_budget")
+            check_crash_point("after_budget_before_complete")
+
     # ------------------------------------------------------------------
     # Replacement claim persistence
     # ------------------------------------------------------------------
 
     def add_replacement_claim(self, claim) -> None:
         with self._conn:
-            self._conn.execute(
-                """INSERT OR REPLACE INTO claims (
+            self._insert_replacement_claim(claim)
+
+    def _insert_replacement_claim(self, claim) -> None:
+        self._conn.execute(
+            """INSERT OR REPLACE INTO claims (
                     id, source_asset_id, replacement_asset_id,
                     definition_hash, claim_type, signed_by,
                     provenance_seal, lineage_id
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    claim.id,
-                    claim.source_asset_id,
-                    claim.replacement_asset_id,
-                    claim.definition_hash,
-                    claim.claim_type,
-                    claim.signed_by,
-                    claim.provenance_seal,
-                    claim.lineage_id,
-                ),
-            )
+            (
+                claim.id,
+                claim.source_asset_id,
+                claim.replacement_asset_id,
+                claim.definition_hash,
+                claim.claim_type,
+                claim.signed_by,
+                claim.provenance_seal,
+                claim.lineage_id,
+            ),
+        )
+
+    def commit_replacement_claim(self, claim, trace_entry: TraceEntry) -> None:
+        """Persist a replacement claim and its audit trace atomically."""
+        with self._conn:
+            self._insert_replacement_claim(claim)
+            check_crash_point("after_replacement_claim_before_trace")
+            self._insert_trace_entry(trace_entry)
 
     def get_claims_by_definition(self, definition_hash: str) -> list:
         rows = self._conn.execute(

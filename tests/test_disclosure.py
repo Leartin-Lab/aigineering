@@ -73,7 +73,7 @@ def test_engine_does_not_disclose_non_promptable_label_asset():
         disclosure_view="sealed",
     )
     input_asset = _asset("input", "input content")
-    store.add_asset(sealed_skill)
+    store._add_system_asset(sealed_skill)
     store.add_asset(input_asset)
 
     contract = _contract(

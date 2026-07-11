@@ -6,11 +6,32 @@ import json
 from typing import TYPE_CHECKING
 
 from aigineering.core.ids import hash_contract_v2
-from aigineering.protocol.types import Contract
+from aigineering.protocol.types import Candidate, Contract
 
 if TYPE_CHECKING:
     from aigineering.core.method_runtime import MethodRuntime
     from aigineering.protocol.types import Asset
+
+
+class RecoveryMethodHandler:
+    """Method ingress for explicit operator recovery decisions."""
+
+    def handle_cancel(
+        self,
+        runtime: MethodRuntime,
+        contract: Contract,
+        candidate: Candidate,
+    ) -> bool:
+        """Apply an explicit recovery cancellation as one terminal transition."""
+        if candidate.parsed_action is not None:
+            action = candidate.parsed_action.get("action")
+            if action != "cancel":
+                return False
+        return runtime.cancel_contract(
+            contract,
+            reason="operator requested cancellation of recovery-required contract",
+            relation_target=candidate.worker_id,
+        )
 
 
 def schedule_method_result_recovery(
@@ -40,13 +61,6 @@ def schedule_method_result_recovery(
         "required_output": output_name,
         "expected_format": _expected_format(method_type),
     }
-    context_asset = runtime.mint_system_asset(
-        name=context_name,
-        content=json.dumps(context, sort_keys=True, ensure_ascii=False),
-        created_by=failed_contract.id,
-        promptable=True,
-    )
-
     name = f"{failed_contract.name}.recover"
     description = json.dumps(
         {
@@ -91,9 +105,16 @@ def schedule_method_result_recovery(
         tool_scope=[],
         labels=[f"method:{method_type}"],
         origin="system",
-        minting_authority=(output_name,),
+        minting_authority=(output_name, context_name),
     )
     runtime.add_contract(recovery)
+    context_asset = runtime.mint_authorized_system_asset(
+        recovery,
+        name=context_name,
+        content=json.dumps(context, sort_keys=True, ensure_ascii=False),
+        created_by=failed_contract.id,
+        promptable=True,
+    )
     runtime.append_trace(
         parent_id,
         "method_recovery_scheduled",
@@ -136,13 +157,6 @@ def schedule_projection_recovery(
             "reasons to correct the output format and names."
         ),
     }
-    context_asset = runtime.mint_system_asset(
-        name=context_name,
-        content=json.dumps(context, sort_keys=True, ensure_ascii=False),
-        created_by=failed_contract.id,
-        promptable=True,
-    )
-
     name = f"{failed_contract.name or failed_contract.id}.recover"
     description = json.dumps(
         {
@@ -186,10 +200,17 @@ def schedule_projection_recovery(
         tool_scope=failed_contract.tool_scope,
         labels=failed_contract.labels,
         origin="recovery",
-        minting_authority=failed_contract.minting_authority,
+        minting_authority=(context_name, *failed_contract.minting_authority),
         sensitive_input_policy=failed_contract.sensitive_input_policy,
     )
     runtime.add_contract(recovery)
+    context_asset = runtime.mint_authorized_system_asset(
+        recovery,
+        name=context_name,
+        content=json.dumps(context, sort_keys=True, ensure_ascii=False),
+        created_by=failed_contract.id,
+        promptable=True,
+    )
     runtime.append_trace(
         failed_contract.id,
         "recovery_scheduled",

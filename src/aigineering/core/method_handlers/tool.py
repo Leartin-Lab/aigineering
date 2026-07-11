@@ -162,7 +162,8 @@ class ToolMethodHandler:
         )
 
         # Mint the call system asset (promptable=False — internal artifact)
-        call_asset = runtime.mint_system_asset(
+        call_asset = runtime.mint_authorized_system_asset(
+            contract,
             call_asset_name,
             call_content,
             contract.id,
@@ -170,7 +171,8 @@ class ToolMethodHandler:
         )
 
         # Mint the observation system asset
-        obs_asset = runtime.mint_system_asset(
+        obs_asset = runtime.mint_authorized_system_asset(
+            contract,
             obs_name,
             obs_content,
             contract.id,

@@ -37,7 +37,7 @@ def test_tool_descriptor_registration_and_query():
         source_uri="tool://web_search/1.0",
     )
 
-    store.add_asset(descriptor)
+    store._add_system_asset(descriptor)
 
     # Query by exact ID
     loaded = store.get_asset(descriptor.id)
@@ -286,7 +286,7 @@ def test_descriptor_disclosure_metadata_only():
 
     # Verify the store round-trip does not add hidden fields
     store = MemoryStore()
-    store.add_asset(t)
+    store._add_system_asset(t)
     rel = store.get_asset(t.id)
     assert rel is not None
     assert rel == t
@@ -362,7 +362,7 @@ def test_descriptors_carry_provenance():
     # Provenance is preserved through store round-trip
     store = MemoryStore()
     for desc in descriptors:
-        store.add_asset(desc)
+        store._add_system_asset(desc)
 
     for desc in descriptors:
         reloaded = store.get_asset(desc.id)

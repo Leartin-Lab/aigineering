@@ -48,7 +48,7 @@ def test_handler_schedules_tool_child():
     registry.register("tool", handler)
 
     store = MemoryStore()
-    store.add_asset(
+    store._add_system_asset(
         create_tool_descriptor(
             "lookup",
             "Lookup test values.",
@@ -90,7 +90,7 @@ def test_handler_executes_tool_on_completion():
     trace_store = TraceStore()
     tools = ToolRegistry()
     tools.register(ToolSpec(name="lookup"), lambda args: f"value:{args['key']}")
-    store.add_asset(
+    store._add_system_asset(
         create_tool_descriptor(
             "lookup",
             "Lookup test values.",
@@ -119,6 +119,7 @@ def test_handler_executes_tool_on_completion():
         budget=1,
         tool_scope=["lookup"],
         origin="system",
+        minting_authority=("_tool_obs_tool_child_1", "_tool_call_tool_child_1"),
     )
 
     result = handler.handle_completion(runtime, tool_contract, [])
@@ -140,7 +141,7 @@ def test_handler_executes_mcp_tool_on_completion():
 
     store = MemoryStore()
     trace_store = TraceStore()
-    store.add_asset(
+    store._add_system_asset(
         create_mcp_descriptor(
             "search",
             source_uri="mcp://search",
@@ -177,6 +178,7 @@ def test_handler_executes_mcp_tool_on_completion():
         budget=1,
         tool_scope=["mcp:search.query"],
         origin="system",
+        minting_authority=("_mcp_obs_mcp_child_1", "_mcp_call_mcp_child_1"),
     )
 
     result = handler.handle_completion(runtime, tool_contract, [])
@@ -226,6 +228,7 @@ def test_handler_requires_verified_tool_descriptor():
         budget=1,
         tool_scope=["lookup"],
         origin="system",
+        minting_authority=("_tool_obs_tool_child_1", "_tool_call_tool_child_1"),
     )
 
     result = handler.handle_completion(runtime, tool_contract, [])
@@ -241,7 +244,7 @@ def test_handler_requires_verified_tool_descriptor():
     trace_store = TraceStore()
     tools = ToolRegistry()
     tools.register(ToolSpec(name="lookup"), should_not_run)
-    store.add_asset(
+    store._add_system_asset(
         create_tool_descriptor(
             "lookup",
             "Lookup test values.",
@@ -287,6 +290,7 @@ def test_handler_rejects_unknown_tool():
         budget=1,
         tool_scope=["unknown_tool"],
         origin="system",
+        minting_authority=("_tool_obs_tool_child_1", "_tool_call_tool_child_1"),
     )
 
     result = handler.handle_completion(runtime, tool_contract, [])
@@ -307,7 +311,7 @@ def test_handler_respects_tool_scope():
     trace_store = TraceStore()
     tools = ToolRegistry()
     tools.register(ToolSpec(name="lookup"), lambda args: "value")
-    store.add_asset(
+    store._add_system_asset(
         create_tool_descriptor(
             "lookup",
             "Lookup test values.",
@@ -336,6 +340,7 @@ def test_handler_respects_tool_scope():
         budget=1,
         tool_scope=[],
         origin="system",
+        minting_authority=("_tool_obs_tool_child_1", "_tool_call_tool_child_1"),
     )
 
     result = handler.handle_completion(runtime, tool_contract, [])
@@ -403,7 +408,7 @@ def test_engine_uses_tool_handler():
     tools = ToolRegistry()
     tools.register(ToolSpec(name="lookup"), lambda args: f"value:{args['key']}")
     store = MemoryStore()
-    store.add_asset(
+    store._add_system_asset(
         create_tool_descriptor(
             "lookup",
             "Lookup test values.",
@@ -468,7 +473,7 @@ def test_tool_without_handler_fails_closed():
         ]
     )
     store = MemoryStore()
-    store.add_asset(
+    store._add_system_asset(
         create_tool_descriptor(
             "lookup",
             "Lookup test values.",

@@ -20,6 +20,11 @@ from aigineering.cli.task_state import project_task_status
 from aigineering.cli.worker_runtime import build_worker
 from aigineering.core.engine import Engine
 from aigineering.core.session import SessionStore
+from aigineering.core.startup_check import (
+    begin_runtime_startup,
+    end_runtime,
+    renew_heartbeat,
+)
 from aigineering.core.trace import JsonLTraceStore
 from aigineering.protocol.types import Session, TraceEntry
 
@@ -277,6 +282,8 @@ def _run_task_pool(
     json_output: bool,
 ) -> None:
     store = _persistent_store()
+    runtime_result = begin_runtime_startup(store)
+    runtime_owner = runtime_result.runtime_owner
     try:
         worker = build_worker(
             worker_kind,
@@ -286,91 +293,93 @@ def _run_task_pool(
             max_retries=max_retries,
             capabilities=capabilities,
         )
-    except ValueError as e:
-        raise click.ClickException(str(e))
-    if mock_output is not None or mock_presets:
-        if worker_kind != "mock":
-            raise click.ClickException(
-                "--mock-output/--mock-preset requires --worker mock"
+        if mock_output is not None or mock_presets:
+            if worker_kind != "mock":
+                raise click.ClickException(
+                    "--mock-output/--mock-preset requires --worker mock"
+                )
+            set_output = getattr(worker, "set_output", None)
+            if set_output is not None:
+                if mock_output is not None:
+                    for contract in store.get_all_contracts():
+                        set_output(contract.name, mock_output)
+                for preset in mock_presets:
+                    name, sep, output = preset.partition("=")
+                    if sep != "=" or not name:
+                        raise click.ClickException(
+                            "--mock-preset must use contract_name=raw_output"
+                        )
+                    set_output(name, output)
+        deadline = time.monotonic() + wait_timeout
+        cycles: list[dict] = []
+
+        while True:
+            before_trace_count = len(getattr(store, "get_all", lambda: [])())
+            engine = Engine.restore_from_store(
+                store=store,
+                worker=worker,
+                trace_store=store,
+                method_registry=_default_method_registry(),
             )
-        set_output = getattr(worker, "set_output", None)
-        if set_output is not None:
-            if mock_output is not None:
-                for contract in store.get_all_contracts():
-                    set_output(contract.name, mock_output)
-            for preset in mock_presets:
-                name, sep, output = preset.partition("=")
-                if sep != "=" or not name:
-                    raise click.ClickException(
-                        "--mock-preset must use contract_name=raw_output"
+            engine.run(heartbeat_callback=lambda: renew_heartbeat(store, runtime_owner))
+            after_entries = getattr(store, "get_all", lambda: [])()
+            new_entries = after_entries[before_trace_count:]
+            touched_contracts = sorted({entry.contract_id for entry in new_entries})
+            if touched_contracts:
+                cycles.append(
+                    {
+                        "contracts": touched_contracts,
+                        "trace_events": len(new_entries),
+                    }
+                )
+
+            if target_task_id:
+                target = store.get_contract(target_task_id)
+                if target is None:
+                    _emit_run_result(
+                        {
+                            "ok": False,
+                            "status": "error",
+                            "error": f"Task '{target_task_id}' not found.",
+                            "cycles": cycles,
+                        },
+                        json_output,
                     )
-                set_output(name, output)
-    deadline = time.monotonic() + wait_timeout
-    cycles: list[dict] = []
+                    return
+                status = project_task_status(target, store)
+                if status["terminal"]:
+                    status["ok"] = status["status"] == "completed"
+                    status["cycles"] = cycles
+                    _emit_run_result(status, json_output)
+                    return
 
-    while True:
-        before_trace_count = len(getattr(store, "get_all", lambda: [])())
-        engine = Engine.restore_from_store(
-            store=store,
-            worker=worker,
-            trace_store=store,
-            method_registry=_default_method_registry(),
-        )
-        engine.run()
-        after_entries = getattr(store, "get_all", lambda: [])()
-        new_entries = after_entries[before_trace_count:]
-        touched_contracts = sorted({entry.contract_id for entry in new_entries})
-        if touched_contracts:
-            cycles.append(
-                {
-                    "contracts": touched_contracts,
-                    "trace_events": len(new_entries),
-                }
-            )
-
-        if target_task_id:
-            target = store.get_contract(target_task_id)
-            if target is None:
+            if not target_task_id:
                 _emit_run_result(
                     {
-                        "ok": False,
-                        "status": "error",
-                        "error": f"Task '{target_task_id}' not found.",
+                        "ok": True,
+                        "status": "ran",
                         "cycles": cycles,
                     },
                     json_output,
                 )
                 return
-            status = project_task_status(target, store)
-            if status["terminal"]:
+
+            if time.monotonic() >= deadline or not new_entries:
+                status = project_task_status(target, store)
                 status["ok"] = status["status"] == "completed"
+                if status.get("silent_failure_risks"):
+                    status["status"] = "stalled"
+                if not status["terminal"]:
+                    status["timed_out"] = time.monotonic() >= deadline
                 status["cycles"] = cycles
                 _emit_run_result(status, json_output)
                 return
-
-        if not target_task_id:
-            _emit_run_result(
-                {
-                    "ok": True,
-                    "status": "ran",
-                    "cycles": cycles,
-                },
-                json_output,
-            )
-            return
-
-        if time.monotonic() >= deadline or not new_entries:
-            status = project_task_status(target, store)
-            status["ok"] = status["status"] == "completed"
-            if status.get("silent_failure_risks"):
-                status["status"] = "stalled"
-            if not status["terminal"]:
-                status["timed_out"] = time.monotonic() >= deadline
-            status["cycles"] = cycles
-            _emit_run_result(status, json_output)
-            return
-        time.sleep(max(interval, 0.05))
-        store = _persistent_store()
+            time.sleep(max(interval, 0.05))
+            store = _persistent_store()
+    except ValueError as e:
+        raise click.ClickException(str(e))
+    finally:
+        end_runtime(store, runtime_owner)
 
 
 def _emit_run_result(payload: dict, json_output: bool) -> None:

@@ -18,9 +18,10 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
-from aigineering.core.authority import RESERVED_PREFIXES
+from aigineering.core.authority import RESERVED_PREFIXES, ReservedNamespaceError
 from aigineering.core.provenance import sign_asset
 from aigineering.core.trace import create_entry
 
@@ -41,13 +42,18 @@ _logger = logging.getLogger(__name__)
 
 def _is_protected_name(name: str) -> bool:
     """Return True when *name* starts with a protected prefix."""
+    return _get_matched_prefix(name) is not None
+
+
+def _get_matched_prefix(name: str) -> str | None:
+    """Return the first matching protected prefix, or None."""
     for prefix in RESERVED_PREFIXES:
         if name.startswith(prefix):
-            return True
+            return prefix
         # Also match the bare prefix form: "_sys_" should match "_sys"
         if prefix.endswith("_") and name == prefix.rstrip("_"):
-            return True
-    return False
+            return prefix
+    return None
 
 
 class RuntimeIngress:
@@ -109,70 +115,114 @@ class RuntimeIngress:
 
         Raises
         ------
-        ValueError
+        ReservedNamespaceError
             If *asset.name* uses a protected prefix and *allow_protected*
             is ``False``.
         """
-        if _is_protected_name(asset.name) and not allow_protected:
-            raise ValueError(
-                f"Asset name '{asset.name}' uses a protected prefix. "
-                f"Use allow_protected=True if intentional."
-            )
+        if not allow_protected:
+            prefix = _get_matched_prefix(asset.name)
+            if prefix is not None:
+                raise ReservedNamespaceError(asset.name, prefix)
 
         signed = sign_asset(asset)
         if not signed.signed_by:
             signed = sign_asset(asset, signed_by="engine")
 
-        self._store.add_asset(signed)
-
-        self._trace.append(
-            create_entry(
-                contract_id="runtime_ingress",
-                event_type="asset_accepted",
-                parent_id=signed.id,
-                relation_target=signed.name,
-                accepted_fragments=[
-                    json.dumps(
-                        {
-                            "asset_id": signed.id,
-                            "name": signed.name,
-                            "origin": signed.origin,
-                            "trust_tier": signed.trust_tier,
-                            "source": source,
-                        }
-                    )
-                ],
-            )
+        main_entry = create_entry(
+            contract_id="runtime_ingress",
+            event_type="asset_accepted",
+            parent_id=signed.id,
+            relation_target=signed.name,
+            accepted_fragments=[
+                json.dumps(
+                    {
+                        "asset_id": signed.id,
+                        "name": signed.name,
+                        "origin": signed.origin,
+                        "trust_tier": signed.trust_tier,
+                        "source": source,
+                    }
+                )
+            ],
         )
 
+        protected_entry: object | None = None
         if allow_protected and _is_protected_name(asset.name):
-            self._trace.append(
-                create_entry(
-                    contract_id="runtime_ingress",
-                    event_type="asset_accepted_protected_override",
-                    parent_id=signed.id,
-                    relation_target=signed.name,
-                )
+            protected_entry = create_entry(
+                contract_id="runtime_ingress",
+                event_type="asset_accepted_protected_override",
+                parent_id=signed.id,
+                relation_target=signed.name,
             )
 
-        if self._reducer is not None:
-            events = self._reducer.on_asset_created(signed)
-            _logger.debug(
-                "FactReducer produced %d events for asset %r", len(events), signed.name
+        from collections.abc import Callable
+
+        commit_fn: Callable | None = getattr(
+            self._store, "commit_direct_execution", None
+        )
+        if commit_fn is not None:
+            trace_entries: list[object] = [main_entry]
+            if protected_entry is not None:
+                trace_entries.append(protected_entry)
+
+            # Collect reducer traces with mirror_to_trace=False — they'll
+            # be mirrored to runtime memory only after the transaction
+            # succeeds, matching the pattern in commit_execution_batch.
+            reducer_traces: list[object] = []
+            if self._reducer is not None:
+                events = self._reducer.on_asset_created(signed)
+                _logger.debug(
+                    "FactReducer produced %d events for asset %r",
+                    len(events),
+                    signed.name,
+                )
+                reducer_traces.extend(
+                    self._apply_reducer_events(events, signed, mirror_to_trace=False)
+                )
+
+            commit_fn(
+                accepted_assets=[signed],
+                trace_entries=list(trace_entries) + reducer_traces,
             )
-            self._apply_reducer_events(events, signed)
+            for entry in reducer_traces:
+                self._trace.append(entry)
+        else:
+            if allow_protected:
+                add_fn = getattr(
+                    self._store, "_add_system_asset", self._store.add_asset
+                )
+                add_fn(signed)
+            else:
+                self._store.add_asset(signed)
+            self._trace.append(main_entry)
+            if protected_entry is not None:
+                self._trace.append(protected_entry)
+            if self._reducer is not None:
+                events = self._reducer.on_asset_created(signed)
+                _logger.debug(
+                    "FactReducer produced %d events for asset %r",
+                    len(events),
+                    signed.name,
+                )
+                self._apply_reducer_events(events, signed)
 
         return signed
 
-    def _apply_reducer_events(self, events: list[object], asset: Asset) -> None:
+    def _apply_reducer_events(
+        self, events: list[object], asset: Asset, *, mirror_to_trace: bool = True
+    ) -> list[object]:
         """Apply FactReducer events: append trace entries for every
-        detected consequence of the new asset.
+        detected consequence of the new asset.  Returns the created
+        :class:`TraceEntry` objects for optional SQLite batch collection.
 
-        For ``contract_complete`` events the engine's completion state is
-        also updated so that reactive parent completion actually works.
+        When *mirror_to_trace* is False (used inside batch commit),
+        the entries are only returned, not appended to the runtime trace
+        store — the caller is responsible for mirroring after durable
+        commit succeeds.
         """
         from aigineering.core.fact_reducer import FactReducerEvent
 
+        created: list[object] = []
         for event in events:
             if not isinstance(event, FactReducerEvent):
                 continue
@@ -199,14 +249,106 @@ class RuntimeIngress:
                 trace_event_type = "method_result_detected"
 
             if trace_event_type is not None and event.contract_id:
-                self._trace.append(
-                    create_entry(
-                        contract_id=event.contract_id,
-                        event_type=trace_event_type,
-                        parent_id=asset.id,
-                        **trace_kwargs,
-                    )
+                entry = create_entry(
+                    contract_id=event.contract_id,
+                    event_type=trace_event_type,
+                    parent_id=asset.id,
+                    **trace_kwargs,
                 )
+                if mirror_to_trace:
+                    self._trace.append(entry)
+                created.append(entry)
+        return created
+
+    def commit_execution_batch(
+        self,
+        assets: list[Asset],
+        engine_trace_entries: Sequence[object],
+        *,
+        source: str = "projection",
+        allow_protected: bool = False,
+    ) -> list[Asset]:
+        signed: list[Asset] = []
+        for asset in assets:
+            if not allow_protected:
+                prefix = _get_matched_prefix(asset.name)
+                if prefix is not None:
+                    raise ReservedNamespaceError(asset.name, prefix)
+            s = sign_asset(asset)
+            if not s.signed_by:
+                s = sign_asset(asset, signed_by="engine")
+            signed.append(s)
+
+        ingress_traces: list[object] = []
+        for s_asset in signed:
+            entry = create_entry(
+                contract_id="runtime_ingress",
+                event_type="asset_accepted",
+                parent_id=s_asset.id,
+                relation_target=s_asset.name,
+                accepted_fragments=[
+                    json.dumps(
+                        {
+                            "asset_id": s_asset.id,
+                            "name": s_asset.name,
+                            "origin": s_asset.origin,
+                            "trust_tier": s_asset.trust_tier,
+                            "source": source,
+                        }
+                    )
+                ],
+            )
+            ingress_traces.append(entry)
+
+        from collections.abc import Callable
+
+        commit_fn: Callable | None = getattr(
+            self._store, "commit_direct_execution", None
+        )
+        if commit_fn is not None:
+
+            def _reducer_cb() -> list[object]:
+                reducer_traces: list[object] = []
+                if self._reducer is not None:
+                    for s_asset in signed:
+                        events = self._reducer.on_asset_created(s_asset)
+                        created = self._apply_reducer_events(
+                            events, s_asset, mirror_to_trace=False
+                        )
+                        reducer_traces.extend(created)
+                return reducer_traces
+
+            # Collect reducer traces once — used both for durable commit
+            # and for runtime mirroring after the transaction succeeds.
+            reducer_traces = _reducer_cb()
+            all_traces = list(engine_trace_entries) + ingress_traces + reducer_traces
+            commit_fn(
+                accepted_assets=signed,
+                trace_entries=all_traces,
+            )
+            for entry in ingress_traces:
+                self._trace.append(entry)
+            for entry in reducer_traces:
+                self._trace.append(entry)
+        else:
+            add_fn = (
+                getattr(self._store, "_add_system_asset", None)
+                if allow_protected
+                else None
+            )
+            for s_asset in signed:
+                if add_fn is not None:
+                    add_fn(s_asset)
+                else:
+                    self._store.add_asset(s_asset)
+            if self._reducer is not None:
+                for s_asset in signed:
+                    events = self._reducer.on_asset_created(s_asset)
+                    self._apply_reducer_events(events, s_asset)
+            for entry in ingress_traces:
+                self._trace.append(entry)
+
+        return signed
 
     # -- Contract acceptance ------------------------------------------------
 
@@ -236,26 +378,37 @@ class RuntimeIngress:
                     f"({list(contract.minting_authority)!r})."
                 )
 
-        self._store.add_contract(contract)
-
-        self._trace.append(
-            create_entry(
-                contract_id="runtime_ingress",
-                event_type="contract_accepted",
-                parent_id=contract.id,
-                relation_target=contract.id,
-                accepted_fragments=[
-                    json.dumps(
-                        {
-                            "contract_id": contract.id,
-                            "name": contract.name,
-                            "outputs": list(contract.outputs),
-                            "budget": contract.budget,
-                        }
-                    )
-                ],
-            )
+        entry = create_entry(
+            contract_id="runtime_ingress",
+            event_type="contract_accepted",
+            parent_id=contract.id,
+            relation_target=contract.id,
+            accepted_fragments=[
+                json.dumps(
+                    {
+                        "contract_id": contract.id,
+                        "name": contract.name,
+                        "outputs": list(contract.outputs),
+                        "budget": contract.budget,
+                    }
+                )
+            ],
         )
+
+        from collections.abc import Callable
+
+        commit_fn: Callable | None = getattr(
+            self._store, "commit_direct_execution", None
+        )
+        if commit_fn is not None:
+            commit_fn(
+                accepted_assets=[],
+                trace_entries=[entry],
+                contract=contract,
+            )
+        else:
+            self._store.add_contract(contract)
+            self._trace.append(entry)
 
         return contract
 
@@ -273,29 +426,32 @@ class RuntimeIngress:
         referenced asset; they record an auditable relationship that readers
         may use for version resolution, slicing, summaries, or redactions.
         """
-        self._store.add_replacement_claim(claim)
-        self._trace.append(
-            create_entry(
-                contract_id="runtime_ingress",
-                event_type="replacement_claim_created",
-                parent_id=claim.id,
-                relation_type=claim.claim_type,
-                relation_target=claim.replacement_asset_id,
-                accepted_fragments=[
-                    json.dumps(
-                        {
-                            "claim_id": claim.id,
-                            "source_asset_id": claim.source_asset_id,
-                            "replacement_asset_id": claim.replacement_asset_id,
-                            "definition_hash": claim.definition_hash,
-                            "claim_type": claim.claim_type,
-                            "source": source,
-                        },
-                        sort_keys=True,
-                    )
-                ],
-            )
+        entry = create_entry(
+            contract_id="runtime_ingress",
+            event_type="replacement_claim_created",
+            parent_id=claim.id,
+            relation_type=claim.claim_type,
+            relation_target=claim.replacement_asset_id,
+            accepted_fragments=[
+                json.dumps(
+                    {
+                        "claim_id": claim.id,
+                        "source_asset_id": claim.source_asset_id,
+                        "replacement_asset_id": claim.replacement_asset_id,
+                        "definition_hash": claim.definition_hash,
+                        "claim_type": claim.claim_type,
+                        "source": source,
+                    },
+                    sort_keys=True,
+                )
+            ],
         )
+        commit_fn = getattr(self._store, "commit_replacement_claim", None)
+        if commit_fn is not None:
+            commit_fn(claim, entry)
+        else:
+            self._store.add_replacement_claim(claim)
+            self._trace.append(entry)
         return claim
 
     # -- Candidate submission -----------------------------------------------
@@ -329,6 +485,16 @@ class RuntimeIngress:
         """
         from aigineering.core.projection import project_candidate
         from aigineering.protocol.types import ProjectionResult
+
+        # SQLite is the operational runtime substrate.  Its worker protocol
+        # must use ``submit_candidate`` so claim, lease, package binding and
+        # idempotency join the same transaction.  Keeping this convenience
+        # API active on SQLite would recreate a claimless mutation ingress.
+        if hasattr(self._store, "commit_candidate_submission"):
+            raise RuntimeError(
+                "SQLite candidate submission is claim-bound; use "
+                "aig worker submit / core.submit.submit_candidate"
+            )
 
         raw_result = project_candidate(contract, candidate)
 

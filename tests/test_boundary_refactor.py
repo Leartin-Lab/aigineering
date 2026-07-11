@@ -256,46 +256,36 @@ class TestProtectedAssetMinting:
     runtime namespaces without explicit minting_authority.
     """
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="W8-arch: Contract constructor does not validate reserved "
-        "output names — validation lives in RuntimeIngress.accept_contract(). "
-        "The data model is a persistence concern; the ingress is the authority "
-        "gate.  Direct Contract construction bypasses this check by design.",
-    )
     def test_contract_rejected_when_declaring_reserved_output(self):
         """DESIRED: Creating a contract that declares a reserved output
-        name should be REJECTED.
+        name should be REJECTED by the runtime ingress.
 
-        Currently hash_contract accepts any output name — the reserved
-        check only happens at projection time in authority.py.
+        RuntimeIngress.accept_contract() now enforces this at the
+        ingress gate — the Contract data model remains a persistence
+        concern and does not validate.
         """
         from aigineering.core.authority import RESERVED_PREFIXES
+        from aigineering.core.runtime_ingress import RuntimeIngress
 
         reserved_name = "_sys_test_output"
         assert any(reserved_name.startswith(p) for p in RESERVED_PREFIXES)
 
-        # DESIRED: attempting to create a contract with reserved output
-        # should raise an error.  Currently it succeeds silently.
-        with pytest.raises(ValueError, match="reserved"):
-            Contract(
-                id=hash_contract(
-                    "bad",
-                    "",
-                    [],
-                    [reserved_name],
-                    "",
-                    3,
-                    [],
-                    [],
-                    "human",
-                ),
-                name="bad",
-                inputs=[],
-                outputs=[reserved_name],
-                activation="",
-                budget=3,
-            )
+        store = MemoryStore()
+        trace_store = TraceStore()
+        ingress = RuntimeIngress(store, trace_store)
+
+        contract = Contract(
+            id=hash_contract("bad", "", [], [reserved_name], "", 3, [], [], "human"),
+            name="bad",
+            inputs=[],
+            outputs=[reserved_name],
+            activation="",
+            budget=3,
+        )
+
+        # RuntimeIngress.accept_contract() rejects reserved output names
+        with pytest.raises(ValueError, match="protected prefix"):
+            ingress.accept_contract(contract)
 
     def test_projection_rejects_reserved_output_from_worker(self):
         """DESIRED: Authority check rejects reserved asset names from worker
@@ -343,35 +333,30 @@ class TestProtectedAssetMinting:
             f"minting_authority.  Accepted: {accepted_names}"
         )
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="W8-arch: Store.add_asset() does not enforce reserved-name "
-        "checks — the store is a persistence primitive.  Reserved-name "
-        "enforcement lives in RuntimeIngress, the single production entry. "
-        "Direct store writes are only allowed in tests and store internals.",
-    )
     def test_direct_store_write_bypasses_reserved_name_check(self):
-        """DESIRED: Writing a reserved-name asset directly to store should
-        be blocked — only RuntimeIngress with allow_protected=True should
-        permit it.
+        """DESIRED: Writing a reserved-name asset through the runtime
+        ingress should be blocked — only RuntimeIngress with
+        allow_protected=True should permit it.
 
-        Currently store.add_asset accepts any name; the reserved check
-        lives only in projection and control_plane, not in the store layer.
+        RuntimeIngress.accept_asset() now enforces the protected-name
+        check at the ingress gate.
         """
+        from aigineering.core.runtime_ingress import RuntimeIngress
+
         store = MemoryStore()
+        trace_store = TraceStore()
+        ingress = RuntimeIngress(store, trace_store)
+
         asset = Asset(
             id=hash_asset_content("_sys_test", "hack"),
             name="_sys_test",
             content="hack",
         )
-        signed = sign_asset(asset, signed_by="malicious_worker")
 
-        # DESIRED: store.add_asset should reject reserved names, or
-        # the ONLY path to add assets should be RuntimeIngress which
-        # enforces the check.
-        # Currently store.add_asset accepts it blindly.
-        with pytest.raises(ValueError, match="reserved"):
-            store.add_asset(signed)
+        # RuntimeIngress.accept_asset() rejects protected names by default.
+        # Only allow_protected=True permits them.
+        with pytest.raises(ValueError, match="collides with reserved prefix"):
+            ingress.accept_asset(asset)
 
 
 # ============================================================================

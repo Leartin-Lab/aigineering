@@ -49,7 +49,7 @@ def _contract(**kwargs) -> Contract:
 def test_label_injects_existing_asset():
     store = MemoryStore()
     skill = sign_asset(_asset("_skill_review", "review procedure", origin="skill"))
-    store.add_asset(skill)
+    store._add_system_asset(skill)
     contract = _contract(name="review", labels=["reviewer"], outputs=["result"])
 
     result = resolve_contract_labels(
@@ -88,7 +88,7 @@ def test_engine_discloses_label_injected_assets_and_traces_resolution():
     worker = MockWorker()
     skill = _asset("_skill_review", "review procedure", origin="skill")
     input_asset = _asset("input", "input content")
-    store.add_asset(sign_asset(skill))
+    store._add_system_asset(sign_asset(skill))
     store.add_asset(sign_asset(input_asset))
 
     contract = _contract(
@@ -208,7 +208,7 @@ class TestLabelPlaceholderSafety:
             sensitive_input_policy={"required_trust_tier": "observed"},
         )
         store2 = MemoryStore()
-        store2.add_asset(placeholder)
+        store2._add_system_asset(placeholder)
         policy_result = check_sensitive_input_policy(c, store2)
         assert policy_result["compliant"] is False, (
             "Placeholder with trust_tier=untrusted must NOT satisfy "
@@ -262,7 +262,7 @@ class TestLabelPlaceholderSafety:
             activation="_skill_missing",
         )
         store2 = MemoryStore()
-        store2.add_asset(placeholder)
+        store2._add_system_asset(placeholder)
         sufficiency = check_sufficiency(c, store2)
         assert "_skill_missing" in sufficiency["trust_gaps"], (
             "Placeholder with trust_tier=untrusted must appear in trust_gaps."

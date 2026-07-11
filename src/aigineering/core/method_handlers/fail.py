@@ -61,7 +61,8 @@ class FailMethodHandler:
         # Collect failure result content from method_assets (parent-resume path)
         for asset in method_assets:
             if asset.name.startswith("_fail_result_"):
-                runtime.mint_system_asset(
+                runtime.mint_authorized_system_asset(
+                    contract,
                     name=report_name,
                     content=asset.content,
                     created_by=contract.id,
@@ -88,7 +89,8 @@ class FailMethodHandler:
         detail = fail_payload.get("detail", "")
         parent_name = fail_payload.get("parent_contract_name", "unknown")
 
-        report = runtime.mint_system_asset(
+        report = runtime.mint_authorized_system_asset(
+            contract,
             name=report_name,
             content=json.dumps(
                 {

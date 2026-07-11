@@ -5,7 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 from types import MappingProxyType
-from typing import Optional
+from collections.abc import Mapping
+from typing import Any, Optional
 
 
 @dataclass(frozen=True)
@@ -66,8 +67,8 @@ class Contract:
 class Candidate:
     worker_id: str
     raw_output: str
-    parsed_action: Optional[MappingProxyType] = None
-    metadata: Optional[MappingProxyType] = None
+    parsed_action: Optional[Mapping[str, Any]] = None
+    metadata: Optional[Mapping[str, Any]] = None
 
     def __post_init__(self) -> None:
         if self.parsed_action is not None:
@@ -247,7 +248,7 @@ class ProjectionResult:
     rejected_candidates: tuple[RejectedCandidate, ...] = field(default_factory=tuple)
     raw_candidate: str = ""
     status: ProjectionStatus = ProjectionStatus.REJECTED
-    authority_policy: Optional[MappingProxyType] = None
+    authority_policy: Optional[Mapping[str, Any]] = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "accepted_assets", tuple(self.accepted_assets))

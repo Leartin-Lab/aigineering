@@ -1,23 +1,50 @@
 # Aigineering Roadmap
 
-## Status
+## Current Status
 
-Aigineering is an early Zero Trust Agent Runtime. The current `v0.5.0-alpha`
-milestone is the **050 local productivity alpha**: a traceable CLI/control-plane
-surface on top of the v0.4 single-node kernel.
+**Version:** `v0.5.0` (single-machine formal release)
 
-The v0.4 kernel includes SQLite-backed transactional submission, recoverable
-runtime state, capability containment, and a worker pull/submit protocol. It is
-not a security-audited production deployment, and it does not yet claim
-distributed runtime safety.
+Aigineering is a Zero Trust Agent Runtime. The current milestone is the **050
+local productivity formal release**: a traceable CLI/control-plane surface on top of the
+v0.4 single-node kernel, with runtime ingress as the production mutation gate,
+reactive declared-output completion, and output satisfaction that filters out
+observation/context assets.
+
+The v0.4 kernel provides SQLite-backed transactional submission, recoverable
+runtime state, capability containment, and a worker pull/submit protocol. The
+transactional candidate submission guarantees apply through the `aig worker
+next` / `aig worker submit` protocol path: worker packages are claim-bound,
+submitted candidates are idempotency-bound, and accepted assets plus trace
+records commit atomically through the SQLite runtime store.
+
+**What's working today:**
+- Candidate-to-fact boundary with declared-output authority checks
+- SQLite-backed durable store with schema versioning and migration
+- Worker claim/idempotency tables with single-active-claim enforcement
+- Resumable engine state from persisted assets, contracts, traces
+- OpenAI-compatible LLM worker with retry, usage metadata, multi-tool-call
+- Control-plane asset/contract/behavior injection via CLI
+- Additive asset slicing, replacement claims, version lists, lineage views
+- Capability, MCP, skill, tool, memory, and persona descriptors as signed assets
+- Stable MCP function call to method/tool contract expansion
+- Experimental REPL (`aig repl`) and optional FastAPI surface (`aig serve`)
+- CLI trace timeline, tree, and DAG views
+- Replay, audit, and session commands for persisted runs
+
+**What's not done yet:**
+- PyPI publish (API stability gate)
+- Cryptographic signing enabled as the default runtime policy
+- Universal trust-policy enforcement over signer, origin, trust tier, labels
+- Distributed runtime across shared stores
+- External security audit and deployment hardening
+- Crash-injection and concurrent-worker stress tests
 
 ```text
 Contract -> Worker/Sub-agent -> Candidate -> Projection/Method -> Asset/Trace
 ```
 
-The project has completed Waves 0–4 of its development plan and is ready for
-broader single-machine experiments. It is not externally audited or
-deployment-hardened yet.
+The project has completed Waves 0–5 of its development plan. It is not
+externally audited or deployment-hardened.
 
 ## v0.1 - Hallucination Containment MVP
 
@@ -89,7 +116,7 @@ Focus: make the single-node runtime durable, resumable, protocolized, and safer.
 - [ ] Trust policy over signer, origin, trust tier, labels, tool scope, and reserved prefixes
 - [ ] Broader crash-injection and concurrent-worker stress tests
 
-## v0.5 - Local Productivity Alpha
+## v0.5 - Local Productivity Formal Release
 
 Focus: make the single-node runtime useful for local work without weakening the
 candidate/fact boundary.
@@ -114,9 +141,9 @@ candidate/fact boundary.
 - [ ] Prefix search and tag filtering
 - [ ] Lineage bundles
 - [ ] GC: audit closure, keep flags, reflog, tombstones
-- [ ] Replacement claims instead of asset mutation
+- [x] Replacement claims instead of asset mutation
 - [ ] Real-world LLM benchmarks
-- [ ] AEST-style benchmark suite
+- [ ] Reproducible benchmark suite for output quality evaluation
 
 ## v0.7+ - Distributed and Production Hardening
 

@@ -16,6 +16,7 @@ def cli() -> None:
 
 from aigineering.cli.run import run, demo  # noqa: E402
 from aigineering.cli.trace import trace, audit  # noqa: E402
+from aigineering.cli.recover import recover  # noqa: E402
 from aigineering.cli.replay import replay  # noqa: E402
 from aigineering.cli.session import session  # noqa: E402
 from aigineering.cli.worker import worker  # noqa: E402
@@ -44,6 +45,7 @@ cli.add_command(audit)
 cli.add_command(replay)
 cli.add_command(session)
 cli.add_command(worker)
+cli.add_command(recover)
 cli.add_command(retry)
 cli.add_command(verify)
 cli.add_command(readiness)

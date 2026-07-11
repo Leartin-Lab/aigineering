@@ -13,8 +13,13 @@ from aigineering.cli._common import (
 )
 
 from aigineering.core.runtime_ingress import RuntimeIngress
+from aigineering.core.startup_check import (
+    begin_runtime_startup,
+    end_runtime,
+    renew_heartbeat,
+)
 
-app = FastAPI(title="Aigineering API", version="0.5.0-alpha.3")
+app = FastAPI(title="Aigineering API", version="0.5.0")
 
 
 # ── Request / response models ────────────────────────────────────────────────
@@ -369,7 +374,16 @@ def run_contract(contract_id: str, body: ContractRunRequest):
 
     engine = Engine(store=store, worker=worker, trace_store=store)
     engine.add_contract(contract)
-    engine.run()
+
+    runtime_result = begin_runtime_startup(store)
+    try:
+        engine.run(
+            heartbeat_callback=lambda: renew_heartbeat(
+                store, runtime_result.runtime_owner
+            )
+        )
+    finally:
+        end_runtime(store, runtime_result.runtime_owner)
 
     entries = store.get_by_contract(contract.id)
     outputs = store.get_assets_by_contract(contract.id)

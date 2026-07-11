@@ -95,6 +95,19 @@ def method_contract(parent: Contract, action: WorkerAction) -> Contract:
         origin="system",
         parent_id=parent.id,
     )
+
+    # Expand minting_authority for method-type-specific system assets.
+    _extra_authority: tuple[str, ...] = (f"_fail_context_{contract_id}",)
+    if action.type == "fail":
+        _extra_authority = (f"_fail_report_{contract_id}",)
+    elif action.type == "tool":
+        if output_prefix == "_mcp_obs_":
+            _extra_authority = (f"_mcp_call_{contract_id}",)
+        else:
+            _extra_authority = (f"_tool_call_{contract_id}",)
+
+    context_name = f"_method_ctx_{parent.id}"
+
     return Contract(
         id=contract_id,
         parent_id=parent.id,
@@ -107,7 +120,10 @@ def method_contract(parent: Contract, action: WorkerAction) -> Contract:
         tool_scope=tool_scope,
         labels=labels,
         origin="system",
-        minting_authority=(output_name,),
+        # A method contract needs exact authority for both its declared
+        # result and the context asset that activates it.  Do not rely on a
+        # generic protected-name override when scheduling methods.
+        minting_authority=(output_name, context_name) + _extra_authority,
     )
 
 

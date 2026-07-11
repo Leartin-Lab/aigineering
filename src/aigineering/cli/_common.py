@@ -16,6 +16,11 @@ from aigineering.core.ids import (
     hash_contract,
 )
 from aigineering.core.runtime_ingress import RuntimeIngress
+from aigineering.core.startup_check import (
+    begin_runtime_startup,
+    end_runtime,
+    renew_heartbeat,
+)
 from aigineering.core.method_handlers.fail import FailMethodHandler
 from aigineering.core.method_handlers.plan import PlanMethodHandler
 from aigineering.core.method_handlers.replan import ReplanMethodHandler
@@ -275,7 +280,16 @@ def _run_demo(
     engine.add_contract(contract)
     engine.add_asset(data_file)
     engine.add_asset(citation_db)
-    engine.run()
+
+    runtime_result = begin_runtime_startup(store)
+    try:
+        engine.run(
+            heartbeat_callback=lambda: renew_heartbeat(
+                store, runtime_result.runtime_owner
+            )
+        )
+    finally:
+        end_runtime(store, runtime_result.runtime_owner)
 
     return store, trace_store, contract
 

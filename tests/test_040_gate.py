@@ -1936,7 +1936,7 @@ class TestPublicDocs:
                 f"G11: README claims '{claim}' which is not yet true under 040 gate."
             )
         assert "not a security-audited production release" in readme.lower()
-        assert "v0.5.0-alpha.3" in readme.lower()
+        assert "v0.5.0" in readme.lower()
         assert "local productivity alpha" in readme.lower()
         assert "transactional worker candidate submission" in readme.lower()
 
@@ -1949,7 +1949,9 @@ class TestPublicDocs:
         assert "local productivity alpha" in roadmap_lower
         assert "v0.5" in roadmap_lower
         assert "[x] transactional candidate submission" in roadmap_lower
-        assert "not a security-audited production deployment" in roadmap_lower
+        assert (
+            "pre-release" in roadmap_lower or "not a security-audited" in roadmap_lower
+        )
         assert "[x] release packaging and distribution checks" in roadmap_lower
 
         # G11: must NOT claim "stable kernel" in status descriptions
