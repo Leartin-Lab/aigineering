@@ -21,6 +21,7 @@ import logging
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
+from aigineering.core.activation import validate_execution_activation
 from aigineering.core.authority import RESERVED_PREFIXES, ReservedNamespaceError
 from aigineering.core.provenance import sign_asset
 from aigineering.core.trace import create_entry
@@ -367,6 +368,8 @@ class RuntimeIngress:
             If an output uses a protected prefix and the contract does not
             have minting authority for that name.
         """
+        validate_execution_activation(contract.activation)
+
         for output_name in contract.outputs:
             if (
                 _is_protected_name(output_name)

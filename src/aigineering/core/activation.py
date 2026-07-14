@@ -8,6 +8,10 @@ _MAX_DEPTH = 50
 _MAX_TOKENS = 200
 
 
+class NonMonotonicActivationError(ValueError):
+    """Raised when an execution contract depends on fact absence."""
+
+
 def _tokenize(expression: str) -> list[str]:
     tokens: list[str] = []
     for raw in expression.split():
@@ -106,3 +110,26 @@ def check_activation(expression: Optional[str], available_names: set[str]) -> bo
         return True
     parser = _Parser(tokens, available_names)
     return parser.evaluate()
+
+
+def validate_execution_activation(expression: Optional[str]) -> None:
+    """Validate the monotonic activation subset accepted for execution.
+
+    Runtime facts are append-only, so positive ``AND``/``OR`` predicates can
+    only move from disabled to enabled. ``NOT`` depends on a closed-world
+    absence assumption and can move in the opposite direction when a fact is
+    appended; execution contracts therefore reject it at ingress.
+
+    :func:`check_activation` retains ``NOT`` support for non-execution queries
+    and compatibility with historical records.
+    """
+
+    if not expression or not expression.strip():
+        return
+    tokens = _tokenize(expression)
+    if "NOT" in tokens:
+        raise NonMonotonicActivationError(
+            "execution activation must be monotonic: NOT/absence predicates "
+            "are unsupported; model denial or cancellation as an explicit asset"
+        )
+    _Parser(tokens, set()).evaluate()
