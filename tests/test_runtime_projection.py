@@ -38,6 +38,19 @@ def test_contract_view_reports_fact_blockers_and_enables_monotonically():
     assert enabled.blockers == ()
 
 
+def test_declared_input_is_a_natural_blocker_without_activation_expression():
+    store = MemoryStore()
+    contract = Contract(id="task:input-blocker", inputs=("evidence",), budget=1)
+    store.add_contract(contract)
+
+    view = RuntimeProjection(store, MemoryTraceStore()).contract_view(contract)
+
+    assert view.enabled is False
+    assert view.inputs_satisfied is False
+    assert view.missing_assets == ("evidence",)
+    assert view.blockers == ("missing_asset:evidence",)
+
+
 def test_projection_is_reconstructable_across_store_adapters():
     memory = MemoryStore()
     memory_trace = MemoryTraceStore()

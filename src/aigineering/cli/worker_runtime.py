@@ -29,9 +29,9 @@ from aigineering.core.methods import (
     system_asset,
 )
 from aigineering.core.provenance import sign_asset
+from aigineering.core.runtime_projection import RuntimeProjection
 from aigineering.core.submit import (
     SubmitConflictError,
-    _all_outputs_satisfied,
     submit_candidate,
 )
 from aigineering.core.worker_routing import is_eligible
@@ -47,8 +47,6 @@ from aigineering.protocol.wire import (
     contract_to_dict,
     trace_entry_to_dict,
 )
-
-from aigineering.cli.task_state import project_task_status
 
 
 @dataclass(frozen=True)
@@ -156,19 +154,11 @@ def claim_next_package(
             contract.activation, available_names
         ):
             continue
-        status = project_task_status(contract, store)
-        if status["terminal"] or status["status"] in {"waiting", "submitted"}:
-            continue
-        if _all_outputs_satisfied(contract, store):
+        view = RuntimeProjection(store, store).contract_view(contract)
+        if not view.enabled:
             continue
 
-        trace_entries = store.get_by_contract(contract.id)
-        budget_consumed = sum(
-            1 for entry in trace_entries if entry.event_type == "budget_consumed"
-        )
-        remaining_budget = contract.budget - budget_consumed
-        if remaining_budget <= 0:
-            continue
+        remaining_budget = view.budget_remaining
 
         # Compatibility remains available for legacy unconstrained contracts,
         # but a constrained contract is never claimed by an unknown or

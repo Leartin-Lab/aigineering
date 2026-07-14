@@ -35,6 +35,7 @@ class ContractView:
     enabled: bool
     blockers: tuple[str, ...]
     activation_satisfied: bool
+    inputs_satisfied: bool
     missing_assets: tuple[str, ...]
     outputs_satisfied: bool
     terminal: str | None
@@ -93,8 +94,12 @@ class RuntimeProjection:
                 for output in contract.outputs
             )
         activation_satisfied = check_activation(contract.activation, available_names)
-        referenced = _activation_names(contract.activation)
-        missing_assets = tuple(sorted(referenced - available_names))
+        activation_references = _activation_names(contract.activation)
+        required_inputs = set(contract.inputs)
+        missing_inputs = required_inputs - available_names
+        missing_activation = activation_references - available_names
+        missing_assets = tuple(sorted(missing_inputs | missing_activation))
+        inputs_satisfied = not missing_inputs
         terminal_events = tuple(
             sorted(
                 set(typed_terminal_events)
@@ -116,6 +121,15 @@ class RuntimeProjection:
             if typed_budget is not None
             else _budget_remaining(contract, entries)
         )
+        method_pending = False
+        for entry in entries:
+            if entry.event_type in {
+                "method_scheduled",
+                "method_continuation_scheduled",
+            }:
+                method_pending = True
+            elif entry.event_type == "method_resumed":
+                method_pending = False
 
         blockers: list[str] = []
         if terminal == "conflict":
@@ -124,18 +138,27 @@ class RuntimeProjection:
             blockers.append(f"terminal:{terminal}")
         if outputs_satisfied:
             blockers.append("outputs_satisfied")
+        if not inputs_satisfied:
+            blockers.extend(f"missing_asset:{name}" for name in sorted(missing_inputs))
         if not activation_satisfied:
-            blockers.extend(f"missing_asset:{name}" for name in missing_assets)
-            if not missing_assets:
+            blockers.extend(
+                f"missing_asset:{name}"
+                for name in sorted(missing_activation)
+                if f"missing_asset:{name}" not in blockers
+            )
+            if not missing_activation:
                 blockers.append("activation_unsatisfied")
         if budget_remaining <= 0:
             blockers.append("budget_exhausted")
+        if method_pending:
+            blockers.append("method_pending")
 
         canonical = {
             "activation_satisfied": activation_satisfied,
             "blockers": blockers,
             "budget_remaining": budget_remaining,
             "contract_id": contract.id,
+            "inputs_satisfied": inputs_satisfied,
             "missing_assets": list(missing_assets),
             "outputs_satisfied": outputs_satisfied,
             "terminal": terminal,
@@ -149,6 +172,7 @@ class RuntimeProjection:
             enabled=not blockers,
             blockers=tuple(blockers),
             activation_satisfied=activation_satisfied,
+            inputs_satisfied=inputs_satisfied,
             missing_assets=missing_assets,
             outputs_satisfied=outputs_satisfied,
             terminal=terminal,

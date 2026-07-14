@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from aigineering.core.activation import check_activation
+from aigineering.core.runtime_projection import ContractView, RuntimeProjection
 from aigineering.core.submit import _all_outputs_satisfied
 from aigineering.core.worker_routing import eligible_workers
 from aigineering.protocol.types import Contract, TraceEntry
@@ -18,6 +18,7 @@ def project_task_status(contract: Contract, store) -> dict:
     used by ``aig task status``, ``wait``, and ``audit``.
     """
     entries = _trace_entries(store, contract.id)
+    view = RuntimeProjection(store, store).contract_view(contract)
     terminal = _latest_terminal(entries)
     output_assets = _output_assets(contract, store)
     rejections = [
@@ -39,7 +40,7 @@ def project_task_status(contract: Contract, store) -> dict:
         if entry.usage_metadata is not None
     ]
 
-    status = _status_from_entries(contract, store, entries, terminal)
+    status = _status_from_entries(contract, store, entries, terminal, view)
     risks = _silent_failure_risks(contract, store, entries, status)
     return {
         "contract_id": contract.id,
@@ -48,6 +49,9 @@ def project_task_status(contract: Contract, store) -> dict:
         "terminal": status in TERMINAL_EVENTS or status == "completed",
         "ok": status == "completed",
         "outputs_satisfied": _all_outputs_satisfied(contract, store),
+        "blockers": list(view.blockers),
+        "budget_remaining": view.budget_remaining,
+        "projection_hash": view.projection_hash,
         "outputs": output_assets,
         "silent_failure_risks": risks,
         "rejection_count": len(rejections),
@@ -88,7 +92,10 @@ def _status_from_entries(
     store,
     entries: list[TraceEntry],
     terminal: str,
+    view: ContractView,
 ) -> str:
+    if view.terminal == "conflict":
+        return "stalled"
     if terminal == "complete":
         return "completed"
     if terminal:
@@ -105,11 +112,10 @@ def _status_from_entries(
             suspended = False
     if suspended:
         return "waiting"
-    available_names = {a.name for a in store.get_all_assets()}
-    if contract.activation and not check_activation(
-        contract.activation, available_names
-    ):
+    if not view.inputs_satisfied or not view.activation_satisfied:
         return "blocked"
+    if view.budget_remaining <= 0:
+        return "stalled"
     if contract.worker_capabilities or contract.worker_pools:
         registrations = getattr(store, "get_worker_registrations", None)
         if registrations is not None and not eligible_workers(

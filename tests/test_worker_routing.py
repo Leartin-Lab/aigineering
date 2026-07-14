@@ -136,6 +136,20 @@ def test_worker_execution_rejects_store_without_transactional_port():
         claim_next_package(store, worker_id="worker")
 
 
+def test_missing_declared_input_prevents_claim_without_explicit_activation():
+    store = SQLiteStore(":memory:")
+    contract = Contract(
+        id="task:missing-input",
+        inputs=("evidence",),
+        outputs=("report",),
+        budget=1,
+    )
+    store.add_contract(contract)
+
+    assert claim_next_package(store, worker_id="worker") is None
+    store.close()
+
+
 @pytest.mark.parametrize("kind", ["memory", "sqlite"])
 def test_worker_registration_versions_are_immutable_and_rebuildable(kind):
     store = MemoryStore() if kind == "memory" else SQLiteStore(":memory:")
