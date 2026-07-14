@@ -9,12 +9,14 @@ from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
 
 from aigineering.cli._common import (
+    _default_method_registry,
     _find_trace_for_session,
     _persistent_store,
 )
 from aigineering.cli.worker_runtime import (
     claim_next_package,
     execute_claimed_package,
+    submit_candidate_envelope,
 )
 
 from aigineering.core.runtime_ingress import RuntimeIngress
@@ -22,7 +24,6 @@ from aigineering.core.submit import (
     SubmitClaimError,
     SubmitCommitError,
     SubmitConflictError,
-    submit_candidate,
 )
 from aigineering.protocol.envelope import CandidateEnvelope
 
@@ -424,26 +425,14 @@ def renew_worker_claim(claim_id: str, body: WorkerRenewRequest):
 @app.post("/worker/submissions")
 def submit_worker_candidate(body: WorkerSubmitRequest):
     """Commit a fenced candidate; any replica may service the request."""
-    if body.parsed_action is not None:
-        raise HTTPException(
-            status_code=422,
-            detail="Method actions require the method submission protocol",
-        )
     try:
         envelope = CandidateEnvelope(**body.model_dump())
         store = _persistent_store()
-        result = submit_candidate(
+        return submit_candidate_envelope(
             envelope,
             store,
-            store,
-            RuntimeIngress(store, store),
-            idempotency_key=envelope.idempotency_key,
+            method_registry=_default_method_registry(),
         )
-        if result["status"] == "rejected":
-            from aigineering.cli.worker_runtime import process_rejected_submissions
-
-            process_rejected_submissions(store)
-        return result
     except (ValueError, SubmitClaimError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except SubmitConflictError as exc:

@@ -194,6 +194,41 @@ def test_worker_protocol_cross_replica_claim_renew_submit(tmp_path, monkeypatch)
     assert record_types.count("claim.submitted") == 1
 
 
+def test_worker_protocol_method_submission_uses_same_fenced_path(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    client = TestClient(app)
+    created = client.post(
+        "/contracts",
+        json={"name": "remote_plan", "outputs": ["report"], "budget": 2},
+    )
+    contract_id = created.json()["id"]
+    claimed = client.post(
+        "/worker/claims",
+        json={"worker_id": "remote-planner", "contract_id": contract_id},
+    )
+    package = claimed.json()
+
+    submitted = client.post(
+        "/worker/submissions",
+        json={
+            "contract_id": contract_id,
+            "worker_id": "remote-planner",
+            "raw_output": '/plan {"reason": "decompose remotely"}',
+            "package_id": package["package_id"],
+            "claim_id": package["claim_id"],
+            "claim_epoch": package["claim_epoch"],
+            "idempotency_key": f"remote-{package['package_id']}",
+        },
+    )
+
+    assert submitted.status_code == 200, submitted.text
+    body = submitted.json()
+    assert body["status"] == "method_scheduled"
+    child = SQLiteStore(".aig/store.db").get_contract(body["child_contract_id"])
+    assert child is not None
+    assert "method:plan" in child.labels
+
+
 def test_asset_slice_versions_and_replacement_claims(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     client = TestClient(app)

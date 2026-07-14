@@ -36,7 +36,7 @@ from aigineering.protocol.actions import parse_method_action
 from aigineering.protocol.envelope import CandidateEnvelope
 from aigineering.protocol.package import WorkerPackage
 from aigineering.protocol.runtime_record import create_runtime_record
-from aigineering.protocol.types import Asset, Contract
+from aigineering.protocol.types import Asset, Candidate, Contract
 from aigineering.protocol.wire import (
     asset_to_dict,
     contract_to_dict,
@@ -283,15 +283,6 @@ def execute_claimed_package(
             f"claim lease renewal failed for {claimed.package.claim_id!r}; "
             "worker result was not submitted"
         )
-    method_action = parse_method_action(candidate)
-    if method_action is not None:
-        if method_registry is None:
-            raise ValueError(
-                f"worker produced /{method_action.type} but no method registry is configured"
-            )
-        return _submit_claimed_method(
-            claimed, candidate, method_action, store, trace, method_registry
-        )
     envelope = CandidateEnvelope(
         contract_id=claimed.contract.id,
         worker_id=claimed.worker_id,
@@ -306,6 +297,52 @@ def execute_claimed_package(
         claim_epoch=claimed.package.claim_epoch,
         idempotency_key=f"run-{claimed.package.package_id}",
     )
+    return submit_candidate_envelope(
+        envelope,
+        store,
+        trace_store=trace,
+        method_registry=method_registry,
+    )
+
+
+def submit_candidate_envelope(
+    envelope: CandidateEnvelope,
+    store,
+    *,
+    trace_store=None,
+    method_registry=None,
+) -> dict:
+    """Submit one already-produced Candidate through the shared protocol."""
+    trace = trace_store if trace_store is not None else store
+    contract = store.get_contract(envelope.contract_id)
+    if contract is None:
+        raise ValueError(f"Contract '{envelope.contract_id}' not found in store")
+    candidate = Candidate(
+        worker_id=envelope.worker_id,
+        raw_output=envelope.raw_output,
+        parsed_action=envelope.parsed_action,
+    )
+    method_action = parse_method_action(candidate)
+    if method_action is not None:
+        if method_registry is None:
+            raise ValueError(
+                f"worker produced /{method_action.type} but no method registry is configured"
+            )
+        budget_consumed = sum(
+            1
+            for entry in trace.get_by_contract(contract.id)
+            if entry.event_type == "budget_consumed"
+        )
+        return _submit_claimed_method(
+            contract,
+            envelope,
+            candidate,
+            method_action,
+            max(0, contract.budget - budget_consumed),
+            store,
+            trace,
+            method_registry,
+        )
     ingress = RuntimeIngress(store, trace)
     result = submit_candidate(
         envelope=envelope,
@@ -315,13 +352,7 @@ def execute_claimed_package(
         idempotency_key=envelope.idempotency_key,
     )
     if result["status"] == "rejected":
-        _schedule_rejected_recovery(
-            claimed.contract,
-            candidate.raw_output,
-            list(result["rejected_candidates"]),
-            store,
-            trace,
-        )
+        process_rejected_submissions(store)
     return result
 
 
@@ -402,21 +433,23 @@ def process_rejected_submissions(store) -> list[str]:
 
 
 def _submit_claimed_method(
-    claimed: ClaimedPackage,
+    contract: Contract,
+    envelope: CandidateEnvelope,
     candidate,
     action,
+    budget_remaining: int,
     store,
     trace,
     method_registry,
 ) -> dict:
     """Atomically schedule a claim-bound method action."""
-    claim = store.get_claim(claimed.contract.id)
+    claim = store.get_claim(contract.id)
     if (
         claim is None
-        or claim.get("claim_id") != claimed.package.claim_id
-        or claim.get("epoch") != claimed.package.claim_epoch
-        or claim.get("worker_id") != claimed.worker_id
-        or claim.get("package_id") != claimed.package.package_id
+        or claim.get("claim_id") != envelope.claim_id
+        or claim.get("epoch") != envelope.claim_epoch
+        or claim.get("worker_id") != envelope.worker_id
+        or claim.get("package_id") != envelope.package_id
         or claim.get("status") != "active"
     ):
         raise ValueError("method submission failed active claim/package fencing")
@@ -427,86 +460,72 @@ def _submit_claimed_method(
 
     if action.type == "retry":
         child = Contract(
-            id=hash_retry(claimed.contract.id),
-            parent_id=claimed.contract.parent_id,
-            name=claimed.contract.name,
-            description=claimed.contract.description,
-            inputs=claimed.contract.inputs,
-            outputs=claimed.contract.outputs,
-            activation=claimed.contract.activation,
-            budget=claimed.contract.budget,
-            tool_scope=claimed.contract.tool_scope,
-            labels=claimed.contract.labels,
-            worker_capabilities=claimed.contract.worker_capabilities,
-            worker_pools=claimed.contract.worker_pools,
-            origin=claimed.contract.origin,
-            sensitive_input_policy=claimed.contract.sensitive_input_policy,
+            id=hash_retry(contract.id),
+            parent_id=contract.parent_id,
+            name=contract.name,
+            description=contract.description,
+            inputs=contract.inputs,
+            outputs=contract.outputs,
+            activation=contract.activation,
+            budget=contract.budget,
+            tool_scope=contract.tool_scope,
+            labels=contract.labels,
+            worker_capabilities=contract.worker_capabilities,
+            worker_pools=contract.worker_pools,
+            origin=contract.origin,
+            sensitive_input_policy=contract.sensitive_input_policy,
         )
         context_asset = None
         event_type = "retry_created"
     else:
-        child = method_contract(claimed.contract, action)
+        child = method_contract(contract, action)
         context_asset = sign_asset(
             system_asset(
-                name=f"_method_ctx_{claimed.contract.id}",
-                content=method_context_content(claimed.contract, action, child),
-                created_by=claimed.contract.id,
+                name=f"_method_ctx_{contract.id}",
+                content=method_context_content(contract, action, child),
+                created_by=contract.id,
             )
         )
         event_type = "method_scheduled"
 
-    existing = trace.get_by_contract(claimed.contract.id)
+    existing = trace.get_by_contract(contract.id)
     parent_id = existing[-1].id if existing else None
     method_entry = create_entry(
-        claimed.contract.id,
+        contract.id,
         event_type,
         parent_id=parent_id,
-        worker_id=claimed.worker_id,
+        worker_id=envelope.worker_id,
         candidate_raw=candidate.raw_output,
         relation_type=action.type,
         relation_target=child.id,
         disclosed_assets=[context_asset.id] if context_asset is not None else [],
-        budget_remaining=claimed.package.budget_remaining,
+        budget_remaining=budget_remaining,
     )
-    remaining = max(0, claimed.package.budget_remaining - 1)
+    remaining = max(0, budget_remaining - 1)
     budget_entry = create_entry(
-        claimed.contract.id,
+        contract.id,
         "budget_consumed",
         parent_id=method_entry.id,
         relation_type=action.type,
         budget_remaining=remaining,
     )
-    envelope = CandidateEnvelope(
-        contract_id=claimed.contract.id,
-        worker_id=claimed.worker_id,
-        raw_output=candidate.raw_output,
-        parsed_action=(
-            dict(candidate.parsed_action)
-            if candidate.parsed_action is not None
-            else None
-        ),
-        package_id=claimed.package.package_id,
-        claim_id=claimed.package.claim_id,
-        claim_epoch=claimed.package.claim_epoch,
-        idempotency_key=f"run-{claimed.package.package_id}",
-    )
     candidate_record = create_runtime_record(
         "candidate.received",
         {
             "candidate_id": envelope.candidate_hash,
-            "claim_epoch": claimed.package.claim_epoch,
-            "claim_id": claimed.package.claim_id,
-            "contract_id": claimed.contract.id,
+            "claim_epoch": envelope.claim_epoch,
+            "claim_id": envelope.claim_id,
+            "contract_id": contract.id,
             "method": action.type,
-            "package_id": claimed.package.package_id,
+            "package_id": envelope.package_id,
             "raw_output": candidate.raw_output,
-            "worker_id": claimed.worker_id,
+            "worker_id": envelope.worker_id,
         },
     )
     method_record = create_runtime_record(
         "method.scheduled",
         {
-            "contract_id": claimed.contract.id,
+            "contract_id": contract.id,
             "method": action.type,
             "relation_target": child.id,
         },
@@ -519,7 +538,7 @@ def _submit_claimed_method(
             "budget.consumed",
             {
                 "amount": 1,
-                "contract_id": claimed.contract.id,
+                "contract_id": contract.id,
                 "remaining": remaining,
                 "trace_id": budget_entry.id,
             },
@@ -553,7 +572,7 @@ def _submit_claimed_method(
             )
         )
     response = {
-        "contract_id": claimed.contract.id,
+        "contract_id": contract.id,
         "status": "method_scheduled",
         "method": action.type,
         "child_contract_id": child.id,
