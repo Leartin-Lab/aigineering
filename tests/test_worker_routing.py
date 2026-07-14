@@ -128,6 +128,14 @@ def test_missing_capability_is_visible_in_task_projection():
     ]
 
 
+def test_worker_execution_rejects_store_without_transactional_port():
+    store = MemoryStore()
+    store.add_contract(Contract(id="task:weak-store", outputs=("out",)))
+
+    with pytest.raises(TypeError, match="transactional worker StorePort"):
+        claim_next_package(store, worker_id="worker")
+
+
 @pytest.mark.parametrize("kind", ["memory", "sqlite"])
 def test_worker_registration_versions_are_immutable_and_rebuildable(kind):
     store = MemoryStore() if kind == "memory" else SQLiteStore(":memory:")

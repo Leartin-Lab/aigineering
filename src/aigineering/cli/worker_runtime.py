@@ -18,6 +18,7 @@ from aigineering.core.disclosure import (
     redact_for_disclosure,
 )
 from aigineering.core.runtime_ingress import RuntimeIngress
+from aigineering.core.store import require_operational_store
 from aigineering.core.fact_reducer import FactReducer
 from aigineering.core.ids import hash_retry
 from aigineering.core.method_runtime import MethodRuntime
@@ -82,9 +83,6 @@ class _ClaimLeaseKeeper:
     def start(self) -> None:
         if not self._claimed.package.claim_id:
             return
-        if getattr(self._store, "renew_claim", None) is None:
-            self._failed.set()
-            return
         self._thread = Thread(target=self._run, daemon=True)
         self._thread.start()
 
@@ -147,9 +145,9 @@ def claim_next_package(
     contract_id: str | None = None,
 ) -> ClaimedPackage | None:
     """Claim the next ready contract and return its worker package."""
+    store = require_operational_store(store)
     available_names = {a.name for a in store.get_all_assets()}
-    get_registration = getattr(store, "get_worker_registration", None)
-    registered_worker = get_registration(worker_id) if get_registration else None
+    registered_worker = store.get_worker_registration(worker_id)
     policy_blockers: list[DisclosurePolicyError] = []
     for contract in store.get_all_contracts():
         if contract_id is not None and contract.id != contract_id:
@@ -164,7 +162,7 @@ def claim_next_package(
         if _all_outputs_satisfied(contract, store):
             continue
 
-        trace_entries = getattr(store, "get_by_contract", lambda _cid: [])(contract.id)
+        trace_entries = store.get_by_contract(contract.id)
         budget_consumed = sum(
             1 for entry in trace_entries if entry.event_type == "budget_consumed"
         )
@@ -189,14 +187,12 @@ def claim_next_package(
             disclosed = tuple(compute_disclosure(contract, store))
         except DisclosurePolicyError as exc:
             policy_blockers.append(exc)
-            new_entry = getattr(store, "new_entry", None)
-            if new_entry is not None:
-                new_entry(
-                    contract.id,
-                    "disclosure_policy_rejected",
-                    rejected_fragments=list(exc.reasons),
-                    authority_result="rejected",
-                )
+            store.new_entry(
+                contract.id,
+                "disclosure_policy_rejected",
+                rejected_fragments=list(exc.reasons),
+                authority_result="rejected",
+            )
             continue
         method_context_assets = _method_context_assets_for(contract, store)
         package = WorkerPackage(
@@ -214,52 +210,48 @@ def claim_next_package(
                 registered_worker.version if registered_worker else ""
             ),
         )
-        claim_contract = getattr(store, "claim_contract", None)
-        if claim_contract is not None:
-            claim = claim_contract(
-                contract.id,
-                worker_id,
-                lease_seconds=lease_seconds,
-                package_id=package.package_id,
-                expected_registration_version=(
-                    registered_worker.version if registered_worker else ""
-                ),
-            )
-            if claim is None:
-                continue
-            package = WorkerPackage(
-                contract_id=contract.id,
-                contract=contract_to_dict(contract),
-                disclosed_assets=tuple(asset_to_dict(a) for a in disclosed),
-                method_context_assets=method_context_assets,
-                tool_scope=contract.tool_scope,
-                budget_remaining=remaining_budget,
-                claim_id=claim["claim_id"],
-                claim_epoch=claim["epoch"],
-                lease_until=claim["lease_until"],
-                package_id=package.package_id,
-                capability_requirements=contract.worker_capabilities,
-                worker_profile_id=(
-                    registered_worker.profile_id if registered_worker else ""
-                ),
-                worker_registration_version=(
-                    registered_worker.version if registered_worker else ""
-                ),
-            )
-            new_entry = getattr(store, "new_entry", None)
-            if new_entry is not None:
-                new_entry(
-                    contract.id,
-                    "worker_routed",
-                    worker_id=worker_id,
-                    relation_type="worker_profile",
-                    relation_target=(
-                        f"{registered_worker.profile_id}@{registered_worker.version}"
-                        if registered_worker
-                        else "legacy"
-                    ),
-                    budget_remaining=remaining_budget,
-                )
+        claim = store.claim_contract(
+            contract.id,
+            worker_id,
+            lease_seconds=lease_seconds,
+            package_id=package.package_id,
+            expected_registration_version=(
+                registered_worker.version if registered_worker else ""
+            ),
+        )
+        if claim is None:
+            continue
+        package = WorkerPackage(
+            contract_id=contract.id,
+            contract=contract_to_dict(contract),
+            disclosed_assets=tuple(asset_to_dict(a) for a in disclosed),
+            method_context_assets=method_context_assets,
+            tool_scope=contract.tool_scope,
+            budget_remaining=remaining_budget,
+            claim_id=claim["claim_id"],
+            claim_epoch=claim["epoch"],
+            lease_until=claim["lease_until"],
+            package_id=package.package_id,
+            capability_requirements=contract.worker_capabilities,
+            worker_profile_id=(
+                registered_worker.profile_id if registered_worker else ""
+            ),
+            worker_registration_version=(
+                registered_worker.version if registered_worker else ""
+            ),
+        )
+        store.new_entry(
+            contract.id,
+            "worker_routed",
+            worker_id=worker_id,
+            relation_type="worker_profile",
+            relation_target=(
+                f"{registered_worker.profile_id}@{registered_worker.version}"
+                if registered_worker
+                else "legacy"
+            ),
+            budget_remaining=remaining_budget,
+        )
         return ClaimedPackage(contract, disclosed, package, worker_id)
     if policy_blockers:
         reasons = [reason for exc in policy_blockers for reason in exc.reasons]
@@ -603,10 +595,8 @@ def _submit_claimed_method(
         "complete": False,
         "duplicate": False,
     }
-    commit = getattr(store, "commit_method_submission", None)
-    if commit is None:
-        raise ValueError("store does not support transactional method submission")
-    commit(
+    operational_store = require_operational_store(store)
+    operational_store.commit_method_submission(
         child_contract=child,
         context_asset=context_asset,
         trace_entries=[method_entry, budget_entry],
@@ -659,12 +649,10 @@ def process_method_completions(store, method_registry) -> list[str]:
 
 
 def _method_context_assets_for(contract: Contract, store) -> tuple[dict, ...]:
-    get_all = getattr(store, "get_all", None)
-    if get_all is None:
-        return ()
+    store = require_operational_store(store)
     assets: list[Asset] = []
     seen: set[str] = set()
-    for entry in get_all():
+    for entry in store.get_all():
         if (
             entry.event_type != "method_continuation_scheduled"
             or entry.relation_target != contract.id

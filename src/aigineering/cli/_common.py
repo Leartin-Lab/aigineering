@@ -22,11 +22,10 @@ from aigineering.core.method_handlers.retry import RetryMethodHandler
 from aigineering.core.method_handlers.tool import ToolMethodHandler
 from aigineering.core.method_registry import MethodRegistry
 from aigineering.core.session import SessionStore
-from aigineering.core.store import MemoryStore, StoreProtocol
+from aigineering.core.store import StoreProtocol
 from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.core.trace import (
     JsonLTraceStore,
-    MemoryTraceStore,
     TraceStoreProtocol,
     create_entry,
 )
@@ -168,9 +167,9 @@ def _run_demo(
 ) -> tuple[StoreProtocol, TraceStoreProtocol, Contract]:
     """Run the build_report hallucination containment demo."""
     if store is None:
-        store = MemoryStore()
+        store = SQLiteStore(":memory:")
     if trace_store is None:
-        trace_store = MemoryTraceStore()
+        trace_store = store
 
     ingress = RuntimeIngress(store, trace_store)
 

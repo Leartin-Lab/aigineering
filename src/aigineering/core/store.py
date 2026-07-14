@@ -69,6 +69,50 @@ class StoreProtocol(Protocol):
     def get_runtime_revision(self) -> int: ...
 
 
+@runtime_checkable
+class OperationalStoreProtocol(StoreProtocol, Protocol):
+    """Required transactional surface for claim/package/submit execution."""
+
+    def get_worker_registration(self, worker_id: str): ...
+    def get_worker_registrations(self) -> list: ...
+    def get_by_contract(self, contract_id: str) -> list: ...
+    def get_all(self) -> list: ...
+    def new_entry(self, contract_id: str, event_type: str, **kwargs): ...
+    def get_claim(self, contract_id: str) -> dict | None: ...
+    def claim_contract(
+        self,
+        contract_id: str,
+        worker_id: str,
+        lease_seconds: int = 60,
+        package_id: str = "",
+        expected_registration_version: str = "",
+    ) -> dict | None: ...
+    def renew_claim(
+        self,
+        claim_id: str,
+        epoch: int,
+        worker_id: str,
+        *,
+        lease_seconds: int = 60,
+    ) -> dict | None: ...
+    def get_idempotency(
+        self, contract_id: str, idempotency_key: str
+    ) -> dict | None: ...
+    def has_any_idempotency(self, contract_id: str) -> bool: ...
+    def commit_candidate_submission(self, *args, **kwargs) -> bool: ...
+    def commit_method_submission(self, *args, **kwargs) -> bool: ...
+
+
+def require_operational_store(store: StoreProtocol) -> OperationalStoreProtocol:
+    """Fail startup instead of silently downgrading transactional semantics."""
+    if not isinstance(store, OperationalStoreProtocol):
+        raise TypeError(
+            f"{type(store).__name__} does not implement the required "
+            "transactional worker StorePort"
+        )
+    return store
+
+
 # ---------------------------------------------------------------------------
 # Activation name extraction
 # ---------------------------------------------------------------------------
