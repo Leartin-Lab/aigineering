@@ -18,7 +18,8 @@ from aigineering.core.provenance import sign_asset
 from aigineering.core.store import StoreProtocol
 from aigineering.core.trace import TraceStoreProtocol, create_entry
 from aigineering.protocol.envelope import CandidateEnvelope
-from aigineering.protocol.types import Candidate, Contract, ProjectionResult
+from aigineering.protocol.runtime_record import RuntimeRecord, create_runtime_record
+from aigineering.protocol.types import Asset, Candidate, Contract, ProjectionResult
 from aigineering.protocol.wire import asset_to_dict
 
 if TYPE_CHECKING:
@@ -272,6 +273,15 @@ def submit_candidate(
         response["complete_trace_id"] = complete_entry.id
         trace_entries.append(complete_entry)
 
+    runtime_records = _submission_runtime_records(
+        envelope=envelope,
+        projection_result=projection_result,
+        signed_assets=signed_assets,
+        rejected_dicts=rejected_dicts,
+        budget_remaining=max(0, contract.budget - 1),
+        complete=response.get("complete") is True,
+    )
+
     cached_result = {k: v for k, v in response.items() if k != "duplicate"}
     commit_submission = getattr(store, "commit_candidate_submission", None)
     if commit_submission is not None:
@@ -285,6 +295,7 @@ def submit_candidate(
                 envelope.worker_id,
                 envelope.package_id,
                 envelope.claim_epoch,
+                runtime_records=runtime_records,
             )
         except Exception as e:
             raise SubmitCommitError(
@@ -299,10 +310,83 @@ def submit_candidate(
             ingress.accept_asset(asset, source="candidate")
         for trace_entry in trace_entries:
             trace_store.append(trace_entry)
+        for record in runtime_records:
+            store.append_runtime_record(record)
         if effective_idempotency_key:
             idem.set(contract.id, effective_idempotency_key, cached_result)
 
     return response
+
+
+def _submission_runtime_records(
+    *,
+    envelope: CandidateEnvelope,
+    projection_result: ProjectionResult,
+    signed_assets: list[Asset],
+    rejected_dicts: list[dict],
+    budget_remaining: int,
+    complete: bool,
+) -> tuple[RuntimeRecord, ...]:
+    """Build the immutable causal facts for one candidate commitment."""
+    candidate = create_runtime_record(
+        "candidate.received",
+        {
+            "candidate_id": envelope.candidate_hash,
+            "claim_epoch": envelope.claim_epoch,
+            "claim_id": envelope.claim_id,
+            "contract_id": envelope.contract_id,
+            "idempotency_key": envelope.idempotency_key,
+            "package_id": envelope.package_id,
+            "parsed_action": envelope.parsed_action,
+            "protocol_version": envelope.protocol_version,
+            "raw_output": envelope.raw_output,
+            "worker_id": envelope.worker_id,
+        },
+    )
+    projection = create_runtime_record(
+        "projection.decided",
+        {
+            "accepted_asset_ids": [asset.id for asset in signed_assets],
+            "authority_policy": (
+                dict(projection_result.authority_policy)
+                if projection_result.authority_policy is not None
+                else None
+            ),
+            "candidate_id": envelope.candidate_hash,
+            "contract_id": envelope.contract_id,
+            "rejections": rejected_dicts,
+            "status": projection_result.status.value,
+        },
+        causal_parents=[candidate.id],
+    )
+    records: list[RuntimeRecord] = [candidate, projection]
+    records.extend(
+        create_runtime_record(
+            "asset.committed",
+            {"asset": asset_to_dict(asset), "contract_id": envelope.contract_id},
+            causal_parents=[projection.id],
+        )
+        for asset in signed_assets
+    )
+    budget = create_runtime_record(
+        "budget.consumed",
+        {
+            "amount": 1,
+            "contract_id": envelope.contract_id,
+            "remaining": budget_remaining,
+        },
+        causal_parents=[projection.id],
+    )
+    records.append(budget)
+    if complete:
+        records.append(
+            create_runtime_record(
+                "lifecycle.terminal",
+                {"contract_id": envelope.contract_id, "terminal": "complete"},
+                causal_parents=[projection.id, budget.id],
+            )
+        )
+    return tuple(records)
 
 
 def _all_outputs_satisfied(

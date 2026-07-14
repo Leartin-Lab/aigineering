@@ -1676,6 +1676,7 @@ class SQLiteStore:
         worker_id: str = "",
         package_id: str = "",
         claim_epoch: int = 0,
+        runtime_records: tuple[RuntimeRecord, ...] = (),
     ) -> bool:
         """Commit accepted assets, trace, idempotency, and claim state atomically.
 
@@ -1694,6 +1695,8 @@ class SQLiteStore:
             check_crash_point("after_asset_before_trace")
             for entry in trace_entries:
                 self._insert_trace_entry(entry)
+            for record in runtime_records:
+                self._insert_runtime_record(record)
             if idempotency_key:
                 self.set_idempotency(
                     trace_entries[0].contract_id, idempotency_key, idempotency_result
@@ -1727,6 +1730,11 @@ class SQLiteStore:
                     "FROM worker_claims WHERE claim_id = ?",
                     (claim_id,),
                 ).fetchone()
+                projection_parents = [
+                    record.id
+                    for record in runtime_records
+                    if record.record_type == "projection.decided"
+                ]
                 self._insert_runtime_record(
                     create_runtime_record(
                         "claim.submitted",
@@ -1737,7 +1745,8 @@ class SQLiteStore:
                             "package_id": claim_row["package_id"],
                             "worker_id": claim_row["worker_id"],
                         },
-                        causal_parents=[self._claim_granted_record_id(claim_id)],
+                        causal_parents=[self._claim_granted_record_id(claim_id)]
+                        + projection_parents,
                     )
                 )
         return True

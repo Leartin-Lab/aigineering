@@ -273,6 +273,20 @@ def test_submit_creates_projection_assets():
         assets = stored.get_assets_by_name("final_report")
         assert len(assets) == 1
         assert assets[0].name == "final_report"
+        records = [record for _, record in stored.scan_runtime_records()]
+        record_types = [record.record_type for record in records]
+        assert "candidate.received" in record_types
+        assert "projection.decided" in record_types
+        assert "asset.committed" in record_types
+        assert "budget.consumed" in record_types
+        assert "lifecycle.terminal" in record_types
+        projection = next(
+            record for record in records if record.record_type == "projection.decided"
+        )
+        claim_submitted = next(
+            record for record in records if record.record_type == "claim.submitted"
+        )
+        assert projection.id in claim_submitted.causal_parents
 
 
 def test_submit_without_claim_rejected_for_sqlite_store():
