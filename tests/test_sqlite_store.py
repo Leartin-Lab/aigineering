@@ -648,6 +648,15 @@ def test_claim_epoch_increments_and_fences_renewal(store):
     assert record_types.count("claim.submitted") == 1
     assert record_types.count("claim.renewed") == 1
 
+    with store._conn:
+        store._conn.execute("DELETE FROM worker_claims")
+    store.rebuild_claim_projection()
+    rebuilt = store.get_claim("c1")
+    assert rebuilt is not None
+    assert rebuilt["claim_id"] == second["claim_id"]
+    assert rebuilt["epoch"] == 2
+    assert rebuilt["lease_until"] == renewed["lease_until"]
+
 
 def test_expired_claim_cannot_be_renewed(store):
     store.persist_claim("expired", "c1", "worker", "2020-01-01T00:00:00+00:00", epoch=3)

@@ -489,6 +489,38 @@ class SQLiteStore:
             self._conn.execute(
                 "ALTER TABLE worker_claims ADD COLUMN epoch INTEGER NOT NULL DEFAULT 1"
             )
+        rows = self._conn.execute(
+            "SELECT * FROM worker_claims ORDER BY rowid"
+        ).fetchall()
+        for row in rows:
+            granted = create_runtime_record(
+                "claim.granted",
+                {
+                    "claim_id": row["claim_id"],
+                    "contract_id": row["contract_id"],
+                    "epoch": int(row["epoch"]),
+                    "lease_until": row["lease_until"],
+                    "package_id": row["package_id"],
+                    "worker_id": row["worker_id"],
+                },
+                recorded_at=row["created_at"],
+            )
+            self._insert_runtime_record(granted)
+            if row["status"] == "submitted":
+                self._insert_runtime_record(
+                    create_runtime_record(
+                        "claim.submitted",
+                        {
+                            "claim_id": row["claim_id"],
+                            "contract_id": row["contract_id"],
+                            "epoch": int(row["epoch"]),
+                            "package_id": row["package_id"],
+                            "worker_id": row["worker_id"],
+                        },
+                        causal_parents=[granted.id],
+                        recorded_at=row["updated_at"],
+                    )
+                )
 
     # ── Immutable runtime-record envelope ────────────────────────────────
 
@@ -1445,6 +1477,56 @@ class SQLiteStore:
                     },
                 )
             )
+
+    def rebuild_claim_projection(self) -> None:
+        """Rebuild the transactional claim head from immutable claim facts."""
+        records = [
+            record
+            for _, record in self.scan_runtime_records()
+            if record.record_type.startswith("claim.")
+        ]
+        with self._conn:
+            self._conn.execute("DELETE FROM worker_claims")
+            for record in records:
+                payload = record.payload
+                if record.record_type == "claim.granted":
+                    self._conn.execute(
+                        """INSERT INTO worker_claims (
+                            claim_id, contract_id, worker_id, lease_until, status,
+                            package_id, epoch, created_at, updated_at
+                        ) VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?)""",
+                        (
+                            payload["claim_id"],
+                            payload["contract_id"],
+                            payload["worker_id"],
+                            payload["lease_until"],
+                            payload["package_id"],
+                            int(payload["epoch"]),
+                            record.recorded_at,
+                            record.recorded_at,
+                        ),
+                    )
+                elif record.record_type == "claim.renewed":
+                    self._conn.execute(
+                        "UPDATE worker_claims SET lease_until = ?, updated_at = ? "
+                        "WHERE claim_id = ? AND epoch = ?",
+                        (
+                            payload["lease_until"],
+                            record.recorded_at,
+                            payload["claim_id"],
+                            int(payload["epoch"]),
+                        ),
+                    )
+                elif record.record_type == "claim.submitted":
+                    self._conn.execute(
+                        "UPDATE worker_claims SET status = 'submitted', updated_at = ? "
+                        "WHERE claim_id = ? AND epoch = ?",
+                        (
+                            record.recorded_at,
+                            payload["claim_id"],
+                            int(payload["epoch"]),
+                        ),
+                    )
 
     def get_idempotency(self, contract_id: str, idempotency_key: str) -> dict | None:
         cur = self._conn.execute(
