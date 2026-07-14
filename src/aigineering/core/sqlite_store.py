@@ -1451,6 +1451,7 @@ class SQLiteStore:
         claim_id: str,
         worker_id: str = "",
         package_id: str = "",
+        claim_epoch: int = 0,
     ) -> bool:
         """Commit accepted assets, trace, idempotency, and claim state atomically.
 
@@ -1480,6 +1481,7 @@ class SQLiteStore:
                     "WHERE claim_id = ? AND status = 'active' "
                     "AND worker_id = ? "
                     "AND (? = '' OR package_id = ?) "
+                    "AND (? = 0 OR epoch = ?) "
                     "AND lease_until >= ?",
                     (
                         committed_at,
@@ -1487,6 +1489,8 @@ class SQLiteStore:
                         worker_id,
                         package_id,
                         package_id,
+                        claim_epoch,
+                        claim_epoch,
                         committed_at,
                     ),
                 )

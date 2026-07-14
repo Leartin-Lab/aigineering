@@ -83,6 +83,7 @@ envelope = CandidateEnvelope(
     worker_id="worker1",
     raw_output='/exec {"outputs": {"out": "result"}}',
     claim_id=claim["claim_id"],
+    claim_epoch=claim["epoch"],
     idempotency_key="idem-1",
 )
 ingress = RuntimeIngress(store, store)
@@ -299,6 +300,7 @@ envelope = CandidateEnvelope(
     worker_id="worker1",
     raw_output='/exec {"outputs": {"out": "first"}}',
     claim_id=claim["claim_id"],
+    claim_epoch=claim["epoch"],
     idempotency_key="idem-double",
 )
 ingress = RuntimeIngress(store, store)
@@ -334,6 +336,7 @@ envelope = CandidateEnvelope(
     worker_id="worker1",
     raw_output='/exec {"outputs": {"out": "second"}}',
     claim_id=claim["claim_id"],
+    claim_epoch=claim["epoch"],
     idempotency_key="idem-double",
 )
 ingress = RuntimeIngress(store, store)

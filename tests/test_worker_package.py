@@ -48,6 +48,20 @@ def test_worker_package_round_trip_with_capability_requirements():
     assert restored.capability_requirements == ("streaming", "vision")
 
 
+def test_worker_package_round_trip_preserves_claim_epoch():
+    package = WorkerPackage(
+        contract_id="c1",
+        contract={},
+        disclosed_assets=[],
+        method_context_assets=[],
+        tool_scope=[],
+        budget_remaining=1,
+        claim_id="lease:1",
+        claim_epoch=3,
+    )
+    assert WorkerPackage.from_json(package.to_json()).claim_epoch == 3
+
+
 def test_worker_package_capability_requirements_defaults_to_empty():
     """capability_requirements defaults to empty tuple when omitted."""
     wp = WorkerPackage(

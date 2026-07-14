@@ -11,7 +11,7 @@ from aigineering.core.ids import compute_content_hash
 # Version 2 binds the selected WorkerProfile and registration revision into
 # package identity. Older packages fail closed rather than silently losing
 # routing evidence.
-CURRENT_PROTOCOL_VERSION = 2
+CURRENT_PROTOCOL_VERSION = 3
 
 
 @dataclass(frozen=True)
@@ -30,6 +30,7 @@ class WorkerPackage:
     protocol_version: int = CURRENT_PROTOCOL_VERSION
     package_id: str = ""
     claim_id: str = ""
+    claim_epoch: int = 0
     lease_until: str = ""
     capability_requirements: tuple[str, ...] = ()
     worker_profile_id: str = ""
@@ -40,6 +41,8 @@ class WorkerPackage:
         object.__setattr__(
             self, "method_context_assets", tuple(self.method_context_assets)
         )
+        if self.claim_epoch < 0:
+            raise ValueError("claim_epoch must not be negative")
         object.__setattr__(self, "tool_scope", tuple(self.tool_scope))
         object.__setattr__(
             self, "capability_requirements", tuple(self.capability_requirements)
@@ -93,6 +96,7 @@ class WorkerPackage:
             "protocol_version": self.protocol_version,
             "package_id": self.package_id,
             "claim_id": self.claim_id,
+            "claim_epoch": self.claim_epoch,
             "lease_until": self.lease_until,
             "contract_id": self.contract_id,
             "contract": self.contract,
@@ -127,6 +131,7 @@ class WorkerPackage:
             protocol_version=version,
             package_id=d.get("package_id", ""),
             claim_id=d.get("claim_id", ""),
+            claim_epoch=int(d.get("claim_epoch", 0)),
             lease_until=d.get("lease_until", ""),
             capability_requirements=tuple(d.get("capability_requirements", ())),
             worker_profile_id=d.get("worker_profile_id", ""),

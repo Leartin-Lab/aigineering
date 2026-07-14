@@ -1260,6 +1260,7 @@ class TestClaimPersistence:
                 worker_id="worker-1",
                 raw_output='/exec {"out": "hello"}',
                 claim_id=claim.claim_id,
+                claim_epoch=1,
             )
             result = submit_candidate(env, store, trace, ingress)
             assert result["status"] in ("accepted", "partial"), (
@@ -1272,6 +1273,7 @@ class TestClaimPersistence:
                 worker_id="worker-2",
                 raw_output='/exec {"out": "hijack"}',
                 claim_id=claim.claim_id,
+                claim_epoch=1,
             )
             try:
                 submit_candidate(env2, store, trace, ingress)
@@ -1310,6 +1312,7 @@ class TestClaimPersistence:
                 worker_id="worker-1",
                 raw_output='/exec {"out2": "late"}',
                 claim_id="expired-claim-id",
+                claim_epoch=1,
             )
             try:
                 submit_candidate(env3, store, trace, ingress)
@@ -1347,6 +1350,7 @@ class TestClaimPersistence:
                 worker_id="worker-1",
                 raw_output='/exec {"out3": "stale"}',
                 claim_id="released-claim-id",
+                claim_epoch=1,
             )
             try:
                 submit_candidate(env4, store, trace, ingress)
@@ -1675,7 +1679,7 @@ class TestWorkerProtocolHashing:
         env_dict = json.loads(env_json)
 
         # Future version must be rejected
-        env_dict["protocol_version"] = 2
+        env_dict["protocol_version"] = CURRENT_ENVELOPE_VERSION + 1
         with pytest.raises(ValueError, match="Unsupported envelope protocol version"):
             CandidateEnvelope.from_json(json.dumps(env_dict))
 

@@ -31,6 +31,7 @@ def test_candidate_envelope_round_trip_with_claim_id():
         worker_id="w1",
         raw_output="output",
         claim_id="claim_abc",
+        claim_epoch=1,
     )
 
     json_str = ce.to_json()
@@ -134,6 +135,7 @@ def test_candidate_envelope_multi_worker_compatibility():
         raw_output='/exec {"outputs": {"report": "analysis complete"}}',
         parsed_action={"type": "exec", "outputs": {"report": "analysis complete"}},
         claim_id="claim_789",
+        claim_epoch=1,
     )
 
     # All envelopes serialize and deserialize correctly

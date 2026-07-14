@@ -11,7 +11,7 @@ from typing import Any, Optional
 
 from aigineering.core.ids import compute_content_hash
 
-CURRENT_ENVELOPE_VERSION = 1
+CURRENT_ENVELOPE_VERSION = 2
 
 
 @dataclass(frozen=True)
@@ -24,6 +24,7 @@ class CandidateEnvelope:
     protocol_version: int = CURRENT_ENVELOPE_VERSION
     package_id: str = ""
     claim_id: str = ""
+    claim_epoch: int = 0
     idempotency_key: str = ""
     parsed_action: Optional[dict[str, Any]] = None
 
@@ -44,6 +45,8 @@ class CandidateEnvelope:
             )
         if self.claim_id and len(self.claim_id) > 256:
             raise ValueError("claim_id exceeds maximum length (256)")
+        if self.claim_epoch < 0:
+            raise ValueError("claim_epoch must not be negative")
         if self.idempotency_key and len(self.idempotency_key) > 256:
             raise ValueError("idempotency_key exceeds maximum length (256)")
         if self.package_id and not self.package_id.startswith("pkg:"):
@@ -59,8 +62,10 @@ class CandidateEnvelope:
                 "worker_id": self.worker_id,
                 "raw_output": self.raw_output,
                 "claim_id": self.claim_id,
+                "claim_epoch": self.claim_epoch,
                 "idempotency_key": self.idempotency_key,
                 "package_id": self.package_id,
+                "parsed_action": self.parsed_action,
             },
             sort_keys=True,
         )
@@ -74,6 +79,7 @@ class CandidateEnvelope:
             "worker_id": self.worker_id,
             "package_id": self.package_id,
             "claim_id": self.claim_id,
+            "claim_epoch": self.claim_epoch,
             "idempotency_key": self.idempotency_key,
             "raw_output": self.raw_output,
             "parsed_action": self.parsed_action,
@@ -112,6 +118,7 @@ class CandidateEnvelope:
             protocol_version=version,
             package_id=d.get("package_id", ""),
             claim_id=d.get("claim_id", ""),
+            claim_epoch=int(d.get("claim_epoch", 0)),
             idempotency_key=d.get("idempotency_key", ""),
             parsed_action=d.get("parsed_action"),
         )

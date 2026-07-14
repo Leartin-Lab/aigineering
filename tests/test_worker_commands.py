@@ -143,6 +143,7 @@ def _envelope_json_from_package(
         raw_output=raw_output,
         package_id=pkg_data.get("package_id", ""),
         claim_id=pkg_data.get("claim_id", ""),
+        claim_epoch=int(pkg_data.get("claim_epoch", 0)),
         idempotency_key=(
             f"idem-{pkg_data['contract_id']}"
             if idempotency_key is None
@@ -438,6 +439,7 @@ def test_submit_rejected_candidate():
             raw_output="secret_data: hidden result",
             package_id=pkg_data["package_id"],
             claim_id=pkg_data["claim_id"],
+            claim_epoch=pkg_data["claim_epoch"],
         )
         result = runner.invoke(
             cli, ["worker", "submit", "--json", bad_envelope.to_json()]
@@ -464,6 +466,7 @@ def test_submit_rejected_preserves_trace():
             raw_output="undeclared: bad",
             package_id=pkg_data["package_id"],
             claim_id=pkg_data["claim_id"],
+            claim_epoch=pkg_data["claim_epoch"],
         )
         result = runner.invoke(
             cli, ["worker", "submit", "--json", bad_envelope.to_json()]

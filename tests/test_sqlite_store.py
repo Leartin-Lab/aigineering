@@ -650,6 +650,28 @@ def test_expired_claim_cannot_be_renewed(store):
     assert store.renew_claim("expired", 3, "worker") is None
 
 
+def test_candidate_submit_rejects_stale_fencing_epoch_before_projection(store):
+    from aigineering.core.runtime_ingress import RuntimeIngress
+    from aigineering.core.submit import SubmitClaimError, submit_candidate
+    from aigineering.protocol.envelope import CandidateEnvelope
+
+    contract = Contract(id="epoch-submit", outputs=["out"], budget=1)
+    store.add_contract(contract)
+    claim = store.claim_contract(contract.id, "worker")
+    assert claim is not None
+    envelope = CandidateEnvelope(
+        contract_id=contract.id,
+        worker_id="worker",
+        raw_output='/exec {"out": "value"}',
+        claim_id=claim["claim_id"],
+        claim_epoch=claim["epoch"] + 1,
+    )
+
+    with pytest.raises(SubmitClaimError, match="epoch mismatch"):
+        submit_candidate(envelope, store, store, RuntimeIngress(store, store))
+    assert store.get_assets_by_name("out") == []
+
+
 def test_claim_contract_rejects_second_connection_active_claim(tmp_path):
     """Two SQLite connections cannot both claim the same contract as active."""
     db_path = str(tmp_path / "claims.db")
@@ -783,6 +805,7 @@ def test_candidate_submission_rolls_back_when_claim_predicate_fails(store, monke
             "lease_until": "2026-12-31T00:00:00+00:00",
             "status": "active",
             "package_id": "pkg:test",
+            "epoch": 1,
         },
     )
     envelope = CandidateEnvelope(
@@ -790,6 +813,7 @@ def test_candidate_submission_rolls_back_when_claim_predicate_fails(store, monke
         worker_id="worker-1",
         raw_output='/exec {"out": "value"}',
         claim_id="claim-stale",
+        claim_epoch=1,
         package_id="pkg:test",
         idempotency_key="idem-stale",
     )
@@ -831,6 +855,7 @@ def test_candidate_submission_rolls_back_when_claim_expires_at_commit(
             "lease_until": "2026-12-31T00:00:00+00:00",
             "status": "active",
             "package_id": "pkg:expired",
+            "epoch": 1,
         },
     )
     envelope = CandidateEnvelope(
@@ -838,6 +863,7 @@ def test_candidate_submission_rolls_back_when_claim_expires_at_commit(
         worker_id="worker-1",
         raw_output='/exec {"out": "value"}',
         claim_id="claim-expired",
+        claim_epoch=1,
         package_id="pkg:expired",
         idempotency_key="idem-expired",
     )

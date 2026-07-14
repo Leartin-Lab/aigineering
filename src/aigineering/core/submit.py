@@ -128,6 +128,15 @@ def submit_candidate(
                     f"claim_id mismatch: envelope='{envelope.claim_id}' "
                     f"vs store='{claim.get('claim_id')}'"
                 )
+            if envelope.claim_epoch < 1:
+                raise SubmitClaimError(
+                    "claim-bound envelope.claim_epoch is required and must be positive"
+                )
+            if claim.get("epoch") != envelope.claim_epoch:
+                raise SubmitClaimError(
+                    f"claim epoch mismatch: envelope={envelope.claim_epoch} "
+                    f"vs store={claim.get('epoch')}"
+                )
             if claim.get("worker_id") != envelope.worker_id:
                 raise SubmitClaimError(
                     f"claim owned by '{claim.get('worker_id')}', "
@@ -275,6 +284,7 @@ def submit_candidate(
                 envelope.claim_id,
                 envelope.worker_id,
                 envelope.package_id,
+                envelope.claim_epoch,
             )
         except Exception as e:
             raise SubmitCommitError(

@@ -131,6 +131,7 @@ def claim_next_package(
                 tool_scope=contract.tool_scope,
                 budget_remaining=remaining_budget,
                 claim_id=claim["claim_id"],
+                claim_epoch=claim["epoch"],
                 lease_until=claim["lease_until"],
                 package_id=package.package_id,
                 capability_requirements=contract.worker_capabilities,
@@ -177,6 +178,7 @@ def execute_claimed_package(
         ),
         package_id=claimed.package.package_id,
         claim_id=claimed.package.claim_id,
+        claim_epoch=claimed.package.claim_epoch,
         idempotency_key=f"run-{claimed.package.package_id}",
     )
     ingress = RuntimeIngress(store, store)
