@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from aigineering.protocol.types import Contract
+from aigineering.protocol.runtime_record import RuntimeRecord, create_runtime_record
 
 
 @dataclass(frozen=True)
@@ -38,6 +39,41 @@ class WorkerRegistration:
             raise ValueError("active_claims must not be negative")
         object.__setattr__(self, "capabilities", tuple(sorted(set(self.capabilities))))
         object.__setattr__(self, "pools", tuple(sorted(set(self.pools))))
+
+
+def worker_registration_record(registration: WorkerRegistration) -> RuntimeRecord:
+    """Return the immutable control-plane fact for a registration version."""
+    return create_runtime_record(
+        "worker.registered",
+        {
+            "capabilities": list(registration.capabilities),
+            "capacity": registration.capacity,
+            "enabled": registration.enabled,
+            "pools": list(registration.pools),
+            "profile_id": registration.profile_id,
+            "version": registration.version,
+            "worker_id": registration.worker_id,
+        },
+    )
+
+
+def registration_from_record(
+    record: RuntimeRecord, *, active_claims: int = 0
+) -> WorkerRegistration:
+    """Materialize a routing view from a ``worker.registered`` fact."""
+    if record.record_type != "worker.registered":
+        raise ValueError(f"expected worker.registered, got {record.record_type!r}")
+    payload = record.payload
+    return WorkerRegistration(
+        worker_id=str(payload["worker_id"]),
+        capabilities=tuple(payload["capabilities"]),
+        pools=tuple(payload["pools"]),
+        profile_id=str(payload["profile_id"]),
+        capacity=int(payload["capacity"]),
+        active_claims=active_claims,
+        enabled=bool(payload["enabled"]),
+        version=str(payload["version"]),
+    )
 
 
 def is_eligible(contract: Contract, worker: WorkerRegistration) -> bool:

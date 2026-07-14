@@ -26,7 +26,11 @@ from aigineering.core.provenance import verify_asset_seal
 from aigineering.core.record_conflict import ImmutableRecordConflict
 from aigineering.core.store import _projection_index_digest
 from aigineering.core.trace import trace_effective_payload
-from aigineering.core.worker_routing import WorkerRegistration
+from aigineering.core.worker_routing import (
+    WorkerRegistration,
+    registration_from_record,
+    worker_registration_record,
+)
 from aigineering.protocol.types import Asset, Contract, TraceEntry
 from aigineering.protocol.runtime_record import (
     RuntimeRecord,
@@ -870,8 +874,24 @@ class SQLiteStore:
     # ------------------------------------------------------------------
 
     def register_worker(self, registration: WorkerRegistration) -> None:
-        """Upsert trusted routing metadata for an execution worker."""
+        """Append one registration version and update its derived current view."""
         with self._conn:
+            record = worker_registration_record(registration)
+            for _, existing in self.scan_runtime_records(
+                record_type="worker.registered"
+            ):
+                payload = existing.payload
+                if (
+                    payload["worker_id"] == registration.worker_id
+                    and payload["version"] == registration.version
+                ):
+                    if existing.id == record.id:
+                        return
+                    raise ImmutableRecordConflict(
+                        "worker registration version",
+                        f"{registration.worker_id}:{registration.version}",
+                    )
+            self.append_runtime_record(record)
             self._conn.execute(
                 """INSERT INTO worker_registrations (
                     worker_id, capabilities, pools, profile_id, capacity,
@@ -896,6 +916,36 @@ class SQLiteStore:
                     now_iso(),
                 ),
             )
+
+    def rebuild_worker_registration_projection(self) -> None:
+        """Rebuild the mutable routing view from immutable registration facts."""
+        with self._conn:
+            self._conn.execute("DELETE FROM worker_registrations")
+            for _, record in self.scan_runtime_records(record_type="worker.registered"):
+                registration = registration_from_record(record)
+                self._conn.execute(
+                    """INSERT INTO worker_registrations (
+                        worker_id, capabilities, pools, profile_id, capacity,
+                        enabled, version, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(worker_id) DO UPDATE SET
+                        capabilities = excluded.capabilities,
+                        pools = excluded.pools,
+                        profile_id = excluded.profile_id,
+                        capacity = excluded.capacity,
+                        enabled = excluded.enabled,
+                        version = excluded.version,
+                        updated_at = excluded.updated_at""",
+                    (
+                        registration.worker_id,
+                        json.dumps(list(registration.capabilities)),
+                        json.dumps(list(registration.pools)),
+                        registration.profile_id,
+                        registration.capacity,
+                        int(registration.enabled),
+                        registration.version,
+                        record.recorded_at,
+                    ),
+                )
 
     def get_worker_registration(self, worker_id: str) -> WorkerRegistration | None:
         row = self._conn.execute(

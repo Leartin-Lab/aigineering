@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import pytest
+
 from aigineering.agent.prompt import contract_prompt
 from aigineering.cli.task_state import project_task_status
 from aigineering.cli.worker_runtime import claim_next_package
 from aigineering.core.sqlite_store import SQLiteStore
+from aigineering.core.record_conflict import ImmutableRecordConflict
+from aigineering.core.store import MemoryStore
 from aigineering.core.worker_routing import (
     WorkerRegistration,
     eligible_workers,
@@ -112,3 +116,31 @@ def test_missing_capability_is_visible_in_task_projection():
             "message": "no registered worker currently satisfies routing constraints",
         }
     ]
+
+
+@pytest.mark.parametrize("kind", ["memory", "sqlite"])
+def test_worker_registration_versions_are_immutable_and_rebuildable(kind):
+    store = MemoryStore() if kind == "memory" else SQLiteStore(":memory:")
+    v1 = WorkerRegistration("worker", capabilities=("text",), version="1")
+    store.register_worker(v1)
+    store.register_worker(v1)
+
+    with pytest.raises(ImmutableRecordConflict, match="registration version"):
+        store.register_worker(
+            WorkerRegistration("worker", capabilities=("vision",), version="1")
+        )
+
+    v2 = WorkerRegistration("worker", capabilities=("vision",), version="2")
+    store.register_worker(v2)
+    assert store.get_worker_registration("worker") == v2
+    assert len(store.scan_runtime_records(record_type="worker.registered")) == 2
+
+    if kind == "memory":
+        store._worker_registrations.clear()
+    else:
+        with store._conn:
+            store._conn.execute("DELETE FROM worker_registrations")
+    store.rebuild_worker_registration_projection()
+    assert store.get_worker_registration("worker") == v2
+    if kind == "sqlite":
+        store.close()

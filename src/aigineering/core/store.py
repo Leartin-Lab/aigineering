@@ -16,6 +16,10 @@ from aigineering.core.authority import (
 from aigineering.core.provenance import verify_asset_seal
 from aigineering.core.record_conflict import ImmutableRecordConflict
 from aigineering.core.ids import compute_content_hash
+from aigineering.core.worker_routing import (
+    registration_from_record,
+    worker_registration_record,
+)
 from aigineering.protocol.types import Asset, Contract
 from aigineering.protocol.runtime_record import (
     RuntimeRecord,
@@ -194,6 +198,21 @@ class MemoryStore(_ProjectionIndexMixin):
         self._runtime_revision = 0
 
     def register_worker(self, registration) -> None:
+        record = worker_registration_record(registration)
+        for _, existing in self.scan_runtime_records(record_type="worker.registered"):
+            payload = existing.payload
+            if (
+                payload["worker_id"] == registration.worker_id
+                and payload["version"] == registration.version
+            ):
+                if existing.id == record.id:
+                    self._worker_registrations[registration.worker_id] = registration
+                    return
+                raise ImmutableRecordConflict(
+                    "worker registration version",
+                    f"{registration.worker_id}:{registration.version}",
+                )
+        self.append_runtime_record(record)
         self._worker_registrations[registration.worker_id] = registration
 
     def get_worker_registration(self, worker_id: str):
@@ -201,6 +220,12 @@ class MemoryStore(_ProjectionIndexMixin):
 
     def get_worker_registrations(self) -> list:
         return list(self._worker_registrations.values())
+
+    def rebuild_worker_registration_projection(self) -> None:
+        self._worker_registrations.clear()
+        for _, record in self.scan_runtime_records(record_type="worker.registered"):
+            registration = registration_from_record(record)
+            self._worker_registrations[registration.worker_id] = registration
 
     def append_runtime_record(self, record: RuntimeRecord) -> int:
         existing = self._runtime_records.get(record.id)
