@@ -34,6 +34,7 @@ from aigineering.core.worker_routing import (
 from aigineering.protocol.types import Asset, Contract, TraceEntry
 from aigineering.protocol.runtime_record import (
     RuntimeRecord,
+    create_runtime_record,
     runtime_record_effective_payload,
     validate_runtime_record,
 )
@@ -493,45 +494,49 @@ class SQLiteStore:
 
     def append_runtime_record(self, record: RuntimeRecord) -> int:
         with self._conn:
+            return self._insert_runtime_record(record)
+
+    def _insert_runtime_record(self, record: RuntimeRecord) -> int:
+        """Insert within the caller's transaction without committing it."""
+        row = self._conn.execute(
+            "SELECT * FROM runtime_records WHERE record_id = ?", (record.id,)
+        ).fetchone()
+        if row is not None:
+            existing = self._row_to_runtime_record(row)
+            if runtime_record_effective_payload(
+                existing
+            ) == runtime_record_effective_payload(record):
+                return int(row["revision"])
+            raise ImmutableRecordConflict("runtime record", record.id)
+        validate_runtime_record(record)
+        try:
+            cursor = self._conn.execute(
+                """INSERT INTO runtime_records (
+                    record_id, record_type, schema_version, payload_json,
+                    causal_parents, recorded_at
+                ) VALUES (?, ?, ?, ?, ?, ?)""",
+                (
+                    record.id,
+                    record.record_type,
+                    record.schema_version,
+                    json.dumps(
+                        runtime_record_effective_payload(record)["payload"],
+                        sort_keys=True,
+                    ),
+                    json.dumps(list(record.causal_parents)),
+                    record.recorded_at,
+                ),
+            )
+        except sqlite3.IntegrityError:
             row = self._conn.execute(
                 "SELECT * FROM runtime_records WHERE record_id = ?", (record.id,)
             ).fetchone()
-            if row is not None:
-                existing = self._row_to_runtime_record(row)
-                if runtime_record_effective_payload(
-                    existing
-                ) == runtime_record_effective_payload(record):
-                    return int(row["revision"])
-                raise ImmutableRecordConflict("runtime record", record.id)
-            validate_runtime_record(record)
-            try:
-                cursor = self._conn.execute(
-                    """INSERT INTO runtime_records (
-                        record_id, record_type, schema_version, payload_json,
-                        causal_parents, recorded_at
-                    ) VALUES (?, ?, ?, ?, ?, ?)""",
-                    (
-                        record.id,
-                        record.record_type,
-                        record.schema_version,
-                        json.dumps(
-                            runtime_record_effective_payload(record)["payload"],
-                            sort_keys=True,
-                        ),
-                        json.dumps(list(record.causal_parents)),
-                        record.recorded_at,
-                    ),
-                )
-            except sqlite3.IntegrityError:
-                row = self._conn.execute(
-                    "SELECT * FROM runtime_records WHERE record_id = ?", (record.id,)
-                ).fetchone()
-                if row is not None and runtime_record_effective_payload(
-                    self._row_to_runtime_record(row)
-                ) == runtime_record_effective_payload(record):
-                    return int(row["revision"])
-                raise ImmutableRecordConflict("runtime record", record.id) from None
-            return int(cursor.lastrowid)
+            if row is not None and runtime_record_effective_payload(
+                self._row_to_runtime_record(row)
+            ) == runtime_record_effective_payload(record):
+                return int(row["revision"])
+            raise ImmutableRecordConflict("runtime record", record.id) from None
+        return int(cursor.lastrowid)
 
     def get_runtime_record(self, record_id: str) -> RuntimeRecord | None:
         row = self._conn.execute(
@@ -1355,6 +1360,19 @@ class SQLiteStore:
                     timestamp,
                 ),
             )
+            self._insert_runtime_record(
+                create_runtime_record(
+                    "claim.granted",
+                    {
+                        "claim_id": claim_id,
+                        "contract_id": contract_id,
+                        "epoch": epoch,
+                        "lease_until": lease_until,
+                        "package_id": package_id,
+                        "worker_id": worker_id,
+                    },
+                )
+            )
             self._conn.commit()
         except (sqlite3.IntegrityError, sqlite3.OperationalError):
             self._conn.rollback()
@@ -1385,6 +1403,17 @@ class SQLiteStore:
             )
             if cursor.rowcount != 1:
                 return None
+            self._insert_runtime_record(
+                create_runtime_record(
+                    "claim.renewed",
+                    {
+                        "claim_id": claim_id,
+                        "epoch": epoch,
+                        "lease_until": deadline,
+                        "worker_id": worker_id,
+                    },
+                )
+            )
         row = self._conn.execute(
             "SELECT contract_id FROM worker_claims WHERE claim_id = ?", (claim_id,)
         ).fetchone()
@@ -1392,10 +1421,29 @@ class SQLiteStore:
 
     def mark_claim_submitted(self, claim_id: str) -> None:
         with self._conn:
+            row = self._conn.execute(
+                "SELECT contract_id, worker_id, epoch, package_id "
+                "FROM worker_claims WHERE claim_id = ? AND status = 'active'",
+                (claim_id,),
+            ).fetchone()
+            if row is None:
+                return
             self._conn.execute(
                 "UPDATE worker_claims SET status = 'submitted', updated_at = ? "
-                "WHERE claim_id = ?",
+                "WHERE claim_id = ? AND status = 'active'",
                 (now_iso(), claim_id),
+            )
+            self._insert_runtime_record(
+                create_runtime_record(
+                    "claim.submitted",
+                    {
+                        "claim_id": claim_id,
+                        "contract_id": row["contract_id"],
+                        "epoch": int(row["epoch"]),
+                        "package_id": row["package_id"],
+                        "worker_id": row["worker_id"],
+                    },
+                )
             )
 
     def get_idempotency(self, contract_id: str, idempotency_key: str) -> dict | None:
@@ -1498,6 +1546,23 @@ class SQLiteStore:
                     raise sqlite3.IntegrityError(
                         "active worker claim predicate failed during submit"
                     )
+                claim_row = self._conn.execute(
+                    "SELECT contract_id, worker_id, epoch, package_id "
+                    "FROM worker_claims WHERE claim_id = ?",
+                    (claim_id,),
+                ).fetchone()
+                self._insert_runtime_record(
+                    create_runtime_record(
+                        "claim.submitted",
+                        {
+                            "claim_id": claim_id,
+                            "contract_id": claim_row["contract_id"],
+                            "epoch": int(claim_row["epoch"]),
+                            "package_id": claim_row["package_id"],
+                            "worker_id": claim_row["worker_id"],
+                        },
+                    )
+                )
         return True
 
     def commit_direct_execution(

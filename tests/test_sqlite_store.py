@@ -643,6 +643,10 @@ def test_claim_epoch_increments_and_fences_renewal(store):
     renewed = store.renew_claim(second["claim_id"], 2, "worker", lease_seconds=90)
     assert renewed is not None
     assert renewed["epoch"] == 2
+    record_types = [record.record_type for _, record in store.scan_runtime_records()]
+    assert record_types.count("claim.granted") == 2
+    assert record_types.count("claim.submitted") == 1
+    assert record_types.count("claim.renewed") == 1
 
 
 def test_expired_claim_cannot_be_renewed(store):
