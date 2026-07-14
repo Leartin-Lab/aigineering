@@ -778,7 +778,7 @@ def test_tool_calls_go_through_method_dispatch_e2e():
     tools = ToolRegistry()
     tools.register(ToolSpec(name="lookup"), lambda args: f"value:{args['key']}")
     store = MemoryStore()
-    store.add_asset(
+    store._add_system_asset(
         create_tool_descriptor(
             "lookup",
             "Lookup test values.",

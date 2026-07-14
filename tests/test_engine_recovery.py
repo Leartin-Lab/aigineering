@@ -103,7 +103,7 @@ def test_save_restore_preserves_method_context():
     )
     tools = ToolRegistry()
     tools.register(ToolSpec(name="lookup"), lambda args: f"value:{args['key']}")
-    store.add_asset(
+    store._add_system_asset(
         create_tool_descriptor(
             "lookup",
             "Lookup test values.",
@@ -111,7 +111,7 @@ def test_save_restore_preserves_method_context():
             trust_tier="configured",
         )
     )
-    store.add_asset(
+    store._add_system_asset(
         create_tool_descriptor(
             "lookup",
             "Lookup test values.",
@@ -209,7 +209,7 @@ def test_recovery_after_tool_observation():
     )
     tools = ToolRegistry()
     tools.register(ToolSpec(name="lookup"), lambda args: f"value:{args['key']}")
-    store.add_asset(
+    store._add_system_asset(
         create_tool_descriptor(
             "lookup",
             "Lookup test values.",

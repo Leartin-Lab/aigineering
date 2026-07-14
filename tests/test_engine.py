@@ -285,7 +285,7 @@ def test_method_scheduling_uses_child_contract_identity():
     )
     tools = ToolRegistry()
     tools.register(ToolSpec(name="search"), lambda args: f"value:{args['q']}")
-    store.add_asset(
+    store._add_system_asset(
         create_tool_descriptor(
             "search",
             "Search test values.",
@@ -323,7 +323,7 @@ def test_method_scheduling_uses_child_contract_identity():
 
 def test_tool_method_executes_registry_and_commits_observation():
     store = MemoryStore()
-    store.add_asset(
+    store._add_system_asset(
         create_tool_descriptor(
             "lookup",
             "Lookup test values.",
@@ -426,7 +426,7 @@ def test_tool_observation_resumes_parent_without_satisfying_output():
         budget=5,
         tool_scope=["lookup"],
     )
-    store.add_asset(
+    store._add_system_asset(
         create_tool_descriptor(
             "lookup",
             "Lookup test values.",

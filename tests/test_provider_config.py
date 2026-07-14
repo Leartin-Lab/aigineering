@@ -248,7 +248,7 @@ def test_snapshot_store_round_trip():
         trust_tier="configured",
     )
 
-    store.add_asset(snapshot)
+    store._add_system_asset(snapshot)
 
     # Query by exact ID
     loaded = store.get_asset(snapshot.id)

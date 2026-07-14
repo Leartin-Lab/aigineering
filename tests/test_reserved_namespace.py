@@ -50,6 +50,17 @@ def test_reserved_prefixes_are_not_empty():
     assert "_persona_" in RESERVED_PREFIXES
 
 
+def test_runtime_generated_capability_and_control_namespaces_are_reserved():
+    assert {
+        "_context_overflow_report_",
+        "_file_content_",
+        "_label_missing_",
+        "_provider_config_",
+        "_sufficiency_result_",
+        "_tool_capability_",
+    } <= RESERVED_PREFIXES
+
+
 @pytest.mark.parametrize(
     "store_factory", [MemoryStore, lambda: SQLiteStore(":memory:")]
 )

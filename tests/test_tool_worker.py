@@ -75,7 +75,7 @@ def test_tool_handler_uses_tool_worker():
     trace_store = TraceStore()
     tools = ToolRegistry()
     tools.register(ToolSpec(name="lookup"), lambda args: f"value:{args['key']}")
-    store.add_asset(
+    store._add_system_asset(
         create_tool_descriptor(
             "lookup",
             "Lookup test values.",

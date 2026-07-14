@@ -24,7 +24,7 @@ def test_llm_worker_tool_then_exec_e2e():
     tools = ToolRegistry()
     tools.register(ToolSpec(name="lookup"), lambda args: f"value:{args['key']}")
     store = MemoryStore()
-    store.add_asset(
+    store._add_system_asset(
         create_tool_descriptor(
             "lookup",
             "Lookup test values.",

@@ -56,7 +56,7 @@ def _make_registry() -> ToolRegistry:
 
 def _add_demo_tool_descriptors(store: MemoryStore, *names: str) -> None:
     for name in names:
-        store.add_asset(
+        store._add_system_asset(
             create_tool_descriptor(
                 name,
                 f"Demo tool: {name}",
