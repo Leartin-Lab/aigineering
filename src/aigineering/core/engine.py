@@ -10,7 +10,10 @@ from typing import Callable
 from aigineering.agent.worker import Worker
 from aigineering.core.budget_manager import BudgetManager
 from aigineering.core.crash import check_crash_point
-from aigineering.core.context_overflow import ContextOverflowHandler
+from aigineering.core.context_overflow import (
+    ContextOverflowHandler,
+    ContextOverflowOrchestrator,
+)
 from aigineering.core.continuation_manager import ContinuationManager
 from aigineering.core.disclosure import compute_disclosure, redact_for_disclosure
 from aigineering.core.labels import Label, LABEL_MODE_DEBUG, resolve_contract_labels
@@ -163,6 +166,9 @@ class Engine:
             label_mode=self._label_mode,
             label_context=self._label_context,
         )
+        self._overflow = ContextOverflowOrchestrator(
+            self._overflow_handler, self._ingress
+        )
 
     @property
     def _budget(self) -> dict[str, int]:
@@ -182,6 +188,9 @@ class Engine:
     @_context_size_limit.setter
     def _context_size_limit(self, value: int | None) -> None:
         self._overflow_handler = ContextOverflowHandler(value)
+        self._overflow = ContextOverflowOrchestrator(
+            self._overflow_handler, self._ingress
+        )
 
     def add_contract(self, contract: Contract) -> None:
         self._ingress.accept_contract(contract)
@@ -729,41 +738,13 @@ class Engine:
         )
 
     def _check_context_overflow(self, contract: Contract, scope: list[Asset]) -> bool:
-        overflow = self._overflow_handler.check_overflow(contract, scope)
-        if overflow is None:
-            return False
-
-        # Record overflow as trace event and diagnostic asset.
-        # The replan is dispatched via the normal method ingress
-        # (_dispatch_method → ReplanMethodHandler), NOT via Engine
-        # fabricating a worker candidate.  The worker_id prefix
-        # "runtime:" marks this as a kernel-generated method trigger.
-        self._add_trace(
-            contract.id,
-            "context_overflow",
-            disclosed_assets=[a.id for a in scope],
-            relation_type="replan",
-            relation_target="context_size_exceeded",
-            rejected_fragments=[
-                f"[replan_recommended] context size {overflow.estimated_tokens} "
-                f"exceeds limit {overflow.limit} — replan recommended"
-            ],
+        return self._overflow.handle_overflow(
+            contract,
+            scope,
             budget_remaining=self._resolve_budget(contract),
+            add_trace=self._add_trace,
+            dispatch_method=self._dispatch_method,
         )
-
-        report_asset = self._overflow_handler.create_report_asset(contract.id, overflow)
-        self._ingress.accept_asset(report_asset, source="engine")
-
-        action = WorkerAction(
-            type="replan",
-            payload={"reason": "context_size_exceeded"},
-        )
-        candidate = Candidate(
-            worker_id="runtime:context_overflow",
-            raw_output='/replan {"reason": "context_size_exceeded"}',
-        )
-        self._dispatch_method(contract, action, candidate)
-        return True
 
     def _run_system_method(self, contract: Contract) -> bool:
         method = method_payload(contract)

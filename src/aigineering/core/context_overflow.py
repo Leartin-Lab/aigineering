@@ -12,7 +12,6 @@ from aigineering.protocol.types import Asset, Candidate, Contract
 
 if TYPE_CHECKING:
     from aigineering.core.runtime_ingress import RuntimeIngress
-    from aigineering.core.trace_manager import TraceManager
 
 _CHARS_PER_TOKEN = 4
 
@@ -75,11 +74,9 @@ class ContextOverflowOrchestrator:
     def __init__(
         self,
         overflow_handler: ContextOverflowHandler,
-        trace_manager: TraceManager,
         ingress: RuntimeIngress,
     ) -> None:
         self._overflow_handler = overflow_handler
-        self._trace_mgr = trace_manager
         self._ingress = ingress
 
     def handle_overflow(
