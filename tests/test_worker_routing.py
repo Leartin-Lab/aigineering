@@ -11,8 +11,12 @@ from aigineering.cli.task_state import project_task_status
 from aigineering.cli.worker_runtime import (
     claim_next_package,
     execute_claimed_package,
+    process_rejected_submissions,
 )
+from aigineering.core.fact_reducer import FactReducer
+from aigineering.core.runtime_ingress import RuntimeIngress
 from aigineering.core.sqlite_store import SQLiteStore
+from aigineering.core.submit import submit_candidate
 from aigineering.core.record_conflict import ImmutableRecordConflict
 from aigineering.core.store import MemoryStore
 from aigineering.core.worker_routing import (
@@ -21,6 +25,7 @@ from aigineering.core.worker_routing import (
     select_worker,
 )
 from aigineering.protocol.types import Candidate, Contract
+from aigineering.protocol.envelope import CandidateEnvelope
 
 
 def _contract(**overrides) -> Contract:
@@ -209,4 +214,38 @@ def test_renewal_failure_discards_worker_result(monkeypatch):
 
     assert store.get_assets_by_name("report") == []
     assert store.get_claim(contract.id)["status"] == "active"
+    store.close()
+
+
+def test_rejected_submission_recovery_replays_after_crash_gap():
+    store = SQLiteStore(":memory:")
+    contract = Contract(id="task:rejected-replay", outputs=("report",), budget=1)
+    store.add_contract(contract)
+    claimed = claim_next_package(store, worker_id="worker")
+    assert claimed is not None
+    envelope = CandidateEnvelope(
+        contract_id=contract.id,
+        worker_id=claimed.worker_id,
+        raw_output="undeclared: rejected",
+        package_id=claimed.package.package_id,
+        claim_id=claimed.package.claim_id,
+        claim_epoch=claimed.package.claim_epoch,
+    )
+    ingress = RuntimeIngress(store, store, FactReducer(store, store))
+
+    result = submit_candidate(envelope, store, store, ingress)
+
+    assert result["status"] == "rejected"
+    assert not store.scan_runtime_records(record_type="lifecycle.terminal")
+
+    assert process_rejected_submissions(store) == [contract.id]
+    assert process_rejected_submissions(store) == []
+    terminal_records = store.scan_runtime_records(record_type="lifecycle.terminal")
+    assert terminal_records[-1][1].payload["terminal"] == "failed"
+    contracts = store.get_all_contracts()
+    assert any(
+        child.name == f"{contract.name or contract.id}.recover"
+        and child.origin == "recovery"
+        for child in contracts
+    ), contracts
     store.close()

@@ -22,6 +22,7 @@ from aigineering.cli.worker_runtime import (
     claim_next_package,
     execute_claimed_package,
     process_method_completions,
+    process_rejected_submissions,
 )
 from aigineering.core.session import SessionStore
 from aigineering.core.startup_check import (
@@ -348,6 +349,7 @@ def _run_task_pool(
         while True:
             before_trace_count = len(getattr(store, "get_all", lambda: [])())
             registry = _default_method_registry()
+            recovered = process_rejected_submissions(store)
             processed_before = process_method_completions(store, registry)
             claimed = claim_next_package(store, worker_id="cli:run-task")
             submission: dict | None = None
@@ -372,6 +374,7 @@ def _run_task_pool(
                             submission.get("status") if submission is not None else None
                         ),
                         "methods_processed": processed_before + processed_after,
+                        "rejections_recovered": recovered,
                     }
                 )
 
@@ -398,7 +401,10 @@ def _run_task_pool(
                     return
 
             if time.monotonic() >= deadline or (
-                claimed is None and not processed_before and not processed_after
+                claimed is None
+                and not processed_before
+                and not processed_after
+                and not recovered
             ):
                 status = project_task_status(target, store)
                 status["ok"] = status["status"] == "completed"

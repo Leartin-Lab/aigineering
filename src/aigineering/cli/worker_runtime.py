@@ -364,6 +364,43 @@ def _schedule_rejected_recovery(
     )
 
 
+def process_rejected_submissions(store) -> list[str]:
+    """Replay missing recovery effects from immutable rejected projections."""
+    processed: list[str] = []
+    records = [record for _, record in store.scan_runtime_records()]
+    candidates = {
+        record.payload["candidate_id"]: record
+        for record in records
+        if record.record_type == "candidate.received"
+    }
+    terminal_contracts = {
+        record.payload["contract_id"]
+        for record in records
+        if record.record_type == "lifecycle.terminal"
+    }
+    for record in records:
+        if record.record_type != "projection.decided":
+            continue
+        payload = record.payload
+        contract_id = str(payload["contract_id"])
+        if payload["status"] != "rejected" or contract_id in terminal_contracts:
+            continue
+        contract = store.get_contract(contract_id)
+        candidate = candidates.get(payload["candidate_id"])
+        if contract is None or candidate is None:
+            continue
+        _schedule_rejected_recovery(
+            contract,
+            str(candidate.payload["raw_output"]),
+            [dict(rejection) for rejection in payload["rejections"]],
+            store,
+            store,
+        )
+        terminal_contracts.add(contract_id)
+        processed.append(contract_id)
+    return processed
+
+
 def _submit_claimed_method(
     claimed: ClaimedPackage,
     candidate,
