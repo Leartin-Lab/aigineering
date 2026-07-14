@@ -1361,17 +1361,6 @@ class SQLiteStore:
                 "WHERE claim_id = ? AND status = 'active'",
                 (recorded_at, claim_id),
             )
-            granted = create_runtime_record(
-                "claim.granted",
-                {
-                    "claim_id": claim_id,
-                    "contract_id": row["contract_id"],
-                    "epoch": int(row["epoch"]),
-                    "lease_until": row["lease_until"],
-                    "package_id": row["package_id"],
-                    "worker_id": row["worker_id"],
-                },
-            )
             self._insert_runtime_record(
                 create_runtime_record(
                     "claim.released",
@@ -1382,7 +1371,7 @@ class SQLiteStore:
                         "package_id": row["package_id"],
                         "worker_id": row["worker_id"],
                     },
-                    causal_parents=[granted.id],
+                    causal_parents=[self._claim_granted_record_id(claim_id)],
                     recorded_at=recorded_at,
                 )
             )
@@ -1523,6 +1512,11 @@ class SQLiteStore:
             )
             if cursor.rowcount != 1:
                 return None
+            row = self._conn.execute(
+                "SELECT contract_id, worker_id, epoch, package_id, lease_until "
+                "FROM worker_claims WHERE claim_id = ?",
+                (claim_id,),
+            ).fetchone()
             self._insert_runtime_record(
                 create_runtime_record(
                     "claim.renewed",
@@ -1532,11 +1526,9 @@ class SQLiteStore:
                         "lease_until": deadline,
                         "worker_id": worker_id,
                     },
+                    causal_parents=[self._claim_granted_record_id(claim_id)],
                 )
             )
-        row = self._conn.execute(
-            "SELECT contract_id FROM worker_claims WHERE claim_id = ?", (claim_id,)
-        ).fetchone()
         return self.get_claim(row["contract_id"]) if row is not None else None
 
     def mark_claim_submitted(self, claim_id: str) -> None:
@@ -1563,8 +1555,20 @@ class SQLiteStore:
                         "package_id": row["package_id"],
                         "worker_id": row["worker_id"],
                     },
+                    causal_parents=[self._claim_granted_record_id(claim_id)],
                 )
             )
+
+    def _claim_granted_record_id(self, claim_id: str) -> str:
+        """Return the canonical causal root for one claim lifecycle."""
+        rows = self._conn.execute(
+            "SELECT record_id, payload_json FROM runtime_records "
+            "WHERE record_type = 'claim.granted' ORDER BY revision DESC"
+        ).fetchall()
+        for row in rows:
+            if json.loads(row["payload_json"]).get("claim_id") == claim_id:
+                return str(row["record_id"])
+        raise RuntimeError(f"claim {claim_id!r} has no immutable grant fact")
 
     def rebuild_claim_projection(self) -> None:
         """Rebuild the transactional claim head from immutable claim facts."""
@@ -1719,7 +1723,7 @@ class SQLiteStore:
                         "active worker claim predicate failed during submit"
                     )
                 claim_row = self._conn.execute(
-                    "SELECT contract_id, worker_id, epoch, package_id "
+                    "SELECT contract_id, worker_id, epoch, package_id, lease_until "
                     "FROM worker_claims WHERE claim_id = ?",
                     (claim_id,),
                 ).fetchone()
@@ -1733,6 +1737,7 @@ class SQLiteStore:
                             "package_id": claim_row["package_id"],
                             "worker_id": claim_row["worker_id"],
                         },
+                        causal_parents=[self._claim_granted_record_id(claim_id)],
                     )
                 )
         return True

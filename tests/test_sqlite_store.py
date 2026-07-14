@@ -671,6 +671,17 @@ def test_claim_epoch_increments_and_fences_renewal(store):
     assert record_types.count("claim.granted") == 2
     assert record_types.count("claim.submitted") == 1
     assert record_types.count("claim.renewed") == 1
+    records = [record for _, record in store.scan_runtime_records()]
+    granted_ids = {
+        record.id for record in records if record.record_type == "claim.granted"
+    }
+    lifecycle = [
+        record
+        for record in records
+        if record.record_type in {"claim.renewed", "claim.submitted"}
+    ]
+    assert lifecycle
+    assert all(record.causal_parents[0] in granted_ids for record in lifecycle)
 
     with store._conn:
         store._conn.execute("DELETE FROM worker_claims")
