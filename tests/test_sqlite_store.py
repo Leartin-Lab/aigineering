@@ -628,6 +628,28 @@ def test_worker_claim_has_database_unique_active_contract(store):
     assert claim["status"] == "active"
 
 
+def test_claim_epoch_increments_and_fences_renewal(store):
+    first = store.claim_contract("c1", "worker", lease_seconds=30)
+    assert first is not None
+    assert first["epoch"] == 1
+    store.mark_claim_submitted(first["claim_id"])
+
+    second = store.claim_contract("c1", "worker", lease_seconds=30)
+    assert second is not None
+    assert second["epoch"] == 2
+    assert store.renew_claim(first["claim_id"], 1, "worker") is None
+    assert store.renew_claim(second["claim_id"], 1, "worker") is None
+
+    renewed = store.renew_claim(second["claim_id"], 2, "worker", lease_seconds=90)
+    assert renewed is not None
+    assert renewed["epoch"] == 2
+
+
+def test_expired_claim_cannot_be_renewed(store):
+    store.persist_claim("expired", "c1", "worker", "2020-01-01T00:00:00+00:00", epoch=3)
+    assert store.renew_claim("expired", 3, "worker") is None
+
+
 def test_claim_contract_rejects_second_connection_active_claim(tmp_path):
     """Two SQLite connections cannot both claim the same contract as active."""
     db_path = str(tmp_path / "claims.db")

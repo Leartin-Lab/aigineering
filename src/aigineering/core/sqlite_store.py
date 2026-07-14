@@ -45,7 +45,7 @@ from aigineering.protocol.wire import (
 
 _logger = logging.getLogger(__name__)
 
-CURRENT_SCHEMA_VERSION = 6
+CURRENT_SCHEMA_VERSION = 7
 
 # ---------------------------------------------------------------------------
 # Activation name extraction (shared with store.py)
@@ -194,6 +194,7 @@ CREATE TABLE IF NOT EXISTS worker_claims (
     lease_until TEXT NOT NULL,
     status TEXT NOT NULL,
     package_id TEXT NOT NULL DEFAULT '',
+    epoch INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 )
@@ -401,6 +402,9 @@ class SQLiteStore:
             if current < 6:
                 self._migrate_to_v6()
                 self._record_schema_version(6)
+            if current < 7:
+                self._migrate_to_v7()
+                self._record_schema_version(7)
 
     def _migrate_to_v2(self) -> None:
         """Add 040 transactional worker state and contract authority metadata."""
@@ -473,6 +477,17 @@ class SQLiteStore:
         self._conn.execute(_DDL_CREATE_RUNTIME_RECORDS)
         for idx_ddl in _DDL_INDEXES:
             self._conn.execute(idx_ddl)
+
+    def _migrate_to_v7(self) -> None:
+        """Add monotonic fencing epochs to the derived claim head."""
+        columns = {
+            row["name"]
+            for row in self._conn.execute("PRAGMA table_info(worker_claims)")
+        }
+        if "epoch" not in columns:
+            self._conn.execute(
+                "ALTER TABLE worker_claims ADD COLUMN epoch INTEGER NOT NULL DEFAULT 1"
+            )
 
     # ── Immutable runtime-record envelope ────────────────────────────────
 
@@ -1213,6 +1228,7 @@ class SQLiteStore:
         lease_until: str,
         status: str = "active",
         package_id: str = "",
+        epoch: int = 1,
     ) -> None:
         """Persist a worker lease claim to survive restarts."""
         now = now_iso()
@@ -1220,9 +1236,9 @@ class SQLiteStore:
             self._conn.execute(
                 """INSERT INTO worker_claims (
                     claim_id, contract_id, worker_id, lease_until, status,
-                    package_id, created_at, updated_at
+                    package_id, epoch, created_at, updated_at
                 ) VALUES (
-                    ?, ?, ?, ?, ?, ?, ?, ?
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?
                 )
                 ON CONFLICT(claim_id) DO UPDATE SET
                     contract_id = excluded.contract_id,
@@ -1230,6 +1246,7 @@ class SQLiteStore:
                     lease_until = excluded.lease_until,
                     status = excluded.status,
                     package_id = excluded.package_id,
+                    epoch = excluded.epoch,
                     updated_at = excluded.updated_at
                 """,
                 (
@@ -1239,6 +1256,7 @@ class SQLiteStore:
                     lease_until,
                     status,
                     package_id,
+                    epoch,
                     now,
                     now,
                 ),
@@ -1247,7 +1265,7 @@ class SQLiteStore:
     def get_claim(self, contract_id: str) -> dict | None:
         """Return the active claim for *contract_id*, or None."""
         cur = self._conn.execute(
-            "SELECT claim_id, contract_id, worker_id, lease_until, status, package_id "
+            "SELECT claim_id, contract_id, worker_id, lease_until, status, package_id, epoch "
             "FROM worker_claims WHERE contract_id = ? "
             "ORDER BY CASE WHEN status = 'active' THEN 0 ELSE 1 END, rowid DESC LIMIT 1",
             (contract_id,),
@@ -1262,6 +1280,7 @@ class SQLiteStore:
             "lease_until": row["lease_until"],
             "status": row["status"],
             "package_id": row["package_id"],
+            "epoch": int(row["epoch"]),
         }
 
     def claim_contract(
@@ -1282,7 +1301,8 @@ class SQLiteStore:
             self._conn.execute("BEGIN IMMEDIATE")
             existing = self._conn.execute(
                 "SELECT claim_id, status FROM worker_claims "
-                "WHERE contract_id = ? ORDER BY rowid DESC LIMIT 1",
+                "WHERE contract_id = ? AND status = 'active' "
+                "ORDER BY epoch DESC LIMIT 1",
                 (contract_id,),
             ).fetchone()
             if existing is not None:
@@ -1311,18 +1331,26 @@ class SQLiteStore:
                     self._conn.rollback()
                     return None
 
+            epoch = int(
+                self._conn.execute(
+                    "SELECT COALESCE(MAX(epoch), 0) + 1 FROM worker_claims "
+                    "WHERE contract_id = ?",
+                    (contract_id,),
+                ).fetchone()[0]
+            )
             timestamp = now_iso()
             self._conn.execute(
                 """INSERT INTO worker_claims (
                     claim_id, contract_id, worker_id, lease_until, status,
-                    package_id, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, 'active', ?, ?, ?)""",
+                    package_id, epoch, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?)""",
                 (
                     claim_id,
                     contract_id,
                     worker_id,
                     lease_until,
                     package_id,
+                    epoch,
                     timestamp,
                     timestamp,
                 ),
@@ -1332,6 +1360,35 @@ class SQLiteStore:
             self._conn.rollback()
             return None
         return self.get_claim(contract_id)
+
+    def renew_claim(
+        self,
+        claim_id: str,
+        epoch: int,
+        worker_id: str,
+        *,
+        lease_seconds: int = 60,
+    ) -> dict | None:
+        """Renew an active claim only when all fencing identities still match."""
+        from datetime import datetime, timedelta, timezone
+
+        if epoch < 1 or lease_seconds < 1:
+            return None
+        now = datetime.now(timezone.utc)
+        deadline = (now + timedelta(seconds=lease_seconds)).isoformat()
+        with self._conn:
+            cursor = self._conn.execute(
+                "UPDATE worker_claims SET lease_until = ?, updated_at = ? "
+                "WHERE claim_id = ? AND epoch = ? AND worker_id = ? "
+                "AND status = 'active' AND lease_until >= ?",
+                (deadline, now_iso(), claim_id, epoch, worker_id, now.isoformat()),
+            )
+            if cursor.rowcount != 1:
+                return None
+        row = self._conn.execute(
+            "SELECT contract_id FROM worker_claims WHERE claim_id = ?", (claim_id,)
+        ).fetchone()
+        return self.get_claim(row["contract_id"]) if row is not None else None
 
     def mark_claim_submitted(self, claim_id: str) -> None:
         with self._conn:
