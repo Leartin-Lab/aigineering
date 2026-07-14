@@ -7,16 +7,24 @@ from dataclasses import dataclass
 from aigineering.agent.llm import LLMWorker
 from aigineering.agent.mock import MockWorker
 from aigineering.core.activation import check_activation
+from aigineering.core.budget_manager import BudgetManager
+from aigineering.core.continuation_manager import ContinuationManager
 from aigineering.core.disclosure import (
     DisclosurePolicyError,
     compute_disclosure,
     redact_for_disclosure,
 )
 from aigineering.core.runtime_ingress import RuntimeIngress
+from aigineering.core.fact_reducer import FactReducer
+from aigineering.core.method_runtime import MethodRuntime
+from aigineering.core.method_handlers.recovery import schedule_projection_recovery
 from aigineering.core.submit import _all_outputs_satisfied, submit_candidate
 from aigineering.core.worker_routing import is_eligible
+from aigineering.core.trace_manager import TraceManager
+from aigineering.protocol.actions import parse_method_action
 from aigineering.protocol.envelope import CandidateEnvelope
 from aigineering.protocol.package import WorkerPackage
+from aigineering.protocol.runtime_record import create_runtime_record
 from aigineering.protocol.types import Asset, Contract
 from aigineering.protocol.wire import asset_to_dict, contract_to_dict
 
@@ -189,10 +197,20 @@ def execute_claimed_package(
     worker: MockWorker | LLMWorker,
     store,
     trace_store=None,
+    method_registry=None,
 ) -> dict:
     """Invoke a worker and submit its candidate envelope."""
     trace = trace_store if trace_store is not None else store
     candidate = worker.invoke(claimed.contract, list(claimed.disclosed_assets))
+    method_action = parse_method_action(candidate)
+    if method_action is not None:
+        if method_registry is None:
+            raise ValueError(
+                f"worker produced /{method_action.type} but no method registry is configured"
+            )
+        return _submit_claimed_method(
+            claimed, candidate, method_action, store, trace, method_registry
+        )
     envelope = CandidateEnvelope(
         contract_id=claimed.contract.id,
         worker_id=claimed.worker_id,
@@ -208,13 +226,210 @@ def execute_claimed_package(
         idempotency_key=f"run-{claimed.package.package_id}",
     )
     ingress = RuntimeIngress(store, trace)
-    return submit_candidate(
+    result = submit_candidate(
         envelope=envelope,
         store=store,
         trace_store=trace,
         ingress=ingress,
         idempotency_key=envelope.idempotency_key,
     )
+    if result["status"] == "rejected":
+        _schedule_rejected_recovery(
+            claimed.contract,
+            candidate.raw_output,
+            list(result["rejected_candidates"]),
+            store,
+            trace,
+        )
+    return result
+
+
+def _schedule_rejected_recovery(
+    contract: Contract,
+    candidate_raw: str,
+    rejections: list[dict],
+    store,
+    trace,
+) -> None:
+    budget = BudgetManager()
+    for current in store.get_all_contracts():
+        budget.initialize(current.id, current.budget)
+    trace_manager = TraceManager(trace)
+    runtime = MethodRuntime(
+        store=store,
+        trace=trace_manager,
+        budget=budget,
+        ingress=RuntimeIngress(store, trace, FactReducer(store, trace)),
+    )
+    recovery = schedule_projection_recovery(
+        runtime,
+        failed_contract=contract,
+        candidate_raw=candidate_raw,
+        rejections=rejections,
+    )
+    trace_manager.record(
+        contract.id,
+        "failed",
+        relation_type="projection",
+        relation_target=recovery.id if recovery is not None else "unrecoverable",
+        authority_result="rejected",
+        budget_remaining=budget.get_remaining(contract.id),
+    )
+    store.append_runtime_record(
+        create_runtime_record(
+            "lifecycle.terminal",
+            {"contract_id": contract.id, "terminal": "failed"},
+        )
+    )
+
+
+def _submit_claimed_method(
+    claimed: ClaimedPackage,
+    candidate,
+    action,
+    store,
+    trace,
+    method_registry,
+) -> dict:
+    """Commit a claim-bound method action through MethodRuntime."""
+    claim = store.get_claim(claimed.contract.id)
+    if (
+        claim is None
+        or claim.get("claim_id") != claimed.package.claim_id
+        or claim.get("epoch") != claimed.package.claim_epoch
+        or claim.get("worker_id") != claimed.worker_id
+        or claim.get("package_id") != claimed.package.package_id
+        or claim.get("status") != "active"
+    ):
+        raise ValueError("method submission failed active claim/package fencing")
+
+    handler = method_registry.get(action.type)
+    if handler is None or not handler.can_handle(action.type):
+        raise ValueError(f"no method handler registered for /{action.type}")
+
+    budget = BudgetManager()
+    for contract in store.get_all_contracts():
+        budget.initialize(contract.id, contract.budget)
+    trace_manager = TraceManager(trace)
+    ingress = RuntimeIngress(store, trace, FactReducer(store, trace))
+    runtime = MethodRuntime(
+        store=store,
+        trace=trace_manager,
+        budget=budget,
+        ingress=ingress,
+    )
+    if not handler.handle_method(runtime, claimed.contract, action.type, candidate):
+        raise ValueError(f"method handler rejected /{action.type}")
+
+    remaining = budget.consume(claimed.contract.id)
+    budget_entry = trace_manager.record(
+        claimed.contract.id,
+        "budget_consumed",
+        worker_id=claimed.worker_id,
+        candidate_raw=candidate.raw_output,
+        relation_type=action.type,
+        budget_remaining=remaining,
+    )
+    candidate_record = create_runtime_record(
+        "candidate.received",
+        {
+            "candidate_id": CandidateEnvelope(
+                contract_id=claimed.contract.id,
+                worker_id=claimed.worker_id,
+                raw_output=candidate.raw_output,
+                parsed_action=(
+                    dict(candidate.parsed_action)
+                    if candidate.parsed_action is not None
+                    else None
+                ),
+                package_id=claimed.package.package_id,
+                claim_id=claimed.package.claim_id,
+                claim_epoch=claimed.package.claim_epoch,
+                idempotency_key=f"run-{claimed.package.package_id}",
+            ).candidate_hash,
+            "claim_epoch": claimed.package.claim_epoch,
+            "claim_id": claimed.package.claim_id,
+            "contract_id": claimed.contract.id,
+            "method": action.type,
+            "package_id": claimed.package.package_id,
+            "raw_output": candidate.raw_output,
+            "worker_id": claimed.worker_id,
+        },
+    )
+    method_record = create_runtime_record(
+        "method.scheduled",
+        {
+            "contract_id": claimed.contract.id,
+            "method": action.type,
+            "relation_target": next(
+                (
+                    entry.relation_target
+                    for entry in reversed(trace.get_by_contract(claimed.contract.id))
+                    if entry.event_type in {"method_scheduled", "retry_created"}
+                ),
+                "",
+            ),
+        },
+        causal_parents=[candidate_record.id],
+    )
+    store.append_runtime_record(candidate_record)
+    store.append_runtime_record(method_record)
+    store.append_runtime_record(
+        create_runtime_record(
+            "budget.consumed",
+            {
+                "amount": 1,
+                "contract_id": claimed.contract.id,
+                "remaining": remaining,
+                "trace_id": budget_entry.id,
+            },
+            causal_parents=[method_record.id],
+        )
+    )
+    store.mark_claim_submitted(claimed.package.claim_id)
+    return {
+        "contract_id": claimed.contract.id,
+        "status": "method_scheduled",
+        "method": action.type,
+        "complete": False,
+    }
+
+
+def process_method_completions(store, method_registry) -> list[str]:
+    """Project completed method Contracts into their deterministic effects."""
+    processed: list[str] = []
+    trace_manager = TraceManager(store)
+    budget = BudgetManager()
+    for contract in store.get_all_contracts():
+        budget.initialize(contract.id, contract.budget)
+    continuations = ContinuationManager(
+        store=store,
+        budget_mgr=budget,
+        trace_mgr=trace_manager,
+        method_registry=method_registry,
+        completed=set(),
+        suspended=set(),
+        method_scheduled=set(),
+        method_context={},
+        ingress=RuntimeIngress(store, store, FactReducer(store, store)),
+    )
+    for contract in store.get_all_contracts():
+        if contract.origin != "system" or contract.parent_id is None:
+            continue
+        entries = store.get_by_contract(contract.id)
+        if not any(entry.event_type == "complete" for entry in entries):
+            continue
+        if any(entry.event_type == "method_processed" for entry in entries):
+            continue
+        continuations.resume_parent_from_method(contract)
+        trace_manager.record(
+            contract.id,
+            "method_processed",
+            relation_type="method_completion",
+            relation_target=contract.parent_id,
+        )
+        processed.append(contract.id)
+    return processed
 
 
 def _method_context_assets_for(contract: Contract, store) -> tuple[dict, ...]:

@@ -21,8 +21,8 @@ from aigineering.cli.worker_runtime import (
     build_worker,
     claim_next_package,
     execute_claimed_package,
+    process_method_completions,
 )
-from aigineering.core.engine import Engine
 from aigineering.core.session import SessionStore
 from aigineering.core.startup_check import (
     begin_runtime_startup,
@@ -347,13 +347,19 @@ def _run_task_pool(
 
         while True:
             before_trace_count = len(getattr(store, "get_all", lambda: [])())
-            engine = Engine.restore_from_store(
-                store=store,
-                worker=worker,
-                trace_store=store,
-                method_registry=_default_method_registry(),
-            )
-            engine.run(heartbeat_callback=lambda: renew_heartbeat(store, runtime_owner))
+            registry = _default_method_registry()
+            processed_before = process_method_completions(store, registry)
+            claimed = claim_next_package(store, worker_id="cli:run-task")
+            submission: dict | None = None
+            if claimed is not None:
+                renew_heartbeat(store, runtime_owner)
+                submission = execute_claimed_package(
+                    claimed,
+                    worker,
+                    store,
+                    method_registry=registry,
+                )
+            processed_after = process_method_completions(store, registry)
             after_entries = getattr(store, "get_all", lambda: [])()
             new_entries = after_entries[before_trace_count:]
             touched_contracts = sorted({entry.contract_id for entry in new_entries})
@@ -362,6 +368,10 @@ def _run_task_pool(
                     {
                         "contracts": touched_contracts,
                         "trace_events": len(new_entries),
+                        "submission_status": (
+                            submission.get("status") if submission is not None else None
+                        ),
+                        "methods_processed": processed_before + processed_after,
                     }
                 )
 
@@ -387,7 +397,9 @@ def _run_task_pool(
                         raise click.exceptions.Exit(1)
                     return
 
-            if time.monotonic() >= deadline or not new_entries:
+            if time.monotonic() >= deadline or (
+                claimed is None and not processed_before and not processed_after
+            ):
                 status = project_task_status(target, store)
                 status["ok"] = status["status"] == "completed"
                 if status.get("silent_failure_risks"):

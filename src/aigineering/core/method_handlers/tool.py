@@ -58,6 +58,12 @@ class ToolMethodHandler:
         if payload.get("method") != "tool":
             return False
 
+        # A protocol worker may already have produced the declared observation
+        # Candidate. Completion then projects continuation only; it must never
+        # execute the external tool a second time inside Engine/method code.
+        if any(asset.name in contract.outputs for asset in method_assets):
+            return True
+
         tool_name = (
             payload.get("payload", {}).get("name")
             if isinstance(payload.get("payload"), dict)
