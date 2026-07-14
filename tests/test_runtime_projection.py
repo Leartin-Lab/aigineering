@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import pytest
+
 from aigineering.core.provenance import sign_asset
+from aigineering.core.runtime_ingress import RuntimeIngress
 from aigineering.core.runtime_projection import RuntimeProjection
 from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.core.store import MemoryStore
@@ -89,3 +92,43 @@ def test_projection_as_of_excludes_later_terminal_event():
     assert before_terminal.terminal is None
     assert current.terminal == "complete"
     assert before_terminal.projection_hash != current.projection_hash
+
+
+def test_projection_as_of_revision_excludes_future_asset_fact():
+    store = MemoryStore()
+    trace = MemoryTraceStore()
+    ingress = RuntimeIngress(store, trace)
+    contract = ingress.accept_contract(
+        Contract(id="c-history", activation="input", outputs=["report"], budget=1)
+    )
+    before_asset = store.get_runtime_revision()
+    ingress.accept_asset(
+        Asset(id="input-history", name="input", content="future", origin="human")
+    )
+
+    historical = RuntimeProjection(
+        store, trace, as_of_revision=before_asset
+    ).contract_view(contract)
+    current = RuntimeProjection(store, trace).contract_view(contract)
+
+    assert historical.activation_satisfied is False
+    assert historical.missing_assets == ("input",)
+    assert current.activation_satisfied is True
+
+
+def test_historical_projection_fails_closed_for_unrecorded_assets():
+    store = MemoryStore()
+    trace = MemoryTraceStore()
+    ingress = RuntimeIngress(store, trace)
+    contract = ingress.accept_contract(Contract(id="c-incomplete", budget=1))
+    store.add_asset(
+        sign_asset(
+            Asset(id="legacy", name="legacy", content="unlogged", origin="human"),
+            signed_by="human",
+        )
+    )
+
+    with pytest.raises(RuntimeError, match="unrecorded asset"):
+        RuntimeProjection(
+            store, trace, as_of_revision=store.get_runtime_revision()
+        ).contract_view(contract)

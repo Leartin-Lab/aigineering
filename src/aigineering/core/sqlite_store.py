@@ -1758,6 +1758,7 @@ class SQLiteStore:
         *,
         contract: Contract | None = None,
         reducer_callback: Callable[[], list[TraceEntry]] | None = None,
+        runtime_records: tuple[RuntimeRecord, ...] = (),
     ) -> None:
         with self._conn:
             if contract is not None:
@@ -1776,6 +1777,8 @@ class SQLiteStore:
                 trace_entries = list(trace_entries) + reducer_traces
             for entry in trace_entries:
                 self._insert_trace_entry(entry)
+            for record in runtime_records:
+                self._insert_runtime_record(record)
             check_crash_point("after_trace_before_budget")
             check_crash_point("after_budget_before_complete")
 

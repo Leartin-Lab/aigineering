@@ -5,11 +5,17 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
+from datetime import datetime
+from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 from aigineering.core.activation import check_activation
 from aigineering.core.ids import compute_content_hash
-from aigineering.core.output_satisfaction import all_outputs_satisfied
+from aigineering.core.output_satisfaction import (
+    all_outputs_satisfied,
+    is_business_output,
+)
+from aigineering.protocol.wire import trace_entry_from_dict
 
 if TYPE_CHECKING:
     from aigineering.core.store import StoreProtocol
@@ -46,24 +52,53 @@ class RuntimeProjection:
         trace: TraceStoreProtocol,
         *,
         as_of: str | None = None,
+        as_of_revision: int | None = None,
     ) -> None:
+        if as_of is not None and as_of_revision is not None:
+            raise ValueError("choose either as_of timestamp or as_of_revision")
         self._store = store
         self._trace = trace
         self._as_of = as_of
+        self._as_of_revision = as_of_revision
 
     def contract_view(self, contract: Contract) -> ContractView:
-        assets = self._store.get_all_assets()
-        available_names = {asset.name for asset in assets}
+        historical = self._historical_facts(contract)
+        if historical is None:
+            assets = self._store.get_all_assets()
+            available_names = {asset.name for asset in assets}
+            outputs_satisfied = bool(contract.outputs) and all_outputs_satisfied(
+                contract, self._store
+            )
+            entries = self._entries_for(contract.id)
+            typed_terminal_events: tuple[str, ...] = ()
+            typed_budget: int | None = None
+        else:
+            asset_payloads, entries, typed_terminal_events, typed_budget = historical
+            available_names = {
+                str(payload.get("name", "")) for payload in asset_payloads
+            }
+            outputs_satisfied = bool(contract.outputs) and all(
+                any(
+                    contract.origin == "system"
+                    or is_business_output(
+                        SimpleNamespace(
+                            name=payload.get("name", ""),
+                            origin=payload.get("origin", ""),
+                        ),
+                        output,
+                    )
+                    for payload in asset_payloads
+                    if payload.get("name") == output
+                )
+                for output in contract.outputs
+            )
         activation_satisfied = check_activation(contract.activation, available_names)
         referenced = _activation_names(contract.activation)
         missing_assets = tuple(sorted(referenced - available_names))
-        outputs_satisfied = bool(contract.outputs) and all_outputs_satisfied(
-            contract, self._store
-        )
-        entries = self._entries_for(contract.id)
         terminal_events = tuple(
             sorted(
-                {
+                set(typed_terminal_events)
+                | {
                     entry.event_type
                     for entry in entries
                     if entry.event_type in _TERMINAL_EVENTS
@@ -76,7 +111,11 @@ class RuntimeProjection:
             terminal = terminal_events[0]
         else:
             terminal = None
-        budget_remaining = _budget_remaining(contract, entries)
+        budget_remaining = (
+            typed_budget
+            if typed_budget is not None
+            else _budget_remaining(contract, entries)
+        )
 
         blockers: list[str] = []
         if terminal == "conflict":
@@ -127,6 +166,79 @@ class RuntimeProjection:
         if self._as_of is None:
             return entries
         return [entry for entry in entries if entry.timestamp <= self._as_of]
+
+    def _historical_facts(
+        self, contract: Contract
+    ) -> tuple[list[dict], list[TraceEntry], tuple[str, ...], int | None] | None:
+        if self._as_of is None and self._as_of_revision is None:
+            return None
+        records = self._store.scan_runtime_records()
+        declared = [
+            record
+            for _, record in records
+            if record.record_type == "contract.declared"
+            and record.payload["contract"]["id"] == contract.id
+        ]
+        if not declared:
+            # Legacy/import-only stores cannot provide asset history. Preserve
+            # trace-only compatibility only when no runtime fact log exists.
+            if records:
+                raise RuntimeError(
+                    f"historical projection for {contract.id!r} lacks contract fact"
+                )
+            return None
+
+        recorded_asset_ids = {
+            record.payload["asset"]["id"]
+            for _, record in records
+            if record.record_type == "asset.committed"
+        }
+        current_asset_ids = {asset.id for asset in self._store.get_all_assets()}
+        if not current_asset_ids.issubset(recorded_asset_ids):
+            raise RuntimeError("historical projection has unrecorded asset facts")
+
+        selected = [
+            (revision, record)
+            for revision, record in records
+            if self._record_selected(revision, record.recorded_at)
+        ]
+        asset_payloads = [
+            dict(record.payload["asset"])
+            for _, record in selected
+            if record.record_type == "asset.committed"
+        ]
+        entries = [
+            trace_entry_from_dict(dict(record.payload["trace"]))
+            for _, record in selected
+            if record.record_type == "trace.recorded"
+            and record.payload["trace"]["contract_id"] == contract.id
+        ]
+        terminal_events = tuple(
+            str(record.payload["terminal"])
+            for _, record in selected
+            if record.record_type == "lifecycle.terminal"
+            and record.payload["contract_id"] == contract.id
+        )
+        budget_values = [
+            int(record.payload["remaining"])
+            for _, record in selected
+            if record.record_type == "budget.consumed"
+            and record.payload["contract_id"] == contract.id
+        ]
+        return (
+            asset_payloads,
+            entries,
+            terminal_events,
+            budget_values[-1] if budget_values else None,
+        )
+
+    def _record_selected(self, revision: int, recorded_at: str) -> bool:
+        if self._as_of_revision is not None:
+            return revision <= self._as_of_revision
+        assert self._as_of is not None
+        return datetime.fromisoformat(recorded_at) <= datetime.fromisoformat(
+            self._as_of
+        )
 
 
 def _activation_names(expression: str) -> set[str]:

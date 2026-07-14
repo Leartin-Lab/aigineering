@@ -25,6 +25,12 @@ from aigineering.core.activation import validate_execution_activation
 from aigineering.core.authority import RESERVED_PREFIXES, ReservedNamespaceError
 from aigineering.core.provenance import sign_asset
 from aigineering.core.trace import create_entry
+from aigineering.protocol.runtime_record import RuntimeRecord, create_runtime_record
+from aigineering.protocol.wire import (
+    asset_to_dict,
+    contract_to_dict,
+    trace_entry_to_dict,
+)
 
 if TYPE_CHECKING:
     from aigineering.core.fact_reducer import FactReducer
@@ -55,6 +61,23 @@ def _get_matched_prefix(name: str) -> str | None:
         if prefix.endswith("_") and name == prefix.rstrip("_"):
             return prefix
     return None
+
+
+def _asset_committed_record(asset: Asset) -> RuntimeRecord:
+    return create_runtime_record(
+        "asset.committed",
+        {"asset": asset_to_dict(asset), "contract_id": asset.created_by},
+    )
+
+
+def _trace_records(entries: Sequence[object]) -> tuple[RuntimeRecord, ...]:
+    return tuple(
+        create_runtime_record(
+            "trace.recorded",
+            {"trace": trace_entry_to_dict(entry)},
+        )
+        for entry in entries
+    )
 
 
 class RuntimeIngress:
@@ -128,6 +151,7 @@ class RuntimeIngress:
         signed = sign_asset(asset)
         if not signed.signed_by:
             signed = sign_asset(asset, signed_by="engine")
+        asset_record = _asset_committed_record(signed)
 
         main_entry = create_entry(
             contract_id="runtime_ingress",
@@ -184,6 +208,8 @@ class RuntimeIngress:
             commit_fn(
                 accepted_assets=[signed],
                 trace_entries=list(trace_entries) + reducer_traces,
+                runtime_records=(asset_record,)
+                + _trace_records(list(trace_entries) + reducer_traces),
             )
             for entry in reducer_traces:
                 self._trace.append(entry)
@@ -198,6 +224,7 @@ class RuntimeIngress:
             self._trace.append(main_entry)
             if protected_entry is not None:
                 self._trace.append(protected_entry)
+            reducer_traces: list[object] = []
             if self._reducer is not None:
                 events = self._reducer.on_asset_created(signed)
                 _logger.debug(
@@ -205,7 +232,14 @@ class RuntimeIngress:
                     len(events),
                     signed.name,
                 )
-                self._apply_reducer_events(events, signed)
+                reducer_traces = self._apply_reducer_events(events, signed)
+            self._store.append_runtime_record(asset_record)
+            for record in _trace_records(
+                [main_entry]
+                + ([protected_entry] if protected_entry is not None else [])
+                + reducer_traces
+            ):
+                self._store.append_runtime_record(record)
 
         return signed
 
@@ -326,6 +360,10 @@ class RuntimeIngress:
             commit_fn(
                 accepted_assets=signed,
                 trace_entries=all_traces,
+                runtime_records=tuple(
+                    _asset_committed_record(asset) for asset in signed
+                )
+                + _trace_records(all_traces),
             )
             for entry in ingress_traces:
                 self._trace.append(entry)
@@ -342,12 +380,19 @@ class RuntimeIngress:
                     add_fn(s_asset)
                 else:
                     self._store.add_asset(s_asset)
+            reducer_traces: list[object] = []
             if self._reducer is not None:
                 for s_asset in signed:
                     events = self._reducer.on_asset_created(s_asset)
-                    self._apply_reducer_events(events, s_asset)
+                    reducer_traces.extend(self._apply_reducer_events(events, s_asset))
             for entry in ingress_traces:
                 self._trace.append(entry)
+            for s_asset in signed:
+                self._store.append_runtime_record(_asset_committed_record(s_asset))
+            for record in _trace_records(
+                list(engine_trace_entries) + ingress_traces + reducer_traces
+            ):
+                self._store.append_runtime_record(record)
 
         return signed
 
@@ -408,10 +453,22 @@ class RuntimeIngress:
                 accepted_assets=[],
                 trace_entries=[entry],
                 contract=contract,
+                runtime_records=(
+                    create_runtime_record(
+                        "contract.declared", {"contract": contract_to_dict(contract)}
+                    ),
+                    *_trace_records([entry]),
+                ),
             )
         else:
             self._store.add_contract(contract)
             self._trace.append(entry)
+            self._store.append_runtime_record(
+                create_runtime_record(
+                    "contract.declared", {"contract": contract_to_dict(contract)}
+                )
+            )
+            self._store.append_runtime_record(_trace_records([entry])[0])
 
         return contract
 
