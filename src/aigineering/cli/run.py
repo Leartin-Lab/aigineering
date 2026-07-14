@@ -17,7 +17,11 @@ from aigineering.cli._common import (
     _session_id,
 )
 from aigineering.cli.task_state import project_task_status
-from aigineering.cli.worker_runtime import build_worker
+from aigineering.cli.worker_runtime import (
+    build_worker,
+    claim_next_package,
+    execute_claimed_package,
+)
 from aigineering.core.engine import Engine
 from aigineering.core.session import SessionStore
 from aigineering.core.startup_check import (
@@ -313,6 +317,34 @@ def _run_task_pool(
         deadline = time.monotonic() + wait_timeout
         cycles: list[dict] = []
 
+        if target_task_id is None:
+            claimed = claim_next_package(store, worker_id="cli:run-once")
+            if claimed is None:
+                _emit_run_result(
+                    {
+                        "ok": False,
+                        "status": "idle",
+                        "error": "No enabled unclaimed contract is available.",
+                        "cycles": [],
+                    },
+                    json_output,
+                )
+                raise click.exceptions.Exit(1)
+            result = execute_claimed_package(claimed, worker, store)
+            status = project_task_status(claimed.contract, store)
+            status["ok"] = status["status"] == "completed"
+            status["submission_status"] = result["status"]
+            status["cycles"] = [
+                {
+                    "contracts": [claimed.contract.id],
+                    "trace_events": len(store.get_by_contract(claimed.contract.id)),
+                }
+            ]
+            _emit_run_result(status, json_output)
+            if not status["ok"]:
+                raise click.exceptions.Exit(1)
+            return
+
         while True:
             before_trace_count = len(getattr(store, "get_all", lambda: [])())
             engine = Engine.restore_from_store(
@@ -352,17 +384,6 @@ def _run_task_pool(
                     status["cycles"] = cycles
                     _emit_run_result(status, json_output)
                     return
-
-            if not target_task_id:
-                _emit_run_result(
-                    {
-                        "ok": True,
-                        "status": "ran",
-                        "cycles": cycles,
-                    },
-                    json_output,
-                )
-                return
 
             if time.monotonic() >= deadline or not new_entries:
                 status = project_task_status(target, store)

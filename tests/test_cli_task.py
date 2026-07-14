@@ -60,12 +60,32 @@ def test_run_once_executes_next_ready_task():
         assert result.exit_code == 0, result.output
         data = json.loads(result.output)
         assert data["ok"] is True
-        assert data["status"] == "ran"
+        assert data["status"] == "completed"
+        assert data["submission_status"] in {"accepted", "partial"}
         assert contract_id in data["cycles"][0]["contracts"]
 
         status_result = runner.invoke(cli, ["task", "status", contract_id, "--json"])
         status = json.loads(status_result.output)
         assert status["outputs"]["final_report"]
+
+        store = SQLiteStore(".aig/store.db")
+        record_types = [
+            record.record_type for _, record in store.scan_runtime_records()
+        ]
+        assert "claim.granted" in record_types
+        assert "candidate.received" in record_types
+        assert "claim.submitted" in record_types
+
+
+def test_run_once_idle_is_visible_and_nonzero():
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        result = runner.invoke(cli, ["run", "--once", "--worker", "mock", "--json"])
+
+        assert result.exit_code == 1
+        data = json.loads(result.output)
+        assert data["ok"] is False
+        assert data["status"] == "idle"
 
 
 def test_run_task_waits_until_target_complete():
