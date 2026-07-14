@@ -6,7 +6,11 @@ from types import MappingProxyType
 import pytest
 
 from aigineering.core.provenance import sign_asset
-from aigineering.core.sqlite_store import CURRENT_SCHEMA_VERSION, SQLiteStore
+from aigineering.core.sqlite_store import (
+    CURRENT_SCHEMA_VERSION,
+    ImmutableRecordConflict,
+    SQLiteStore,
+)
 from aigineering.core.store import StoreProtocol
 from aigineering.core.trace import create_entry
 from aigineering.protocol.types import Asset, Contract
@@ -628,6 +632,26 @@ def test_worker_claim_has_database_unique_active_contract(store):
     assert claim["status"] == "active"
 
 
+def test_worker_claim_identity_cannot_be_rewritten(store):
+    store.persist_claim("claim-1", "c1", "worker-1", "2026-12-31T00:00:00")
+
+    with pytest.raises(ImmutableRecordConflict, match="worker claim"):
+        store.persist_claim("claim-1", "c1", "worker-2", "2026-12-31T00:00:00")
+
+
+def test_released_claim_rebuilds_from_lifecycle_facts(store):
+    store.persist_claim("claim-1", "c1", "worker-1", "2026-12-31T00:00:00")
+    store.mark_claim_released("claim-1")
+
+    with store._conn:
+        store._conn.execute("DELETE FROM worker_claims")
+    store.rebuild_claim_projection()
+
+    claim = store.get_claim("c1")
+    assert claim is not None
+    assert claim["status"] == "released"
+
+
 def test_claim_epoch_increments_and_fences_renewal(store):
     first = store.claim_contract("c1", "worker", lease_seconds=30)
     assert first is not None
@@ -799,14 +823,7 @@ def test_candidate_submission_rolls_back_when_claim_predicate_fails(store, monke
         "active",
         "pkg:test",
     )
-    store.persist_claim(
-        "claim-stale",
-        "c-submit",
-        "worker-1",
-        "2026-12-31T00:00:00+00:00",
-        "released",
-        "pkg:test",
-    )
+    store.mark_claim_released("claim-stale")
     ingress = RuntimeIngress(store, store)
     monkeypatch.setattr(
         store,

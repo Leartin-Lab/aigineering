@@ -1267,9 +1267,35 @@ class SQLiteStore:
         package_id: str = "",
         epoch: int = 1,
     ) -> None:
-        """Persist a worker lease claim to survive restarts."""
+        """Import an immutable worker claim and append its lifecycle facts.
+
+        This compatibility entry point is intentionally insert-only. Runtime
+        state transitions use the explicit lifecycle methods below; callers
+        cannot rewrite a previously observed claim in place.
+        """
+        if status not in {"active", "released", "submitted"}:
+            raise ValueError(f"unsupported claim status: {status!r}")
         now = now_iso()
         with self._conn:
+            existing = self._conn.execute(
+                "SELECT claim_id, contract_id, worker_id, lease_until, status, "
+                "package_id, epoch FROM worker_claims WHERE claim_id = ?",
+                (claim_id,),
+            ).fetchone()
+            expected = (
+                claim_id,
+                contract_id,
+                worker_id,
+                lease_until,
+                status,
+                package_id,
+                epoch,
+            )
+            if existing is not None:
+                observed = tuple(existing[key] for key in existing.keys())
+                if observed == expected:
+                    return
+                raise ImmutableRecordConflict("worker claim", claim_id)
             self._conn.execute(
                 """INSERT INTO worker_claims (
                     claim_id, contract_id, worker_id, lease_until, status,
@@ -1277,14 +1303,6 @@ class SQLiteStore:
                 ) VALUES (
                     ?, ?, ?, ?, ?, ?, ?, ?, ?
                 )
-                ON CONFLICT(claim_id) DO UPDATE SET
-                    contract_id = excluded.contract_id,
-                    worker_id = excluded.worker_id,
-                    lease_until = excluded.lease_until,
-                    status = excluded.status,
-                    package_id = excluded.package_id,
-                    epoch = excluded.epoch,
-                    updated_at = excluded.updated_at
                 """,
                 (
                     claim_id,
@@ -1297,6 +1315,76 @@ class SQLiteStore:
                     now,
                     now,
                 ),
+            )
+            granted = create_runtime_record(
+                "claim.granted",
+                {
+                    "claim_id": claim_id,
+                    "contract_id": contract_id,
+                    "epoch": epoch,
+                    "lease_until": lease_until,
+                    "package_id": package_id,
+                    "worker_id": worker_id,
+                },
+                recorded_at=now,
+            )
+            self._insert_runtime_record(granted)
+            if status != "active":
+                self._insert_runtime_record(
+                    create_runtime_record(
+                        f"claim.{status}",
+                        {
+                            "claim_id": claim_id,
+                            "contract_id": contract_id,
+                            "epoch": epoch,
+                            "package_id": package_id,
+                            "worker_id": worker_id,
+                        },
+                        causal_parents=[granted.id],
+                        recorded_at=now,
+                    )
+                )
+
+    def mark_claim_released(self, claim_id: str) -> None:
+        """Append a release fact and update the derived claim head."""
+        with self._conn:
+            row = self._conn.execute(
+                "SELECT contract_id, worker_id, epoch, package_id, lease_until "
+                "FROM worker_claims WHERE claim_id = ? AND status = 'active'",
+                (claim_id,),
+            ).fetchone()
+            if row is None:
+                return
+            recorded_at = now_iso()
+            self._conn.execute(
+                "UPDATE worker_claims SET status = 'released', updated_at = ? "
+                "WHERE claim_id = ? AND status = 'active'",
+                (recorded_at, claim_id),
+            )
+            granted = create_runtime_record(
+                "claim.granted",
+                {
+                    "claim_id": claim_id,
+                    "contract_id": row["contract_id"],
+                    "epoch": int(row["epoch"]),
+                    "lease_until": row["lease_until"],
+                    "package_id": row["package_id"],
+                    "worker_id": row["worker_id"],
+                },
+            )
+            self._insert_runtime_record(
+                create_runtime_record(
+                    "claim.released",
+                    {
+                        "claim_id": claim_id,
+                        "contract_id": row["contract_id"],
+                        "epoch": int(row["epoch"]),
+                        "package_id": row["package_id"],
+                        "worker_id": row["worker_id"],
+                    },
+                    causal_parents=[granted.id],
+                    recorded_at=recorded_at,
+                )
             )
 
     def get_claim(self, contract_id: str) -> dict | None:
@@ -1517,11 +1605,13 @@ class SQLiteStore:
                             int(payload["epoch"]),
                         ),
                     )
-                elif record.record_type == "claim.submitted":
+                elif record.record_type in {"claim.released", "claim.submitted"}:
+                    status = record.record_type.removeprefix("claim.")
                     self._conn.execute(
-                        "UPDATE worker_claims SET status = 'submitted', updated_at = ? "
+                        "UPDATE worker_claims SET status = ?, updated_at = ? "
                         "WHERE claim_id = ? AND epoch = ?",
                         (
+                            status,
                             record.recorded_at,
                             payload["claim_id"],
                             int(payload["epoch"]),
