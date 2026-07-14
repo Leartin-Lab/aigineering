@@ -75,6 +75,7 @@ def project_candidate(
 
     for a in accepted_dicts:
         worker_origin = _derive_worker_origin(candidate.worker_id)
+        worker_trust = "observed" if worker_origin in {"tool", "mcp"} else "untrusted"
         asset = Asset(
             id=hash_asset_content(a["name"], a["content"]),
             name=a["name"],
@@ -84,7 +85,7 @@ def project_candidate(
             content_type="text",
             created_by=contract.id,
             origin=worker_origin,
-            trust_tier="untrusted",
+            trust_tier=worker_trust,
             minted_by=candidate.worker_id,
             source_uri="",
             promptable=True,

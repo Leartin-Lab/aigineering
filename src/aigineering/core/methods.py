@@ -82,6 +82,15 @@ def method_contract(parent: Contract, action: WorkerAction) -> Contract:
     outputs = [output_name]
     activation = f"_method_ctx_{parent.id}"
     inputs = list(parent.inputs)
+    if action.type == "tool" and isinstance(action.payload.get("name"), str):
+        tool_name = action.payload["name"]
+        descriptor_name = (
+            f"_mcp_{tool_name[4:].split('.', 1)[0]}"
+            if tool_name.startswith("mcp:")
+            else f"_tool_capability_{tool_name}"
+        )
+        if descriptor_name not in inputs:
+            inputs.append(descriptor_name)
     tool_scope = list(parent.tool_scope)
     labels = _append_method_label(parent.labels, action.type)
 

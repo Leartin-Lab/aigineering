@@ -12,11 +12,13 @@ import json
 from typing import TYPE_CHECKING
 
 from aigineering.agent.tool_executor import ToolExecutor
+from aigineering.core.capability_descriptors import verify_descriptor
 from aigineering.core.methods import method_payload
+from aigineering.protocol.types import Candidate
 
 if TYPE_CHECKING:
     from aigineering.core.tools import ToolRegistry
-    from aigineering.protocol.types import Asset, Candidate, Contract
+    from aigineering.protocol.types import Asset, Contract
 
 
 class ToolWorker:
@@ -76,8 +78,57 @@ class ToolWorker:
                 raw_output=obs,
             )
 
-        return self._executor.invoke(
-            tool_name,
-            args if isinstance(args, dict) else {},
-            contract.id,
+        descriptor_name = f"_tool_capability_{tool_name}"
+        descriptor = next(
+            (asset for asset in disclosed_assets if asset.name == descriptor_name),
+            None,
         )
+        if tool_name not in contract.tool_scope:
+            obs = json.dumps(
+                {
+                    "ok": False,
+                    "tool": tool_name,
+                    "result": "",
+                    "error": f"tool '{tool_name}' is not in contract.tool_scope",
+                },
+                sort_keys=True,
+                ensure_ascii=False,
+            )
+        elif descriptor is None or not verify_descriptor(descriptor, kind="tool"):
+            obs = json.dumps(
+                {
+                    "ok": False,
+                    "tool": tool_name,
+                    "result": "",
+                    "error": f"tool descriptor '{descriptor_name}' is missing or invalid",
+                },
+                sort_keys=True,
+                ensure_ascii=False,
+            )
+        else:
+            obs = self._executor.invoke(
+                tool_name,
+                args if isinstance(args, dict) else {},
+                contract.id,
+            ).raw_output
+        return _observation_candidate(self.worker_id, contract, obs)
+
+
+def _observation_candidate(
+    worker_id: str, contract: Contract, observation: str
+) -> Candidate:
+    if len(contract.outputs) != 1:
+        return Candidate(
+            worker_id=worker_id,
+            raw_output="tool method contract must declare exactly one observation output",
+        )
+    outputs = {contract.outputs[0]: observation}
+    return Candidate(
+        worker_id=worker_id,
+        raw_output=json.dumps(
+            {"type": "exec", "outputs": outputs},
+            sort_keys=True,
+            ensure_ascii=False,
+        ),
+        parsed_action={"type": "exec", "outputs": outputs},
+    )
