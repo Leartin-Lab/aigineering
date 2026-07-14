@@ -28,7 +28,11 @@ from aigineering.core.methods import (
     system_asset,
 )
 from aigineering.core.provenance import sign_asset
-from aigineering.core.submit import _all_outputs_satisfied, submit_candidate
+from aigineering.core.submit import (
+    SubmitConflictError,
+    _all_outputs_satisfied,
+    submit_candidate,
+)
 from aigineering.core.worker_routing import is_eligible
 from aigineering.core.trace_manager import TraceManager
 from aigineering.core.trace import create_entry
@@ -443,6 +447,26 @@ def _submit_claimed_method(
     method_registry,
 ) -> dict:
     """Atomically schedule a claim-bound method action."""
+    if envelope.idempotency_key:
+        cached = store.get_idempotency(contract.id, envelope.idempotency_key)
+        if cached is not None:
+            cached_response = dict(cached)
+            cached_candidate_hash = cached_response.pop("_candidate_hash", "")
+            if (
+                cached_candidate_hash
+                and cached_candidate_hash != envelope.candidate_hash
+            ):
+                raise SubmitConflictError(
+                    f"Idempotency key for contract '{contract.id}' is already "
+                    "bound to a different Candidate payload"
+                )
+            cached_response["duplicate"] = True
+            return cached_response
+        if store.has_any_idempotency(contract.id):
+            raise SubmitConflictError(
+                f"Contract '{contract.id}' already has a submission with a "
+                "different idempotency key"
+            )
     claim = store.get_claim(contract.id)
     if (
         claim is None
@@ -577,6 +601,7 @@ def _submit_claimed_method(
         "method": action.type,
         "child_contract_id": child.id,
         "complete": False,
+        "duplicate": False,
     }
     commit = getattr(store, "commit_method_submission", None)
     if commit is None:
@@ -587,7 +612,7 @@ def _submit_claimed_method(
         trace_entries=[method_entry, budget_entry],
         runtime_records=tuple(runtime_records),
         idempotency_key=envelope.idempotency_key,
-        idempotency_result=response,
+        idempotency_result={**response, "_candidate_hash": envelope.candidate_hash},
         claim_id=envelope.claim_id,
         worker_id=envelope.worker_id,
         package_id=envelope.package_id,

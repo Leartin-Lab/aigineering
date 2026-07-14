@@ -79,6 +79,15 @@ def submit_candidate(
         )
         if cached is not None:
             cached_response = dict(cached)
+            cached_candidate_hash = cached_response.pop("_candidate_hash", "")
+            if (
+                cached_candidate_hash
+                and cached_candidate_hash != envelope.candidate_hash
+            ):
+                raise SubmitConflictError(
+                    f"Idempotency key for contract '{contract.id}' is already "
+                    "bound to a different Candidate payload"
+                )
             cached_response["duplicate"] = True
             return cached_response
 
@@ -283,6 +292,7 @@ def submit_candidate(
     )
 
     cached_result = {k: v for k, v in response.items() if k != "duplicate"}
+    cached_result["_candidate_hash"] = envelope.candidate_hash
     commit_submission = getattr(store, "commit_candidate_submission", None)
     if commit_submission is not None:
         try:

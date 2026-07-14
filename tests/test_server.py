@@ -170,22 +170,28 @@ def test_worker_protocol_cross_replica_claim_renew_submit(tmp_path, monkeypatch)
     )
     assert renewed.status_code == 200, renewed.text
 
-    submitted = replica_c.post(
-        "/worker/submissions",
-        json={
-            "contract_id": contract_id,
-            "worker_id": "remote-worker",
-            "raw_output": "out: accepted across replicas",
-            "package_id": package["package_id"],
-            "claim_id": package["claim_id"],
-            "claim_epoch": package["claim_epoch"],
-            "idempotency_key": f"remote-{package['package_id']}",
-        },
-    )
+    submission = {
+        "contract_id": contract_id,
+        "worker_id": "remote-worker",
+        "raw_output": "out: accepted across replicas",
+        "package_id": package["package_id"],
+        "claim_id": package["claim_id"],
+        "claim_epoch": package["claim_epoch"],
+        "idempotency_key": f"remote-{package['package_id']}",
+    }
+    submitted = replica_c.post("/worker/submissions", json=submission)
     assert submitted.status_code == 200, submitted.text
     assert submitted.json()["complete"] is True
     output = replica_a.get("/assets/out")
     assert output.json()[0]["content"] == "accepted across replicas"
+    duplicate = replica_b.post("/worker/submissions", json=submission)
+    assert duplicate.status_code == 200
+    assert duplicate.json()["duplicate"] is True
+    changed = replica_a.post(
+        "/worker/submissions",
+        json={**submission, "raw_output": "out: changed replay"},
+    )
+    assert changed.status_code == 409
 
     records = SQLiteStore(".aig/store.db").scan_runtime_records()
     record_types = [record.record_type for _, record in records]
@@ -208,18 +214,16 @@ def test_worker_protocol_method_submission_uses_same_fenced_path(tmp_path, monke
     )
     package = claimed.json()
 
-    submitted = client.post(
-        "/worker/submissions",
-        json={
-            "contract_id": contract_id,
-            "worker_id": "remote-planner",
-            "raw_output": '/plan {"reason": "decompose remotely"}',
-            "package_id": package["package_id"],
-            "claim_id": package["claim_id"],
-            "claim_epoch": package["claim_epoch"],
-            "idempotency_key": f"remote-{package['package_id']}",
-        },
-    )
+    submission = {
+        "contract_id": contract_id,
+        "worker_id": "remote-planner",
+        "raw_output": '/plan {"reason": "decompose remotely"}',
+        "package_id": package["package_id"],
+        "claim_id": package["claim_id"],
+        "claim_epoch": package["claim_epoch"],
+        "idempotency_key": f"remote-{package['package_id']}",
+    }
+    submitted = client.post("/worker/submissions", json=submission)
 
     assert submitted.status_code == 200, submitted.text
     body = submitted.json()
@@ -227,6 +231,14 @@ def test_worker_protocol_method_submission_uses_same_fenced_path(tmp_path, monke
     child = SQLiteStore(".aig/store.db").get_contract(body["child_contract_id"])
     assert child is not None
     assert "method:plan" in child.labels
+    duplicate = client.post("/worker/submissions", json=submission)
+    assert duplicate.status_code == 200
+    assert duplicate.json()["duplicate"] is True
+    changed = client.post(
+        "/worker/submissions",
+        json={**submission, "raw_output": '/plan {"reason": "changed"}'},
+    )
+    assert changed.status_code == 409
 
 
 def test_asset_slice_versions_and_replacement_claims(tmp_path, monkeypatch):
