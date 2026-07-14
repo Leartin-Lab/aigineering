@@ -111,10 +111,18 @@ class ContinuationManager:
                         method_scheduled=self._method_scheduled,
                     )
                     if completion(runtime, contract, method_assets):
+                        if method_type == "tool":
+                            method_assets = [
+                                asset
+                                for output in contract.outputs
+                                if output.startswith(("_tool_obs_", "_mcp_obs_"))
+                                for asset in self._store.get_assets_by_name(output)
+                                if asset.promptable
+                            ]
                         parent = self._store.get_contract(parent_id)
                         if parent is not None and self._all_outputs_satisfied(parent):
-                            self._complete_contract(parent)
-                            self._complete_satisfied_ancestors(parent)
+                            self.complete_contract(parent)
+                            self.complete_satisfied_ancestors(parent)
                         elif method_type == "tool" and parent is not None:
                             if _tool_observation_succeeded(method_assets):
                                 self.schedule_continuation_contract(
@@ -126,14 +134,16 @@ class ContinuationManager:
                                     "failed",
                                     budget_remaining=self._resolve_budget(parent),
                                 )
+                                self._completed.add(parent.id)
+                                self._suspended.discard(parent.id)
                         else:
-                            self._complete_satisfied_ancestors(contract)
+                            self.complete_satisfied_ancestors(contract)
                         return
 
         parent = self._store.get_contract(parent_id)
         if parent is not None and self._all_outputs_satisfied(parent):
-            self._complete_contract(parent)
-            self._complete_satisfied_ancestors(parent)
+            self.complete_contract(parent)
+            self.complete_satisfied_ancestors(parent)
             return
 
         if method_type == "tool" and parent is not None:
@@ -145,6 +155,8 @@ class ContinuationManager:
                     "failed",
                     budget_remaining=self._resolve_budget(parent),
                 )
+                self._completed.add(parent.id)
+                self._suspended.discard(parent.id)
             return
 
         self._add_trace(
@@ -220,7 +232,7 @@ class ContinuationManager:
 
     # ── Internal helpers ─────────────────────────────────────────────────
 
-    def _complete_contract(self, contract: Contract) -> None:
+    def complete_contract(self, contract: Contract) -> None:
         if contract.id in self._completed:
             return
         self._emit_terminal_event(
@@ -231,13 +243,13 @@ class ContinuationManager:
         self._completed.add(contract.id)
         self._suspended.discard(contract.id)
 
-    def _complete_satisfied_ancestors(self, contract: Contract) -> None:
+    def complete_satisfied_ancestors(self, contract: Contract) -> None:
         parent_id = contract.parent_id
         while parent_id is not None:
             parent = self._store.get_contract(parent_id)
             if parent is None or not self._all_outputs_satisfied(parent):
                 return
-            self._complete_contract(parent)
+            self.complete_contract(parent)
             parent_id = parent.parent_id
 
     def _all_outputs_satisfied(self, contract: Contract) -> bool:
@@ -266,8 +278,7 @@ class ContinuationManager:
         self._add_trace(contract_id, event_type, **kwargs)
 
     def _add_trace(self, contract_id: str, event_type: str, **kwargs: object) -> None:
-        entry = self._trace_mgr.record(contract_id, event_type, **kwargs)
-        self._pending_trace_entries.append(entry)
+        self._trace_mgr.record(contract_id, event_type, **kwargs)
 
     def _add_contract(self, contract: Contract) -> None:
         if self._ingress is not None:
