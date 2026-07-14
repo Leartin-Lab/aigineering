@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
+import sqlite3
+from threading import Event, Thread
 
 from aigineering.agent.llm import LLMWorker
 from aigineering.agent.mock import MockWorker
@@ -49,6 +52,62 @@ class ClaimedPackage:
     disclosed_assets: tuple[Asset, ...]
     package: WorkerPackage
     worker_id: str
+
+
+class _ClaimLeaseKeeper:
+    """Renew one claim while its synchronous provider invocation is running."""
+
+    def __init__(self, claimed: ClaimedPackage, store) -> None:
+        self._claimed = claimed
+        self._store = store
+        self._stop = Event()
+        self._failed = Event()
+        self._thread: Thread | None = None
+        try:
+            deadline = datetime.fromisoformat(claimed.package.lease_until)
+            if deadline.tzinfo is None:
+                deadline = deadline.replace(tzinfo=timezone.utc)
+            lease_seconds = max(
+                1, int((deadline - datetime.now(timezone.utc)).total_seconds())
+            )
+        except (TypeError, ValueError):
+            lease_seconds = 60
+        self._lease_seconds = lease_seconds
+        self._interval = max(0.1, min(10.0, lease_seconds / 3))
+
+    def start(self) -> None:
+        if not self._claimed.package.claim_id:
+            return
+        if getattr(self._store, "renew_claim", None) is None:
+            self._failed.set()
+            return
+        self._thread = Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=max(1.0, self._interval * 2))
+
+    @property
+    def failed(self) -> bool:
+        return self._failed.is_set()
+
+    def _run(self) -> None:
+        while not self._stop.wait(self._interval):
+            try:
+                renewed = self._store.renew_claim(
+                    self._claimed.package.claim_id,
+                    self._claimed.package.claim_epoch,
+                    self._claimed.worker_id,
+                    lease_seconds=self._lease_seconds,
+                )
+            except (RuntimeError, sqlite3.Error):
+                self._failed.set()
+                return
+            if renewed is None:
+                self._failed.set()
+                return
 
 
 def build_worker(
@@ -213,7 +272,17 @@ def execute_claimed_package(
 ) -> dict:
     """Invoke a worker and submit its candidate envelope."""
     trace = trace_store if trace_store is not None else store
-    candidate = worker.invoke(claimed.contract, list(claimed.disclosed_assets))
+    keeper = _ClaimLeaseKeeper(claimed, store)
+    keeper.start()
+    try:
+        candidate = worker.invoke(claimed.contract, list(claimed.disclosed_assets))
+    finally:
+        keeper.stop()
+    if keeper.failed:
+        raise ValueError(
+            f"claim lease renewal failed for {claimed.package.claim_id!r}; "
+            "worker result was not submitted"
+        )
     method_action = parse_method_action(candidate)
     if method_action is not None:
         if method_registry is None:

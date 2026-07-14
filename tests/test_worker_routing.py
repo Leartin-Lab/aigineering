@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import time
+
 import pytest
 
 from aigineering.agent.prompt import contract_prompt
 from aigineering.cli.task_state import project_task_status
-from aigineering.cli.worker_runtime import claim_next_package
+from aigineering.cli.worker_runtime import (
+    claim_next_package,
+    execute_claimed_package,
+)
 from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.core.record_conflict import ImmutableRecordConflict
 from aigineering.core.store import MemoryStore
@@ -15,7 +20,7 @@ from aigineering.core.worker_routing import (
     eligible_workers,
     select_worker,
 )
-from aigineering.protocol.types import Contract
+from aigineering.protocol.types import Candidate, Contract
 
 
 def _contract(**overrides) -> Contract:
@@ -160,4 +165,48 @@ def test_claim_rechecks_registration_version_inside_transaction():
 
     assert stale is None
     assert current is not None
+    store.close()
+
+
+def test_long_worker_invocation_renews_claim_before_submit():
+    class SlowWorker:
+        def invoke(self, contract, disclosed_assets):
+            del contract, disclosed_assets
+            time.sleep(1.1)
+            return Candidate(worker_id="slow", raw_output="report: done")
+
+    store = SQLiteStore(":memory:")
+    contract = Contract(id="task:slow", outputs=("report",), budget=1)
+    store.add_contract(contract)
+    claimed = claim_next_package(store, worker_id="slow-worker", lease_seconds=1)
+    assert claimed is not None
+
+    result = execute_claimed_package(claimed, SlowWorker(), store)
+
+    assert result["status"] == "accepted"
+    record_types = [record.record_type for _, record in store.scan_runtime_records()]
+    assert "claim.renewed" in record_types
+    assert store.get_claim(contract.id)["status"] == "submitted"
+    store.close()
+
+
+def test_renewal_failure_discards_worker_result(monkeypatch):
+    class SlowWorker:
+        def invoke(self, contract, disclosed_assets):
+            del contract, disclosed_assets
+            time.sleep(0.5)
+            return Candidate(worker_id="slow", raw_output="report: forbidden")
+
+    store = SQLiteStore(":memory:")
+    contract = Contract(id="task:lost-lease", outputs=("report",), budget=1)
+    store.add_contract(contract)
+    claimed = claim_next_package(store, worker_id="slow-worker", lease_seconds=1)
+    assert claimed is not None
+    monkeypatch.setattr(store, "renew_claim", lambda *args, **kwargs: None)
+
+    with pytest.raises(ValueError, match="result was not submitted"):
+        execute_claimed_package(claimed, SlowWorker(), store)
+
+    assert store.get_assets_by_name("report") == []
+    assert store.get_claim(contract.id)["status"] == "active"
     store.close()
