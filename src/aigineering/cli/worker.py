@@ -12,7 +12,10 @@ from aigineering.cli._common import (
     _persistent_store,
     _redact_sealed,
 )
-from aigineering.cli.worker_runtime import claim_next_package
+from aigineering.cli.worker_runtime import (
+    _method_context_assets_for,
+    claim_next_package,
+)
 from aigineering.core.disclosure import compute_disclosure
 from aigineering.core.runtime_ingress import RuntimeIngress
 from aigineering.core.worker_routing import WorkerRegistration
@@ -22,36 +25,12 @@ from aigineering.core.submit import (
 )
 from aigineering.protocol.envelope import CandidateEnvelope
 from aigineering.protocol.package import WorkerPackage
-from aigineering.protocol.types import Asset, Contract
 from aigineering.protocol.wire import asset_to_dict, contract_to_dict
 
 
 @click.group("worker")
 def worker() -> None:
     """Operational worker commands for contract execution."""
-
-
-def _method_context_assets_for(contract: Contract, store) -> tuple[dict, ...]:
-    """Resolve continuation method context from durable trace records."""
-    get_all = getattr(store, "get_all", None)
-    if get_all is None:
-        return ()
-
-    assets: list[Asset] = []
-    seen: set[str] = set()
-    for entry in get_all():
-        if (
-            entry.event_type != "method_continuation_scheduled"
-            or entry.relation_target != contract.id
-        ):
-            continue
-        for asset_id in entry.disclosed_assets:
-            asset = store.get_asset(asset_id)
-            if asset is None or asset.id in seen:
-                continue
-            assets.append(asset)
-            seen.add(asset.id)
-    return tuple(asset_to_dict(asset) for asset in assets)
 
 
 @worker.command("package")

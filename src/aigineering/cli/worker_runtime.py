@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from aigineering.agent.llm import LLMWorker
 from aigineering.agent.mock import MockWorker
 from aigineering.core.activation import check_activation
-from aigineering.core.disclosure import compute_disclosure
+from aigineering.core.disclosure import compute_disclosure, redact_for_disclosure
 from aigineering.core.runtime_ingress import RuntimeIngress
 from aigineering.core.submit import _all_outputs_satisfied, submit_candidate
 from aigineering.core.worker_routing import is_eligible
@@ -207,6 +207,6 @@ def _method_context_assets_for(contract: Contract, store) -> tuple[dict, ...]:
             asset = store.get_asset(asset_id)
             if asset is None or asset.id in seen:
                 continue
-            assets.append(asset)
+            assets.append(redact_for_disclosure(asset))
             seen.add(asset.id)
     return tuple(asset_to_dict(asset) for asset in assets)

@@ -61,6 +61,8 @@ def _seed_contract_with_asset(store: SQLiteStore) -> tuple[Contract, Asset]:
 
 def _seed_continuation_with_method_context(
     store: SQLiteStore,
+    *,
+    disclosure_view: str = "original",
 ) -> tuple[Contract, Contract, Asset]:
     """Add parent, continuation, and durable method context observation."""
     parent = Contract(
@@ -90,6 +92,7 @@ def _seed_continuation_with_method_context(
             origin="system",
             trust_tier="system",
             created_by="tool_contract",
+            disclosure_view=disclosure_view,
         )
     )
     store.add_contract(parent)
@@ -214,6 +217,24 @@ def test_worker_package_includes_continuation_method_context():
         data = json.loads(result.output)
         assert data["contract_id"] == continuation.id
         assert [a["name"] for a in data["method_context_assets"]] == [obs.name]
+
+
+def test_worker_package_redacts_method_context_disclosure_view():
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        store = SQLiteStore(".aig/store.db")
+        _parent, continuation, obs = _seed_continuation_with_method_context(
+            store, disclosure_view="redacted"
+        )
+
+        result = runner.invoke(
+            cli, ["worker", "package", "--contract", continuation.id, "--json"]
+        )
+        assert result.exit_code == 0
+        context = json.loads(result.output)["method_context_assets"]
+        assert context[0]["id"] == obs.id
+        assert context[0]["content"] == "[redacted]"
+        assert "value:x" not in result.output
 
 
 # ---------------------------------------------------------------------------
