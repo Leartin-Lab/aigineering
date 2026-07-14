@@ -164,7 +164,7 @@ class TrustTier(Enum):
 
     Canonical members (G10 gate set):
         UNTRUSTED     = 0  (default for unverified content)
-        OBSERVED      = 1  (passively observed, e.g. worker output)
+        OBSERVED      = 1  (bounded external observation, e.g. tool output)
         CONFIGURED    = 2  (explicitly configured, e.g. tool descriptor)
         VERIFIED      = 3  (verified by a trusted process)
         SYSTEM        = 4  (runtime-internal, e.g. method system assets)

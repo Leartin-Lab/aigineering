@@ -177,6 +177,9 @@ class ToolMethodHandler:
             obs_content,
             contract.id,
             source_uri=f"tool://{tool_name}" if isinstance(tool_name, str) else "",
+            origin="mcp" if is_mcp_tool else "tool",
+            trust_tier="observed",
+            minted_by="mcp_adapter" if is_mcp_tool else "tool_adapter",
         )
 
         runtime.append_trace(

@@ -192,8 +192,16 @@ def system_asset(
     created_by: str,
     promptable: bool = True,
     source_uri: str = "",
+    origin: str = "system",
+    trust_tier: str = "system",
+    minted_by: str = "engine",
 ) -> Asset:
-    """Create a deterministic engine-minted system asset."""
+    """Create an authorized runtime asset.
+
+    Reserved namespace authority and source trust are separate dimensions:
+    external observations may use a protected runtime name while remaining
+    OBSERVED rather than being elevated to SYSTEM.
+    """
 
     return Asset(
         id=hash_asset_content(name, content),
@@ -202,9 +210,9 @@ def system_asset(
         definition_hash=hash_asset_definition(name),
         content_hash=hash_asset_content(name, content),
         created_by=created_by,
-        origin="system",
-        trust_tier="system",
-        minted_by="engine",
+        origin=origin,
+        trust_tier=trust_tier,
+        minted_by=minted_by,
         source_uri=source_uri,
         promptable=promptable,
     )

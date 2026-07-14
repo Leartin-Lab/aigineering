@@ -366,7 +366,8 @@ def test_tool_method_executes_registry_and_commits_observation():
     assert len(call_assets) == 1
     assert call_assets[0].promptable is False
     assert len(obs_assets) == 1
-    assert obs_assets[0].origin == "system"
+    assert obs_assets[0].origin == "tool"
+    assert obs_assets[0].trust_tier == "observed"
     assert "value:x" in obs_assets[0].content
 
     tool_events = trace_store.get_by_event_type("tool_executed")

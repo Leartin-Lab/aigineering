@@ -108,6 +108,9 @@ class MethodRuntime:
         created_by: str,
         promptable: bool = True,
         source_uri: str = "",
+        origin: str = "system",
+        trust_tier: str = "system",
+        minted_by: str = "engine",
     ) -> Asset:
         """Create and sign a system asset, then add it to the store.
 
@@ -129,6 +132,9 @@ class MethodRuntime:
             created_by=created_by,
             promptable=promptable,
             source_uri=source_uri,
+            origin=origin,
+            trust_tier=trust_tier,
+            minted_by=minted_by,
         )
         return self._ingress.accept_asset(asset, source="method", allow_protected=True)
 

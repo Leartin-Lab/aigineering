@@ -444,7 +444,8 @@ def test_engine_uses_tool_handler():
 
     obs_assets = store.get_assets_by_name(f"_tool_obs_{contract.id}")
     assert len(obs_assets) == 1
-    assert obs_assets[0].origin == "system"
+    assert obs_assets[0].origin == "tool"
+    assert obs_assets[0].trust_tier == "observed"
     assert "value:x" in obs_assets[0].content
 
     call_assets = [
