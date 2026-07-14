@@ -87,6 +87,16 @@ class MemoryStore:
         self._activation_index: dict[str, set[str]] = {}
         self._reverse_activation_index: dict[str, set[str]] = {}
         self._declared_outputs_index: dict[str, set[str]] = {}
+        self._worker_registrations: dict[str, object] = {}
+
+    def register_worker(self, registration) -> None:
+        self._worker_registrations[registration.worker_id] = registration
+
+    def get_worker_registration(self, worker_id: str):
+        return self._worker_registrations.get(worker_id)
+
+    def get_worker_registrations(self) -> list:
+        return list(self._worker_registrations.values())
 
     def add_asset(self, asset: Asset) -> None:
         if not asset.signed_by or not verify_asset_seal(asset):
@@ -294,6 +304,8 @@ class JsonLStore:
                     budget=data.get("budget", 0),
                     tool_scope=data.get("tool_scope", []),
                     labels=data.get("labels", []),
+                    worker_capabilities=data.get("worker_capabilities", []),
+                    worker_pools=data.get("worker_pools", []),
                     origin=data.get("origin", "human"),
                     minting_authority=data.get("minting_authority", []),
                     sensitive_input_policy=data.get("sensitive_input_policy"),

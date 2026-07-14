@@ -52,8 +52,13 @@ def contract_prompt(contract: Contract, assets: list[Asset]) -> str:
         "- Use /replan only after an assumption, path, or result is invalid.",
         "- Do not use /replan for missing information.",
         "",
-        "Behavior instructions:",
     ]
+    lines.extend(_method_result_instructions(contract))
+    lines.extend(
+        [
+            "Behavior instructions:",
+        ]
+    )
     for asset in behavior_assets:
         lines.append(f"- {asset.name}: {asset.content}")
 
@@ -66,3 +71,33 @@ def contract_prompt(contract: Contract, assets: list[Asset]) -> str:
     for asset in evidence_assets:
         lines.append(f"- {asset.name}: {asset.content}")
     return "\n".join(lines)
+
+
+def _method_result_instructions(contract: Contract) -> list[str]:
+    """Add an explicit schema only for planner method-result contracts.
+
+    A method result is still emitted through the normal `/exec` action, but
+    its declared protected output carries a JSON plan.  Without this schema a
+    real model reasonably returns ordinary prose or an unsupported action.
+    """
+    plan_outputs = [
+        output
+        for output in contract.outputs
+        if output.startswith("_plan_result_") or output.startswith("_replan_result_")
+    ]
+    if not plan_outputs:
+        return []
+    output = plan_outputs[0]
+    return [
+        "Planner result protocol (required):",
+        f"- Return /exec with exactly one output named `{output}`.",
+        "- Its content must be one JSON object with a `contracts` array.",
+        "- Each child may contain only: name, description, inputs, outputs, activation, budget, tool_scope, labels.",
+        "- Use only disclosed input names, declared parent tools, and simple unqualified asset names in activation.",
+        "- The method description lists parent_outputs. At least one child must produce every parent output; use intermediate outputs only when a later child consumes them.",
+        "- Do not emit origin, trust_tier, created_by, minting_authority, worker_capabilities, worker_pools, or prose outside the action.",
+        '- A minimal valid result is: /exec {"outputs": {"'
+        + output
+        + '": "{\\"contracts\\":[{\\"name\\":\\"extract\\",\\"description\\":\\"extract facts\\",\\"inputs\\":[\\"input_asset\\"],\\"outputs\\":[\\"facts\\"],\\"activation\\":\\"input_asset\\",\\"budget\\":1,\\"tool_scope\\":[],\\"labels\\":[]}]}"}}',
+        "",
+    ]

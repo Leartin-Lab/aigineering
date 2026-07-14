@@ -1937,7 +1937,7 @@ class TestPublicDocs:
             )
         assert "not a security-audited production release" in readme.lower()
         assert "v0.5.0" in readme.lower()
-        assert "local productivity alpha" in readme.lower()
+        assert "local productivity formal release" in readme.lower()
         assert "transactional worker candidate submission" in readme.lower()
 
         # Check ROADMAP
@@ -1946,7 +1946,7 @@ class TestPublicDocs:
             roadmap = f.read()
 
         roadmap_lower = roadmap.lower()
-        assert "local productivity alpha" in roadmap_lower
+        assert "local productivity formal release" in roadmap_lower
         assert "v0.5" in roadmap_lower
         assert "[x] transactional candidate submission" in roadmap_lower
         assert (

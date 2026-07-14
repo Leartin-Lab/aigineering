@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from aigineering.core.activation import check_activation
 from aigineering.core.submit import _all_outputs_satisfied
+from aigineering.core.worker_routing import eligible_workers
 from aigineering.protocol.types import Contract, TraceEntry
 
 TERMINAL_EVENTS = frozenset({"complete", "failed", "cancelled", "unreachable"})
@@ -109,6 +110,12 @@ def _status_from_entries(
         contract.activation, available_names
     ):
         return "blocked"
+    if contract.worker_capabilities or contract.worker_pools:
+        registrations = getattr(store, "get_worker_registrations", None)
+        if registrations is not None and not eligible_workers(
+            contract, registrations()
+        ):
+            return "waiting_for_capability"
     return "ready"
 
 
@@ -136,6 +143,13 @@ def _silent_failure_risks(
             {
                 "code": "submitted_without_recovery",
                 "message": "task has worker projection but no terminal event or active recovery",
+            }
+        )
+    if status == "waiting_for_capability":
+        risks.append(
+            {
+                "code": "waiting_for_capability",
+                "message": "no registered worker currently satisfies routing constraints",
             }
         )
     return risks

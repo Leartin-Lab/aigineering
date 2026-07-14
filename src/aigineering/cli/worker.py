@@ -15,6 +15,7 @@ from aigineering.cli._common import (
 from aigineering.cli.worker_runtime import claim_next_package
 from aigineering.core.disclosure import compute_disclosure
 from aigineering.core.runtime_ingress import RuntimeIngress
+from aigineering.core.worker_routing import WorkerRegistration
 from aigineering.core.submit import (
     SubmitConflictError,
     submit_candidate,
@@ -84,6 +85,7 @@ def worker_package(contract_id: str, json_output: bool) -> None:
         method_context_assets=method_context_assets,
         tool_scope=contract.tool_scope,
         budget_remaining=contract.budget,
+        capability_requirements=contract.worker_capabilities,
     )
 
     if json_output:
@@ -133,9 +135,92 @@ def worker_next(worker_id: str, lease_seconds: int, json_output: bool) -> None:
         return
 
     if json_output:
-        _output_json(None)
+        constrained = [
+            contract.id
+            for contract in store.get_all_contracts()
+            if contract.worker_capabilities or contract.worker_pools
+        ]
+        if constrained:
+            _output_json(
+                {
+                    "status": "waiting_for_capability",
+                    "worker_id": worker_id,
+                    "contracts": constrained,
+                    "message": "No eligible registered worker can claim constrained work.",
+                }
+            )
+        else:
+            _output_json(None)
     else:
-        click.echo("No ready contracts.")
+        constrained = any(
+            contract.worker_capabilities or contract.worker_pools
+            for contract in store.get_all_contracts()
+        )
+        if constrained:
+            click.echo("Waiting for an eligible registered worker capability.")
+        else:
+            click.echo("No ready contracts.")
+
+
+@worker.command("register")
+@click.option("--worker-id", required=True, help="Stable execution-worker identity.")
+@click.option(
+    "--capability",
+    "capabilities",
+    multiple=True,
+    help="Hard capability offered by this worker.",
+)
+@click.option(
+    "--pool", "pools", multiple=True, help="User-defined worker pool membership."
+)
+@click.option(
+    "--profile",
+    "profile_id",
+    default="",
+    help="Versioned provider compatibility profile.",
+)
+@click.option("--capacity", default=1, show_default=True, type=click.IntRange(min=1))
+@click.option(
+    "--disabled", is_flag=True, default=False, help="Register as unavailable."
+)
+@click.option("--json", "json_output", is_flag=True, default=False)
+def worker_register(
+    worker_id: str,
+    capabilities: tuple[str, ...],
+    pools: tuple[str, ...],
+    profile_id: str,
+    capacity: int,
+    disabled: bool,
+    json_output: bool,
+) -> None:
+    """Register trusted routing metadata for a stateless execution worker."""
+    store = _persistent_store()
+    register = getattr(store, "register_worker", None)
+    if register is None:
+        raise click.ClickException(
+            "Worker registration requires SQLite runtime storage."
+        )
+    registration = WorkerRegistration(
+        worker_id=worker_id,
+        capabilities=capabilities,
+        pools=pools,
+        profile_id=profile_id,
+        capacity=capacity,
+        enabled=not disabled,
+    )
+    register(registration)
+    payload = {
+        "worker_id": registration.worker_id,
+        "capabilities": list(registration.capabilities),
+        "pools": list(registration.pools),
+        "profile_id": registration.profile_id,
+        "capacity": registration.capacity,
+        "enabled": registration.enabled,
+    }
+    if json_output:
+        _output_json(payload)
+    else:
+        click.echo(json.dumps(payload, ensure_ascii=False))
 
 
 @worker.command("submit")

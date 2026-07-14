@@ -59,29 +59,34 @@ def hash_contract(
     tool_scope: list[str],
     labels: list[str],
     origin: str,
+    worker_capabilities: list[str] | None = None,
+    worker_pools: list[str] | None = None,
 ) -> str:
     """Deterministic contract identity with ``task:`` domain tag.
 
     Canonical fields (alphabetical in JSON):
       activation, budget, description, inputs, labels, name, origin,
-      outputs, tool_scope
+      outputs, tool_scope, worker_capabilities, worker_pools
 
     ``parent_id`` is intentionally excluded – contracts are content-addressed
     independent of structural position.
     """
-    canonical = canonical_json(
-        {
-            "activation": activation,
-            "budget": budget,
-            "description": description,
-            "inputs": sorted(inputs),
-            "labels": sorted(labels),
-            "name": name,
-            "origin": origin,
-            "outputs": sorted(outputs),
-            "tool_scope": sorted(tool_scope),
-        }
-    )
+    fields: dict[str, object] = {
+        "activation": activation,
+        "budget": budget,
+        "description": description,
+        "inputs": sorted(inputs),
+        "labels": sorted(labels),
+        "name": name,
+        "origin": origin,
+        "outputs": sorted(outputs),
+        "tool_scope": sorted(tool_scope),
+    }
+    if worker_capabilities:
+        fields["worker_capabilities"] = sorted(worker_capabilities)
+    if worker_pools:
+        fields["worker_pools"] = sorted(worker_pools)
+    canonical = canonical_json(fields)
     return f"task:{compute_content_hash(canonical)}"
 
 
@@ -96,6 +101,8 @@ def hash_contract_v2(
     labels: list[str],
     origin: str,
     parent_id: str | None = None,
+    worker_capabilities: list[str] | tuple[str, ...] | None = None,
+    worker_pools: list[str] | tuple[str, ...] | None = None,
 ) -> str:
     """Deterministic contract identity **v2** with ``task:`` domain tag.
 
@@ -119,6 +126,10 @@ def hash_contract_v2(
     }
     if parent_id is not None:
         fields["parent_id"] = parent_id
+    if worker_capabilities:
+        fields["worker_capabilities"] = sorted(worker_capabilities)
+    if worker_pools:
+        fields["worker_pools"] = sorted(worker_pools)
     canonical = canonical_json(fields)
     return f"task:{compute_content_hash(canonical)}"
 

@@ -8,7 +8,10 @@ from typing import Any
 
 from aigineering.core.ids import compute_content_hash
 
-CURRENT_PROTOCOL_VERSION = 1
+# Version 2 binds the selected WorkerProfile and registration revision into
+# package identity. Older packages fail closed rather than silently losing
+# routing evidence.
+CURRENT_PROTOCOL_VERSION = 2
 
 
 @dataclass(frozen=True)
@@ -29,6 +32,8 @@ class WorkerPackage:
     claim_id: str = ""
     lease_until: str = ""
     capability_requirements: tuple[str, ...] = ()
+    worker_profile_id: str = ""
+    worker_registration_version: str = ""
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "disclosed_assets", tuple(self.disclosed_assets))
@@ -77,6 +82,8 @@ class WorkerPackage:
             f"|{contract_hash}|{disclosure_hash}|{method_hash}"
             f"|b{self.budget_remaining}|t{tool_scope_hash}"
             f"|c{','.join(sorted(self.capability_requirements))}"
+            f"|p{self.worker_profile_id}"
+            f"|r{self.worker_registration_version}"
         )
         return f"pkg:{compute_content_hash(payload)}"
 
@@ -94,6 +101,8 @@ class WorkerPackage:
             "tool_scope": list(self.tool_scope),
             "budget_remaining": self.budget_remaining,
             "capability_requirements": list(self.capability_requirements),
+            "worker_profile_id": self.worker_profile_id,
+            "worker_registration_version": self.worker_registration_version,
         }
         return json.dumps(d, sort_keys=True, ensure_ascii=False)
 
@@ -120,4 +129,6 @@ class WorkerPackage:
             claim_id=d.get("claim_id", ""),
             lease_until=d.get("lease_until", ""),
             capability_requirements=tuple(d.get("capability_requirements", ())),
+            worker_profile_id=d.get("worker_profile_id", ""),
+            worker_registration_version=d.get("worker_registration_version", ""),
         )

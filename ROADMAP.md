@@ -4,6 +4,9 @@
 
 **Version:** `v0.5.0` (single-machine formal release)
 
+This is not a security-audited production release. The formal designation
+refers to the supported single-machine local-productivity scope only.
+
 Aigineering is a Zero Trust Agent Runtime. The current milestone is the **050
 local productivity formal release**: a traceable CLI/control-plane surface on top of the
 v0.4 single-node kernel, with runtime ingress as the production mutation gate,

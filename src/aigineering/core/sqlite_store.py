@@ -23,6 +23,7 @@ from aigineering.core.authority import (
 from aigineering.core.crash import check_crash_point
 from aigineering.core.ids import compute_content_hash, now_iso
 from aigineering.core.provenance import verify_asset_seal
+from aigineering.core.worker_routing import WorkerRegistration
 from aigineering.protocol.types import Asset, Contract, TraceEntry
 from aigineering.protocol.wire import (
     asset_to_dict,
@@ -32,7 +33,7 @@ from aigineering.protocol.wire import (
 
 _logger = logging.getLogger(__name__)
 
-CURRENT_SCHEMA_VERSION = 4
+CURRENT_SCHEMA_VERSION = 5
 
 # ---------------------------------------------------------------------------
 # Activation name extraction (shared with store.py)
@@ -106,6 +107,8 @@ CREATE TABLE IF NOT EXISTS contracts (
     budget INTEGER NOT NULL DEFAULT 0,
     tool_scope TEXT NOT NULL DEFAULT '[]',
     labels TEXT NOT NULL DEFAULT '[]',
+    worker_capabilities TEXT NOT NULL DEFAULT '[]',
+    worker_pools TEXT NOT NULL DEFAULT '[]',
     origin TEXT NOT NULL DEFAULT 'human',
     minting_authority TEXT NOT NULL DEFAULT '[]',
     sensitive_input_policy TEXT
@@ -220,6 +223,19 @@ CREATE TABLE IF NOT EXISTS contract_declared_outputs (
 )
 """
 
+_DDL_CREATE_WORKER_REGISTRATIONS = """
+CREATE TABLE IF NOT EXISTS worker_registrations (
+    worker_id TEXT PRIMARY KEY,
+    capabilities TEXT NOT NULL DEFAULT '[]',
+    pools TEXT NOT NULL DEFAULT '[]',
+    profile_id TEXT NOT NULL DEFAULT '',
+    capacity INTEGER NOT NULL DEFAULT 1,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    version TEXT NOT NULL DEFAULT '1',
+    updated_at TEXT NOT NULL
+)
+"""
+
 _DDL_INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_assets_definition_hash ON assets(definition_hash)",
     "CREATE INDEX IF NOT EXISTS idx_assets_content_hash ON assets(content_hash)",
@@ -235,6 +251,7 @@ _DDL_INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_idempotency_contract ON idempotency_records(contract_id)",
     "CREATE INDEX IF NOT EXISTS idx_activation_refs_asset ON contract_activation_refs(asset_name)",
     "CREATE INDEX IF NOT EXISTS idx_declared_outputs_name ON contract_declared_outputs(output_name)",
+    "CREATE INDEX IF NOT EXISTS idx_worker_registrations_enabled ON worker_registrations(enabled)",
 ]
 
 # ---------------------------------------------------------------------------
@@ -298,6 +315,7 @@ class SQLiteStore:
             _DDL_CREATE_ACTIVATION_REFS,
             _DDL_CREATE_DECLARED_OUTPUTS,
             _DDL_CREATE_RUNTIME_LIFECYCLE,
+            _DDL_CREATE_WORKER_REGISTRATIONS,
         ]:
             self._conn.execute(ddl)
         for idx_ddl in _DDL_INDEXES:
@@ -322,6 +340,14 @@ class SQLiteStore:
             self._conn.execute(
                 "ALTER TABLE contracts ADD COLUMN sensitive_input_policy TEXT"
             )
+        if "worker_capabilities" not in existing:
+            self._conn.execute(
+                "ALTER TABLE contracts ADD COLUMN worker_capabilities TEXT NOT NULL DEFAULT '[]'"
+            )
+        if "worker_pools" not in existing:
+            self._conn.execute(
+                "ALTER TABLE contracts ADD COLUMN worker_pools TEXT NOT NULL DEFAULT '[]'"
+            )
 
     def _record_schema_version(self, version: int) -> None:
         self._conn.execute("DELETE FROM schema_version")
@@ -343,6 +369,9 @@ class SQLiteStore:
             if current < 4:
                 self._migrate_to_v4()
                 self._record_schema_version(4)
+            if current < 5:
+                self._migrate_to_v5()
+                self._record_schema_version(5)
 
     def _migrate_to_v2(self) -> None:
         """Add 040 transactional worker state and contract authority metadata."""
@@ -402,6 +431,13 @@ class SQLiteStore:
                         )
             except _json.JSONDecodeError:
                 pass
+
+    def _migrate_to_v5(self) -> None:
+        """Persist routing constraints and trusted worker registrations."""
+        self._ensure_contract_columns()
+        self._conn.execute(_DDL_CREATE_WORKER_REGISTRATIONS)
+        for idx_ddl in _DDL_INDEXES:
+            self._conn.execute(idx_ddl)
 
     # ── Runtime Lifecycle ─────────────────────────────────────────────────
 
@@ -494,6 +530,8 @@ class SQLiteStore:
             budget=row["budget"],
             tool_scope=tuple(json.loads(row["tool_scope"])),
             labels=tuple(json.loads(row["labels"])),
+            worker_capabilities=tuple(json.loads(row["worker_capabilities"] or "[]")),
+            worker_pools=tuple(json.loads(row["worker_pools"] or "[]")),
             origin=row["origin"],
             minting_authority=tuple(json.loads(row["minting_authority"] or "[]")),
             sensitive_input_policy=(
@@ -625,11 +663,13 @@ class SQLiteStore:
             """INSERT OR REPLACE INTO contracts (
                 id, parent_id, name, description,
                 inputs, outputs, activation, budget,
-                tool_scope, labels, origin, minting_authority, sensitive_input_policy
+                tool_scope, labels, worker_capabilities, worker_pools,
+                origin, minting_authority, sensitive_input_policy
             ) VALUES (
                 :id, :parent_id, :name, :description,
                 :inputs, :outputs, :activation, :budget,
-                :tool_scope, :labels, :origin, :minting_authority, :sensitive_input_policy
+                :tool_scope, :labels, :worker_capabilities, :worker_pools,
+                :origin, :minting_authority, :sensitive_input_policy
             )""",
             {
                 "id": d["id"],
@@ -642,6 +682,8 @@ class SQLiteStore:
                 "budget": d["budget"],
                 "tool_scope": json.dumps(list(d["tool_scope"])),
                 "labels": json.dumps(list(d["labels"])),
+                "worker_capabilities": json.dumps(list(d["worker_capabilities"])),
+                "worker_pools": json.dumps(list(d["worker_pools"])),
                 "origin": d["origin"],
                 "minting_authority": json.dumps(list(d["minting_authority"])),
                 "sensitive_input_policy": (
@@ -684,6 +726,66 @@ class SQLiteStore:
     def get_all_contracts(self) -> list[Contract]:
         cur = self._conn.execute("SELECT * FROM contracts")
         return [self._row_to_contract(row) for row in cur.fetchall()]
+
+    # ------------------------------------------------------------------
+    # Worker registration / routing control plane
+    # ------------------------------------------------------------------
+
+    def register_worker(self, registration: WorkerRegistration) -> None:
+        """Upsert trusted routing metadata for an execution worker."""
+        with self._conn:
+            self._conn.execute(
+                """INSERT INTO worker_registrations (
+                    worker_id, capabilities, pools, profile_id, capacity,
+                    enabled, version, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(worker_id) DO UPDATE SET
+                    capabilities = excluded.capabilities,
+                    pools = excluded.pools,
+                    profile_id = excluded.profile_id,
+                    capacity = excluded.capacity,
+                    enabled = excluded.enabled,
+                    version = excluded.version,
+                    updated_at = excluded.updated_at""",
+                (
+                    registration.worker_id,
+                    json.dumps(list(registration.capabilities)),
+                    json.dumps(list(registration.pools)),
+                    registration.profile_id,
+                    registration.capacity,
+                    int(registration.enabled),
+                    registration.version,
+                    now_iso(),
+                ),
+            )
+
+    def get_worker_registration(self, worker_id: str) -> WorkerRegistration | None:
+        row = self._conn.execute(
+            "SELECT * FROM worker_registrations WHERE worker_id = ?", (worker_id,)
+        ).fetchone()
+        return self._row_to_worker_registration(row) if row is not None else None
+
+    def get_worker_registrations(self) -> list[WorkerRegistration]:
+        rows = self._conn.execute(
+            "SELECT * FROM worker_registrations ORDER BY worker_id"
+        ).fetchall()
+        return [self._row_to_worker_registration(row) for row in rows]
+
+    def _row_to_worker_registration(self, row: sqlite3.Row) -> WorkerRegistration:
+        active_claims = self._conn.execute(
+            "SELECT COUNT(*) FROM worker_claims WHERE worker_id = ? AND status = 'active'",
+            (row["worker_id"],),
+        ).fetchone()[0]
+        return WorkerRegistration(
+            worker_id=row["worker_id"],
+            capabilities=tuple(json.loads(row["capabilities"])),
+            pools=tuple(json.loads(row["pools"])),
+            profile_id=row["profile_id"],
+            capacity=row["capacity"],
+            active_claims=active_claims,
+            enabled=bool(row["enabled"]),
+            version=row["version"],
+        )
 
     # ------------------------------------------------------------------
     # Activation / declared-output indexes

@@ -12,6 +12,7 @@ from aigineering.core.activation import check_activation
 from aigineering.core.budget_manager import BudgetManager
 from aigineering.core.crash import check_crash_point
 from aigineering.core.context_overflow import ContextOverflowHandler
+from aigineering.core.continuation_manager import _tool_observation_succeeded
 from aigineering.core.disclosure import compute_disclosure, redact_for_disclosure
 from aigineering.core.labels import Label, LABEL_MODE_DEBUG, resolve_contract_labels
 from aigineering.core.method_handlers.recovery import (
@@ -818,14 +819,31 @@ class Engine:
                 completion = getattr(handler, "handle_completion", None)
                 if callable(completion):
                     if completion(_make_runtime(self), contract, method_assets):
+                        if method_type == "tool":
+                            method_assets = [
+                                asset
+                                for output in contract.outputs
+                                if output.startswith(("_tool_obs_", "_mcp_obs_"))
+                                for asset in self._store.get_assets_by_name(output)
+                                if asset.promptable
+                            ]
                         parent = self._store.get_contract(parent_id)
                         if parent is not None and self._all_outputs_satisfied(parent):
                             self._complete_contract(parent)
                             self._complete_satisfied_ancestors(parent)
                         elif method_type == "tool" and parent is not None:
-                            self._schedule_continuation_contract(
-                                parent, contract, method_assets
-                            )
+                            if _tool_observation_succeeded(method_assets):
+                                self._schedule_continuation_contract(
+                                    parent, contract, method_assets
+                                )
+                            else:
+                                self._emit_terminal_event(
+                                    parent.id,
+                                    "failed",
+                                    budget_remaining=self._resolve_budget(parent),
+                                )
+                                self._completed.add(parent.id)
+                                self._suspended.discard(parent.id)
                         else:
                             self._complete_satisfied_ancestors(contract)
                         return
@@ -837,7 +855,14 @@ class Engine:
             return
 
         if method_type == "tool" and parent is not None:
-            self._schedule_continuation_contract(parent, contract, method_assets)
+            if _tool_observation_succeeded(method_assets):
+                self._schedule_continuation_contract(parent, contract, method_assets)
+            else:
+                self._emit_terminal_event(
+                    parent.id, "failed", budget_remaining=self._resolve_budget(parent)
+                )
+                self._completed.add(parent.id)
+                self._suspended.discard(parent.id)
             return
 
         self._add_trace(
@@ -892,6 +917,8 @@ class Engine:
                 budget=budget,
                 tool_scope=list(parent.tool_scope),
                 labels=list(parent.labels),
+                worker_capabilities=list(parent.worker_capabilities),
+                worker_pools=list(parent.worker_pools),
                 origin="continuation",
                 parent_id=parent.id,
             ),
@@ -903,6 +930,8 @@ class Engine:
             budget=budget,
             tool_scope=parent.tool_scope,
             labels=parent.labels,
+            worker_capabilities=parent.worker_capabilities,
+            worker_pools=parent.worker_pools,
             origin="continuation",
             minting_authority=parent.minting_authority,
             sensitive_input_policy=parent.sensitive_input_policy,

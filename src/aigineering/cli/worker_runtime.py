@@ -10,6 +10,7 @@ from aigineering.core.activation import check_activation
 from aigineering.core.disclosure import compute_disclosure
 from aigineering.core.runtime_ingress import RuntimeIngress
 from aigineering.core.submit import _all_outputs_satisfied, submit_candidate
+from aigineering.core.worker_routing import is_eligible
 from aigineering.protocol.envelope import CandidateEnvelope
 from aigineering.protocol.package import WorkerPackage
 from aigineering.protocol.types import Asset, Contract
@@ -58,6 +59,8 @@ def claim_next_package(
 ) -> ClaimedPackage | None:
     """Claim the next ready contract and return its worker package."""
     available_names = {a.name for a in store.get_all_assets()}
+    get_registration = getattr(store, "get_worker_registration", None)
+    registered_worker = get_registration(worker_id) if get_registration else None
     for contract in store.get_all_contracts():
         if contract.activation and not check_activation(
             contract.activation, available_names
@@ -77,6 +80,19 @@ def claim_next_package(
         if remaining_budget <= 0:
             continue
 
+        # Compatibility remains available for legacy unconstrained contracts,
+        # but a constrained contract is never claimed by an unknown or
+        # ineligible worker. Routing labels are not disclosed prompt assets.
+        if contract.worker_capabilities or contract.worker_pools:
+            if registered_worker is None or not is_eligible(
+                contract, registered_worker
+            ):
+                continue
+        elif registered_worker is not None and not is_eligible(
+            contract, registered_worker
+        ):
+            continue
+
         disclosed = tuple(compute_disclosure(contract, store))
         method_context_assets = _method_context_assets_for(contract, store)
         package = WorkerPackage(
@@ -86,6 +102,13 @@ def claim_next_package(
             method_context_assets=method_context_assets,
             tool_scope=contract.tool_scope,
             budget_remaining=remaining_budget,
+            capability_requirements=contract.worker_capabilities,
+            worker_profile_id=(
+                registered_worker.profile_id if registered_worker else ""
+            ),
+            worker_registration_version=(
+                registered_worker.version if registered_worker else ""
+            ),
         )
         claim_contract = getattr(store, "claim_contract", None)
         if claim_contract is not None:
@@ -107,7 +130,28 @@ def claim_next_package(
                 claim_id=claim["claim_id"],
                 lease_until=claim["lease_until"],
                 package_id=package.package_id,
+                capability_requirements=contract.worker_capabilities,
+                worker_profile_id=(
+                    registered_worker.profile_id if registered_worker else ""
+                ),
+                worker_registration_version=(
+                    registered_worker.version if registered_worker else ""
+                ),
             )
+            new_entry = getattr(store, "new_entry", None)
+            if new_entry is not None:
+                new_entry(
+                    contract.id,
+                    "worker_routed",
+                    worker_id=worker_id,
+                    relation_type="worker_profile",
+                    relation_target=(
+                        f"{registered_worker.profile_id}@{registered_worker.version}"
+                        if registered_worker
+                        else "legacy"
+                    ),
+                    budget_remaining=remaining_budget,
+                )
         return ClaimedPackage(contract, disclosed, package)
     return None
 

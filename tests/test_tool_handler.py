@@ -41,8 +41,8 @@ def test_handler_can_handle_tool():
     assert handler.can_handle("replan") is False
 
 
-def test_handler_schedules_tool_child():
-    """ToolMethodHandler.handle_method creates a child contract via scheduler."""
+def test_handler_failed_tool_closes_parent_without_continuation():
+    """A tool failure is terminal and cannot recursively create continuation work."""
     registry = MethodRegistry()
     handler = ToolMethodHandler()
     registry.register("tool", handler)
@@ -79,7 +79,9 @@ def test_handler_schedules_tool_child():
     continuations = [c for c in child_contracts if c.origin == "continuation"]
     assert len(system_children) == 1
     assert system_children[0].name == "root.tool"
-    assert len(continuations) == 1
+    assert continuations == []
+    failed = trace_store.get_by_event_type("failed")
+    assert [entry.contract_id for entry in failed] == [contract.id]
 
 
 def test_handler_executes_tool_on_completion():

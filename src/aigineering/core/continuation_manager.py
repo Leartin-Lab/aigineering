@@ -7,6 +7,8 @@ delegates cleanly without exposing private internals.
 
 from __future__ import annotations
 
+import json
+
 from typing import TYPE_CHECKING
 
 from aigineering.core.ids import hash_contract_v2
@@ -114,9 +116,16 @@ class ContinuationManager:
                             self._complete_contract(parent)
                             self._complete_satisfied_ancestors(parent)
                         elif method_type == "tool" and parent is not None:
-                            self.schedule_continuation_contract(
-                                parent, contract, method_assets
-                            )
+                            if _tool_observation_succeeded(method_assets):
+                                self.schedule_continuation_contract(
+                                    parent, contract, method_assets
+                                )
+                            else:
+                                self._emit_terminal_event(
+                                    parent.id,
+                                    "failed",
+                                    budget_remaining=self._resolve_budget(parent),
+                                )
                         else:
                             self._complete_satisfied_ancestors(contract)
                         return
@@ -128,7 +137,14 @@ class ContinuationManager:
             return
 
         if method_type == "tool" and parent is not None:
-            self.schedule_continuation_contract(parent, contract, method_assets)
+            if _tool_observation_succeeded(method_assets):
+                self.schedule_continuation_contract(parent, contract, method_assets)
+            else:
+                self._emit_terminal_event(
+                    parent.id,
+                    "failed",
+                    budget_remaining=self._resolve_budget(parent),
+                )
             return
 
         self._add_trace(
@@ -168,6 +184,8 @@ class ContinuationManager:
                 budget=budget,
                 tool_scope=list(parent.tool_scope),
                 labels=list(parent.labels),
+                worker_capabilities=list(parent.worker_capabilities),
+                worker_pools=list(parent.worker_pools),
                 origin="continuation",
                 parent_id=parent.id,
             ),
@@ -179,6 +197,8 @@ class ContinuationManager:
             budget=budget,
             tool_scope=parent.tool_scope,
             labels=parent.labels,
+            worker_capabilities=parent.worker_capabilities,
+            worker_pools=parent.worker_pools,
             origin="continuation",
             minting_authority=parent.minting_authority,
             sensitive_input_policy=parent.sensitive_input_policy,
@@ -270,3 +290,14 @@ class ContinuationManager:
                 relation_target=",".join(resolution.label_names),
                 budget_remaining=self._resolve_budget(contract),
             )
+
+
+def _tool_observation_succeeded(method_assets: list["Asset"]) -> bool:
+    """Return true only for an explicit successful tool observation."""
+    for asset in method_assets:
+        if asset.name.startswith(("_tool_obs_", "_mcp_obs_")):
+            try:
+                return json.loads(asset.content).get("ok") is True
+            except json.JSONDecodeError:
+                return False
+    return False

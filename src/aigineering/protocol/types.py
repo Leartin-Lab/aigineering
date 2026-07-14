@@ -45,6 +45,8 @@ class Contract:
     budget: int = 0
     tool_scope: tuple[str, ...] = field(default_factory=tuple)
     labels: tuple[str, ...] = field(default_factory=tuple)
+    worker_capabilities: tuple[str, ...] = field(default_factory=tuple)
+    worker_pools: tuple[str, ...] = field(default_factory=tuple)
     origin: str = "human"
     minting_authority: tuple[str, ...] = field(default_factory=tuple)
     sensitive_input_policy: Optional[MappingProxyType] = None
@@ -54,6 +56,8 @@ class Contract:
         object.__setattr__(self, "outputs", tuple(self.outputs))
         object.__setattr__(self, "tool_scope", tuple(self.tool_scope))
         object.__setattr__(self, "labels", tuple(self.labels))
+        object.__setattr__(self, "worker_capabilities", tuple(self.worker_capabilities))
+        object.__setattr__(self, "worker_pools", tuple(self.worker_pools))
         object.__setattr__(self, "minting_authority", tuple(self.minting_authority))
         if self.sensitive_input_policy is not None:
             object.__setattr__(

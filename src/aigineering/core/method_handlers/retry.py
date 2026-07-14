@@ -54,6 +54,8 @@ class RetryMethodHandler:
             budget=contract.budget,
             tool_scope=contract.tool_scope,
             labels=contract.labels,
+            worker_capabilities=contract.worker_capabilities,
+            worker_pools=contract.worker_pools,
             origin=contract.origin,
             sensitive_input_policy=contract.sensitive_input_policy,
         )

@@ -33,7 +33,9 @@ _PLAN_RESERVED_PREFIXES: frozenset[str] = RESERVED_PREFIXES | frozenset({"_perso
 
 # Fields the planner must not set in child contract payloads.
 # (origin is always hard-clamped to "plan" by the engine.)
-_PLAN_PROTECTED_FIELDS: frozenset[str] = frozenset({"trust_tier", "created_by"})
+_PLAN_PROTECTED_FIELDS: frozenset[str] = frozenset(
+    {"trust_tier", "created_by", "worker_capabilities", "worker_pools"}
+)
 
 _ACTIVATION_KEYWORDS: frozenset[str] = frozenset({"AND", "OR", "NOT"})
 
@@ -92,6 +94,8 @@ def method_contract(parent: Contract, action: WorkerAction) -> Contract:
         budget=1,
         tool_scope=tool_scope,
         labels=labels,
+        worker_capabilities=parent.worker_capabilities,
+        worker_pools=parent.worker_pools,
         origin="system",
         parent_id=parent.id,
     )
@@ -134,6 +138,9 @@ def _method_description(parent: Contract, action: WorkerAction) -> str:
             "method": action.type,
             "parent_contract_id": parent.id,
             "parent_contract_name": parent.name,
+            "parent_inputs": list(parent.inputs),
+            "parent_outputs": list(parent.outputs),
+            "parent_tool_scope": list(parent.tool_scope),
             "payload": payload,
         },
         sort_keys=True,
@@ -382,6 +389,8 @@ def contracts_from_plan_asset(
                     budget=budget,
                     tool_scope=tool_scope,
                     labels=labels,
+                    worker_capabilities=(),
+                    worker_pools=(),
                     origin=origin,
                 )
             )
@@ -566,6 +575,8 @@ def contracts_from_plan_asset(
                 budget=budget,
                 tool_scope=tool_scope,
                 labels=labels,
+                worker_capabilities=parent_contract.worker_capabilities,
+                worker_pools=parent_contract.worker_pools,
                 origin=origin,
                 sensitive_input_policy=(
                     parent_contract.sensitive_input_policy

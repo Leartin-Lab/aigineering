@@ -87,6 +87,8 @@ def schedule_method_result_recovery(
         budget=1,
         tool_scope=[],
         labels=[f"method:{method_type}"],
+        worker_capabilities=failed_contract.worker_capabilities,
+        worker_pools=failed_contract.worker_pools,
         origin="system",
         parent_id=parent_id,
     )
@@ -182,6 +184,8 @@ def schedule_projection_recovery(
         budget=1,
         tool_scope=list(failed_contract.tool_scope),
         labels=list(failed_contract.labels),
+        worker_capabilities=list(failed_contract.worker_capabilities),
+        worker_pools=list(failed_contract.worker_pools),
         origin="recovery",
         parent_id=failed_contract.parent_id,
     )
@@ -199,6 +203,8 @@ def schedule_projection_recovery(
         budget=1,
         tool_scope=failed_contract.tool_scope,
         labels=failed_contract.labels,
+        worker_capabilities=failed_contract.worker_capabilities,
+        worker_pools=failed_contract.worker_pools,
         origin="recovery",
         minting_authority=(context_name, *failed_contract.minting_authority),
         sensitive_input_policy=failed_contract.sensitive_input_policy,

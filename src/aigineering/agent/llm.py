@@ -14,6 +14,7 @@ from types import MappingProxyType
 from typing import Any
 
 from aigineering.agent.prompt import contract_prompt, system_prompt
+from aigineering.core.worker_routing import WorkerRegistration
 from aigineering.protocol.types import Asset, Candidate, Contract
 
 logger = logging.getLogger(__name__)
@@ -47,6 +48,10 @@ class LLMConfig:
     retry_backoff: float = 2.0  # multiplier
     capabilities: frozenset[str] = field(default_factory=frozenset)
     tool_definitions: list[dict[str, object]] | None = None
+    routing_capabilities: frozenset[str] = field(default_factory=frozenset)
+    worker_pools: frozenset[str] = field(default_factory=frozenset)
+    profile_id: str = "openai-compatible-v1"
+    capacity: int = 1
 
 
 class ProviderError(Exception):
@@ -74,6 +79,10 @@ class LLMWorker:
         retry_backoff: float | None = None,
         capabilities: frozenset[str] | None = None,
         tool_definitions: list[dict[str, object]] | None = None,
+        routing_capabilities: frozenset[str] | None = None,
+        worker_pools: frozenset[str] | None = None,
+        profile_id: str | None = None,
+        capacity: int | None = None,
     ) -> None:
         if config is not None:
             self.model = config.model
@@ -95,6 +104,18 @@ class LLMWorker:
                 if tool_definitions is not None
                 else config.tool_definitions
             )
+            self._routing_capabilities = (
+                routing_capabilities
+                if routing_capabilities is not None
+                else config.routing_capabilities
+            )
+            self._worker_pools = (
+                worker_pools if worker_pools is not None else config.worker_pools
+            )
+            self.profile_id = (
+                profile_id if profile_id is not None else config.profile_id
+            )
+            self._capacity = capacity if capacity is not None else config.capacity
         else:
             self.model = model
             self.api_key = (
@@ -108,6 +129,13 @@ class LLMWorker:
             self._retry_backoff = retry_backoff if retry_backoff is not None else 2.0
             self._capabilities = capabilities or frozenset()
             self._tool_definitions = tool_definitions
+            self._routing_capabilities = routing_capabilities or frozenset()
+            self._worker_pools = worker_pools or frozenset()
+            self.profile_id = profile_id or "openai-compatible-v1"
+            self._capacity = capacity if capacity is not None else 1
+
+        if self._capacity < 1:
+            raise ValueError("capacity must be at least 1")
 
         self.worker_id = worker_id or f"llm:{self._sanitize_model_name()}"
         self._transport = transport
@@ -165,6 +193,7 @@ class LLMWorker:
             response,
             model=self.model,
             provider=self._provider_name(),
+            worker_profile=self.profile_id,
         )
 
         tool_calls = _extract_tool_calls(response)
@@ -182,6 +211,20 @@ class LLMWorker:
             raw_output=_extract_message_content(response),
             parsed_action=None,
             metadata=usage_metadata,
+        )
+
+    def registration(self) -> WorkerRegistration:
+        """Return trusted routing metadata for this stateless LLM worker.
+
+        Registration is control-plane data. Callers persist it through the
+        runtime store; it is not disclosed to model prompts.
+        """
+        return WorkerRegistration(
+            worker_id=self.worker_id,
+            capabilities=tuple(self._routing_capabilities),
+            pools=tuple(self._worker_pools),
+            profile_id=self.profile_id,
+            capacity=self._capacity,
         )
 
     def _call_with_retry(
@@ -393,6 +436,7 @@ def _build_usage_metadata(
     *,
     model: str,
     provider: str,
+    worker_profile: str,
 ) -> MappingProxyType | None:
     """Build usage metadata with token counts, model, and provider.
 
@@ -403,12 +447,14 @@ def _build_usage_metadata(
         result: dict[str, object] = {
             "model": model,
             "provider": provider,
+            "worker_profile": worker_profile,
         }
         return MappingProxyType(result)
 
     result = dict(usage)
     result["model"] = model
     result["provider"] = provider
+    result["worker_profile"] = worker_profile
     return MappingProxyType(result)
 
 

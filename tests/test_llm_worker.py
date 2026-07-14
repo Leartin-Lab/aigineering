@@ -125,6 +125,25 @@ def test_llmconfig_defaults():
     assert cfg.retry_backoff == 2.0
 
 
+def test_llm_worker_exposes_routing_registration_without_prompt_injection():
+    worker = LLMWorker(
+        model="vision-model",
+        transport=_ok_transport,
+        routing_capabilities=frozenset({"vision", "strict-action"}),
+        worker_pools=frozenset({"advanced"}),
+        profile_id="deepseek-vision-v1",
+        capacity=2,
+    )
+
+    registration = worker.registration()
+
+    assert registration.worker_id == "llm:vision-model"
+    assert registration.capabilities == ("strict-action", "vision")
+    assert registration.pools == ("advanced",)
+    assert registration.profile_id == "deepseek-vision-v1"
+    assert registration.capacity == 2
+
+
 def test_llm_worker_from_config():
     cfg = LLMConfig(model="cfg-model", timeout=30.0, max_retries=5, retry_backoff=3.0)
     worker = LLMWorker(model="ignored", config=cfg, transport=_ok_transport)

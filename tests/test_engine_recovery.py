@@ -528,6 +528,14 @@ def test_restore_from_store_with_tool_observation():
     )
     tools = ToolRegistry()
     tools.register(ToolSpec(name="lookup"), lambda args: f"value:{args['key']}")
+    store._add_system_asset(
+        create_tool_descriptor(
+            "lookup",
+            "Lookup test values.",
+            {"type": "object"},
+            trust_tier="configured",
+        )
+    )
 
     contract = Contract(
         id="contract_parent",
