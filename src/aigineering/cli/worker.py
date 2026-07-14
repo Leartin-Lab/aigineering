@@ -24,8 +24,7 @@ from aigineering.core.submit import (
     submit_candidate,
 )
 from aigineering.protocol.envelope import CandidateEnvelope
-from aigineering.protocol.package import WorkerPackage
-from aigineering.protocol.wire import asset_to_dict, contract_to_dict
+from aigineering.protocol.wire import contract_to_dict
 
 
 @click.group("worker")
@@ -45,7 +44,12 @@ def worker() -> None:
     help="Output machine-readable JSON instead of human-readable text.",
 )
 def worker_package(contract_id: str, json_output: bool) -> None:
-    """Create a WorkerPackage for a contract from the durable store."""
+    """Preview package metadata without creating worker-visible disclosure.
+
+    A submittable WorkerPackage is only emitted by ``worker next`` after an
+    atomic claim.  This command is an operator view and never exposes asset
+    content or a package identity.
+    """
     store = _persistent_store()
     contract = store.get_contract(contract_id)
     if contract is None:
@@ -57,22 +61,47 @@ def worker_package(contract_id: str, json_output: bool) -> None:
 
     scope = compute_disclosure(contract, store)
     method_context_assets = _method_context_assets_for(contract, store)
-    pkg = WorkerPackage(
-        contract_id=contract.id,
-        contract=contract_to_dict(contract),
-        disclosed_assets=tuple(asset_to_dict(a) for a in scope),
-        method_context_assets=method_context_assets,
-        tool_scope=contract.tool_scope,
-        budget_remaining=contract.budget,
-        capability_requirements=contract.worker_capabilities,
-    )
+
+    def metadata(asset: object) -> dict[str, object]:
+        if isinstance(asset, dict):
+            return {
+                key: asset[key]
+                for key in (
+                    "id",
+                    "name",
+                    "content_type",
+                    "trust_tier",
+                    "promptable",
+                    "disclosure_view",
+                )
+                if key in asset
+            }
+        return {
+            "id": asset.id,
+            "name": asset.name,
+            "content_type": asset.content_type,
+            "trust_tier": asset.trust_tier,
+            "promptable": asset.promptable,
+            "disclosure_view": asset.disclosure_view,
+        }
+
+    preview = {
+        "view": "operator_package_preview",
+        "submittable": False,
+        "contract_id": contract.id,
+        "contract": contract_to_dict(contract),
+        "disclosed_assets": [metadata(asset) for asset in scope],
+        "method_context_assets": [metadata(asset) for asset in method_context_assets],
+        "tool_scope": list(contract.tool_scope),
+        "budget_remaining": contract.budget,
+        "capability_requirements": list(contract.worker_capabilities),
+    }
 
     if json_output:
-        result = json.loads(pkg.to_json())
-        _output_json(result)
+        _output_json(preview)
         return
 
-    click.echo(pkg.to_json())
+    click.echo(json.dumps(preview, sort_keys=True, ensure_ascii=False))
 
 
 @worker.command("next")

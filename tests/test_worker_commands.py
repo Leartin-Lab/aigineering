@@ -162,7 +162,7 @@ def _envelope_json_from_package(
 
 
 def test_worker_package_creation():
-    """aig worker package --contract <id> --json returns valid WorkerPackage JSON."""
+    """Unclaimed package command returns a non-submittable operator preview."""
     runner = CliRunner()
     with runner.isolated_filesystem():
         store = SQLiteStore(".aig/store.db")
@@ -178,15 +178,17 @@ def test_worker_package_creation():
         assert data["contract_id"] == contract.id
         assert isinstance(data["contract"], dict)
         assert data["contract"]["name"] == "test_contract"
+        assert data["view"] == "operator_package_preview"
+        assert data["submittable"] is False
+        assert "package_id" not in data
+        assert "claim_id" not in data
         assert isinstance(data["disclosed_assets"], list)
         assert len(data["disclosed_assets"]) == 1
         assert data["disclosed_assets"][0]["name"] == "input1"
+        assert "content" not in data["disclosed_assets"][0]
+        assert asset.content not in result.output
         assert data["tool_scope"] == []
         assert data["budget_remaining"] == 5
-
-        # Round-trip: deserialize should succeed
-        pkg = WorkerPackage.from_json(json.dumps(data))
-        assert pkg.contract_id == contract.id
 
 
 def test_worker_package_missing_contract():
@@ -203,7 +205,7 @@ def test_worker_package_missing_contract():
 
 
 def test_worker_package_includes_continuation_method_context():
-    """Durable packages include method context assets for continuation tasks."""
+    """Operator preview includes only method-context metadata."""
     runner = CliRunner()
     with runner.isolated_filesystem():
         store = SQLiteStore(".aig/store.db")
@@ -217,9 +219,11 @@ def test_worker_package_includes_continuation_method_context():
         data = json.loads(result.output)
         assert data["contract_id"] == continuation.id
         assert [a["name"] for a in data["method_context_assets"]] == [obs.name]
+        assert "content" not in data["method_context_assets"][0]
+        assert obs.content not in result.output
 
 
-def test_worker_package_redacts_method_context_disclosure_view():
+def test_worker_package_never_emits_method_context_content():
     runner = CliRunner()
     with runner.isolated_filesystem():
         store = SQLiteStore(".aig/store.db")
@@ -233,7 +237,7 @@ def test_worker_package_redacts_method_context_disclosure_view():
         assert result.exit_code == 0
         context = json.loads(result.output)["method_context_assets"]
         assert context[0]["id"] == obs.id
-        assert context[0]["content"] == "[redacted]"
+        assert "content" not in context[0]
         assert "value:x" not in result.output
 
 
