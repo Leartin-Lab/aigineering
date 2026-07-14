@@ -124,6 +124,13 @@ def test_run_persists_assets_contracts_and_session_manifest():
         assert len(assets) > 0, "final_report asset must exist in SQLite store"
         contracts = [c for c in store.get_all_contracts() if c.name == "build_report"]
         assert len(contracts) > 0, "build_report contract must exist in SQLite store"
+        assert contracts[0].description == "Build a report for goal: test"
+        record_types = [
+            record.record_type for _, record in store.scan_runtime_records()
+        ]
+        assert "claim.granted" in record_types
+        assert "candidate.received" in record_types
+        assert "claim.submitted" in record_types
         store.close()
 
 

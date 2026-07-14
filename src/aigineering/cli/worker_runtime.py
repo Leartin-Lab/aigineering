@@ -188,8 +188,10 @@ def execute_claimed_package(
     claimed: ClaimedPackage,
     worker: MockWorker | LLMWorker,
     store,
+    trace_store=None,
 ) -> dict:
     """Invoke a worker and submit its candidate envelope."""
+    trace = trace_store if trace_store is not None else store
     candidate = worker.invoke(claimed.contract, list(claimed.disclosed_assets))
     envelope = CandidateEnvelope(
         contract_id=claimed.contract.id,
@@ -205,11 +207,11 @@ def execute_claimed_package(
         claim_epoch=claimed.package.claim_epoch,
         idempotency_key=f"run-{claimed.package.package_id}",
     )
-    ingress = RuntimeIngress(store, store)
+    ingress = RuntimeIngress(store, trace)
     return submit_candidate(
         envelope=envelope,
         store=store,
-        trace_store=store,
+        trace_store=trace,
         ingress=ingress,
         idempotency_key=envelope.idempotency_key,
     )

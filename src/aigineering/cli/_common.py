@@ -9,18 +9,12 @@ from typing import Optional
 
 import click
 
-from aigineering.core.engine import Engine
 from aigineering.core.ids import (
     hash_asset_content,
     hash_asset_definition,
     hash_contract,
 )
 from aigineering.core.runtime_ingress import RuntimeIngress
-from aigineering.core.startup_check import (
-    begin_runtime_startup,
-    end_runtime,
-    renew_heartbeat,
-)
 from aigineering.core.method_handlers.fail import FailMethodHandler
 from aigineering.core.method_handlers.plan import PlanMethodHandler
 from aigineering.core.method_handlers.replan import ReplanMethodHandler
@@ -264,32 +258,38 @@ def _run_demo(
             origin="human",
         ),
         name="build_report",
+        description=f"Build a report for goal: {goal}",
         inputs=["data_file", "citation_db"],
         outputs=["final_report"],
         activation="data_file AND citation_db",
         budget=5,
+        labels=list(behavior_labels),
     )
 
-    engine = Engine(
+    before_trace_ids = {entry.id for entry in getattr(store, "get_all", lambda: [])()}
+    ingress.accept_contract(contract)
+    ingress.accept_asset(data_file, source="demo")
+    ingress.accept_asset(citation_db, source="demo")
+
+    from aigineering.cli.worker_runtime import (
+        claim_next_package,
+        execute_claimed_package,
+    )
+
+    claimed = claim_next_package(
         store,
-        worker,
-        trace_store,
-        method_registry=_default_method_registry(),
-        ingress=ingress,
+        worker_id="cli:demo",
+        contract_id=contract.id,
     )
-    engine.add_contract(contract)
-    engine.add_asset(data_file)
-    engine.add_asset(citation_db)
+    if claimed is None:
+        raise RuntimeError(f"demo contract {contract.id!r} could not be claimed")
+    execute_claimed_package(claimed, worker, store, trace_store)
 
-    runtime_result = begin_runtime_startup(store)
-    try:
-        engine.run(
-            heartbeat_callback=lambda: renew_heartbeat(
-                store, runtime_result.runtime_owner
-            )
-        )
-    finally:
-        end_runtime(store, runtime_result.runtime_owner)
+    # Session JSONL is an audit export of the durable runtime trace, not an
+    # independent execution store.
+    for entry in getattr(store, "get_all", lambda: [])():
+        if entry.id not in before_trace_ids:
+            trace_store.append(entry)
 
     return store, trace_store, contract
 
