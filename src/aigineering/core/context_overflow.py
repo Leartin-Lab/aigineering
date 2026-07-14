@@ -133,7 +133,11 @@ class ContextOverflowOrchestrator:
         )
 
         report_asset = self._overflow_handler.create_report_asset(contract.id, overflow)
-        self._ingress.accept_asset(report_asset, source="engine")
+        self._ingress.accept_asset(
+            report_asset,
+            source="context_overflow",
+            allow_protected=True,
+        )
 
         action = WorkerAction(
             type="replan",

@@ -11,6 +11,8 @@ from aigineering.core.sufficiency import (
 )
 from aigineering.core.ids import hash_asset_content, hash_asset_definition
 from aigineering.core.provenance import sign_asset
+from aigineering.core.runtime_ingress import RuntimeIngress
+from aigineering.core.trace import MemoryTraceStore
 from aigineering.protocol.types import Asset, Contract
 
 
@@ -361,7 +363,11 @@ def test_sufficiency_asset_can_be_stored_and_retrieved():
     store.add_asset(_make_asset("data_file", "data", signed=True))
 
     asset = sufficiency_result_asset(contract, store)
-    store.add_asset(sign_asset(asset))
+    RuntimeIngress(store, MemoryTraceStore()).accept_asset(
+        asset,
+        source="sufficiency",
+        allow_protected=True,
+    )
 
     retrieved = store.get_asset(asset.id)
     assert retrieved is not None
