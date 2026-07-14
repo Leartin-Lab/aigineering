@@ -818,6 +818,48 @@ def test_candidate_submission_rolls_back_on_mid_commit_failure(store, monkeypatc
     assert claim["status"] == "active"
 
 
+def test_method_submission_rolls_back_child_context_and_claim(store, monkeypatch):
+    from aigineering.core.methods import system_asset
+    from aigineering.core.trace import create_entry
+    from aigineering.protocol.runtime_record import create_runtime_record
+
+    store.persist_claim(
+        "claim-method",
+        "c-parent",
+        "worker",
+        "2026-12-31T00:00:00+00:00",
+        package_id="pkg:method",
+    )
+    child = Contract(id="c-method", parent_id="c-parent", origin="system")
+    context = sign_asset(system_asset("_method_ctx_c-parent", "context", "c-parent"))
+    entry = create_entry("c-parent", "method_scheduled")
+    record = create_runtime_record("method.scheduled", {"contract_id": "c-parent"})
+
+    def fail_trace(_entry):
+        raise RuntimeError("simulated method trace failure")
+
+    monkeypatch.setattr(store, "_insert_trace_entry", fail_trace)
+    with pytest.raises(RuntimeError, match="method trace failure"):
+        store.commit_method_submission(
+            child_contract=child,
+            context_asset=context,
+            trace_entries=[entry],
+            runtime_records=(record,),
+            idempotency_key="idem-method",
+            idempotency_result={"status": "method_scheduled"},
+            claim_id="claim-method",
+            worker_id="worker",
+            package_id="pkg:method",
+            claim_epoch=1,
+        )
+
+    assert store.get_contract(child.id) is None
+    assert store.get_asset(context.id) is None
+    assert store.get_runtime_record(record.id) is None
+    assert store.get_idempotency("c-parent", "idem-method") is None
+    assert store.get_claim("c-parent")["status"] == "active"
+
+
 def test_candidate_submission_rolls_back_when_claim_predicate_fails(store, monkeypatch):
     """A stale claim state at commit time rejects and rolls back the submission."""
     from aigineering.core.runtime_ingress import RuntimeIngress

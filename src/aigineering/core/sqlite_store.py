@@ -1751,6 +1751,82 @@ class SQLiteStore:
                 )
         return True
 
+    def commit_method_submission(
+        self,
+        *,
+        child_contract: Contract,
+        context_asset: Asset | None,
+        trace_entries: list[TraceEntry],
+        runtime_records: tuple[RuntimeRecord, ...],
+        idempotency_key: str,
+        idempotency_result: dict,
+        claim_id: str,
+        worker_id: str,
+        package_id: str,
+        claim_epoch: int,
+    ) -> bool:
+        """Atomically schedule a method child and consume its parent claim."""
+        with self._conn:
+            self._insert_contract(child_contract)
+            if context_asset is not None:
+                if not context_asset.signed_by or not verify_asset_seal(context_asset):
+                    raise ValueError("method context asset has no valid canonical seal")
+                self._insert_asset(context_asset)
+            check_crash_point("after_asset_before_trace")
+            for entry in trace_entries:
+                self._insert_trace_entry(entry)
+            for record in runtime_records:
+                self._insert_runtime_record(record)
+            if idempotency_key:
+                self.set_idempotency(
+                    trace_entries[0].contract_id,
+                    idempotency_key,
+                    idempotency_result,
+                )
+            committed_at = now_iso()
+            cursor = self._conn.execute(
+                "UPDATE worker_claims SET status = 'submitted', updated_at = ? "
+                "WHERE claim_id = ? AND status = 'active' AND worker_id = ? "
+                "AND package_id = ? AND epoch = ? AND lease_until >= ?",
+                (
+                    committed_at,
+                    claim_id,
+                    worker_id,
+                    package_id,
+                    claim_epoch,
+                    committed_at,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise sqlite3.IntegrityError(
+                    "active worker claim predicate failed during method submit"
+                )
+            claim_row = self._conn.execute(
+                "SELECT contract_id, worker_id, epoch, package_id "
+                "FROM worker_claims WHERE claim_id = ?",
+                (claim_id,),
+            ).fetchone()
+            method_parents = [
+                record.id
+                for record in runtime_records
+                if record.record_type == "method.scheduled"
+            ]
+            self._insert_runtime_record(
+                create_runtime_record(
+                    "claim.submitted",
+                    {
+                        "claim_id": claim_id,
+                        "contract_id": claim_row["contract_id"],
+                        "epoch": int(claim_row["epoch"]),
+                        "package_id": claim_row["package_id"],
+                        "worker_id": claim_row["worker_id"],
+                    },
+                    causal_parents=[self._claim_granted_record_id(claim_id)]
+                    + method_parents,
+                )
+            )
+        return True
+
     def commit_direct_execution(
         self,
         accepted_assets: list[Asset],
