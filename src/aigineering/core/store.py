@@ -17,6 +17,11 @@ from aigineering.core.provenance import verify_asset_seal
 from aigineering.core.record_conflict import ImmutableRecordConflict
 from aigineering.core.ids import compute_content_hash
 from aigineering.protocol.types import Asset, Contract
+from aigineering.protocol.runtime_record import (
+    RuntimeRecord,
+    runtime_record_effective_payload,
+    validate_runtime_record,
+)
 from aigineering.protocol.wire import asset_to_dict, contract_to_dict
 
 _logger = logging.getLogger(__name__)
@@ -52,6 +57,12 @@ class StoreProtocol(Protocol):
     def get_contracts_declaring_output(self, asset_name: str) -> list[str]: ...
     def rebuild_projection_indexes(self) -> None: ...
     def projection_index_digest(self) -> str: ...
+    def append_runtime_record(self, record: RuntimeRecord) -> int: ...
+    def get_runtime_record(self, record_id: str) -> RuntimeRecord | None: ...
+    def scan_runtime_records(
+        self, *, after_revision: int = 0, record_type: str | None = None
+    ) -> list[tuple[int, RuntimeRecord]]: ...
+    def get_runtime_revision(self) -> int: ...
 
 
 # ---------------------------------------------------------------------------
@@ -179,6 +190,8 @@ class MemoryStore(_ProjectionIndexMixin):
         self._reverse_activation_index: dict[str, set[str]] = {}
         self._declared_outputs_index: dict[str, set[str]] = {}
         self._worker_registrations: dict[str, object] = {}
+        self._runtime_records: dict[str, tuple[int, RuntimeRecord]] = {}
+        self._runtime_revision = 0
 
     def register_worker(self, registration) -> None:
         self._worker_registrations[registration.worker_id] = registration
@@ -188,6 +201,37 @@ class MemoryStore(_ProjectionIndexMixin):
 
     def get_worker_registrations(self) -> list:
         return list(self._worker_registrations.values())
+
+    def append_runtime_record(self, record: RuntimeRecord) -> int:
+        existing = self._runtime_records.get(record.id)
+        if existing is not None:
+            revision, existing_record = existing
+            if runtime_record_effective_payload(
+                existing_record
+            ) == runtime_record_effective_payload(record):
+                return revision
+            raise ImmutableRecordConflict("runtime record", record.id)
+        validate_runtime_record(record)
+        self._runtime_revision += 1
+        self._runtime_records[record.id] = (self._runtime_revision, record)
+        return self._runtime_revision
+
+    def get_runtime_record(self, record_id: str) -> RuntimeRecord | None:
+        existing = self._runtime_records.get(record_id)
+        return existing[1] if existing is not None else None
+
+    def scan_runtime_records(
+        self, *, after_revision: int = 0, record_type: str | None = None
+    ) -> list[tuple[int, RuntimeRecord]]:
+        return [
+            (revision, record)
+            for revision, record in self._runtime_records.values()
+            if revision > after_revision
+            and (record_type is None or record.record_type == record_type)
+        ]
+
+    def get_runtime_revision(self) -> int:
+        return self._runtime_revision
 
     def add_asset(self, asset: Asset) -> None:
         if not asset.signed_by or not verify_asset_seal(asset):

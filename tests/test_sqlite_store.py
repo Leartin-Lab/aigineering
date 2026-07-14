@@ -601,6 +601,7 @@ def test_all_tables_exist(store):
         "claims",
         "worker_claims",
         "idempotency_records",
+        "runtime_records",
         "schema_version",
     }
     assert expected.issubset(tables), f"Missing tables: {expected - tables}"

@@ -28,6 +28,11 @@ from aigineering.core.store import _projection_index_digest
 from aigineering.core.trace import trace_effective_payload
 from aigineering.core.worker_routing import WorkerRegistration
 from aigineering.protocol.types import Asset, Contract, TraceEntry
+from aigineering.protocol.runtime_record import (
+    RuntimeRecord,
+    runtime_record_effective_payload,
+    validate_runtime_record,
+)
 from aigineering.protocol.wire import (
     asset_to_dict,
     contract_to_dict,
@@ -36,7 +41,7 @@ from aigineering.protocol.wire import (
 
 _logger = logging.getLogger(__name__)
 
-CURRENT_SCHEMA_VERSION = 5
+CURRENT_SCHEMA_VERSION = 6
 
 # ---------------------------------------------------------------------------
 # Activation name extraction (shared with store.py)
@@ -239,6 +244,18 @@ CREATE TABLE IF NOT EXISTS worker_registrations (
 )
 """
 
+_DDL_CREATE_RUNTIME_RECORDS = """
+CREATE TABLE IF NOT EXISTS runtime_records (
+    revision INTEGER PRIMARY KEY AUTOINCREMENT,
+    record_id TEXT NOT NULL UNIQUE,
+    record_type TEXT NOT NULL,
+    schema_version INTEGER NOT NULL,
+    payload_json TEXT NOT NULL,
+    causal_parents TEXT NOT NULL DEFAULT '[]',
+    recorded_at TEXT NOT NULL
+)
+"""
+
 _DDL_INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_assets_definition_hash ON assets(definition_hash)",
     "CREATE INDEX IF NOT EXISTS idx_assets_content_hash ON assets(content_hash)",
@@ -255,6 +272,7 @@ _DDL_INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_activation_refs_asset ON contract_activation_refs(asset_name)",
     "CREATE INDEX IF NOT EXISTS idx_declared_outputs_name ON contract_declared_outputs(output_name)",
     "CREATE INDEX IF NOT EXISTS idx_worker_registrations_enabled ON worker_registrations(enabled)",
+    "CREATE INDEX IF NOT EXISTS idx_runtime_records_type_revision ON runtime_records(record_type, revision)",
 ]
 
 # ---------------------------------------------------------------------------
@@ -319,6 +337,7 @@ class SQLiteStore:
             _DDL_CREATE_DECLARED_OUTPUTS,
             _DDL_CREATE_RUNTIME_LIFECYCLE,
             _DDL_CREATE_WORKER_REGISTRATIONS,
+            _DDL_CREATE_RUNTIME_RECORDS,
         ]:
             self._conn.execute(ddl)
         for idx_ddl in _DDL_INDEXES:
@@ -375,6 +394,9 @@ class SQLiteStore:
             if current < 5:
                 self._migrate_to_v5()
                 self._record_schema_version(5)
+            if current < 6:
+                self._migrate_to_v6()
+                self._record_schema_version(6)
 
     def _migrate_to_v2(self) -> None:
         """Add 040 transactional worker state and contract authority metadata."""
@@ -441,6 +463,97 @@ class SQLiteStore:
         self._conn.execute(_DDL_CREATE_WORKER_REGISTRATIONS)
         for idx_ddl in _DDL_INDEXES:
             self._conn.execute(idx_ddl)
+
+    def _migrate_to_v6(self) -> None:
+        """Add the versioned append-only runtime-record envelope."""
+        self._conn.execute(_DDL_CREATE_RUNTIME_RECORDS)
+        for idx_ddl in _DDL_INDEXES:
+            self._conn.execute(idx_ddl)
+
+    # ── Immutable runtime-record envelope ────────────────────────────────
+
+    def append_runtime_record(self, record: RuntimeRecord) -> int:
+        with self._conn:
+            row = self._conn.execute(
+                "SELECT * FROM runtime_records WHERE record_id = ?", (record.id,)
+            ).fetchone()
+            if row is not None:
+                existing = self._row_to_runtime_record(row)
+                if runtime_record_effective_payload(
+                    existing
+                ) == runtime_record_effective_payload(record):
+                    return int(row["revision"])
+                raise ImmutableRecordConflict("runtime record", record.id)
+            validate_runtime_record(record)
+            try:
+                cursor = self._conn.execute(
+                    """INSERT INTO runtime_records (
+                        record_id, record_type, schema_version, payload_json,
+                        causal_parents, recorded_at
+                    ) VALUES (?, ?, ?, ?, ?, ?)""",
+                    (
+                        record.id,
+                        record.record_type,
+                        record.schema_version,
+                        json.dumps(
+                            runtime_record_effective_payload(record)["payload"],
+                            sort_keys=True,
+                        ),
+                        json.dumps(list(record.causal_parents)),
+                        record.recorded_at,
+                    ),
+                )
+            except sqlite3.IntegrityError:
+                row = self._conn.execute(
+                    "SELECT * FROM runtime_records WHERE record_id = ?", (record.id,)
+                ).fetchone()
+                if row is not None and runtime_record_effective_payload(
+                    self._row_to_runtime_record(row)
+                ) == runtime_record_effective_payload(record):
+                    return int(row["revision"])
+                raise ImmutableRecordConflict("runtime record", record.id) from None
+            return int(cursor.lastrowid)
+
+    def get_runtime_record(self, record_id: str) -> RuntimeRecord | None:
+        row = self._conn.execute(
+            "SELECT * FROM runtime_records WHERE record_id = ?", (record_id,)
+        ).fetchone()
+        return self._row_to_runtime_record(row) if row is not None else None
+
+    def scan_runtime_records(
+        self, *, after_revision: int = 0, record_type: str | None = None
+    ) -> list[tuple[int, RuntimeRecord]]:
+        if record_type is None:
+            rows = self._conn.execute(
+                "SELECT * FROM runtime_records WHERE revision > ? ORDER BY revision",
+                (after_revision,),
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                "SELECT * FROM runtime_records "
+                "WHERE revision > ? AND record_type = ? ORDER BY revision",
+                (after_revision, record_type),
+            ).fetchall()
+        return [
+            (int(row["revision"]), self._row_to_runtime_record(row)) for row in rows
+        ]
+
+    def get_runtime_revision(self) -> int:
+        row = self._conn.execute(
+            "SELECT COALESCE(MAX(revision), 0) FROM runtime_records"
+        ).fetchone()
+        return int(row[0])
+
+    @staticmethod
+    def _row_to_runtime_record(row: sqlite3.Row) -> RuntimeRecord:
+        return RuntimeRecord(
+            id=row["record_id"],
+            record_type=row["record_type"],
+            schema_version=int(row["schema_version"]),
+            payload=json.loads(row["payload_json"]),
+            causal_parents=tuple(json.loads(row["causal_parents"])),
+            recorded_at=row["recorded_at"],
+        )
 
     # ── Runtime Lifecycle ─────────────────────────────────────────────────
 

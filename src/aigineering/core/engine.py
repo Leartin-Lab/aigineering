@@ -57,6 +57,7 @@ from aigineering.protocol.types import (
 
 _logger = logging.getLogger(__name__)
 
+
 class _TraceManagerProxy(TraceManager):
     def __init__(self, delegate: TraceManager) -> None:
         self._delegate = delegate
