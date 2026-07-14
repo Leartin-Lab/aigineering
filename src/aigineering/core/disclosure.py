@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from collections.abc import Mapping
 from typing import Protocol
 
 from aigineering.core.labels import BEHAVIOR_LABEL_PREFIX, is_behavior_asset_allowed
+from aigineering.core.trust_policy import TrustPolicy
 from aigineering.protocol.types import Asset, Contract
 
 REDACTED_CONTENT = "[redacted]"
@@ -14,6 +16,18 @@ REDACTED_CONTENT = "[redacted]"
 class StoreLike(Protocol):
     def get_all_assets(self) -> list[Asset]: ...
     def get_assets_by_name(self, name: str) -> list[Asset]: ...
+
+
+class DisclosurePolicyError(ValueError):
+    """Raised before claim when sensitive inputs are not worker-disclosable."""
+
+    def __init__(self, contract_id: str, reasons: list[str]) -> None:
+        self.contract_id = contract_id
+        self.reasons = tuple(reasons)
+        super().__init__(
+            f"contract {contract_id!r} disclosure policy rejected: "
+            + "; ".join(reasons)
+        )
 
 
 def redact_for_disclosure(asset: Asset) -> Asset:
@@ -31,6 +45,7 @@ def redact_for_disclosure(asset: Asset) -> Asset:
 def compute_disclosure(contract: Contract, store: StoreLike) -> list[Asset]:
     seen: set[str] = set()
     result: list[Asset] = []
+    input_assets: list[Asset] = []
 
     for input_name in contract.inputs:
         for asset in store.get_assets_by_name(input_name):
@@ -38,7 +53,10 @@ def compute_disclosure(contract: Contract, store: StoreLike) -> list[Asset]:
                 continue
             if asset.id not in seen:
                 seen.add(asset.id)
-                result.append(redact_for_disclosure(asset))
+                input_assets.append(asset)
+                result.append(asset)
+
+    _enforce_sensitive_input_policy(contract, input_assets)
 
     # Include label-referenced assets (e.g. behavior:* labels) so that
     # promptable behaviour assets are disclosed alongside declared inputs.
@@ -51,6 +69,46 @@ def compute_disclosure(contract: Contract, store: StoreLike) -> list[Asset]:
                 continue
             if asset.id not in seen:
                 seen.add(asset.id)
-                result.append(redact_for_disclosure(asset))
+                result.append(asset)
 
-    return result
+    return [redact_for_disclosure(asset) for asset in result]
+
+
+def _enforce_sensitive_input_policy(
+    contract: Contract, input_assets: list[Asset]
+) -> None:
+    policy = contract.sensitive_input_policy
+    if not isinstance(policy, Mapping) or not policy:
+        return
+
+    reasons: list[str] = []
+    try:
+        decision = TrustPolicy.from_config(dict(policy)).evaluate(
+            input_assets, contract
+        )
+    except ValueError as exc:
+        reasons.append(str(exc))
+    else:
+        reasons.extend(sorted(decision.reasons))
+
+    required_defs = set(policy.get("required_definition_hashes", ()))
+    observed_defs = {asset.definition_hash for asset in input_assets}
+    for definition_hash in sorted(required_defs - observed_defs):
+        reasons.append(
+            f"required definition hash {definition_hash!r} is not among disclosed inputs"
+        )
+
+    if input_assets == [] and any(
+        key in policy
+        for key in (
+            "minimum_trust_tier",
+            "required_trust_tier",
+            "allowed_signers",
+            "required_signer",
+            "required_definition_hashes",
+        )
+    ):
+        reasons.append("sensitive input policy has no matching input assets")
+
+    if reasons:
+        raise DisclosurePolicyError(contract.id, reasons)

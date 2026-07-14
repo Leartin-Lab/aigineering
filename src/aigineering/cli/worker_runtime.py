@@ -7,7 +7,11 @@ from dataclasses import dataclass
 from aigineering.agent.llm import LLMWorker
 from aigineering.agent.mock import MockWorker
 from aigineering.core.activation import check_activation
-from aigineering.core.disclosure import compute_disclosure, redact_for_disclosure
+from aigineering.core.disclosure import (
+    DisclosurePolicyError,
+    compute_disclosure,
+    redact_for_disclosure,
+)
 from aigineering.core.runtime_ingress import RuntimeIngress
 from aigineering.core.submit import _all_outputs_satisfied, submit_candidate
 from aigineering.core.worker_routing import is_eligible
@@ -61,6 +65,7 @@ def claim_next_package(
     available_names = {a.name for a in store.get_all_assets()}
     get_registration = getattr(store, "get_worker_registration", None)
     registered_worker = get_registration(worker_id) if get_registration else None
+    policy_blockers: list[DisclosurePolicyError] = []
     for contract in store.get_all_contracts():
         if contract.activation and not check_activation(
             contract.activation, available_names
@@ -93,7 +98,19 @@ def claim_next_package(
         ):
             continue
 
-        disclosed = tuple(compute_disclosure(contract, store))
+        try:
+            disclosed = tuple(compute_disclosure(contract, store))
+        except DisclosurePolicyError as exc:
+            policy_blockers.append(exc)
+            new_entry = getattr(store, "new_entry", None)
+            if new_entry is not None:
+                new_entry(
+                    contract.id,
+                    "disclosure_policy_rejected",
+                    rejected_fragments=list(exc.reasons),
+                    authority_result="rejected",
+                )
+            continue
         method_context_assets = _method_context_assets_for(contract, store)
         package = WorkerPackage(
             contract_id=contract.id,
@@ -157,6 +174,9 @@ def claim_next_package(
                     budget_remaining=remaining_budget,
                 )
         return ClaimedPackage(contract, disclosed, package)
+    if policy_blockers:
+        reasons = [reason for exc in policy_blockers for reason in exc.reasons]
+        raise DisclosurePolicyError(policy_blockers[0].contract_id, reasons)
     return None
 
 

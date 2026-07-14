@@ -16,7 +16,7 @@ from aigineering.cli.worker_runtime import (
     _method_context_assets_for,
     claim_next_package,
 )
-from aigineering.core.disclosure import compute_disclosure
+from aigineering.core.disclosure import DisclosurePolicyError, compute_disclosure
 from aigineering.core.runtime_ingress import RuntimeIngress
 from aigineering.core.worker_routing import WorkerRegistration
 from aigineering.core.submit import (
@@ -128,11 +128,23 @@ def worker_next(worker_id: str, lease_seconds: int, json_output: bool) -> None:
       - It is not suspended (no outstanding method_scheduled)
     """
     store = _persistent_store()
-    claimed = claim_next_package(
-        store,
-        worker_id=worker_id,
-        lease_seconds=lease_seconds,
-    )
+    try:
+        claimed = claim_next_package(
+            store,
+            worker_id=worker_id,
+            lease_seconds=lease_seconds,
+        )
+    except DisclosurePolicyError as exc:
+        result = {
+            "status": "policy_blocked",
+            "contract_id": exc.contract_id,
+            "reasons": list(exc.reasons),
+        }
+        if json_output:
+            _output_json(result)
+        else:
+            click.echo(json.dumps(result, sort_keys=True, ensure_ascii=False))
+        return
     if claimed is not None:
         pkg = claimed.package
         if json_output:

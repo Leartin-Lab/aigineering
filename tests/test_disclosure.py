@@ -1,7 +1,9 @@
 """Tests for asset disclosure policy."""
 
+import pytest
+
 from aigineering.agent.mock import MockWorker
-from aigineering.core.disclosure import compute_disclosure
+from aigineering.core.disclosure import DisclosurePolicyError, compute_disclosure
 from aigineering.core.engine import Engine
 from aigineering.core.ids import hash_asset_content, hash_contract
 from aigineering.core.labels import Label
@@ -132,3 +134,33 @@ def test_disclosure_includes_configured_behavior_asset():
     )
 
     assert compute_disclosure(contract, store) == [behavior]
+
+
+def test_sensitive_input_policy_blocks_low_trust_asset_before_disclosure():
+    store = MemoryStore()
+    low_trust = _asset("input", "must not leak", trust_tier="untrusted")
+    store.add_asset(low_trust)
+    contract = _contract(
+        name="sensitive",
+        inputs=["input"],
+        outputs=["result"],
+        sensitive_input_policy={"required_trust_tier": "observed"},
+    )
+
+    with pytest.raises(DisclosurePolicyError, match="below minimum"):
+        compute_disclosure(contract, store)
+
+
+def test_sensitive_input_policy_applies_to_each_disclosed_input():
+    store = MemoryStore()
+    store.add_asset(_asset("input", "verified", trust_tier="verified"))
+    store.add_asset(_asset("input", "untrusted", trust_tier="untrusted"))
+    contract = _contract(
+        name="sensitive",
+        inputs=["input"],
+        outputs=["result"],
+        sensitive_input_policy={"required_trust_tier": "observed"},
+    )
+
+    with pytest.raises(DisclosurePolicyError, match="untrusted"):
+        compute_disclosure(contract, store)

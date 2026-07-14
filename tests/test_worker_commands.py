@@ -601,6 +601,43 @@ def test_worker_next_null_when_idle():
         assert data is None
 
 
+def test_worker_next_reports_sensitive_policy_block_without_claim_or_content():
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        store = SQLiteStore(".aig/store.db")
+        asset = sign_asset(
+            Asset(
+                id=hash_asset_content("sensitive", "private-value"),
+                name="sensitive",
+                content="private-value",
+                origin="human",
+                trust_tier="untrusted",
+            )
+        )
+        contract = Contract(
+            id="contract:sensitive",
+            name="sensitive",
+            inputs=("sensitive",),
+            outputs=("result",),
+            activation="sensitive",
+            budget=1,
+            sensitive_input_policy={"required_trust_tier": "observed"},
+        )
+        store.add_asset(asset)
+        store.add_contract(contract)
+
+        result = runner.invoke(cli, ["worker", "next", "--json"])
+
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["status"] == "policy_blocked"
+        assert data["contract_id"] == contract.id
+        assert "private-value" not in result.output
+        persisted = SQLiteStore(".aig/store.db")
+        assert persisted.get_claim(contract.id) is None
+        assert persisted.get_by_event_type("disclosure_policy_rejected")
+
+
 def test_worker_next_skips_completed_contract():
     """worker next does not return a contract whose outputs are all satisfied."""
     runner = CliRunner()
