@@ -8,7 +8,6 @@ import time as _time_module
 from typing import Callable
 
 from aigineering.agent.worker import Worker
-from aigineering.core.activation import check_activation
 from aigineering.core.budget_manager import BudgetManager
 from aigineering.core.crash import check_crash_point
 from aigineering.core.context_overflow import ContextOverflowHandler
@@ -39,7 +38,6 @@ from aigineering.core.runtime_projection import RuntimeProjection
 from aigineering.core.state_serializer import (
     StateSerializer,
     TraceStateRebuilder,
-    derive_lifecycle_from_store,
 )
 from aigineering.core.store import StoreProtocol
 from aigineering.core.trace import MemoryTraceStore, TraceStoreProtocol
@@ -58,20 +56,6 @@ from aigineering.protocol.types import (
 )
 
 _logger = logging.getLogger(__name__)
-
-_MAX_ACTIVATION_TOKENS = 200
-
-
-def _safe_check_activation(expression: str, available_names: set[str]) -> bool:
-    if len(expression) > _MAX_ACTIVATION_TOKENS:
-        _logger.warning("Activation expression too long (%d chars)", len(expression))
-        return False
-    try:
-        return check_activation(expression, available_names)
-    except (ValueError, RecursionError) as e:
-        _logger.warning("Invalid activation expression: %s", e)
-        return False
-
 
 class _TraceManagerProxy(TraceManager):
     def __init__(self, delegate: TraceManager) -> None:
@@ -1042,27 +1026,25 @@ class Engine:
         # Clear pending — loaded historical trace must not be re-committed.
         engine._pending_trace_entries.clear()
 
-        # Primary: derive completion from durable store facts (output satisfaction).
-        durable_state = derive_lifecycle_from_store(store)
-
-        # Secondary: trace-based reconstruction for method-level state, budget
-        # consumption, context, and last-entry tracking.
+        # Trace events reconstruct method-level compatibility caches. Contract
+        # completion/readiness itself comes from the same pure projection used
+        # by the live scheduling loop.
         trace_state = TraceStateRebuilder.rebuild(store, trace_store)
-
-        # Log any discrepancies between trace-derived and store-derived completion.
-        trace_only = trace_state.completed - durable_state.completed
-        durable_only = durable_state.completed - trace_state.completed
-        if trace_only or durable_only:
-            _logger.warning(
-                "restore_from_store: completion discrepancy — "
-                "trace has %d contracts not store-verified (missing output assets?), "
-                "store has %d contracts not in trace (outputs present without trace event)",
-                len(trace_only),
-                len(durable_only),
-            )
+        projection = RuntimeProjection(store, trace_store)
+        projected_completed: set[str] = set()
+        for contract in store.get_all_contracts():
+            view = projection.contract_view(contract)
+            if view.terminal is not None or view.outputs_satisfied:
+                projected_completed.add(contract.id)
+            if view.terminal == "conflict":
+                _logger.error(
+                    "restore_from_store: conflicting terminal facts for contract %s: %s",
+                    contract.id,
+                    view.terminal_events,
+                )
 
         engine._budget_mgr.restore(trace_state.budget)
-        engine._completed = durable_state.completed | trace_state.completed
+        engine._completed = projected_completed
         engine._suspended = trace_state.suspended
         engine._method_scheduled = trace_state.method_scheduled
         engine._method_context = trace_state.method_context
