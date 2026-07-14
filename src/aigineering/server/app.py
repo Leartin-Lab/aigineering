@@ -11,13 +11,12 @@ from aigineering.cli._common import (
     _find_trace_for_session,
     _persistent_store,
 )
+from aigineering.cli.worker_runtime import (
+    claim_next_package,
+    execute_claimed_package,
+)
 
 from aigineering.core.runtime_ingress import RuntimeIngress
-from aigineering.core.startup_check import (
-    begin_runtime_startup,
-    end_runtime,
-    renew_heartbeat,
-)
 
 app = FastAPI(title="Aigineering API", version="0.5.0")
 
@@ -353,12 +352,11 @@ def get_contract(contract_id: str):
 
 @app.post("/contracts/{contract_id}/run", response_model=ContractRunResponse)
 def run_contract(contract_id: str, body: ContractRunRequest):
-    """Run a contract locally and return committed output assets."""
+    """Claim and run one contract through the worker protocol."""
     if body.worker != "mock":
         raise HTTPException(status_code=400, detail="Only mock worker is supported")
 
     from aigineering.agent.mock import MockWorker
-    from aigineering.core.engine import Engine
 
     store = _persistent_store()
     contract = store.get_contract(contract_id)
@@ -371,27 +369,24 @@ def run_contract(contract_id: str, body: ContractRunRequest):
     )
     worker = MockWorker()
     worker.set_output(contract.name, raw_output)
-
-    engine = Engine(store=store, worker=worker, trace_store=store)
-    engine.add_contract(contract)
-
-    runtime_result = begin_runtime_startup(store)
     try:
-        engine.run(
-            heartbeat_callback=lambda: renew_heartbeat(
-                store, runtime_result.runtime_owner
-            )
+        claimed = claim_next_package(
+            store,
+            worker_id="server:mock",
+            contract_id=contract.id,
         )
-    finally:
-        end_runtime(store, runtime_result.runtime_owner)
+        if claimed is None:
+            raise HTTPException(
+                status_code=409,
+                detail="Contract is not enabled or is already claimed/terminal",
+            )
+        result = execute_claimed_package(claimed, worker, store)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     entries = store.get_by_contract(contract.id)
     outputs = store.get_assets_by_contract(contract.id)
-    status = (
-        "complete"
-        if any(entry.event_type == "complete" for entry in entries)
-        else "incomplete"
-    )
+    status = "complete" if result.get("complete") is True else result["status"]
     return ContractRunResponse(
         contract_id=contract.id,
         status=status,

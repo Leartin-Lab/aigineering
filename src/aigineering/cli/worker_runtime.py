@@ -28,6 +28,7 @@ class ClaimedPackage:
     contract: Contract
     disclosed_assets: tuple[Asset, ...]
     package: WorkerPackage
+    worker_id: str
 
 
 def build_worker(
@@ -60,6 +61,7 @@ def claim_next_package(
     *,
     worker_id: str,
     lease_seconds: int = 60,
+    contract_id: str | None = None,
 ) -> ClaimedPackage | None:
     """Claim the next ready contract and return its worker package."""
     available_names = {a.name for a in store.get_all_assets()}
@@ -67,6 +69,8 @@ def claim_next_package(
     registered_worker = get_registration(worker_id) if get_registration else None
     policy_blockers: list[DisclosurePolicyError] = []
     for contract in store.get_all_contracts():
+        if contract_id is not None and contract.id != contract_id:
+            continue
         if contract.activation and not check_activation(
             contract.activation, available_names
         ):
@@ -173,7 +177,7 @@ def claim_next_package(
                     ),
                     budget_remaining=remaining_budget,
                 )
-        return ClaimedPackage(contract, disclosed, package)
+        return ClaimedPackage(contract, disclosed, package, worker_id)
     if policy_blockers:
         reasons = [reason for exc in policy_blockers for reason in exc.reasons]
         raise DisclosurePolicyError(policy_blockers[0].contract_id, reasons)
@@ -189,7 +193,7 @@ def execute_claimed_package(
     candidate = worker.invoke(claimed.contract, list(claimed.disclosed_assets))
     envelope = CandidateEnvelope(
         contract_id=claimed.contract.id,
-        worker_id=candidate.worker_id,
+        worker_id=claimed.worker_id,
         raw_output=candidate.raw_output,
         parsed_action=(
             dict(candidate.parsed_action)

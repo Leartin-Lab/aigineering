@@ -9,6 +9,7 @@ pytest.importorskip("httpx")
 
 from fastapi.testclient import TestClient
 
+from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.server.app import app
 
 
@@ -112,6 +113,12 @@ def test_run_contract_persists_outputs_and_trace(tmp_path, monkeypatch):
     trace = client.get("/trace")
     assert trace.status_code == 200, trace.text
     assert "complete" in [entry["event_type"] for entry in trace.json()]
+    store = SQLiteStore(".aig/store.db")
+    record_types = [record.record_type for _, record in store.scan_runtime_records()]
+    assert "claim.granted" in record_types
+    assert "candidate.received" in record_types
+    assert "projection.decided" in record_types
+    assert "claim.submitted" in record_types
 
 
 def test_run_contract_rejects_non_mock_worker(tmp_path, monkeypatch):
