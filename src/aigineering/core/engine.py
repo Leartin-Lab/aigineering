@@ -35,6 +35,7 @@ from aigineering.core.method_registry import MethodRegistry
 from aigineering.core.method_runtime import MethodRuntime
 from aigineering.core.output_satisfaction import all_outputs_satisfied
 from aigineering.core.runtime_ingress import RuntimeIngress
+from aigineering.core.runtime_projection import RuntimeProjection
 from aigineering.core.state_serializer import (
     StateSerializer,
     TraceStateRebuilder,
@@ -276,9 +277,10 @@ class Engine:
         This ensures that contracts completed via reactive projection
         (not via the Engine's own run loop) are recognised as complete.
         """
-        for entry in self._trace_mgr.store.get_all():
-            if entry.event_type in self._TERMINAL_EVENTS:
-                self._completed.add(entry.contract_id)
+        projection = RuntimeProjection(self._store, self._trace_mgr.store)
+        for contract in self._store.get_all_contracts():
+            if projection.contract_view(contract).terminal is not None:
+                self._completed.add(contract.id)
 
     def _commit(self, result: ProjectionResult) -> None:
         for asset in result.accepted_assets:
@@ -314,16 +316,22 @@ class Engine:
         last_heartbeat = _time_module.monotonic()
 
         while True:
-            available_names: set[str] = {a.name for a in self._store.get_all_assets()}
-
-            enabled: list[Contract] = [
-                c
-                for c in self._store.get_all_contracts()
-                if c.id not in self._completed
-                and c.id not in self._suspended
-                and self._resolve_budget(c) > 0
-                and _safe_check_activation(c.activation, available_names)
-            ]
+            projection = RuntimeProjection(self._store, self._trace_mgr.store)
+            enabled: list[Contract] = []
+            for contract in self._store.get_all_contracts():
+                view = projection.contract_view(contract)
+                # Output-slot satisfaction is not yet a universal execution
+                # blocker: recovery contracts intentionally publish a repaired
+                # version into a slot that already contains a rejected result.
+                # Keep that fact visible in ContractView, but cut Engine over
+                # only to the projection semantics that are already universal.
+                if (
+                    view.terminal is None
+                    and view.activation_satisfied
+                    and view.budget_remaining > 0
+                    and contract.id not in self._suspended
+                ):
+                    enabled.append(contract)
 
             if not enabled:
                 break
