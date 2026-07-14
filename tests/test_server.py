@@ -139,6 +139,61 @@ def test_run_contract_rejects_non_mock_worker(tmp_path, monkeypatch):
     assert "mock worker" in run.json()["detail"]
 
 
+def test_worker_protocol_cross_replica_claim_renew_submit(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    replica_a = TestClient(app)
+    replica_b = TestClient(app)
+    replica_c = TestClient(app)
+    created = replica_a.post(
+        "/contracts",
+        json={"name": "replicated", "outputs": ["out"], "budget": 1},
+    )
+    contract_id = created.json()["id"]
+
+    claimed = replica_a.post(
+        "/worker/claims",
+        json={
+            "worker_id": "remote-worker",
+            "contract_id": contract_id,
+            "lease_seconds": 30,
+        },
+    )
+    assert claimed.status_code == 200, claimed.text
+    package = claimed.json()
+    renewed = replica_b.post(
+        f"/worker/claims/{package['claim_id']}/renew",
+        json={
+            "worker_id": "remote-worker",
+            "claim_epoch": package["claim_epoch"],
+            "lease_seconds": 30,
+        },
+    )
+    assert renewed.status_code == 200, renewed.text
+
+    submitted = replica_c.post(
+        "/worker/submissions",
+        json={
+            "contract_id": contract_id,
+            "worker_id": "remote-worker",
+            "raw_output": "out: accepted across replicas",
+            "package_id": package["package_id"],
+            "claim_id": package["claim_id"],
+            "claim_epoch": package["claim_epoch"],
+            "idempotency_key": f"remote-{package['package_id']}",
+        },
+    )
+    assert submitted.status_code == 200, submitted.text
+    assert submitted.json()["complete"] is True
+    output = replica_a.get("/assets/out")
+    assert output.json()[0]["content"] == "accepted across replicas"
+
+    records = SQLiteStore(".aig/store.db").scan_runtime_records()
+    record_types = [record.record_type for _, record in records]
+    assert record_types.count("claim.granted") == 1
+    assert "claim.renewed" in record_types
+    assert record_types.count("claim.submitted") == 1
+
+
 def test_asset_slice_versions_and_replacement_claims(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     client = TestClient(app)

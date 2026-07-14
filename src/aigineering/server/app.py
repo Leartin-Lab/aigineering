@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Query
@@ -17,6 +18,13 @@ from aigineering.cli.worker_runtime import (
 )
 
 from aigineering.core.runtime_ingress import RuntimeIngress
+from aigineering.core.submit import (
+    SubmitClaimError,
+    SubmitCommitError,
+    SubmitConflictError,
+    submit_candidate,
+)
+from aigineering.protocol.envelope import CandidateEnvelope
 
 app = FastAPI(title="Aigineering API", version="0.5.0")
 
@@ -38,6 +46,29 @@ class ContractCreateRequest(BaseModel):
 class ContractRunRequest(BaseModel):
     worker: str = "mock"
     output_content: str = ""
+
+
+class WorkerClaimRequest(BaseModel):
+    worker_id: str
+    contract_id: str | None = None
+    lease_seconds: int = 60
+
+
+class WorkerRenewRequest(BaseModel):
+    worker_id: str
+    claim_epoch: int
+    lease_seconds: int = 60
+
+
+class WorkerSubmitRequest(BaseModel):
+    contract_id: str
+    worker_id: str
+    raw_output: str
+    package_id: str
+    claim_id: str
+    claim_epoch: int
+    idempotency_key: str = ""
+    parsed_action: dict | None = None
 
 
 class AssetCreateRequest(BaseModel):
@@ -348,6 +379,77 @@ def get_contract(contract_id: str):
         raise HTTPException(status_code=404, detail="Contract not found")
 
     return _contract_response(contract)
+
+
+@app.post("/worker/claims")
+def claim_worker_package(body: WorkerClaimRequest):
+    """Atomically claim one contract and return its disclosure-bound package."""
+    if body.lease_seconds < 1:
+        raise HTTPException(status_code=400, detail="lease_seconds must be positive")
+    store = _persistent_store()
+    try:
+        claimed = claim_next_package(
+            store,
+            worker_id=body.worker_id,
+            contract_id=body.contract_id,
+            lease_seconds=body.lease_seconds,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if claimed is None:
+        raise HTTPException(status_code=409, detail="No eligible contract available")
+    return json.loads(claimed.package.to_json())
+
+
+@app.post("/worker/claims/{claim_id}/renew")
+def renew_worker_claim(claim_id: str, body: WorkerRenewRequest):
+    """Renew a fenced claim; any replica may service the request."""
+    if body.lease_seconds < 1 or body.claim_epoch < 1:
+        raise HTTPException(
+            status_code=400,
+            detail="lease_seconds and claim_epoch must be positive",
+        )
+    store = _persistent_store()
+    renewed = store.renew_claim(
+        claim_id,
+        body.claim_epoch,
+        body.worker_id,
+        lease_seconds=body.lease_seconds,
+    )
+    if renewed is None:
+        raise HTTPException(status_code=409, detail="Claim renewal was rejected")
+    return renewed
+
+
+@app.post("/worker/submissions")
+def submit_worker_candidate(body: WorkerSubmitRequest):
+    """Commit a fenced candidate; any replica may service the request."""
+    if body.parsed_action is not None:
+        raise HTTPException(
+            status_code=422,
+            detail="Method actions require the method submission protocol",
+        )
+    try:
+        envelope = CandidateEnvelope(**body.model_dump())
+        store = _persistent_store()
+        result = submit_candidate(
+            envelope,
+            store,
+            store,
+            RuntimeIngress(store, store),
+            idempotency_key=envelope.idempotency_key,
+        )
+        if result["status"] == "rejected":
+            from aigineering.cli.worker_runtime import process_rejected_submissions
+
+            process_rejected_submissions(store)
+        return result
+    except (ValueError, SubmitClaimError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except SubmitConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except SubmitCommitError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 @app.post("/contracts/{contract_id}/run", response_model=ContractRunResponse)
