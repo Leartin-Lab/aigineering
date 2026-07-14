@@ -175,7 +175,8 @@ def test_run_task_uses_engine_method_path_for_plan():
             ],
         )
 
-        assert result.exit_code == 0, result.output
+        assert result.exit_code == 1, result.output
+        assert json.loads(result.output)["status"] == "waiting"
         audit = runner.invoke(cli, ["task", "audit", contract_id, "--json"])
         data = json.loads(audit.output)
         event_types = {entry["event_type"] for entry in data["trace"]}
@@ -228,7 +229,8 @@ def test_run_task_rejected_output_schedules_recovery():
             ],
         )
 
-        assert result.exit_code == 0, result.output
+        assert result.exit_code == 1, result.output
+        assert json.loads(result.output)["status"] == "failed"
         audit = runner.invoke(cli, ["task", "audit", contract_id, "--json"])
         data = json.loads(audit.output)
         event_types = {entry["event_type"] for entry in data["trace"]}

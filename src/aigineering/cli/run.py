@@ -377,12 +377,14 @@ def _run_task_pool(
                         },
                         json_output,
                     )
-                    return
+                    raise click.exceptions.Exit(1)
                 status = project_task_status(target, store)
                 if status["terminal"]:
                     status["ok"] = status["status"] == "completed"
                     status["cycles"] = cycles
                     _emit_run_result(status, json_output)
+                    if not status["ok"]:
+                        raise click.exceptions.Exit(1)
                     return
 
             if time.monotonic() >= deadline or not new_entries:
@@ -394,6 +396,8 @@ def _run_task_pool(
                     status["timed_out"] = time.monotonic() >= deadline
                 status["cycles"] = cycles
                 _emit_run_result(status, json_output)
+                if not status["ok"]:
+                    raise click.exceptions.Exit(1)
                 return
             time.sleep(max(interval, 0.05))
             store = _persistent_store()
