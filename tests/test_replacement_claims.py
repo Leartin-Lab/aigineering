@@ -6,6 +6,8 @@ import pytest
 
 from aigineering.core.ids import hash_claim
 from aigineering.core.provenance import sign_asset
+from aigineering.core.record_conflict import ImmutableRecordConflict
+from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.core.store import JsonLStore, MemoryStore
 from aigineering.protocol.types import Asset, ReplacementClaim
 from aigineering.protocol.wire import asset_to_canonical, asset_to_dict
@@ -89,6 +91,32 @@ class TestReplacementClaimCreation:
         )
         with pytest.raises(Exception):
             claim.claim_type = "slice"  # type: ignore[misc]
+
+    @pytest.mark.parametrize("kind", ["memory", "sqlite"])
+    def test_claim_id_is_immutable(self, kind):
+        store = MemoryStore() if kind == "memory" else SQLiteStore(":memory:")
+        original = ReplacementClaim(
+            id="claim:fixed",
+            source_asset_id="src",
+            replacement_asset_id="repl",
+            definition_hash="def:h",
+            claim_type="replacement",
+        )
+        store.add_replacement_claim(original)
+        store.add_replacement_claim(original)
+
+        changed = ReplacementClaim(
+            id="claim:fixed",
+            source_asset_id="src",
+            replacement_asset_id="other",
+            definition_hash="def:h",
+            claim_type="replacement",
+        )
+        with pytest.raises(ImmutableRecordConflict, match="replacement claim"):
+            store.add_replacement_claim(changed)
+        assert store.get_claims_by_definition("def:h") == [original]
+        if kind == "sqlite":
+            store.close()
 
 
 class TestLineageId:

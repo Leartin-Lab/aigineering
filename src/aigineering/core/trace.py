@@ -45,11 +45,26 @@ def create_entry(
     relation_target: Optional[str] = None,
     usage_metadata: Optional[MappingProxyType] = None,
 ) -> TraceEntry:
+    effective_payload = {
+        "disclosed_assets": list(disclosed_assets or ()),
+        "worker_id": worker_id,
+        "candidate_raw": candidate_raw,
+        "accepted_fragments": list(accepted_fragments or ()),
+        "accepted_asset_names": list(accepted_asset_names or ()),
+        "rejected_fragments": list(rejected_fragments or ()),
+        "authority_policy": authority_policy,
+        "authority_result": authority_result,
+        "budget_remaining": budget_remaining,
+        "relation_type": relation_type,
+        "relation_target": relation_target,
+        "usage_metadata": dict(usage_metadata) if usage_metadata is not None else None,
+    }
     entry_id = hash_event(
         contract_id=contract_id,
         event_type=event_type,
         sequence=sequence,
         parent_id=parent_id,
+        payload=effective_payload,
     )
     return TraceEntry(
         id=entry_id,
@@ -98,6 +113,14 @@ class MemoryTraceStore:
         return self._seq
 
     def append(self, entry: TraceEntry) -> None:
+        from aigineering.core.record_conflict import ImmutableRecordConflict
+
+        for existing in self.entries:
+            if existing.id != entry.id:
+                continue
+            if trace_effective_payload(existing) == trace_effective_payload(entry):
+                return
+            raise ImmutableRecordConflict("trace event", entry.id)
         self.entries.append(entry)
         self._seq += 1
 
@@ -159,11 +182,25 @@ class JsonLTraceStore:
         if not os.path.exists(self._file_path):
             return []
         entries: list[TraceEntry] = []
+        by_id: dict[str, TraceEntry] = {}
         with open(self._file_path, "r", encoding="utf-8") as f:
             for line in f:
                 stripped = line.strip()
                 if stripped:
-                    entries.append(trace_entry_from_dict(json.loads(stripped)))
+                    entry = trace_entry_from_dict(json.loads(stripped))
+                    existing = by_id.get(entry.id)
+                    if existing is not None:
+                        if trace_effective_payload(existing) != trace_effective_payload(
+                            entry
+                        ):
+                            from aigineering.core.record_conflict import (
+                                ImmutableRecordConflict,
+                            )
+
+                            raise ImmutableRecordConflict("trace event", entry.id)
+                        continue
+                    entries.append(entry)
+                    by_id[entry.id] = entry
         return entries
 
     def _write_line(self, entry: TraceEntry) -> None:
@@ -177,6 +214,14 @@ class JsonLTraceStore:
                 _logger.warning("fsync failed for %s", self._file_path)
 
     def append(self, entry: TraceEntry) -> None:
+        from aigineering.core.record_conflict import ImmutableRecordConflict
+
+        for existing in self._entries:
+            if existing.id != entry.id:
+                continue
+            if trace_effective_payload(existing) == trace_effective_payload(entry):
+                return
+            raise ImmutableRecordConflict("trace event", entry.id)
         self._write_line(entry)
         self._entries.append(entry)
         self._seq += 1
@@ -220,3 +265,31 @@ class JsonLTraceStore:
 
 # Backward compatibility: TraceStore alias points to MemoryTraceStore
 TraceStore = MemoryTraceStore
+
+
+def trace_effective_payload(entry: TraceEntry) -> dict[str, object]:
+    """Return the immutable semantic payload of a trace event.
+
+    Timestamp is recording metadata and the ID itself is derived from this
+    payload, so neither participates in same-ID replay comparison.
+    """
+
+    return {
+        "parent_id": entry.parent_id,
+        "contract_id": entry.contract_id,
+        "event_type": entry.event_type,
+        "disclosed_assets": list(entry.disclosed_assets),
+        "worker_id": entry.worker_id,
+        "candidate_raw": entry.candidate_raw,
+        "accepted_fragments": list(entry.accepted_fragments),
+        "accepted_asset_names": list(entry.accepted_asset_names),
+        "rejected_fragments": list(entry.rejected_fragments),
+        "authority_policy": entry.authority_policy,
+        "authority_result": entry.authority_result,
+        "budget_remaining": entry.budget_remaining,
+        "relation_type": entry.relation_type,
+        "relation_target": entry.relation_target,
+        "usage_metadata": (
+            dict(entry.usage_metadata) if entry.usage_metadata is not None else None
+        ),
+    }

@@ -14,6 +14,8 @@ from aigineering.core.authority import (
     _is_protected_name,
 )
 from aigineering.core.provenance import verify_asset_seal
+from aigineering.core.record_conflict import ImmutableRecordConflict
+from aigineering.core.ids import compute_content_hash
 from aigineering.protocol.types import Asset, Contract
 from aigineering.protocol.wire import asset_to_dict, contract_to_dict
 
@@ -48,6 +50,8 @@ class StoreProtocol(Protocol):
     def unregister_declared_outputs(self, contract_id: str) -> None: ...
     def get_contracts_waiting_for(self, asset_name: str) -> list[str]: ...
     def get_contracts_declaring_output(self, asset_name: str) -> list[str]: ...
+    def rebuild_projection_indexes(self) -> None: ...
+    def projection_index_digest(self) -> str: ...
 
 
 # ---------------------------------------------------------------------------
@@ -79,7 +83,94 @@ def _extract_activation_names(expression: str) -> set[str]:
     return names
 
 
-class MemoryStore:
+def _projection_index_digest(
+    activation_rows: list[tuple[str, str]], output_rows: list[tuple[str, str]]
+) -> str:
+    payload = json.dumps(
+        {
+            "activation": sorted(activation_rows),
+            "declared_outputs": sorted(output_rows),
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return compute_content_hash(payload)
+
+
+class _ProjectionIndexMixin:
+    """Shared derived-index behavior for local record adapters."""
+
+    contracts: dict[str, Contract]
+    _activation_index: dict[str, set[str]]
+    _reverse_activation_index: dict[str, set[str]]
+    _declared_outputs_index: dict[str, set[str]]
+
+    def register_activation_refs(self, contract_id: str, asset_names: set[str]) -> None:
+        self.unregister_activation_refs(contract_id)
+        if not asset_names:
+            return
+        self._activation_index[contract_id] = asset_names.copy()
+        for name in asset_names:
+            self._reverse_activation_index.setdefault(name, set()).add(contract_id)
+
+    def unregister_activation_refs(self, contract_id: str) -> None:
+        old = self._activation_index.pop(contract_id, None)
+        if old:
+            for name in old:
+                targets = self._reverse_activation_index.get(name)
+                if targets:
+                    targets.discard(contract_id)
+                    if not targets:
+                        del self._reverse_activation_index[name]
+
+    def register_declared_outputs(
+        self, contract_id: str, output_names: set[str]
+    ) -> None:
+        self.unregister_declared_outputs(contract_id)
+        for name in output_names:
+            self._declared_outputs_index.setdefault(name, set()).add(contract_id)
+
+    def unregister_declared_outputs(self, contract_id: str) -> None:
+        empty_names: list[str] = []
+        for name, contract_ids in self._declared_outputs_index.items():
+            contract_ids.discard(contract_id)
+            if not contract_ids:
+                empty_names.append(name)
+        for name in empty_names:
+            del self._declared_outputs_index[name]
+
+    def get_contracts_waiting_for(self, asset_name: str) -> list[str]:
+        return list(self._reverse_activation_index.get(asset_name, set()))
+
+    def get_contracts_declaring_output(self, asset_name: str) -> list[str]:
+        return list(self._declared_outputs_index.get(asset_name, set()))
+
+    def rebuild_projection_indexes(self) -> None:
+        """Rebuild all derived indexes solely from immutable contracts."""
+        self._activation_index.clear()
+        self._reverse_activation_index.clear()
+        self._declared_outputs_index.clear()
+        for contract in self.contracts.values():
+            self.register_activation_refs(
+                contract.id, _extract_activation_names(contract.activation)
+            )
+            self.register_declared_outputs(contract.id, set(contract.outputs))
+
+    def projection_index_digest(self) -> str:
+        activation_rows = [
+            (contract_id, asset_name)
+            for contract_id, asset_names in self._activation_index.items()
+            for asset_name in asset_names
+        ]
+        output_rows = [
+            (contract_id, output_name)
+            for output_name, contract_ids in self._declared_outputs_index.items()
+            for contract_id in contract_ids
+        ]
+        return _projection_index_digest(activation_rows, output_rows)
+
+
+class MemoryStore(_ProjectionIndexMixin):
     def __init__(self) -> None:
         self.assets: dict[str, Asset] = {}
         self.contracts: dict[str, Contract] = {}
@@ -115,6 +206,11 @@ class MemoryStore:
                 "?",
             )
             raise ReservedNamespaceError(asset.name, prefix)
+        existing = self.assets.get(asset.id)
+        if existing is not None:
+            if existing == asset:
+                return
+            raise ImmutableRecordConflict("asset", asset.id)
         self.assets[asset.id] = asset
 
     def _add_system_asset(self, asset: Asset) -> None:
@@ -123,6 +219,14 @@ class MemoryStore:
                 f"G3/N-P1.6: Asset '{asset.id}' rejected — missing or invalid canonical seal "
                 f"(signed_by={asset.signed_by!r})"
             )
+        self._persist_asset(asset)
+
+    def _persist_asset(self, asset: Asset) -> None:
+        existing = self.assets.get(asset.id)
+        if existing is not None:
+            if existing == asset:
+                return
+            raise ImmutableRecordConflict("asset", asset.id)
         self.assets[asset.id] = asset
 
     def get_asset(self, asset_id: str) -> Optional[Asset]:
@@ -138,6 +242,11 @@ class MemoryStore:
         return list(self.assets.values())
 
     def add_contract(self, contract: Contract) -> None:
+        existing = self.contracts.get(contract.id)
+        if existing is not None:
+            if existing == contract:
+                return
+            raise ImmutableRecordConflict("contract", contract.id)
         self.contracts[contract.id] = contract
         self.register_activation_refs(
             contract.id, _extract_activation_names(contract.activation)
@@ -164,6 +273,12 @@ class MemoryStore:
         return latest
 
     def add_replacement_claim(self, claim) -> None:
+        for existing in self._claims:
+            if existing.id != claim.id:
+                continue
+            if existing == claim:
+                return
+            raise ImmutableRecordConflict("replacement claim", claim.id)
         self._claims.append(claim)
 
     def get_claims_by_definition(self, definition_hash: str) -> list:
@@ -172,55 +287,8 @@ class MemoryStore:
     def get_claims_for_asset(self, asset_id: str) -> list:
         return [c for c in self._claims if c.source_asset_id == asset_id]
 
-    # ------------------------------------------------------------------
-    # Activation / declared-output indexes
-    # ------------------------------------------------------------------
 
-    def register_activation_refs(self, contract_id: str, asset_names: set[str]) -> None:
-        self.unregister_activation_refs(contract_id)
-        if not asset_names:
-            return
-        self._activation_index[contract_id] = asset_names.copy()
-        for name in asset_names:
-            self._reverse_activation_index.setdefault(name, set()).add(contract_id)
-
-    def unregister_activation_refs(self, contract_id: str) -> None:
-        old = self._activation_index.pop(contract_id, None)
-        if old:
-            for name in old:
-                targets = self._reverse_activation_index.get(name)
-                if targets:
-                    targets.discard(contract_id)
-                    if not targets:
-                        del self._reverse_activation_index[name]
-
-    def register_declared_outputs(
-        self, contract_id: str, output_names: set[str]
-    ) -> None:
-        self.unregister_declared_outputs(contract_id)
-        if not output_names:
-            return
-        for name in output_names:
-            self._declared_outputs_index.setdefault(name, set()).add(contract_id)
-
-    def unregister_declared_outputs(self, contract_id: str) -> None:
-        to_clean: list[str] = []
-        for name, cids in self._declared_outputs_index.items():
-            if contract_id in cids:
-                cids.discard(contract_id)
-                if not cids:
-                    to_clean.append(name)
-        for name in to_clean:
-            del self._declared_outputs_index[name]
-
-    def get_contracts_waiting_for(self, asset_name: str) -> list[str]:
-        return list(self._reverse_activation_index.get(asset_name, set()))
-
-    def get_contracts_declaring_output(self, asset_name: str) -> list[str]:
-        return list(self._declared_outputs_index.get(asset_name, set()))
-
-
-class JsonLStore:
+class JsonLStore(_ProjectionIndexMixin):
     """Persistent JSONL store for Assets and Contracts — one JSON object per line."""
 
     def __init__(self, assets_path: str, contracts_path: str) -> None:
@@ -236,9 +304,13 @@ class JsonLStore:
         self.contracts: dict[str, Contract] = {}
         self._name_index: dict[str, list[str]] = {}
         self._created_by_index: dict[str, list[str]] = {}
+        self._activation_index: dict[str, set[str]] = {}
+        self._reverse_activation_index: dict[str, set[str]] = {}
+        self._declared_outputs_index: dict[str, set[str]] = {}
 
         self._load_assets()
         self._load_contracts()
+        self.rebuild_projection_indexes()
 
     def _load_assets(self) -> None:
         if not os.path.exists(self._assets_path):
@@ -273,6 +345,11 @@ class JsonLStore:
                     tombstoned_at=data.get("tombstoned_at"),
                     lineage_id=data.get("lineage_id", ""),
                 )
+                existing = self.assets.get(asset.id)
+                if existing is not None:
+                    if existing == asset:
+                        continue
+                    raise ImmutableRecordConflict("asset", asset.id)
                 self.assets[asset.id] = asset
         self._rebuild_indexes()
 
@@ -310,6 +387,11 @@ class JsonLStore:
                     minting_authority=data.get("minting_authority", []),
                     sensitive_input_policy=data.get("sensitive_input_policy"),
                 )
+                existing = self.contracts.get(contract.id)
+                if existing is not None:
+                    if existing == contract:
+                        continue
+                    raise ImmutableRecordConflict("contract", contract.id)
                 self.contracts[contract.id] = contract
 
     @staticmethod
@@ -328,21 +410,35 @@ class JsonLStore:
                 f"G3/N-P1.6: Asset '{asset.id}' rejected — missing or invalid canonical seal "
                 f"(signed_by={asset.signed_by!r})"
             )
-        line = json.dumps(asset_to_dict(asset), ensure_ascii=False) + "\n"
-        self._write_jsonl_line(self._assets_path, line)
-        # If ID already exists, remove old index entries before overwriting
+        if _is_protected_name(asset.name):
+            prefix = next(
+                (
+                    p
+                    for p in RESERVED_PREFIXES
+                    if asset.name.startswith(p)
+                    or (p.endswith("_") and asset.name == p.rstrip("_"))
+                ),
+                "?",
+            )
+            raise ReservedNamespaceError(asset.name, prefix)
+        self._persist_asset(asset)
+
+    def _add_system_asset(self, asset: Asset) -> None:
+        if not asset.signed_by or not verify_asset_seal(asset):
+            raise ValueError(
+                f"G3/N-P1.6: Asset '{asset.id}' rejected — missing or invalid canonical seal "
+                f"(signed_by={asset.signed_by!r})"
+            )
+        self._persist_asset(asset)
+
+    def _persist_asset(self, asset: Asset) -> None:
         existing = self.assets.get(asset.id)
         if existing is not None:
-            if existing.name in self._name_index:
-                self._name_index[existing.name] = [
-                    aid for aid in self._name_index[existing.name] if aid != asset.id
-                ]
-            if existing.created_by and existing.created_by in self._created_by_index:
-                self._created_by_index[existing.created_by] = [
-                    aid
-                    for aid in self._created_by_index[existing.created_by]
-                    if aid != asset.id
-                ]
+            if existing == asset:
+                return
+            raise ImmutableRecordConflict("asset", asset.id)
+        line = json.dumps(asset_to_dict(asset), ensure_ascii=False) + "\n"
+        self._write_jsonl_line(self._assets_path, line)
         self.assets[asset.id] = asset
         self._name_index.setdefault(asset.name, []).append(asset.id)
         if asset.created_by:
@@ -376,9 +472,18 @@ class JsonLStore:
         return latest
 
     def add_contract(self, contract: Contract) -> None:
+        existing = self.contracts.get(contract.id)
+        if existing is not None:
+            if existing == contract:
+                return
+            raise ImmutableRecordConflict("contract", contract.id)
         line = json.dumps(contract_to_dict(contract), ensure_ascii=False) + "\n"
         self._write_jsonl_line(self._contracts_path, line)
         self.contracts[contract.id] = contract
+        self.register_activation_refs(
+            contract.id, _extract_activation_names(contract.activation)
+        )
+        self.register_declared_outputs(contract.id, set(contract.outputs))
 
     def get_contract(self, contract_id: str) -> Optional[Contract]:
         return self.contracts.get(contract_id)

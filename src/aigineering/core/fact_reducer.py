@@ -156,6 +156,10 @@ class FactReducer:
 
         # Build the set of currently available asset names (after this asset).
         available_names: set[str] = {a.name for a in self._store.get_all_assets()}
+        # SQLite computes reducer consequences inside the transaction before
+        # physically inserting the new fact; MemoryStore computes after. Make
+        # the reducer's transaction view explicit so both adapters agree.
+        available_names.add(asset.name)
 
         # The new asset is already in the store, so its name is included.
         for contract in self._store.get_all_contracts():
@@ -187,6 +191,11 @@ class FactReducer:
             if asset.name not in contract.outputs:
                 continue
 
+            if contract.origin != "system" and not is_business_output(
+                asset, asset.name
+            ):
+                continue
+
             events.append(
                 FactReducerEvent(
                     type="output_satisfied",
@@ -196,7 +205,9 @@ class FactReducer:
             )
 
             # Check full output satisfaction.
-            if self._all_outputs_satisfied(contract):
+            if all_outputs_satisfied(
+                contract, self._store, extra_output_names={asset.name}
+            ):
                 events.append(
                     FactReducerEvent(
                         type="contract_complete",

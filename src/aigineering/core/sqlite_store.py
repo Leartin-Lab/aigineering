@@ -23,6 +23,9 @@ from aigineering.core.authority import (
 from aigineering.core.crash import check_crash_point
 from aigineering.core.ids import compute_content_hash, now_iso
 from aigineering.core.provenance import verify_asset_seal
+from aigineering.core.record_conflict import ImmutableRecordConflict
+from aigineering.core.store import _projection_index_digest
+from aigineering.core.trace import trace_effective_payload
 from aigineering.core.worker_routing import WorkerRegistration
 from aigineering.protocol.types import Asset, Contract, TraceEntry
 from aigineering.protocol.wire import (
@@ -575,9 +578,15 @@ class SQLiteStore:
             self._insert_asset(asset)
 
     def _insert_asset(self, asset: Asset) -> None:
+        existing = self.get_asset(asset.id)
+        if existing is not None:
+            if existing == asset:
+                return
+            raise ImmutableRecordConflict("asset", asset.id)
         d = asset_to_dict(asset)
-        self._conn.execute(
-            """INSERT OR REPLACE INTO assets (
+        try:
+            self._conn.execute(
+                """INSERT INTO assets (
                     id, name, content, content_type, created_by,
                     origin, trust_tier, minted_by, source_uri,
                     signed_by, signer_kind, provenance_seal, promptable, disclosure_view,
@@ -590,29 +599,34 @@ class SQLiteStore:
                     :definition_hash, :content_hash,
                     :keep_flag, :tombstoned, :tombstoned_at, :lineage_id
                 )""",
-            {
-                "id": d["id"],
-                "name": d["name"],
-                "content": d["content"],
-                "content_type": d["content_type"],
-                "created_by": d["created_by"],
-                "origin": d["origin"],
-                "trust_tier": d["trust_tier"],
-                "minted_by": d["minted_by"],
-                "source_uri": d["source_uri"],
-                "signed_by": d["signed_by"],
-                "signer_kind": d["signer_kind"],
-                "provenance_seal": d["provenance_seal"],
-                "promptable": int(d["promptable"]),
-                "disclosure_view": d["disclosure_view"],
-                "definition_hash": d["definition_hash"],
-                "content_hash": d["content_hash"],
-                "keep_flag": int(d["keep_flag"]),
-                "tombstoned": int(d["tombstoned"]),
-                "tombstoned_at": d["tombstoned_at"],
-                "lineage_id": d["lineage_id"],
-            },
-        )
+                {
+                    "id": d["id"],
+                    "name": d["name"],
+                    "content": d["content"],
+                    "content_type": d["content_type"],
+                    "created_by": d["created_by"],
+                    "origin": d["origin"],
+                    "trust_tier": d["trust_tier"],
+                    "minted_by": d["minted_by"],
+                    "source_uri": d["source_uri"],
+                    "signed_by": d["signed_by"],
+                    "signer_kind": d["signer_kind"],
+                    "provenance_seal": d["provenance_seal"],
+                    "promptable": int(d["promptable"]),
+                    "disclosure_view": d["disclosure_view"],
+                    "definition_hash": d["definition_hash"],
+                    "content_hash": d["content_hash"],
+                    "keep_flag": int(d["keep_flag"]),
+                    "tombstoned": int(d["tombstoned"]),
+                    "tombstoned_at": d["tombstoned_at"],
+                    "lineage_id": d["lineage_id"],
+                },
+            )
+        except sqlite3.IntegrityError:
+            existing = self.get_asset(asset.id)
+            if existing == asset:
+                return
+            raise ImmutableRecordConflict("asset", asset.id) from None
 
     def get_asset(self, asset_id: str) -> Optional[Asset]:
         cur = self._conn.execute("SELECT * FROM assets WHERE id = ?", (asset_id,))
@@ -657,10 +671,16 @@ class SQLiteStore:
     # ------------------------------------------------------------------
 
     def _insert_contract(self, contract: Contract) -> None:
-        """Insert or replace a contract row + index rows (no transaction)."""
+        """Insert an immutable contract row + derived index rows."""
+        existing = self.get_contract(contract.id)
+        if existing is not None:
+            if existing == contract:
+                return
+            raise ImmutableRecordConflict("contract", contract.id)
         d = contract_to_dict(contract)
-        self._conn.execute(
-            """INSERT OR REPLACE INTO contracts (
+        try:
+            self._conn.execute(
+                """INSERT INTO contracts (
                 id, parent_id, name, description,
                 inputs, outputs, activation, budget,
                 tool_scope, labels, worker_capabilities, worker_pools,
@@ -671,28 +691,33 @@ class SQLiteStore:
                 :tool_scope, :labels, :worker_capabilities, :worker_pools,
                 :origin, :minting_authority, :sensitive_input_policy
             )""",
-            {
-                "id": d["id"],
-                "parent_id": d["parent_id"],
-                "name": d["name"],
-                "description": d["description"],
-                "inputs": json.dumps(list(d["inputs"])),
-                "outputs": json.dumps(list(d["outputs"])),
-                "activation": d["activation"],
-                "budget": d["budget"],
-                "tool_scope": json.dumps(list(d["tool_scope"])),
-                "labels": json.dumps(list(d["labels"])),
-                "worker_capabilities": json.dumps(list(d["worker_capabilities"])),
-                "worker_pools": json.dumps(list(d["worker_pools"])),
-                "origin": d["origin"],
-                "minting_authority": json.dumps(list(d["minting_authority"])),
-                "sensitive_input_policy": (
-                    json.dumps(d["sensitive_input_policy"], sort_keys=True)
-                    if d["sensitive_input_policy"] is not None
-                    else None
-                ),
-            },
-        )
+                {
+                    "id": d["id"],
+                    "parent_id": d["parent_id"],
+                    "name": d["name"],
+                    "description": d["description"],
+                    "inputs": json.dumps(list(d["inputs"])),
+                    "outputs": json.dumps(list(d["outputs"])),
+                    "activation": d["activation"],
+                    "budget": d["budget"],
+                    "tool_scope": json.dumps(list(d["tool_scope"])),
+                    "labels": json.dumps(list(d["labels"])),
+                    "worker_capabilities": json.dumps(list(d["worker_capabilities"])),
+                    "worker_pools": json.dumps(list(d["worker_pools"])),
+                    "origin": d["origin"],
+                    "minting_authority": json.dumps(list(d["minting_authority"])),
+                    "sensitive_input_policy": (
+                        json.dumps(d["sensitive_input_policy"], sort_keys=True)
+                        if d["sensitive_input_policy"] is not None
+                        else None
+                    ),
+                },
+            )
+        except sqlite3.IntegrityError:
+            existing = self.get_contract(contract.id)
+            if existing == contract:
+                return
+            raise ImmutableRecordConflict("contract", contract.id) from None
         self._conn.execute(
             "DELETE FROM contract_activation_refs WHERE contract_id = ?",
             (contract.id,),
@@ -847,6 +872,40 @@ class SQLiteStore:
         )
         return [row[0] for row in cur.fetchall()]
 
+    def rebuild_projection_indexes(self) -> None:
+        """Atomically rebuild derived indexes from immutable contracts."""
+        with self._conn:
+            self._conn.execute("DELETE FROM contract_activation_refs")
+            self._conn.execute("DELETE FROM contract_declared_outputs")
+            for contract in self.get_all_contracts():
+                for name in _extract_activation_names(contract.activation):
+                    self._conn.execute(
+                        "INSERT INTO contract_activation_refs "
+                        "(contract_id, asset_name) VALUES (?, ?)",
+                        (contract.id, name),
+                    )
+                for name in contract.outputs:
+                    self._conn.execute(
+                        "INSERT INTO contract_declared_outputs "
+                        "(contract_id, output_name) VALUES (?, ?)",
+                        (contract.id, name),
+                    )
+
+    def projection_index_digest(self) -> str:
+        activation_rows = [
+            (row[0], row[1])
+            for row in self._conn.execute(
+                "SELECT contract_id, asset_name FROM contract_activation_refs"
+            ).fetchall()
+        ]
+        output_rows = [
+            (row[0], row[1])
+            for row in self._conn.execute(
+                "SELECT contract_id, output_name FROM contract_declared_outputs"
+            ).fetchall()
+        ]
+        return _projection_index_digest(activation_rows, output_rows)
+
     # ------------------------------------------------------------------
     # Trace operations (G3, 040 C3)
     # ------------------------------------------------------------------
@@ -881,9 +940,18 @@ class SQLiteStore:
         return entry
 
     def _insert_trace_entry(self, entry: TraceEntry) -> None:
+        row = self._conn.execute(
+            "SELECT * FROM trace_events WHERE id = ?", (entry.id,)
+        ).fetchone()
+        if row is not None:
+            existing = self._row_to_trace_entry(row)
+            if trace_effective_payload(existing) == trace_effective_payload(entry):
+                return
+            raise ImmutableRecordConflict("trace event", entry.id)
         d = trace_entry_to_dict(entry)
-        self._conn.execute(
-            """INSERT OR REPLACE INTO trace_events (
+        try:
+            self._conn.execute(
+                """INSERT INTO trace_events (
                     id, parent_id, contract_id, event_type,
                     disclosed_assets, accepted_fragments, accepted_asset_names,
                     rejected_fragments, worker_id, candidate_raw,
@@ -896,11 +964,20 @@ class SQLiteStore:
                     :authority_policy, :authority_result, :budget_remaining,
                     :relation_type, :relation_target, :timestamp, :usage_metadata
                 )""",
-            {
-                k: json.dumps(v) if isinstance(v, (list, dict, tuple)) else v
-                for k, v in d.items()
-            },
-        )
+                {
+                    k: json.dumps(v) if isinstance(v, (list, dict, tuple)) else v
+                    for k, v in d.items()
+                },
+            )
+        except sqlite3.IntegrityError:
+            row = self._conn.execute(
+                "SELECT * FROM trace_events WHERE id = ?", (entry.id,)
+            ).fetchone()
+            if row is not None and trace_effective_payload(
+                self._row_to_trace_entry(row)
+            ) == trace_effective_payload(entry):
+                return
+            raise ImmutableRecordConflict("trace event", entry.id) from None
 
     def get_trace_events(self, contract_id: str | None = None) -> list:
         """Return trace entries, optionally filtered by contract_id."""
@@ -1092,16 +1169,30 @@ class SQLiteStore:
     def set_idempotency(
         self, contract_id: str, idempotency_key: str, result: dict
     ) -> None:
-        self._conn.execute(
-            "INSERT OR REPLACE INTO idempotency_records "
-            "(contract_id, idempotency_key, result_json, created_at) VALUES (?, ?, ?, ?)",
-            (
-                contract_id,
-                idempotency_key,
-                json.dumps(result, sort_keys=True),
-                now_iso(),
-            ),
-        )
+        existing = self.get_idempotency(contract_id, idempotency_key)
+        if existing is not None:
+            if existing == result:
+                return
+            raise ImmutableRecordConflict(
+                "idempotency record", f"{contract_id}:{idempotency_key}"
+            )
+        try:
+            self._conn.execute(
+                "INSERT INTO idempotency_records "
+                "(contract_id, idempotency_key, result_json, created_at) VALUES (?, ?, ?, ?)",
+                (
+                    contract_id,
+                    idempotency_key,
+                    json.dumps(result, sort_keys=True),
+                    now_iso(),
+                ),
+            )
+        except sqlite3.IntegrityError:
+            if self.get_idempotency(contract_id, idempotency_key) == result:
+                return
+            raise ImmutableRecordConflict(
+                "idempotency record", f"{contract_id}:{idempotency_key}"
+            ) from None
 
     def commit_candidate_submission(
         self,
@@ -1194,23 +1285,39 @@ class SQLiteStore:
             self._insert_replacement_claim(claim)
 
     def _insert_replacement_claim(self, claim) -> None:
-        self._conn.execute(
-            """INSERT OR REPLACE INTO claims (
+        row = self._conn.execute(
+            "SELECT * FROM claims WHERE id = ?", (claim.id,)
+        ).fetchone()
+        if row is not None:
+            existing = self._row_to_replacement_claim(row)
+            if existing == claim:
+                return
+            raise ImmutableRecordConflict("replacement claim", claim.id)
+        try:
+            self._conn.execute(
+                """INSERT INTO claims (
                     id, source_asset_id, replacement_asset_id,
                     definition_hash, claim_type, signed_by,
                     provenance_seal, lineage_id
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            (
-                claim.id,
-                claim.source_asset_id,
-                claim.replacement_asset_id,
-                claim.definition_hash,
-                claim.claim_type,
-                claim.signed_by,
-                claim.provenance_seal,
-                claim.lineage_id,
-            ),
-        )
+                (
+                    claim.id,
+                    claim.source_asset_id,
+                    claim.replacement_asset_id,
+                    claim.definition_hash,
+                    claim.claim_type,
+                    claim.signed_by,
+                    claim.provenance_seal,
+                    claim.lineage_id,
+                ),
+            )
+        except sqlite3.IntegrityError:
+            row = self._conn.execute(
+                "SELECT * FROM claims WHERE id = ?", (claim.id,)
+            ).fetchone()
+            if row is not None and self._row_to_replacement_claim(row) == claim:
+                return
+            raise ImmutableRecordConflict("replacement claim", claim.id) from None
 
     def commit_replacement_claim(self, claim, trace_entry: TraceEntry) -> None:
         """Persist a replacement claim and its audit trace atomically."""

@@ -2,7 +2,9 @@
 
 import pytest
 
+from aigineering.core.authority import ReservedNamespaceError
 from aigineering.core.provenance import sign_asset
+from aigineering.core.record_conflict import ImmutableRecordConflict
 from aigineering.core.store import JsonLStore, MemoryStore
 from aigineering.protocol.types import Asset, Contract
 
@@ -25,6 +27,34 @@ def test_add_and_get_asset(store):
     store.add_asset(asset)
     assert store.get_asset("asset_123") == asset
     assert store.get_asset("nonexistent") is None
+
+
+def test_asset_replay_is_idempotent_but_id_reuse_conflicts(store):
+    asset = sign_asset(
+        Asset(id="immutable-a", name="fact", content="v1"), signed_by="test"
+    )
+    store.add_asset(asset)
+    store.add_asset(asset)
+    assert store.get_all_assets() == [asset]
+
+    changed = sign_asset(
+        Asset(id="immutable-a", name="fact", content="v2"), signed_by="test"
+    )
+    with pytest.raises(ImmutableRecordConflict, match="immutable asset conflict"):
+        store.add_asset(changed)
+    assert store.get_asset("immutable-a") == asset
+
+
+def test_reserved_namespace_requires_explicit_system_ingress(store):
+    protected = sign_asset(
+        Asset(id="protected-a", name="_sys_runtime", content="v1"),
+        signed_by="engine",
+    )
+    with pytest.raises(ReservedNamespaceError):
+        store.add_asset(protected)
+
+    store._add_system_asset(protected)
+    assert store.get_asset("protected-a") == protected
 
 
 def test_get_assets_by_name(store):
@@ -54,6 +84,40 @@ def test_add_and_get_contract(store):
     contract = Contract(id="c1", name="build", outputs=["report"])
     store.add_contract(contract)
     assert store.get_contract("c1") == contract
+
+
+def test_contract_replay_is_idempotent_but_id_reuse_conflicts(store):
+    contract = Contract(id="immutable-c", name="build", outputs=["report"])
+    store.add_contract(contract)
+    store.add_contract(contract)
+    assert store.get_all_contracts() == [contract]
+
+    changed = Contract(id="immutable-c", name="build", outputs=["other"])
+    with pytest.raises(ImmutableRecordConflict, match="immutable contract conflict"):
+        store.add_contract(changed)
+    assert store.get_contract("immutable-c") == contract
+
+
+def test_projection_indexes_rebuild_from_contract_facts(store):
+    contract = Contract(
+        id="indexed-c",
+        activation="input_a AND input_b",
+        outputs=["report", "summary"],
+    )
+    store.add_contract(contract)
+    expected_digest = store.projection_index_digest()
+    assert set(store.get_contracts_waiting_for("input_a")) == {"indexed-c"}
+    assert set(store.get_contracts_declaring_output("report")) == {"indexed-c"}
+
+    store._activation_index.clear()
+    store._reverse_activation_index.clear()
+    store._declared_outputs_index.clear()
+    assert store.projection_index_digest() != expected_digest
+
+    store.rebuild_projection_indexes()
+    assert store.projection_index_digest() == expected_digest
+    assert set(store.get_contracts_waiting_for("input_b")) == {"indexed-c"}
+    assert set(store.get_contracts_declaring_output("summary")) == {"indexed-c"}
 
 
 def test_get_all(store):

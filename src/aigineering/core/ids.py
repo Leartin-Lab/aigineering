@@ -165,8 +165,15 @@ def hash_event(
     event_type: str,
     sequence: int = 0,
     parent_id: Optional[str] = None,
+    payload: Any | None = None,
 ) -> str:
-    """Deterministic trace-event identity (``event:`` tag)."""
+    """Deterministic trace-event identity (``event:`` tag).
+
+    ``payload`` binds the effective event body when provided.  The optional
+    argument preserves the legacy helper API while allowing real TraceEntry
+    identities to cover candidate, authority, accepted/rejected effects and
+    causal metadata instead of only a locally allocated sequence number.
+    """
     components: dict[str, Any] = {
         "contract_id": contract_id,
         "event_type": event_type,
@@ -174,6 +181,8 @@ def hash_event(
     }
     if parent_id is not None:
         components["parent_id"] = parent_id
+    if payload is not None:
+        components["payload"] = payload
     canonical = canonical_json(components)
     return f"event:{compute_content_hash(canonical)}"
 

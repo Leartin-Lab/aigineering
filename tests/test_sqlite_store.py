@@ -35,6 +35,44 @@ def test_satisfies_store_protocol(store):
     assert isinstance(store, StoreProtocol)
 
 
+def test_projection_indexes_rebuild_to_same_digest(store):
+    contract = Contract(
+        id="indexed-c",
+        activation="input_a AND input_b",
+        outputs=["report", "summary"],
+    )
+    store.add_contract(contract)
+    expected_digest = store.projection_index_digest()
+
+    with store._conn:
+        store._conn.execute("DELETE FROM contract_activation_refs")
+        store._conn.execute("DELETE FROM contract_declared_outputs")
+    assert store.projection_index_digest() != expected_digest
+
+    store.rebuild_projection_indexes()
+    assert store.projection_index_digest() == expected_digest
+    assert set(store.get_contracts_waiting_for("input_a")) == {"indexed-c"}
+    assert set(store.get_contracts_declaring_output("summary")) == {"indexed-c"}
+
+
+def test_sqlite_reducer_sees_new_fact_inside_atomic_commit(store):
+    from aigineering.core.fact_reducer import FactReducer
+    from aigineering.core.runtime_ingress import RuntimeIngress
+    from aigineering.core.trace import MemoryTraceStore
+
+    trace = MemoryTraceStore()
+    store.add_contract(Contract(id="c1", outputs=["report"]))
+    ingress = RuntimeIngress(store, trace, FactReducer(store, trace))
+
+    ingress.accept_asset(
+        Asset(id="report-a", name="report", content="done", origin="worker")
+    )
+
+    event_types = [entry.event_type for entry in store.get_trace_events("c1")]
+    assert event_types == ["output_satisfied", "complete"]
+    assert [entry.event_type for entry in trace.get_by_contract("c1")] == event_types
+
+
 # ---------------------------------------------------------------------------
 # Basic CRUD: assets
 # ---------------------------------------------------------------------------
@@ -512,23 +550,36 @@ def test_transaction_atomicity(store):
     assert store.get_asset("a1") is not None
 
 
-def test_insert_or_replace_upsert(store):
-    """INSERT OR REPLACE must update an existing asset, not duplicate it."""
-    store.add_asset(
-        sign_asset(Asset(id="a1", name="original", content="v1"), signed_by="test")
+def test_runtime_record_ids_are_immutable(store):
+    """Identical replay is a no-op; same ID with changed content fails closed."""
+    from aigineering.core.record_conflict import ImmutableRecordConflict
+
+    original = sign_asset(
+        Asset(id="a1", name="original", content="v1"), signed_by="test"
     )
+    store.add_asset(original)
+    store.add_asset(original)
     assert len(store.get_all_assets()) == 1
 
-    # Insert same ID with different content
-    store.add_asset(
-        sign_asset(Asset(id="a1", name="updated", content="v2"), signed_by="test")
-    )
+    with pytest.raises(ImmutableRecordConflict, match="immutable asset conflict"):
+        store.add_asset(
+            sign_asset(Asset(id="a1", name="updated", content="v2"), signed_by="test")
+        )
     assert len(store.get_all_assets()) == 1
+    assert store.get_asset("a1") == original
 
-    updated = store.get_asset("a1")
-    assert updated.name == "updated"
-    assert updated.content == "v2"
-    assert updated.id == "a1"
+
+def test_idempotency_record_is_immutable(store):
+    from aigineering.core.record_conflict import ImmutableRecordConflict
+
+    result = {"status": "accepted", "assets": ["a1"]}
+    store.set_idempotency("c1", "key-1", result)
+    store.set_idempotency("c1", "key-1", result)
+    assert store.get_idempotency("c1", "key-1") == result
+
+    with pytest.raises(ImmutableRecordConflict, match="idempotency record"):
+        store.set_idempotency("c1", "key-1", {"status": "rejected"})
+    assert store.get_idempotency("c1", "key-1") == result
 
 
 # ---------------------------------------------------------------------------

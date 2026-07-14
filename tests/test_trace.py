@@ -2,6 +2,7 @@
 
 import json
 import os
+from dataclasses import replace
 
 import pytest
 
@@ -10,6 +11,7 @@ from aigineering.core.trace import (
     MemoryTraceStore,
     create_entry,
 )
+from aigineering.core.record_conflict import ImmutableRecordConflict
 
 
 # ---------------------------------------------------------------------------
@@ -49,6 +51,25 @@ def test_trace_store_append(trace_store):
     trace_store.append(entry)
     assert len(trace_store.get_all()) == 1
     assert trace_store.sequence == 1
+
+
+def test_trace_payload_participates_in_event_identity():
+    first = create_entry("c1", "projection", sequence=0, candidate_raw="one")
+    second = create_entry("c1", "projection", sequence=0, candidate_raw="two")
+    assert first.id != second.id
+
+
+def test_trace_replay_is_idempotent_but_id_reuse_conflicts(trace_store):
+    original = create_entry("c1", "projection", sequence=0, candidate_raw="one")
+    trace_store.append(original)
+    trace_store.append(original)
+    assert trace_store.get_all() == [original]
+    assert trace_store.sequence == 1
+
+    changed = replace(original, candidate_raw="two")
+    with pytest.raises(ImmutableRecordConflict, match="immutable trace event conflict"):
+        trace_store.append(changed)
+    assert trace_store.get_all() == [original]
 
 
 def test_trace_store_new_entry(trace_store):
