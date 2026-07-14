@@ -117,6 +117,9 @@ def claim_next_package(
                 worker_id,
                 lease_seconds=lease_seconds,
                 package_id=package.package_id,
+                expected_registration_version=(
+                    registered_worker.version if registered_worker else ""
+                ),
             )
             if claim is None:
                 continue

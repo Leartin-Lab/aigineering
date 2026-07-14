@@ -124,10 +124,48 @@ class TestConcurrentClaims:
 
         assert results.get("worker_x") is not None
         assert results.get("worker_y") is not None
-        claimed = sum(1 for v in results.values() if v == "claimed")
-        failed = sum(1 for v in results.values() if v == "failed")
+        claimed = sum(1 for value in results.values() if value == "claimed")
+        failed = sum(1 for value in results.values() if value == "failed")
         assert claimed == 1, f"Exactly one worker should claim: {results}"
         assert failed == 1, f"One worker should fail: {results}"
+
+    def test_registered_worker_capacity_is_atomic_across_contracts(self, tmp_path):
+        """One capacity slot cannot be consumed twice by concurrent claims."""
+        from aigineering.core.worker_routing import WorkerRegistration
+
+        db_path = str(tmp_path / "aig_capacity.db")
+        setup = SQLiteStore(db_path)
+        setup.add_contract(Contract(id="task:a", outputs=("a",), budget=1))
+        setup.add_contract(Contract(id="task:b", outputs=("b",), budget=1))
+        setup.register_worker(WorkerRegistration("worker", capacity=1, version="1"))
+        setup.close()
+
+        barrier = threading.Barrier(2, timeout=10)
+        results: list[dict | None] = []
+
+        def claim(contract_id):
+            store = SQLiteStore(db_path)
+            try:
+                barrier.wait()
+                results.append(
+                    store.claim_contract(
+                        contract_id,
+                        "worker",
+                        expected_registration_version="1",
+                    )
+                )
+            finally:
+                store.close()
+
+        first = threading.Thread(target=claim, args=("task:a",))
+        second = threading.Thread(target=claim, args=("task:b",))
+        first.start()
+        second.start()
+        first.join(timeout=15)
+        second.join(timeout=15)
+
+        assert len(results) == 2
+        assert sum(result is not None for result in results) == 1
 
     def test_ten_workers_submit_to_ten_contracts_all_correct(self, tmp_path):
         """10 workers submit to 10 distinct contracts concurrently — all produce correct traces."""

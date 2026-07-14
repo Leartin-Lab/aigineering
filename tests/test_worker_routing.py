@@ -144,3 +144,20 @@ def test_worker_registration_versions_are_immutable_and_rebuildable(kind):
     assert store.get_worker_registration("worker") == v2
     if kind == "sqlite":
         store.close()
+
+
+def test_claim_rechecks_registration_version_inside_transaction():
+    store = SQLiteStore(":memory:")
+    store.add_contract(Contract(id="task:versioned", outputs=("out",), budget=1))
+    store.register_worker(WorkerRegistration("worker", version="2"))
+
+    stale = store.claim_contract(
+        "task:versioned", "worker", expected_registration_version="1"
+    )
+    current = store.claim_contract(
+        "task:versioned", "worker", expected_registration_version="2"
+    )
+
+    assert stale is None
+    assert current is not None
+    store.close()

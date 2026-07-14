@@ -1270,38 +1270,66 @@ class SQLiteStore:
         worker_id: str,
         lease_seconds: int = 60,
         package_id: str = "",
+        expected_registration_version: str = "",
     ) -> dict | None:
-        """Atomically claim *contract_id* for *worker_id* if no active claim exists."""
+        """Atomically arbitrate contract exclusivity and registered capacity."""
         from datetime import datetime, timedelta, timezone
 
         now = datetime.now(timezone.utc)
         lease_until = (now + timedelta(seconds=lease_seconds)).isoformat()
         claim_id = f"lease:{compute_content_hash(f'{contract_id}|{worker_id}|{now.isoformat()}')}"
         try:
-            with self._conn:
-                existing = self._conn.execute(
-                    "SELECT claim_id, status FROM worker_claims "
-                    "WHERE contract_id = ? ORDER BY rowid DESC LIMIT 1",
-                    (contract_id,),
-                ).fetchone()
-                if existing is not None:
+            self._conn.execute("BEGIN IMMEDIATE")
+            existing = self._conn.execute(
+                "SELECT claim_id, status FROM worker_claims "
+                "WHERE contract_id = ? ORDER BY rowid DESC LIMIT 1",
+                (contract_id,),
+            ).fetchone()
+            if existing is not None:
+                self._conn.rollback()
+                return None
+
+            registration = self._conn.execute(
+                "SELECT enabled, capacity, version FROM worker_registrations "
+                "WHERE worker_id = ?",
+                (worker_id,),
+            ).fetchone()
+            if registration is not None:
+                active_claims = self._conn.execute(
+                    "SELECT COUNT(*) FROM worker_claims "
+                    "WHERE worker_id = ? AND status = 'active'",
+                    (worker_id,),
+                ).fetchone()[0]
+                if (
+                    not bool(registration["enabled"])
+                    or active_claims >= int(registration["capacity"])
+                    or (
+                        expected_registration_version
+                        and registration["version"] != expected_registration_version
+                    )
+                ):
+                    self._conn.rollback()
                     return None
-                self._conn.execute(
-                    """INSERT INTO worker_claims (
-                        claim_id, contract_id, worker_id, lease_until, status,
-                        package_id, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, 'active', ?, ?, ?)""",
-                    (
-                        claim_id,
-                        contract_id,
-                        worker_id,
-                        lease_until,
-                        package_id,
-                        now_iso(),
-                        now_iso(),
-                    ),
-                )
-        except sqlite3.IntegrityError:
+
+            timestamp = now_iso()
+            self._conn.execute(
+                """INSERT INTO worker_claims (
+                    claim_id, contract_id, worker_id, lease_until, status,
+                    package_id, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, 'active', ?, ?, ?)""",
+                (
+                    claim_id,
+                    contract_id,
+                    worker_id,
+                    lease_until,
+                    package_id,
+                    timestamp,
+                    timestamp,
+                ),
+            )
+            self._conn.commit()
+        except (sqlite3.IntegrityError, sqlite3.OperationalError):
+            self._conn.rollback()
             return None
         return self.get_claim(contract_id)
 
