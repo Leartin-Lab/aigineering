@@ -42,6 +42,16 @@ def test_reserved_prefix_rejected():
     assert rej[0]["category"] == "protected_name_rejection"
 
 
+def test_fail_context_prefix_is_runtime_only():
+    name = "_fail_context_contract"
+    acc, rej, _ = check_authority(
+        contract_with_outputs(name),
+        [{"name": name, "content": "worker-controlled"}],
+    )
+    assert acc == []
+    assert rej[0]["category"] == "protected_name_rejection"
+
+
 def test_mixed_accept_reject():
     acc, rej, _ = check_authority(
         contract_with_outputs("report", "data"),

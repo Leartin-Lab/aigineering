@@ -18,6 +18,7 @@ RESERVED_PREFIXES: frozenset[str] = frozenset(
         "_plan_result_",
         "_replan_result_",
         "_fail_result_",
+        "_fail_context_",
         "_method_ctx_",
         "_replan_report_",
         "_fail_report_",

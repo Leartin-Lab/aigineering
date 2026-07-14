@@ -8,6 +8,7 @@ from aigineering.core.asset_versions import create_replacement_claim
 from aigineering.core.ids import hash_asset_content, hash_contract_v2
 from aigineering.core.runtime_ingress import RuntimeIngress
 from aigineering.core.sqlite_store import SQLiteStore
+from aigineering.core.store import MemoryStore
 from aigineering.protocol.types import Asset, Candidate, Contract
 
 
@@ -61,6 +62,19 @@ def test_sqlite_rejects_claimless_programmatic_candidate_submission() -> None:
         budget=1,
     )
     ingress.accept_contract(contract)
+
+    with pytest.raises(RuntimeError, match="claim-bound"):
+        ingress.accept_candidate_submission(
+            contract,
+            Candidate(worker_id="bypass", raw_output="result: no"),
+        )
+
+
+def test_memory_store_rejects_claimless_programmatic_candidate_submission() -> None:
+    """Test stores cannot weaken the operational commitment boundary."""
+    store = MemoryStore()
+    ingress = RuntimeIngress(store, store)
+    contract = Contract(id="contract:memory", outputs=("result",), budget=1)
 
     with pytest.raises(RuntimeError, match="claim-bound"):
         ingress.accept_candidate_submission(

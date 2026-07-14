@@ -465,83 +465,15 @@ class RuntimeIngress:
         candidate: Candidate,
         claim_id: str | None = None,
     ) -> ProjectionResult:
-        """Project a worker candidate through the commitment boundary.
+        """Reject the legacy claimless candidate-ingress API.
 
-        Delegates to :func:`project_candidate` for authority and parse
-        checks, then accepts each accepted asset through
-        :meth:`accept_asset`.  Returns the final projection result with
-        signed assets.
-
-        Parameters
-        ----------
-        contract : Contract
-            The contract the candidate was submitted for.
-        candidate : Candidate
-            The raw worker output to project.
-        claim_id : str or None
-            Optional claim identifier for idempotency tracking.
-
-        Returns
-        -------
-        ProjectionResult
-            The projection result with signed accepted assets.
+        Candidate commitment must use :func:`core.submit.submit_candidate`,
+        irrespective of the backing store.  Keeping a permissive test-store
+        branch here would make boundary guarantees depend on deployment
+        configuration.
         """
-        from aigineering.core.projection import project_candidate
-        from aigineering.protocol.types import ProjectionResult
-
-        # SQLite is the operational runtime substrate.  Its worker protocol
-        # must use ``submit_candidate`` so claim, lease, package binding and
-        # idempotency join the same transaction.  Keeping this convenience
-        # API active on SQLite would recreate a claimless mutation ingress.
-        if hasattr(self._store, "commit_candidate_submission"):
-            raise RuntimeError(
-                "SQLite candidate submission is claim-bound; use "
-                "aig worker submit / core.submit.submit_candidate"
-            )
-
-        raw_result = project_candidate(contract, candidate)
-
-        signed_assets: list[Asset] = []
-        for asset in raw_result.accepted_assets:
-            accepted = self.accept_asset(asset, source="candidate")
-            signed_assets.append(accepted)
-
-        rejected_dicts = [
-            {
-                "name": r.name,
-                "content": r.content,
-                "reject_reason": r.reject_reason,
-                "category": r.category.value,
-            }
-            for r in raw_result.rejected_candidates
-        ]
-
-        self._trace.append(
-            create_entry(
-                contract_id=contract.id,
-                event_type="candidate_submitted",
-                worker_id=candidate.worker_id,
-                candidate_raw=candidate.raw_output,
-                accepted_fragments=[a.id for a in signed_assets],
-                accepted_asset_names=[a.name for a in signed_assets],
-                rejected_fragments=[
-                    f"[{r['category']}] {r['name']}: {r['reject_reason']}"
-                    for r in rejected_dicts
-                ],
-                authority_result=raw_result.status.value,
-                authority_policy=(
-                    json.dumps(dict(raw_result.authority_policy), sort_keys=True)
-                    if raw_result.authority_policy is not None
-                    else None
-                ),
-                usage_metadata=candidate.metadata,
-            )
-        )
-
-        return ProjectionResult(
-            accepted_assets=tuple(signed_assets),
-            rejected_candidates=raw_result.rejected_candidates,
-            raw_candidate=raw_result.raw_candidate,
-            status=raw_result.status,
-            authority_policy=raw_result.authority_policy,
+        del contract, candidate, claim_id
+        raise RuntimeError(
+            "candidate submission is claim-bound; use "
+            "aig worker submit / core.submit.submit_candidate"
         )
