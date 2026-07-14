@@ -1,0 +1,167 @@
+"""Engine-as-Worker adapter with an invocation-scoped inner fact domain."""
+
+from __future__ import annotations
+
+import json
+from collections.abc import Callable
+from typing import TYPE_CHECKING
+
+from aigineering.cli.worker_runtime import (
+    claim_next_package,
+    execute_claimed_package,
+    process_method_completions,
+    process_rejected_submissions,
+)
+from aigineering.core.fact_reducer import FactReducer
+from aigineering.core.ids import hash_contract_v2
+from aigineering.core.method_handlers.fail import FailMethodHandler
+from aigineering.core.method_handlers.plan import PlanMethodHandler
+from aigineering.core.method_handlers.replan import ReplanMethodHandler
+from aigineering.core.method_handlers.retry import RetryMethodHandler
+from aigineering.core.method_handlers.tool import ToolMethodHandler
+from aigineering.core.method_registry import MethodRegistry
+from aigineering.core.output_satisfaction import is_business_output
+from aigineering.core.provenance import verify_asset_seal
+from aigineering.core.runtime_ingress import RuntimeIngress
+from aigineering.core.sqlite_store import SQLiteStore
+from aigineering.protocol.types import Candidate, Contract
+
+if TYPE_CHECKING:
+    from aigineering.agent.worker import Worker
+    from aigineering.protocol.types import Asset
+
+
+class EngineWorker:
+    """Run one disclosed Contract in an isolated inner AIG protocol domain."""
+
+    def __init__(
+        self,
+        delegate: Worker,
+        *,
+        worker_id: str = "engine_worker:nested",
+        max_steps: int = 64,
+        worker_selector: Callable[[Contract], Worker] | None = None,
+    ) -> None:
+        if max_steps < 1:
+            raise ValueError("max_steps must be positive")
+        self._delegate = delegate
+        self._worker_selector = worker_selector
+        self.worker_id = worker_id
+        self._max_steps = max_steps
+
+    def invoke(self, contract: Contract, disclosed_assets: list[Asset]) -> Candidate:
+        """Return only the outer Contract's declared outputs as a Candidate."""
+        inner = SQLiteStore(":memory:")
+        try:
+            ingress = RuntimeIngress(inner, inner, FactReducer(inner, inner))
+            for asset in disclosed_assets:
+                if not verify_asset_seal(asset):
+                    return self._failure(
+                        "outer disclosure contains an invalid asset seal"
+                    )
+                ingress.accept_asset(
+                    asset,
+                    source="outer_disclosure",
+                    allow_protected=asset.name.startswith("_"),
+                )
+            inner_contract = _inner_contract(contract)
+            ingress.accept_contract(inner_contract)
+            registry = _method_registry()
+            for _ in range(self._max_steps):
+                process_rejected_submissions(inner)
+                process_method_completions(inner, registry)
+                claimed = claim_next_package(
+                    inner,
+                    worker_id=f"{self.worker_id}:delegate",
+                )
+                if claimed is None:
+                    break
+                worker = (
+                    self._worker_selector(claimed.contract)
+                    if self._worker_selector is not None
+                    else self._delegate
+                )
+                try:
+                    execute_claimed_package(
+                        claimed,
+                        worker,
+                        inner,
+                        method_registry=registry,
+                    )
+                except ValueError:
+                    return self._failure("inner worker produced an invalid submission")
+                process_method_completions(inner, registry)
+
+            outputs: dict[str, str] = {}
+            for name in contract.outputs:
+                matches = [
+                    asset
+                    for asset in inner.get_assets_by_name(name)
+                    if is_business_output(asset, name)
+                ]
+                if matches:
+                    outputs[name] = matches[-1].content
+            if set(outputs) != set(contract.outputs):
+                missing = sorted(set(contract.outputs) - set(outputs))
+                return self._failure(
+                    "inner runtime stopped without declared outputs: "
+                    + ", ".join(missing)
+                )
+            return Candidate(
+                worker_id=self.worker_id,
+                raw_output=json.dumps(
+                    {"type": "exec", "outputs": outputs},
+                    sort_keys=True,
+                    ensure_ascii=False,
+                ),
+                parsed_action={"type": "exec", "outputs": outputs},
+            )
+        finally:
+            inner.close()
+
+    def _failure(self, reason: str) -> Candidate:
+        # Deliberately undeclared: outer projection records a visible rejection
+        # and schedules ordinary recovery instead of silently terminating.
+        return Candidate(
+            worker_id=self.worker_id,
+            raw_output=f"engine_worker_failure: {reason}",
+        )
+
+
+def _inner_contract(outer: Contract) -> Contract:
+    identity = hash_contract_v2(
+        name=outer.name,
+        description=outer.description,
+        inputs=list(outer.inputs),
+        outputs=list(outer.outputs),
+        activation=outer.activation,
+        budget=outer.budget,
+        tool_scope=list(outer.tool_scope),
+        labels=list(outer.labels),
+        worker_capabilities=[],
+        worker_pools=[],
+        origin="engine_worker",
+    )
+    return Contract(
+        id=identity,
+        name=outer.name,
+        description=outer.description,
+        inputs=outer.inputs,
+        outputs=outer.outputs,
+        activation=outer.activation,
+        budget=outer.budget,
+        tool_scope=outer.tool_scope,
+        labels=outer.labels,
+        origin="engine_worker",
+        sensitive_input_policy=outer.sensitive_input_policy,
+    )
+
+
+def _method_registry() -> MethodRegistry:
+    registry = MethodRegistry()
+    registry.register("plan", PlanMethodHandler())
+    registry.register("replan", ReplanMethodHandler())
+    registry.register("retry", RetryMethodHandler())
+    registry.register("tool", ToolMethodHandler())
+    registry.register("fail", FailMethodHandler())
+    return registry
