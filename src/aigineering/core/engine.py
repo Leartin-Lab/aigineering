@@ -22,11 +22,7 @@ from aigineering.core.method_handlers.recovery import (
     schedule_projection_recovery,
 )
 from aigineering.core.ids import hash_asset_content, hash_asset_definition
-from aigineering.core.methods import (
-    method_contract,
-    method_context_content,
-    method_payload,
-)
+from aigineering.core.methods import method_payload
 from aigineering.core.fact_reducer import FactReducer
 from aigineering.core.projection import project_candidate
 from aigineering.core.method_registry import MethodRegistry
@@ -519,25 +515,16 @@ class Engine:
         Budget decrement and parent suspension always run.
         """
         handler = None
+        runtime = _make_runtime(self)
         if self._method_registry is not None:
             handler = self._method_registry.get(action.type)
 
         handled = False
         if handler is not None and handler.can_handle(action.type):
-            runtime = MethodRuntime(
-                store=self._store,
-                trace=self._trace_mgr,
-                budget=self._budget_mgr,
-                tools=self._tools,
-                mcp_servers=self._mcp_servers,
-                suspended=self._suspended,
-                method_scheduled=self._method_scheduled,
-                ingress=self._ingress,
-            )
             handled = handler.handle_method(runtime, contract, action.type, candidate)
 
         if not handled:
-            self._schedule_method_contract(contract, action, candidate)
+            runtime.schedule_method(contract, action, candidate)
 
         self._write_pending_traces()
         check_crash_point("after_method_schedule")
@@ -699,43 +686,6 @@ class Engine:
         self._completed.add(contract.id)
         self._suspended.discard(contract.id)
         return True
-
-    def _schedule_method_contract(
-        self,
-        contract: Contract,
-        action: WorkerAction,
-        candidate: Candidate,
-    ) -> None:
-        child = method_contract(contract, action)
-        if child.id not in self._method_scheduled:
-            self.add_contract(child)
-            self._create_method_context_asset(contract, action, child)
-            self._method_scheduled.add(child.id)
-
-        self._add_trace(
-            contract.id,
-            "method_scheduled",
-            worker_id=candidate.worker_id,
-            candidate_raw=candidate.raw_output,
-            relation_type=action.type,
-            relation_target=child.id,
-            budget_remaining=self._resolve_budget(contract),
-        )
-
-    def _create_method_context_asset(
-        self,
-        contract: Contract,
-        action: WorkerAction,
-        child: Contract,
-    ) -> None:
-        name = f"_method_ctx_{contract.id}"
-        runtime = _make_runtime(self)
-        runtime.mint_authorized_system_asset(
-            child,
-            name=name,
-            content=method_context_content(contract, action, child),
-            created_by=contract.id,
-        )
 
     def _check_context_overflow(self, contract: Contract, scope: list[Asset]) -> bool:
         return self._overflow.handle_overflow(

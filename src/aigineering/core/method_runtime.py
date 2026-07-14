@@ -205,6 +205,8 @@ class MethodRuntime:
         self.append_trace(
             parent_contract.id,
             "method_scheduled",
+            worker_id=candidate.worker_id,
+            candidate_raw=candidate.raw_output,
             relation_type=action.type,
             relation_target=child.id,
             disclosed_assets=[ctx.id],
