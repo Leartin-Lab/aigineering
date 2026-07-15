@@ -124,6 +124,9 @@ an anonymous claimant cannot lock work it is unable to submit. The former
 server-side mock `/contracts/{id}/run` mutation endpoint returns 410 and directs
 clients to the claim/submission protocol; the server never impersonates a
 worker actor.
+`aig worker submit` uses the same authenticated, method-aware submission
+service and default registry as HTTP, so a signed `/plan` output has identical
+semantics at both ingress surfaces.
 
 `contract.publish` does not authorize an actor to populate
 `minting_authority`. A declaration containing protected minting authority also

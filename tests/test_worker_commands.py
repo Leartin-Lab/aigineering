@@ -949,6 +949,31 @@ def test_worker_next_submit_full_cycle():
         assert data is None
 
 
+def test_worker_submit_uses_shared_method_submission_path():
+    """CLI and HTTP signed submissions must schedule methods identically."""
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        store = SQLiteStore(".aig/store.db")
+        contract, _asset = _seed_contract_with_asset(store)
+        package = _claimed_package(runner)
+        candidate_json = _candidate_json_from_package(
+            package,
+            raw_output='/plan {"reason":"split the work"}',
+        )
+
+        result = runner.invoke(cli, ["worker", "submit", "--json", candidate_json])
+
+        assert result.exit_code == 0, result.output
+        payload = json.loads(result.output)
+        assert payload["status"] == "method_scheduled"
+        assert payload["method"] == "plan"
+        persisted = SQLiteStore(".aig/store.db")
+        child = persisted.get_contract(payload["child_contract_id"])
+        assert child is not None
+        assert child.parent_id == contract.id
+        assert child.origin == "system"
+
+
 def test_no_push_semantics():
     """Verify no push_work or dispatch_work functions exist in the codebase."""
     import os

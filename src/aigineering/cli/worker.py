@@ -13,9 +13,11 @@ from aigineering.cli._common import (
     _redact_sealed,
 )
 from aigineering.cli._candidate import commit_local_effects, require_accepted
+from aigineering.application import default_method_registry
 from aigineering.runtime import (
     _method_context_assets_for,
     claim_next_package,
+    submit_worker_proposal,
 )
 from aigineering.core.disclosure import DisclosurePolicyError, compute_disclosure
 from aigineering.core.actor_facts import load_effective_actor_keys
@@ -25,7 +27,6 @@ from aigineering.core.submit import (
     SubmitClaimError,
     SubmitCommitError,
     SubmitConflictError,
-    submit_worker_candidate,
 )
 from aigineering.protocol.candidate import ActorKey, candidate_proposal_from_dict
 from aigineering.protocol.effect_builders import (
@@ -344,10 +345,11 @@ def worker_submit(candidate_json: str, idempotency_key: Optional[str]) -> None:
         raise click.exceptions.Exit(1)
 
     try:
-        result = submit_worker_candidate(
-            candidate=candidate,
-            store=store,
+        result = submit_worker_proposal(
+            candidate,
+            store,
             trace_store=store,
+            method_registry=default_method_registry(),
         )
     except SubmitConflictError as e:
         _output_json({"error": str(e), "status": "conflict"})

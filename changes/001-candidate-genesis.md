@@ -205,6 +205,9 @@ Implementation progress:
 - Complete: the HTTP worker submission endpoint accepts signed Candidates only;
   server claims require an enabled actor-key binding. The server-side mock run
   endpoint no longer impersonates a worker or mutates runtime state.
+- Complete: CLI and HTTP worker submission share one authenticated,
+  method-aware service. Signed delegation output no longer changes behavior
+  according to ingress surface.
 - Complete: the production task loop injects a durable planning-plugin actor
   through CandidatePublisher. Plan and replan completion publish contained
   child fan-out as one signed Candidate; their duplicated handlers collapse to
