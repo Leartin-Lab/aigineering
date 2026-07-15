@@ -12,7 +12,8 @@ import pytest
 from aigineering.core.commitment import CandidateCommitter, reduce_candidate
 from aigineering.core.domain import initialize_genesis
 from aigineering.core.ids import hash_contract_v3
-from aigineering.core.signing import Signer, Verifier
+from aigineering.core.record_conflict import ImmutableRecordConflict
+from aigineering.core.signing import Ed25519Signer, Signer, Verifier
 from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.core.store import MemoryStore
 from aigineering.core.trace import MemoryTraceStore
@@ -23,6 +24,7 @@ from aigineering.protocol.candidate import (
     create_candidate_proposal,
     create_genesis_manifest,
 )
+from aigineering.protocol.effect_builders import actor_authorization_effect
 from aigineering.protocol.types import Contract
 from aigineering.protocol.wire import contract_to_dict
 
@@ -156,6 +158,101 @@ def test_worker_registration_requires_dedicated_actor_capability():
 
     assert decision.accepted is False
     assert "worker.register" in str(decision.runtime_records[1].payload["reason"])
+
+
+def test_authorized_actor_key_can_publish_its_own_candidate(store):
+    root_signer = Ed25519Signer()
+    worker_signer = Ed25519Signer()
+    genesis = create_genesis_manifest(
+        "delegated-worker",
+        [
+            ActorKey(
+                "human:owner",
+                "root",
+                root_signer.kind,
+                root_signer.signer_id,
+                ("actor.authorize",),
+            )
+        ],
+        "policy:delegation",
+    )
+    initialize_genesis(store, genesis)
+    worker_key = ActorKey(
+        "worker:writer",
+        "worker-1",
+        worker_signer.kind,
+        worker_signer.signer_id,
+        ("asset.publish",),
+    )
+    authorization = create_candidate_proposal(
+        domain_id=genesis.id,
+        actor_id="human:owner",
+        key_id="root",
+        effects=[actor_authorization_effect(worker_key)],
+        signer=root_signer,
+    )
+    trace = store if isinstance(store, SQLiteStore) else MemoryTraceStore()
+    assert CandidateCommitter(store, trace).commit(authorization, genesis).accepted
+
+    proposal = create_candidate_proposal(
+        domain_id=genesis.id,
+        actor_id=worker_key.actor_id,
+        key_id=worker_key.key_id,
+        effects=[
+            CandidateEffect(
+                "asset.propose",
+                {"asset": {"name": "worker_result", "content": "signed"}},
+            )
+        ],
+        signer=worker_signer,
+    )
+    decision = CandidateCommitter(store, trace).commit(proposal, genesis)
+
+    assert decision.accepted is True
+    assert (
+        store.get_assets_by_name("worker_result")[0].created_by == worker_key.actor_id
+    )
+
+
+def test_actor_identity_cannot_be_rebound_to_another_public_key(store):
+    root_signer = Ed25519Signer()
+    genesis = create_genesis_manifest(
+        "actor-conflict",
+        [
+            ActorKey(
+                "human:owner",
+                "root",
+                root_signer.kind,
+                root_signer.signer_id,
+                ("actor.authorize",),
+            )
+        ],
+        "policy:delegation",
+    )
+    initialize_genesis(store, genesis)
+    trace = store if isinstance(store, SQLiteStore) else MemoryTraceStore()
+    committer = CandidateCommitter(store, trace)
+
+    for signer in (Ed25519Signer(), Ed25519Signer()):
+        key = ActorKey(
+            "worker:fixed",
+            "key-1",
+            signer.kind,
+            signer.signer_id,
+            ("asset.publish",),
+        )
+        candidate = create_candidate_proposal(
+            domain_id=genesis.id,
+            actor_id="human:owner",
+            key_id="root",
+            effects=[actor_authorization_effect(key)],
+            signer=root_signer,
+        )
+        if not store.scan_runtime_records(record_type="actor.authorized"):
+            assert committer.commit(candidate, genesis).accepted
+        else:
+            with pytest.raises(ImmutableRecordConflict, match="actor key"):
+                committer.commit(candidate, genesis)
 
 
 def test_asset_relation_candidate_materializes_authenticated_claim(store):

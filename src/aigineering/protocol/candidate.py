@@ -280,14 +280,16 @@ def verify_candidate_proposal(
     genesis: GenesisManifest,
     *,
     verifier_factory: VerifierFactory = create_verifier,
+    actor_keys: tuple[ActorKey, ...] | None = None,
 ) -> None:
     """Fail closed unless identity, domain, bytes, and signature all match."""
     validate_genesis_manifest(genesis)
     if candidate.domain_id != genesis.id:
         raise ValueError("Candidate domain does not match Genesis manifest")
+    effective_keys = actor_keys if actor_keys is not None else genesis.root_keys
     matching = [
         key
-        for key in genesis.root_keys
+        for key in effective_keys
         if key.actor_id == candidate.actor_id and key.key_id == candidate.key_id
     ]
     if len(matching) != 1:
@@ -318,9 +320,15 @@ def candidate_received_record(
     genesis: GenesisManifest,
     *,
     verifier_factory: VerifierFactory = create_verifier,
+    actor_keys: tuple[ActorKey, ...] | None = None,
 ) -> RuntimeRecord:
     """Verify a Candidate and represent receipt without accepting its effects."""
-    verify_candidate_proposal(candidate, genesis, verifier_factory=verifier_factory)
+    verify_candidate_proposal(
+        candidate,
+        genesis,
+        verifier_factory=verifier_factory,
+        actor_keys=actor_keys,
+    )
     return create_runtime_record(
         "candidate.received",
         {

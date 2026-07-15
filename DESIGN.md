@@ -182,6 +182,13 @@ CandidateCommitter can reconstruct the trust root from the Store instead of
 receiving ambient process configuration. Genesis bootstrap is the sole direct
 append exception in the candidate-native transition.
 
+Genesis root actors may delegate Candidate capabilities with the
+`actor.authorize` effect. Accepted public keys are immutable
+`actor.authorized` facts; Candidate authentication derives its effective key
+set from Genesis plus those facts. SQLite schema v10 and the in-memory adapter
+forbid rebinding one actor/key identity to different key material. Rotation and
+revocation are still active-change work and are not implied by authorization.
+
 `cryptography` is a required runtime dependency because actor authentication is
 a base security property. Deterministic content seals remain available for
 integrity compatibility but are explicitly rejected as Candidate identity.

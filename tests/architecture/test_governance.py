@@ -245,6 +245,19 @@ def test_worker_registration_cli_uses_typed_candidate_effect():
     assert "store.register_worker" not in register
 
 
+def test_actor_authorization_is_a_capability_gated_candidate_effect():
+    projection = (ROOT / "src/aigineering/core/effect_projection.py").read_text(
+        encoding="utf-8"
+    )
+    actor_facts = (ROOT / "src/aigineering/core/actor_facts.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert '"actor.authorize": ("actor.authorize"' in projection
+    assert "actor.authorized" in actor_facts
+    assert "validate_actor_authorization_record" in actor_facts
+
+
 def test_engine_worker_bootstraps_inner_domain_through_candidate_publication():
     source = (ROOT / "src/aigineering/agent/engine_worker.py").read_text(
         encoding="utf-8"

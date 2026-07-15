@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from aigineering.protocol.candidate import CandidateEffect
+from aigineering.protocol.candidate import ActorKey, CandidateEffect
 from aigineering.protocol.types import Asset, Contract, ReplacementClaim
 from aigineering.protocol.wire import contract_to_dict
 
@@ -71,4 +71,19 @@ def contract_cancellation_effect(contract_id: str, reason: str) -> CandidateEffe
     return CandidateEffect(
         "contract.cancel",
         {"contract_id": contract_id, "reason": reason},
+    )
+
+
+def actor_authorization_effect(actor_key: ActorKey) -> CandidateEffect:
+    return CandidateEffect(
+        "actor.authorize",
+        {
+            "actor_key": {
+                "actor_id": actor_key.actor_id,
+                "capabilities": list(actor_key.capabilities),
+                "key_id": actor_key.key_id,
+                "kind": actor_key.kind,
+                "public_key": actor_key.public_key,
+            }
+        },
     )

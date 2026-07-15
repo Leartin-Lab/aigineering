@@ -27,6 +27,10 @@ from aigineering.core.ids import (
     now_iso,
     validate_contract_identity,
 )
+from aigineering.core.actor_facts import (
+    genesis_actor_identities,
+    validate_actor_authorization_record,
+)
 from aigineering.core.lifecycle_facts import validate_terminal_record
 from aigineering.core.provenance import verify_asset_seal
 from aigineering.core.record_conflict import ImmutableRecordConflict
@@ -58,7 +62,7 @@ from aigineering.protocol.wire import (
 
 _logger = logging.getLogger(__name__)
 
-CURRENT_SCHEMA_VERSION = 9
+CURRENT_SCHEMA_VERSION = 10
 
 # ---------------------------------------------------------------------------
 # Activation name extraction (shared with store.py)
@@ -273,6 +277,7 @@ _DDL_INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_runtime_records_type_revision ON runtime_records(record_type, revision)",
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_runtime_records_one_genesis ON runtime_records(record_type) WHERE record_type = 'domain.genesis'",
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_runtime_records_one_terminal_per_contract ON runtime_records(json_extract(payload_json, '$.contract_id')) WHERE record_type = 'lifecycle.terminal'",
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_runtime_records_one_actor_key ON runtime_records(json_extract(payload_json, '$.actor_id'), json_extract(payload_json, '$.key_id')) WHERE record_type = 'actor.authorized'",
 ]
 
 # ---------------------------------------------------------------------------
@@ -406,6 +411,9 @@ class SQLiteStore:
             if current < 9:
                 self._migrate_to_v9()
                 self._record_schema_version(9)
+            if current < 10:
+                self._migrate_to_v10()
+                self._record_schema_version(10)
 
     def _migrate_to_v2(self) -> None:
         """Add 040 transactional worker state and contract authority metadata."""
@@ -580,6 +588,16 @@ class SQLiteStore:
             "WHERE record_type = 'lifecycle.terminal'"
         )
 
+    def _migrate_to_v10(self) -> None:
+        """Prevent actor/key identities from being rebound to new public keys."""
+        self._conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_runtime_records_one_actor_key "
+            "ON runtime_records("
+            "json_extract(payload_json, '$.actor_id'), "
+            "json_extract(payload_json, '$.key_id')) "
+            "WHERE record_type = 'actor.authorized'"
+        )
+
     # ── Immutable runtime-record envelope ────────────────────────────────
 
     def append_runtime_record(self, record: RuntimeRecord) -> int:
@@ -588,6 +606,11 @@ class SQLiteStore:
 
     def _insert_runtime_record(self, record: RuntimeRecord) -> int:
         """Insert within the caller's transaction without committing it."""
+        validate_actor_authorization_record(
+            record,
+            self.scan_runtime_records(record_type="actor.authorized"),
+            reserved_identities=genesis_actor_identities(self),
+        )
         validate_terminal_record(
             record,
             self.scan_runtime_records(record_type="lifecycle.terminal"),

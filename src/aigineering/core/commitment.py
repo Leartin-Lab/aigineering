@@ -11,6 +11,7 @@ import json
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
+from aigineering.core.actor_facts import load_authorized_actor_keys
 from aigineering.core.effect_projection import BUILTIN_EFFECTS
 from aigineering.core.fact_materialization import (
     reduce_asset_facts,
@@ -20,6 +21,7 @@ from aigineering.core.trace import create_entry
 from aigineering.core.signing import create_verifier
 from aigineering.protocol.candidate import (
     CandidateProposal,
+    ActorKey,
     GenesisManifest,
     VerifierFactory,
     candidate_received_record,
@@ -47,11 +49,11 @@ class CommitmentDecision:
 
 
 def _actor_capabilities(
-    candidate: CandidateProposal, genesis: GenesisManifest
+    candidate: CandidateProposal, actor_keys: tuple[ActorKey, ...]
 ) -> tuple[str, ...]:
     key = next(
         item
-        for item in genesis.root_keys
+        for item in actor_keys
         if item.actor_id == candidate.actor_id and item.key_id == candidate.key_id
     )
     return key.capabilities
@@ -131,12 +133,17 @@ def reduce_candidate(
     genesis: GenesisManifest,
     *,
     verifier_factory: VerifierFactory,
+    actor_keys: tuple[ActorKey, ...] | None = None,
 ) -> CommitmentDecision:
     """Authenticate and purely decide one Candidate's complete effect batch."""
     validate_genesis_manifest(genesis)
+    effective_actor_keys = actor_keys or genesis.root_keys
     try:
         receipt = candidate_received_record(
-            candidate, genesis, verifier_factory=verifier_factory
+            candidate,
+            genesis,
+            verifier_factory=verifier_factory,
+            actor_keys=effective_actor_keys,
         )
     except ValueError as exc:
         return _authentication_rejection_decision(candidate, str(exc))
@@ -154,7 +161,7 @@ def reduce_candidate(
             candidate, receipt, f"unsupported effect type {effect.effect_type!r}"
         )
     required_capability, projector = handler
-    if required_capability not in _actor_capabilities(candidate, genesis):
+    if required_capability not in _actor_capabilities(candidate, effective_actor_keys):
         return _rejection_decision(
             candidate,
             receipt,
@@ -164,7 +171,7 @@ def reduce_candidate(
         projection = projector(effect, candidate, receipt.id)
     except (TypeError, ValueError) as exc:
         return _rejection_decision(candidate, receipt, str(exc))
-    capabilities = _actor_capabilities(candidate, genesis)
+    capabilities = _actor_capabilities(candidate, effective_actor_keys)
     missing_capabilities = tuple(
         capability
         for capability in projection.additional_capabilities
@@ -234,7 +241,10 @@ class CandidateCommitter:
 
             genesis = load_genesis(self._store)
         decision = reduce_candidate(
-            candidate, genesis, verifier_factory=verifier_factory
+            candidate,
+            genesis,
+            verifier_factory=verifier_factory,
+            actor_keys=genesis.root_keys + load_authorized_actor_keys(self._store),
         )
         if decision.assets:
             reducer_traces, reducer_records = reduce_asset_facts(

@@ -153,10 +153,15 @@ Implementation progress:
   Contract through `contract.declare`; the original attempt is bound as a
   Candidate causal parent. CLI retry no longer instantiates MethodRuntime or a
   feature-specific handler.
+- Complete: a root actor with `actor.authorize` can publish an immutable
+  `actor.authorized` key fact, after which that actor can authenticate its own
+  Candidates. MemoryStore and SQLite schema v10 reject actor/key rebinding;
+  deterministic content seals cannot be authorized as actor keys.
 - Complete: cryptography is a base dependency; the runtime does not silently
   substitute a non-authenticating deterministic seal.
-- Pending: authenticate claim-bound worker submissions as CandidateProposal
-  effects and migrate Method task publication to plugins.
+- Pending: add key revocation/rotation, bind worker routing registration to
+  authorized keys, authenticate claim-bound worker submissions as
+  CandidateProposal effects, and migrate Method task publication to plugins.
 
 ## Required architecture tests
 

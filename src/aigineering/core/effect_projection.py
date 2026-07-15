@@ -7,6 +7,7 @@ from types import MappingProxyType
 from typing import Any, Callable, Mapping
 
 from aigineering.core.authority import matched_reserved_prefix
+from aigineering.core.actor_facts import actor_key_payload
 from aigineering.core.asset_versions import replacement_claim_payload
 from aigineering.core.contract_admission import validate_contract_commitment
 from aigineering.core.fact_materialization import asset_committed_record
@@ -16,7 +17,7 @@ from aigineering.core.worker_routing import (
     WorkerRegistration,
     worker_registration_payload,
 )
-from aigineering.protocol.candidate import CandidateEffect, CandidateProposal
+from aigineering.protocol.candidate import ActorKey, CandidateEffect, CandidateProposal
 from aigineering.protocol.immutability import deep_thaw
 from aigineering.protocol.runtime_record import RuntimeRecord, create_runtime_record
 from aigineering.protocol.types import Asset, Contract, ReplacementClaim
@@ -200,6 +201,32 @@ def project_contract_cancellation(
     return EffectProjection(records=(record,), relation_target=contract_id)
 
 
+def project_actor_authorization(
+    effect: CandidateEffect, candidate: CandidateProposal, receipt_id: str
+) -> EffectProjection:
+    value = effect.payload.get("actor_key")
+    if not isinstance(value, Mapping):
+        raise ValueError("actor.authorize requires an object payload.actor_key")
+    data = deep_thaw(value)
+    key = ActorKey(
+        actor_id=str(data.get("actor_id", "")),
+        key_id=str(data.get("key_id", "")),
+        kind=str(data.get("kind", "")),
+        public_key=str(data.get("public_key", "")),
+        capabilities=tuple(data.get("capabilities", ())),
+    )
+    if key.kind in {"deterministic", "asig_"}:
+        raise ValueError("actor authorization requires an authenticating key kind")
+    record = create_runtime_record(
+        "actor.authorized",
+        {**actor_key_payload(key), "authorized_by": candidate.actor_id},
+        causal_parents=(receipt_id,),
+    )
+    return EffectProjection(
+        records=(record,), relation_target=f"{key.actor_id}/{key.key_id}"
+    )
+
+
 EffectProjector = Callable[[CandidateEffect, CandidateProposal, str], EffectProjection]
 BUILTIN_EFFECTS: Mapping[str, tuple[str, EffectProjector]] = MappingProxyType(
     {
@@ -208,5 +235,6 @@ BUILTIN_EFFECTS: Mapping[str, tuple[str, EffectProjector]] = MappingProxyType(
         "worker.register": ("worker.register", project_worker_registration),
         "asset.relate": ("asset.relate", project_replacement_claim),
         "contract.cancel": ("contract.cancel", project_contract_cancellation),
+        "actor.authorize": ("actor.authorize", project_actor_authorization),
     }
 )
