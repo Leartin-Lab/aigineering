@@ -7,9 +7,10 @@ from types import MappingProxyType
 from typing import Any, Callable, Mapping
 
 from aigineering.core.authority import matched_reserved_prefix
+from aigineering.core.asset_versions import replacement_claim_payload
 from aigineering.core.contract_admission import validate_contract_commitment
 from aigineering.core.fact_materialization import asset_committed_record
-from aigineering.core.ids import hash_asset_content, hash_asset_definition
+from aigineering.core.ids import hash_asset_content, hash_asset_definition, hash_claim
 from aigineering.core.provenance import sign_asset
 from aigineering.core.worker_routing import (
     WorkerRegistration,
@@ -18,7 +19,7 @@ from aigineering.core.worker_routing import (
 from aigineering.protocol.candidate import CandidateEffect, CandidateProposal
 from aigineering.protocol.immutability import deep_thaw
 from aigineering.protocol.runtime_record import RuntimeRecord, create_runtime_record
-from aigineering.protocol.types import Asset, Contract
+from aigineering.protocol.types import Asset, Contract, ReplacementClaim
 from aigineering.protocol.wire import contract_to_dict
 
 
@@ -149,11 +150,42 @@ def project_worker_registration(
     )
 
 
+def project_replacement_claim(
+    effect: CandidateEffect, candidate: CandidateProposal, receipt_id: str
+) -> EffectProjection:
+    value = effect.payload.get("claim")
+    if not isinstance(value, Mapping):
+        raise ValueError("asset.relate requires an object payload.claim")
+    data = deep_thaw(value)
+    source_asset_id = str(data.get("source_asset_id", ""))
+    replacement_asset_id = str(data.get("replacement_asset_id", ""))
+    claim_type = str(data.get("claim_type", "replacement"))
+    if not source_asset_id or not replacement_asset_id:
+        raise ValueError("asset.relate requires both asset identifiers")
+    claim = ReplacementClaim(
+        id=hash_claim(source_asset_id, replacement_asset_id, claim_type),
+        source_asset_id=source_asset_id,
+        replacement_asset_id=replacement_asset_id,
+        definition_hash=str(data.get("definition_hash", "")),
+        claim_type=claim_type,
+        signed_by=candidate.actor_id,
+        provenance_seal=candidate.signature,
+        lineage_id=str(data.get("lineage_id", "")),
+    )
+    record = create_runtime_record(
+        "replacement.claimed",
+        {"claim": replacement_claim_payload(claim)},
+        causal_parents=(receipt_id,),
+    )
+    return EffectProjection(records=(record,), relation_target=claim.id)
+
+
 EffectProjector = Callable[[CandidateEffect, CandidateProposal, str], EffectProjection]
 BUILTIN_EFFECTS: Mapping[str, tuple[str, EffectProjector]] = MappingProxyType(
     {
         "asset.propose": ("asset.publish", project_asset_proposal),
         "contract.declare": ("contract.publish", project_contract_declaration),
         "worker.register": ("worker.register", project_worker_registration),
+        "asset.relate": ("asset.relate", project_replacement_claim),
     }
 )

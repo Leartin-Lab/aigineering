@@ -5,6 +5,7 @@ All operations are ADDITIVE — source assets are never mutated.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 from aigineering.core.ids import hash_asset_content, hash_asset_definition, hash_claim
@@ -12,6 +13,7 @@ from aigineering.core.provenance import sign_asset
 
 if TYPE_CHECKING:
     from aigineering.protocol.types import Asset, ReplacementClaim
+    from aigineering.protocol.runtime_record import RuntimeRecord
 
 
 def content_slice(content: str, range_spec: str) -> str:
@@ -116,6 +118,32 @@ def create_replacement_claim(
         signed_by=signed_by,
         provenance_seal=provenance_seal,
     )
+
+
+def replacement_claim_payload(claim: ReplacementClaim) -> dict[str, object]:
+    return {
+        "id": claim.id,
+        "source_asset_id": claim.source_asset_id,
+        "replacement_asset_id": claim.replacement_asset_id,
+        "definition_hash": claim.definition_hash,
+        "claim_type": claim.claim_type,
+        "signed_by": claim.signed_by,
+        "provenance_seal": claim.provenance_seal,
+        "lineage_id": claim.lineage_id,
+    }
+
+
+def replacement_claim_from_record(
+    record: RuntimeRecord,
+) -> ReplacementClaim | None:
+    if record.record_type != "replacement.claimed":
+        return None
+    value = record.payload.get("claim")
+    if not isinstance(value, Mapping):
+        raise ValueError("replacement.claimed requires an object payload.claim")
+    from aigineering.protocol.types import ReplacementClaim
+
+    return ReplacementClaim(**dict(value))
 
 
 def list_versions(store, name: str) -> list[Asset]:

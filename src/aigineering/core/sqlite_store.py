@@ -29,7 +29,11 @@ from aigineering.core.ids import (
 )
 from aigineering.core.provenance import verify_asset_seal
 from aigineering.core.record_conflict import ImmutableRecordConflict
-from aigineering.core.store import _projection_index_digest, _replacement_claim_payload
+from aigineering.core.asset_versions import (
+    replacement_claim_from_record,
+    replacement_claim_payload,
+)
+from aigineering.core.store import _projection_index_digest
 from aigineering.core.trace import trace_effective_payload
 from aigineering.core.worker_routing import (
     registration_is_replay,
@@ -493,7 +497,7 @@ class SQLiteStore:
             self._insert_runtime_record(
                 create_runtime_record(
                     "replacement.claimed",
-                    {"claim": _replacement_claim_payload(claim)},
+                    {"claim": replacement_claim_payload(claim)},
                 )
             )
         for row in self._conn.execute(
@@ -577,6 +581,7 @@ class SQLiteStore:
                 self.scan_runtime_records(record_type="worker.registered"),
                 registration,
             )
+        replacement_claim = replacement_claim_from_record(record)
         row = self._conn.execute(
             "SELECT * FROM runtime_records WHERE record_id = ?", (record.id,)
         ).fetchone()
@@ -587,6 +592,8 @@ class SQLiteStore:
             ) == runtime_record_effective_payload(record):
                 if registration is not None:
                     self._upsert_worker_registration(registration)
+                if replacement_claim is not None:
+                    self._insert_replacement_claim(replacement_claim)
                 return int(row["revision"])
             raise ImmutableRecordConflict("runtime record", record.id)
         validate_runtime_record(record)
@@ -619,6 +626,8 @@ class SQLiteStore:
             raise ImmutableRecordConflict("runtime record", record.id) from None
         if registration is not None:
             self._upsert_worker_registration(registration)
+        if replacement_claim is not None:
+            self._insert_replacement_claim(replacement_claim)
         return int(cursor.lastrowid)
 
     def get_runtime_record(self, record_id: str) -> RuntimeRecord | None:
@@ -1174,7 +1183,7 @@ class SQLiteStore:
             "FROM idempotency_records ORDER BY contract_id, idempotency_key"
         ).fetchall()
         replacement_claims = [
-            _replacement_claim_payload(self._row_to_replacement_claim(row))
+            replacement_claim_payload(self._row_to_replacement_claim(row))
             for row in self._conn.execute("SELECT * FROM claims ORDER BY id").fetchall()
         ]
         payload = {
@@ -2220,7 +2229,7 @@ class SQLiteStore:
             self._insert_trace_entry(trace_entry)
             claim_record = create_runtime_record(
                 "replacement.claimed",
-                {"claim": _replacement_claim_payload(claim)},
+                {"claim": replacement_claim_payload(claim)},
             )
             self._insert_runtime_record(claim_record)
             self._insert_runtime_record(

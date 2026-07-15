@@ -127,6 +127,9 @@ Implementation progress:
 - Complete: local and HTTP Asset slicing publish `asset.propose` Candidates
   with preserved lineage. The HTTP convenience route recomputes the expected
   slice and rejects unsigned or mismatched proposed payloads before mutation.
+- Complete: replacement assertions publish through `asset.relate`; actor
+  identity is derived from the verified Candidate, not request metadata, and
+  Stores derive the claim index from immutable `replacement.claimed` records.
 - Complete: cryptography is a base dependency; the runtime does not silently
   substitute a non-authenticating deterministic seal.
 - Pending: migrate remaining control-plane and worker submission effects.

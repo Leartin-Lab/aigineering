@@ -73,6 +73,25 @@ def test_asset_slice_uses_candidate_commitment_and_preserves_lineage():
     assert 'lineage_id=str(data.get("lineage_id", ""))' in projection
 
 
+def test_replacement_claim_cli_and_http_require_asset_relate_candidates():
+    cli = (ROOT / "src/aigineering/cli/asset.py").read_text(encoding="utf-8")
+    replace = cli.split("def asset_replace", 1)[1].split(
+        '@asset_group.command("versions")', 1
+    )[0]
+    server = (ROOT / "src/aigineering/server/app.py").read_text(encoding="utf-8")
+    endpoint = server.split("def create_replacement_claim", 1)[1].split(
+        '@app.get("/replacement-claims"', 1
+    )[0]
+
+    assert "replacement_claim_effect" in replace
+    assert "commit_local_effect" in replace
+    assert "RuntimeIngress" not in replace
+    assert "CandidateProposalRequest" in server
+    assert '_require_single_effect(body, "asset.relate")' in endpoint
+    assert "_commit_candidate_request" in endpoint
+    assert "RuntimeIngress" not in endpoint
+
+
 def test_task_create_uses_candidate_commitment_not_legacy_ingress():
     source = (ROOT / "src/aigineering/cli/task.py").read_text(encoding="utf-8")
     create_body = source.split('@task_group.command("status")', 1)[0]

@@ -10,7 +10,10 @@ pytest.importorskip("httpx")
 from fastapi.testclient import TestClient
 
 from aigineering.core.control_plane import build_control_plane_contract
-from aigineering.core.asset_versions import create_slice_asset
+from aigineering.core.asset_versions import (
+    create_replacement_claim,
+    create_slice_asset,
+)
 from aigineering.core.domain import initialize_genesis
 from aigineering.core.signing import Ed25519Signer
 from aigineering.core.sqlite_store import SQLiteStore
@@ -22,7 +25,10 @@ from aigineering.protocol.candidate import (
     create_genesis_manifest,
 )
 from aigineering.protocol.wire import contract_to_dict
-from aigineering.protocol.effect_builders import asset_proposal_effect
+from aigineering.protocol.effect_builders import (
+    asset_proposal_effect,
+    replacement_claim_effect,
+)
 from aigineering.server.app import app
 
 
@@ -36,7 +42,7 @@ def _signed_client():
                 "root",
                 signer.kind,
                 signer.signer_id,
-                ("asset.publish", "contract.publish"),
+                ("asset.publish", "asset.relate", "contract.publish"),
             )
         ],
         "policy:test",
@@ -421,19 +427,21 @@ def test_asset_slice_versions_and_replacement_claims(tmp_path, monkeypatch):
     assert versions.status_code == 200, versions.text
     assert [row["id"] for row in versions.json()] == [source["id"]]
 
+    proposed_claim = create_replacement_claim(
+        source["id"],
+        replacement["id"],
+        definition_hash=source["definition_hash"],
+        claim_type="summary",
+    )
     claim = client.post(
         "/replacement-claims",
-        json={
-            "source_asset_id": source["id"],
-            "replacement_asset_id": replacement["id"],
-            "claim_type": "summary",
-            "signed_by": "reviewer",
-        },
+        json=_candidate_body(actor, replacement_claim_effect(proposed_claim)),
     )
     assert claim.status_code == 201, claim.text
     claim_body = claim.json()
     assert claim_body["definition_hash"] == source["definition_hash"]
     assert claim_body["claim_type"] == "summary"
+    assert claim_body["signed_by"] == "test:client"
 
     by_source = client.get(
         "/replacement-claims",
@@ -461,11 +469,21 @@ def test_replacement_claim_rejects_invalid_claim_type(tmp_path, monkeypatch):
 
     claim = client.post(
         "/replacement-claims",
-        json={
-            "source_asset_id": first.json()["id"],
-            "replacement_asset_id": second.json()["id"],
-            "claim_type": "teleport",
-        },
+        json=_candidate_body(
+            actor,
+            CandidateEffect(
+                "asset.relate",
+                {
+                    "claim": {
+                        "source_asset_id": first.json()["id"],
+                        "replacement_asset_id": second.json()["id"],
+                        "definition_hash": first.json()["definition_hash"],
+                        "claim_type": "teleport",
+                        "lineage_id": "",
+                    }
+                },
+            ),
+        ),
     )
-    assert claim.status_code == 400
+    assert claim.status_code == 422
     assert "Invalid claim_type" in claim.json()["detail"]

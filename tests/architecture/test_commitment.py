@@ -158,6 +158,56 @@ def test_worker_registration_requires_dedicated_actor_capability():
     assert "worker.register" in str(decision.runtime_records[1].payload["reason"])
 
 
+def test_asset_relation_candidate_materializes_authenticated_claim(store):
+    genesis, candidate = _proposal(
+        capabilities=("asset.relate",),
+        effect=CandidateEffect(
+            "asset.relate",
+            {
+                "claim": {
+                    "source_asset_id": "asset:source",
+                    "replacement_asset_id": "asset:replacement",
+                    "definition_hash": "def:report",
+                    "claim_type": "replacement",
+                    "lineage_id": "lineage:report",
+                }
+            },
+        ),
+    )
+    trace = store if isinstance(store, SQLiteStore) else MemoryTraceStore()
+
+    decision = CandidateCommitter(store, trace).commit(
+        candidate, genesis, verifier_factory=_verifier_factory
+    )
+
+    assert decision.accepted is True
+    claims = store.get_claims_for_asset("asset:source")
+    assert len(claims) == 1
+    assert claims[0].replacement_asset_id == "asset:replacement"
+    assert claims[0].signed_by == "human:owner"
+    assert claims[0].provenance_seal == candidate.signature
+
+
+def test_asset_relation_requires_dedicated_actor_capability():
+    genesis, candidate = _proposal(
+        capabilities=("asset.publish",),
+        effect=CandidateEffect(
+            "asset.relate",
+            {
+                "claim": {
+                    "source_asset_id": "source",
+                    "replacement_asset_id": "replacement",
+                }
+            },
+        ),
+    )
+
+    decision = reduce_candidate(candidate, genesis, verifier_factory=_verifier_factory)
+
+    assert decision.accepted is False
+    assert "asset.relate" in str(decision.runtime_records[1].payload["reason"])
+
+
 @pytest.fixture(params=["memory", "sqlite"])
 def store(request):
     value = MemoryStore() if request.param == "memory" else SQLiteStore(":memory:")

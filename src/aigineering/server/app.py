@@ -21,7 +21,6 @@ from aigineering.runtime import (
 )
 
 from aigineering.core.commitment import CandidateCommitter
-from aigineering.core.runtime_ingress import RuntimeIngress
 from aigineering.core.submit import (
     SubmitClaimError,
     SubmitCommitError,
@@ -29,7 +28,10 @@ from aigineering.core.submit import (
 )
 from aigineering.protocol.envelope import CandidateEnvelope
 from aigineering.protocol.candidate import candidate_proposal_from_dict
-from aigineering.protocol.effect_builders import asset_proposal_effect
+from aigineering.protocol.effect_builders import (
+    asset_proposal_effect,
+    replacement_claim_effect,
+)
 from aigineering.protocol.immutability import deep_thaw
 
 app = FastAPI(title="Aigineering API", version="0.5.0")
@@ -88,13 +90,6 @@ class WorkerSubmitRequest(BaseModel):
 
 class AssetSliceCandidateRequest(CandidateProposalRequest):
     range: str = ""
-
-
-class ReplacementClaimCreateRequest(BaseModel):
-    source_asset_id: str
-    replacement_asset_id: str
-    claim_type: str = "replacement"
-    signed_by: str = ""
 
 
 class AssetResponse(BaseModel):
@@ -347,17 +342,21 @@ def slice_asset(name: str, body: AssetSliceCandidateRequest):
     response_model=ReplacementClaimResponse,
     status_code=201,
 )
-def create_replacement_claim(body: ReplacementClaimCreateRequest):
+def create_replacement_claim(body: CandidateProposalRequest):
     """Create a replacement/slice/summary/redaction claim between two assets."""
     from aigineering.core.asset_versions import (
         create_replacement_claim as make_replacement_claim,
     )
 
     store = _persistent_store()
-    source = store.get_asset(body.source_asset_id)
+    _require_single_effect(body, "asset.relate")
+    proposed = body.effects[0].payload.get("claim")
+    if not isinstance(proposed, dict):
+        raise HTTPException(status_code=422, detail="asset.relate requires claim")
+    source = store.get_asset(str(proposed.get("source_asset_id", "")))
     if source is None:
         raise HTTPException(status_code=404, detail="Source asset not found")
-    replacement = store.get_asset(body.replacement_asset_id)
+    replacement = store.get_asset(str(proposed.get("replacement_asset_id", "")))
     if replacement is None:
         raise HTTPException(status_code=404, detail="Replacement asset not found")
     try:
@@ -365,13 +364,22 @@ def create_replacement_claim(body: ReplacementClaimCreateRequest):
             source_asset_id=source.id,
             replacement_asset_id=replacement.id,
             definition_hash=source.definition_hash,
-            claim_type=body.claim_type,
-            signed_by=body.signed_by,
+            claim_type=str(proposed.get("claim_type", "replacement")),
         )
-        ingress = RuntimeIngress(store, store)
-        ingress.accept_replacement_claim(claim, source="server")
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    expected_payload = deep_thaw(replacement_claim_effect(claim).payload)
+    if body.effects[0].payload != expected_payload:
+        raise HTTPException(
+            status_code=422,
+            detail="signed asset.relate payload does not match stored assets",
+        )
+    decision = _commit_candidate_request(body)
+    if not decision.accepted:
+        raise HTTPException(status_code=403, detail=_rejection_reason(decision))
+    claim = next(
+        item for item in store.get_claims_for_asset(source.id) if item.id == claim.id
+    )
     return _replacement_claim_response(claim)
 
 

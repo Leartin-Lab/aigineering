@@ -98,6 +98,13 @@ HTTP convenience endpoint accepts that complete signed proposal and verifies
 its payload against the requested source/range before commitment; unsigned
 slice requests cannot mutate the Store.
 
+Replacement/equivalence assertions use the capability-gated `asset.relate`
+effect. Commitment records the authenticated actor as claimant and the Store
+derives its claim index from `replacement.claimed`; verification of referenced
+content remains a separate operation, so actor authority cannot manufacture
+equivalence. CLI and HTTP publishers validate currently referenced Assets and
+never accept an ambient `signed_by` string.
+
 The optional HTTP API accepts full signed CandidateProposal bodies at
 `POST /candidates`, `POST /contracts`, and `POST /assets`. Resource endpoints
 validate the effect type before commitment. Unsigned legacy request bodies fail

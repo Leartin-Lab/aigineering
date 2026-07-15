@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from aigineering.protocol.candidate import CandidateEffect
-from aigineering.protocol.types import Asset, Contract
+from aigineering.protocol.types import Asset, Contract, ReplacementClaim
 from aigineering.protocol.wire import contract_to_dict
 
 if TYPE_CHECKING:
@@ -47,6 +47,21 @@ def worker_registration_effect(registration: WorkerRegistration) -> CandidateEff
                 "profile_id": registration.profile_id,
                 "version": registration.version,
                 "worker_id": registration.worker_id,
+            }
+        },
+    )
+
+
+def replacement_claim_effect(claim: ReplacementClaim) -> CandidateEffect:
+    return CandidateEffect(
+        "asset.relate",
+        {
+            "claim": {
+                "claim_type": claim.claim_type,
+                "definition_hash": claim.definition_hash,
+                "lineage_id": claim.lineage_id,
+                "replacement_asset_id": claim.replacement_asset_id,
+                "source_asset_id": claim.source_asset_id,
             }
         },
     )

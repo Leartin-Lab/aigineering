@@ -16,8 +16,10 @@ from aigineering.core.asset_versions import (
     resolve_latest,
 )
 from aigineering.core.control_plane import build_control_plane_asset
-from aigineering.core.runtime_ingress import RuntimeIngress
-from aigineering.protocol.effect_builders import asset_proposal_effect
+from aigineering.protocol.effect_builders import (
+    asset_proposal_effect,
+    replacement_claim_effect,
+)
 
 
 @click.group("asset")
@@ -241,13 +243,11 @@ def asset_slice(name: str, slice_name: str, range_spec: str, as_json: bool) -> N
     default="replacement",
     help="Claim type (replacement, slice, summary, redaction, equivalent_input).",
 )
-@click.option("--signed-by", default="", help="Signer identity.")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON.")
 def asset_replace(
     source_id: str,
     replacement_id: str,
     claim_type: str,
-    signed_by: str,
     as_json: bool,
 ) -> None:
     """Create a replacement claim linking source to replacement asset."""
@@ -265,11 +265,22 @@ def asset_replace(
         replacement_asset_id=replacement_id,
         definition_hash=source.definition_hash,
         claim_type=claim_type,
-        signed_by=signed_by,
+        signed_by="",
         provenance_seal="",
     )
-    ingress = RuntimeIngress(store, store)
-    ingress.accept_replacement_claim(claim, source="asset_replace")
+    try:
+        require_accepted(
+            commit_local_effect(
+                store,
+                replacement_claim_effect(claim),
+                idempotency_key=f"asset-relation:{claim.id}",
+            )
+        )
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
+    claim = next(
+        item for item in store.get_claims_for_asset(source_id) if item.id == claim.id
+    )
 
     if as_json:
         _output_json(

@@ -418,7 +418,10 @@ class TestAssetVersionWorkflow:
             assert result["fail_count"] == 0
 
             store = SQLiteStore(".aig/store.db")
-            events = store.get_by_event_type("replacement_claim_created")
-            assert len(events) == 1
-            assert events[0].relation_type == "replacement"
-            assert events[0].relation_target == replacement_id
+            claims = store.get_claims_for_asset(source_id)
+            assert len(claims) == 1
+            assert claims[0].replacement_asset_id == replacement_id
+            assert claims[0].signed_by == "human:owner"
+            assert (
+                len(store.scan_runtime_records(record_type="replacement.claimed")) == 1
+            )

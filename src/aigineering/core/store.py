@@ -14,6 +14,10 @@ from aigineering.core.authority import (
     matched_reserved_prefix,
 )
 from aigineering.core.activation import activation_names
+from aigineering.core.asset_versions import (
+    replacement_claim_from_record,
+    replacement_claim_payload,
+)
 from aigineering.core.provenance import verify_asset_seal
 from aigineering.core.record_conflict import ImmutableRecordConflict
 from aigineering.core.ids import compute_content_hash, validate_contract_identity
@@ -256,6 +260,7 @@ class MemoryStore(_ProjectionIndexMixin):
                 self.scan_runtime_records(record_type="worker.registered"),
                 registration,
             )
+        replacement_claim = replacement_claim_from_record(record)
         existing = self._runtime_records.get(record.id)
         if existing is not None:
             revision, existing_record = existing
@@ -264,6 +269,8 @@ class MemoryStore(_ProjectionIndexMixin):
             ) == runtime_record_effective_payload(record):
                 if registration is not None:
                     self._worker_registrations[registration.worker_id] = registration
+                if replacement_claim is not None:
+                    self.add_replacement_claim(replacement_claim)
                 return revision
             raise ImmutableRecordConflict("runtime record", record.id)
         validate_runtime_record(record)
@@ -271,6 +278,8 @@ class MemoryStore(_ProjectionIndexMixin):
         self._runtime_records[record.id] = (self._runtime_revision, record)
         if registration is not None:
             self._worker_registrations[registration.worker_id] = registration
+        if replacement_claim is not None:
+            self.add_replacement_claim(replacement_claim)
         return self._runtime_revision
 
     def get_runtime_record(self, record_id: str) -> RuntimeRecord | None:
@@ -432,7 +441,7 @@ class MemoryStore(_ProjectionIndexMixin):
         self.append_runtime_record(
             create_runtime_record(
                 "replacement.claimed",
-                {"claim": _replacement_claim_payload(claim)},
+                {"claim": replacement_claim_payload(claim)},
             )
         )
         from aigineering.protocol.wire import trace_entry_to_dict
@@ -448,19 +457,6 @@ class MemoryStore(_ProjectionIndexMixin):
 
     def get_claims_for_asset(self, asset_id: str) -> list:
         return [c for c in self._claims if c.source_asset_id == asset_id]
-
-
-def _replacement_claim_payload(claim) -> dict[str, object]:
-    return {
-        "id": claim.id,
-        "source_asset_id": claim.source_asset_id,
-        "replacement_asset_id": claim.replacement_asset_id,
-        "definition_hash": claim.definition_hash,
-        "claim_type": claim.claim_type,
-        "signed_by": claim.signed_by,
-        "provenance_seal": claim.provenance_seal,
-        "lineage_id": claim.lineage_id,
-    }
 
 
 class JsonLStore(_ProjectionIndexMixin):

@@ -17,6 +17,7 @@ from aigineering.protocol.candidate import (
 LOCAL_ROOT_CAPABILITIES = (
     "asset.publish",
     "asset.publish.protected",
+    "asset.relate",
     "contract.publish",
     "worker.register",
 )
