@@ -29,6 +29,7 @@ from aigineering.core.worker_routing import (
     select_worker,
 )
 from aigineering.protocol.envelope import CandidateEnvelope
+from aigineering.protocol.runtime_record import create_runtime_record
 from aigineering.protocol.types import Candidate, Contract
 from aigineering.protocol.wire import trace_entry_to_dict
 
@@ -273,6 +274,73 @@ def test_rejected_submission_recovery_replays_after_crash_gap():
         and child.origin == "recovery"
         for child in contracts
     ), contracts
+    store.close()
+
+
+def test_rejected_projection_without_raw_candidate_fails_loudly():
+    store = SQLiteStore(":memory:")
+    contract = Contract(id="task:missing-candidate", outputs=("report",), budget=1)
+    store.add_contract(contract)
+    store.append_runtime_record(
+        create_runtime_record(
+            "projection.decided",
+            {
+                "candidate_id": "candidate:missing",
+                "contract_id": contract.id,
+                "rejections": (),
+                "status": "rejected",
+            },
+        )
+    )
+
+    with pytest.raises(RuntimeError, match="no replayable raw Candidate evidence"):
+        process_rejected_submissions(store)
+
+    assert not store.scan_runtime_records(record_type="lifecycle.terminal")
+    store.close()
+
+
+@pytest.mark.parametrize(
+    ("record_type", "payload", "processor", "message"),
+    [
+        (
+            "claim.expired",
+            {
+                "claim_id": "claim:missing",
+                "contract_id": "task:missing",
+                "epoch": 1,
+                "lease_until": "2020-01-01T00:00:00+00:00",
+                "package_id": "package:missing",
+                "worker_id": "worker:missing",
+            },
+            process_expired_claims,
+            "claim expiration .* references missing Contract",
+        ),
+        (
+            "worker.invocation_failed",
+            {
+                "category": "provider_error",
+                "claim_id": "claim:missing",
+                "contract_id": "task:missing",
+                "package_id": "package:missing",
+                "retryable": True,
+                "status_code": 503,
+                "worker_id": "worker:missing",
+            },
+            process_worker_failures,
+            "worker failure .* references missing Contract",
+        ),
+    ],
+)
+def test_recovery_replayers_never_silently_skip_missing_contracts(
+    record_type, payload, processor, message
+):
+    store = SQLiteStore(":memory:")
+    store.append_runtime_record(create_runtime_record(record_type, payload))
+
+    with pytest.raises(RuntimeError, match=message):
+        processor(store)
+
     store.close()
 
 

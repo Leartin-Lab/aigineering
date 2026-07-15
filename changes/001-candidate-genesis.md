@@ -212,6 +212,10 @@ Implementation progress:
   context Asset. Each supported method type has the same plugin-level
   conformance test; SQLite still commits the projection and claim transition
   atomically.
+- Complete: recovery replayers fail loudly when durable rejection, expiration,
+  or provider-failure facts lack the Contract/raw Candidate evidence required
+  to derive their consequence. These broken causal chains can no longer be
+  silently skipped forever on every restart.
 - Complete: the HTTP worker submission endpoint accepts signed Candidates only;
   server claims require an enabled actor-key binding. The server-side mock run
   endpoint no longer impersonates a worker or mutates runtime state.

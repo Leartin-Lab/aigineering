@@ -35,6 +35,12 @@ the protocol does not rely on a process-local task lock.
 7. RuntimeRecord replay reconstructs lifecycle projections. Trace is audit
    evidence; it is not a second mutable task state machine.
 
+Replay is fail-loud on broken causal chains. A rejected projection without raw
+Candidate evidence, or an expiration/provider-failure fact whose Contract is
+missing, is a consistency error rather than skippable work. This prevents a
+backup runtime from repeatedly observing the same unprocessed asset and ending
+without either progress or a visible failure.
+
 ## Current data model
 
 - Asset: immutable content with provenance metadata. Assets are runtime facts.

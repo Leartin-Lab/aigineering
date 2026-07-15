@@ -478,9 +478,18 @@ def process_rejected_submissions(store) -> list[str]:
         if payload["status"] != "rejected" or contract_id in terminal_contracts:
             continue
         contract = store.get_contract(contract_id)
-        candidate = candidates.get(payload["candidate_id"])
-        if contract is None or candidate is None:
-            continue
+        if contract is None:
+            raise RuntimeError(
+                f"rejected projection {record.id!r} references missing "
+                f"Contract {contract_id!r}"
+            )
+        candidate_id = str(payload["candidate_id"])
+        candidate = candidates.get(candidate_id)
+        if candidate is None:
+            raise RuntimeError(
+                f"rejected projection {record.id!r} has no replayable raw "
+                f"Candidate evidence for {candidate_id!r}"
+            )
         _schedule_rejected_recovery(
             contract,
             str(candidate.payload["raw_output"]),
@@ -592,7 +601,10 @@ def process_expired_claims(store) -> list[str]:
         contract_id = str(expiration.payload["contract_id"])
         contract = store.get_contract(contract_id)
         if contract is None:
-            continue
+            raise RuntimeError(
+                f"claim expiration {expiration.id!r} references missing "
+                f"Contract {contract_id!r}"
+            )
         _schedule_rejected_recovery(
             contract,
             "worker claim expired before Candidate submission",
@@ -689,7 +701,10 @@ def process_worker_failures(store) -> list[str]:
         contract_id = str(failure.payload["contract_id"])
         contract = store.get_contract(contract_id)
         if contract is None:
-            continue
+            raise RuntimeError(
+                f"worker failure {failure.id!r} references missing "
+                f"Contract {contract_id!r}"
+            )
         _schedule_rejected_recovery(
             contract,
             "provider invocation failed before Candidate production",

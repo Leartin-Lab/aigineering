@@ -74,3 +74,7 @@ No enabled work is not equivalent to success. Missing inputs, capability gaps,
 budget exhaustion, provider failure, malformed provider output, expired claims,
 and terminal conflicts are explicit blockers or failure facts. CLI/API outcomes
 must remain non-success until declared outputs are satisfied.
+Replay code must not skip a durable failure/rejection fact when its required
+causal Contract or raw Candidate evidence is missing. That condition is an
+explicit consistency error: silently continuing would leave the same work
+permanently unprocessed on every restart.
