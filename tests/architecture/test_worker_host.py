@@ -94,17 +94,12 @@ def test_worker_host_signs_ordinary_claim_submission():
     assert store.get_claim(contract.id)["status"] == "submitted"
 
 
-def test_worker_host_authenticates_transitional_method_submission():
+def test_worker_host_delegates_without_method_handler_authorization():
     store, contract, host = _runtime('/retry {"reason":"try again"}')
     claimed = claim_next_package(store, worker_id=host.worker_id)
     assert claimed is not None
 
-    result = execute_claimed_package(
-        claimed,
-        host,
-        store,
-        method_registry=default_method_registry(),
-    )
+    result = execute_claimed_package(claimed, host, store)
 
     assert result["status"] == "method_scheduled"
     receipt = next(

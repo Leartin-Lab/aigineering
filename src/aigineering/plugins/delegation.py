@@ -30,6 +30,10 @@ class TaskDelegationPlugin:
     """Convert one explicit worker method action into ``task.delegate``."""
 
     plugin_id = "task.delegate.v1"
+    action_types = frozenset({"fail", "plan", "replan", "retry", "tool"})
+
+    def can_handle(self, action_type: str) -> bool:
+        return action_type in self.action_types
 
     def propose(self, envelope: CandidateEnvelope):
         candidate = Candidate(
@@ -48,6 +52,8 @@ class TaskDelegationPlugin:
         action: WorkerAction,
     ) -> DelegationProjection:
         """Derive contained task facts without Store access or mutation."""
+        if not self.can_handle(action.type):
+            raise ValueError(f"unsupported task delegation action {action.type!r}")
         if action.type == "retry":
             return DelegationProjection(retry_contract(parent), None, "retry_created")
         child = method_contract(parent, action)

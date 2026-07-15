@@ -325,10 +325,6 @@ def submit_worker_proposal(
             process_rejected_submissions(store)
         return result
     try:
-        if method_registry is None:
-            raise ValueError(
-                f"worker produced /{method_action.type} but no method registry is configured"
-            )
         budget_consumed = sum(
             1
             for entry in trace.get_by_contract(contract.id)
@@ -342,7 +338,6 @@ def submit_worker_proposal(
             max(0, contract.budget - budget_consumed),
             store,
             trace,
-            method_registry,
             authentication=authentication,
         )
     except (
@@ -383,10 +378,6 @@ def submit_candidate_envelope(
     )
     method_action = parse_method_action(candidate)
     if method_action is not None:
-        if method_registry is None:
-            raise ValueError(
-                f"worker produced /{method_action.type} but no method registry is configured"
-            )
         budget_consumed = sum(
             1
             for entry in trace.get_by_contract(contract.id)
@@ -400,7 +391,6 @@ def submit_candidate_envelope(
             max(0, contract.budget - budget_consumed),
             store,
             trace,
-            method_registry,
         )
     result = submit_candidate(
         envelope=envelope,
@@ -741,7 +731,6 @@ def _submit_claimed_method(
     budget_remaining: int,
     store,
     trace,
-    method_registry,
     *,
     authentication: WorkerCandidateAuthentication | None = None,
 ) -> dict:
@@ -763,10 +752,6 @@ def _submit_claimed_method(
     if duplicate is not None:
         return duplicate
     validate_submission_claim(store, contract, envelope)
-
-    handler = method_registry.get(action.type)
-    if handler is None or not handler.can_handle(action.type):
-        raise ValueError(f"no method handler registered for /{action.type}")
 
     from aigineering.plugins import TaskDelegationPlugin
 

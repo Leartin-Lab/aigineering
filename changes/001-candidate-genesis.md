@@ -212,6 +212,10 @@ Implementation progress:
   context Asset. Each supported method type has the same plugin-level
   conformance test; SQLite still commits the projection and claim transition
   atomically.
+- Complete: claim-bound task publication no longer depends on a registered
+  MethodHandler. The delegation plugin owns the closed supported-action set;
+  MethodRegistry is now completion-only transition debt rather than task
+  publication authority.
 - Complete: recovery replayers fail loudly when durable rejection, expiration,
   or provider-failure facts lack the Contract/raw Candidate evidence required
   to derive their consequence. These broken causal chains can no longer be

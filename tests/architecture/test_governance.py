@@ -311,6 +311,11 @@ def test_claim_bound_delegation_semantics_live_in_plugin_not_runtime_service():
     )
 
     assert "TaskDelegationPlugin().project" in runtime
+    submission = runtime.split("def _submit_claimed_method", 1)[1].split(
+        "def process_method_completions", 1
+    )[0]
+    assert "method_registry" not in submission
+    assert ".can_handle(" not in submission
     assert "method_contract" not in runtime
     assert "retry_contract" not in runtime
     assert "method_context_content" not in runtime

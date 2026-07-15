@@ -234,3 +234,11 @@ def test_delegation_plugin_projects_retry_as_an_independent_task():
     assert projection.child.outputs == parent.outputs
     assert projection.context_asset is None
     assert projection.event_type == "retry_created"
+
+
+def test_delegation_plugin_rejects_unknown_action_without_handler_fallback():
+    with pytest.raises(ValueError, match="unsupported task delegation action"):
+        TaskDelegationPlugin().project(
+            _parent(),
+            WorkerAction(type="unknown", payload={}),
+        )
