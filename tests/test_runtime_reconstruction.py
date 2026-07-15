@@ -9,7 +9,7 @@ import pytest
 from aigineering.agent.mock import MockWorker
 from aigineering.runtime import claim_next_package, execute_claimed_package
 from aigineering.core.asset_versions import create_replacement_claim
-from aigineering.core.control_plane import inject_contract
+from aigineering.core.control_plane import build_control_plane_contract
 from aigineering.core.runtime_ingress import RuntimeIngress
 from aigineering.core.runtime_projection import RuntimeProjection
 from aigineering.core.sqlite_store import SQLiteStore
@@ -30,15 +30,14 @@ def test_delete_and_rebuild_all_runtime_materializations(tmp_path):
     )
     replacement_claim = create_replacement_claim(source.id, replacement.id)
     ingress.accept_replacement_claim(replacement_claim, source="test")
-    contract = inject_contract(
-        store,
-        store,
-        name="rebuildable",
-        inputs=("source",),
-        outputs=("report",),
-        activation="source",
-        budget=1,
-        ingress=ingress,
+    contract = ingress.accept_contract(
+        build_control_plane_contract(
+            name="rebuildable",
+            inputs=("source",),
+            outputs=("report",),
+            activation="source",
+            budget=1,
+        )
     )
     store.register_worker(
         WorkerRegistration(
@@ -94,15 +93,14 @@ def test_v5_materializations_backfill_into_reconstructable_runtime_facts(tmp_pat
     )
     replacement_claim = create_replacement_claim(source.id, replacement.id)
     ingress.accept_replacement_claim(replacement_claim)
-    contract = inject_contract(
-        store,
-        store,
-        name="v5-task",
-        inputs=("source",),
-        outputs=("report",),
-        activation="source",
-        budget=1,
-        ingress=ingress,
+    contract = ingress.accept_contract(
+        build_control_plane_contract(
+            name="v5-task",
+            inputs=("source",),
+            outputs=("report",),
+            activation="source",
+            budget=1,
+        )
     )
     store.register_worker(WorkerRegistration("v5-worker", version="1"))
     claim = store.claim_contract(contract.id, "v5-worker", package_id="pkg:v5")

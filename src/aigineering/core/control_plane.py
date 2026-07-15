@@ -11,18 +11,13 @@ Protected runtime namespaces (``_sys_``, ``_tool_obs_``, ``_mcp_``,
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 from aigineering.core.authority import _is_protected_name
 from aigineering.core.ids import (
     hash_asset_definition,
     hash_asset_content,
     hash_contract_v3,
 )
-
-if TYPE_CHECKING:
-    from aigineering.core.runtime_ingress import RuntimeIngress
-    from aigineering.protocol.types import Asset, Contract
+from aigineering.protocol.types import Asset, Contract
 
 # ---------------------------------------------------------------------------
 # Asset injection
@@ -90,36 +85,6 @@ def build_control_plane_asset(
     )
 
     return asset
-
-
-def inject_asset(
-    store,
-    trace_store,
-    *,
-    name: str,
-    content: str,
-    origin: str = "human",
-    trust_tier: str = "human",
-    source_uri: str = "",
-    promptable: bool = True,
-    content_type: str = "text",
-    allow_protected: bool = False,
-    ingress: RuntimeIngress,
-) -> Asset:
-    """Compatibility ingress; new callers publish the built Asset as Candidate."""
-    asset = build_control_plane_asset(
-        name=name,
-        content=content,
-        origin=origin,
-        trust_tier=trust_tier,
-        source_uri=source_uri,
-        promptable=promptable,
-        content_type=content_type,
-        allow_protected=allow_protected,
-    )
-    return ingress.accept_asset(
-        asset, source="control_plane", allow_protected=allow_protected
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -193,36 +158,3 @@ def build_control_plane_contract(
         tool_scope=tool_scope,
         sensitive_input_policy=policy,
     )
-
-
-def inject_contract(
-    store,
-    trace_store,
-    *,
-    name: str,
-    inputs: tuple[str, ...] = (),
-    outputs: tuple[str, ...] = (),
-    activation: str = "",
-    budget: int = 5,
-    description: str = "",
-    labels: tuple[str, ...] = (),
-    tool_scope: tuple[str, ...] = (),
-    sensitive_input_policy: dict | None = None,
-    allow_protected_outputs: bool = False,
-    ingress: RuntimeIngress,
-) -> Contract:
-    """Compatibility ingress; new callers publish the built Contract as Candidate."""
-    contract = build_control_plane_contract(
-        name=name,
-        inputs=inputs,
-        outputs=outputs,
-        activation=activation,
-        budget=budget,
-        description=description,
-        labels=labels,
-        tool_scope=tool_scope,
-        sensitive_input_policy=sensitive_input_policy,
-        allow_protected_outputs=allow_protected_outputs,
-    )
-    ingress.accept_contract(contract)
-    return contract

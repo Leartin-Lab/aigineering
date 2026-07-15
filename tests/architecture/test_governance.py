@@ -184,6 +184,19 @@ def test_effect_payload_builders_are_protocol_helpers_not_cli_semantics():
     assert "asset.propose" in source
 
 
+def test_control_plane_is_proposal_construction_not_a_commit_path():
+    source = (ROOT / "src/aigineering/core/control_plane.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "build_control_plane_asset" in source
+    assert "build_control_plane_contract" in source
+    assert "RuntimeIngress" not in source
+    assert "accept_asset" not in source
+    assert "accept_contract" not in source
+    assert "def inject_" not in source
+
+
 def test_skill_loader_builds_assets_and_cli_owns_candidate_publication():
     loader = (ROOT / "src/aigineering/core/skill_loader.py").read_text(encoding="utf-8")
     cli = (ROOT / "src/aigineering/cli/skill.py").read_text(encoding="utf-8")

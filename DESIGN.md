@@ -60,6 +60,11 @@ submission compatibility paths are known transition boundaries, not properties
 hidden by the design documentation. Deterministic Asset seals provide replay
 integrity, not actor authentication.
 
+The control-plane module only builds immutable Asset and Contract proposals; it
+has no Store, trace, or ingress dependency. The former `inject_asset` and
+`inject_contract` compatibility API was removed after all production callers
+migrated, eliminating a second trusted commitment surface.
+
 The transition API now also implements GenesisManifest, actor keys,
 CandidateProposal, typed CandidateEffect values, canonical wire serialization,
 and signature verification. `CandidateCommitter` supports one complete

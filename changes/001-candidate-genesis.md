@@ -133,6 +133,10 @@ Implementation progress:
 - Complete: Engine-as-Worker creates an invocation-scoped Genesis identity and
   publishes disclosed inputs and its inner root Contract as Candidates through
   an identity-neutral publisher shared with CLI composition.
+- Complete: `control_plane` is now pure proposal construction. Unexported
+  `inject_asset`/`inject_contract` compatibility functions and their duplicate
+  direct-ingress test suite were deleted after production callers reached the
+  Candidate boundary.
 - Complete: cryptography is a base dependency; the runtime does not silently
   substitute a non-authenticating deterministic seal.
 - Pending: migrate remaining control-plane and worker submission effects.

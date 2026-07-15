@@ -6,7 +6,7 @@ import json
 
 from aigineering.agent.mock import MockWorker
 from aigineering.application import default_method_registry
-from aigineering.core.control_plane import inject_contract
+from aigineering.core.control_plane import build_control_plane_contract
 from aigineering.core.runtime_ingress import RuntimeIngress
 from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.runtime import (
@@ -19,13 +19,12 @@ from aigineering.runtime import (
 def test_plan_method_and_independent_child_complete_root_from_assets():
     store = SQLiteStore(":memory:")
     ingress = RuntimeIngress(store, store)
-    root = inject_contract(
-        store,
-        store,
-        name="research_report",
-        outputs=("final_report",),
-        budget=5,
-        ingress=ingress,
+    root = ingress.accept_contract(
+        build_control_plane_contract(
+            name="research_report",
+            outputs=("final_report",),
+            budget=5,
+        )
     )
     registry = default_method_registry()
     worker = MockWorker()
