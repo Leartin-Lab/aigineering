@@ -39,9 +39,14 @@ class EffectBatchProjection:
     records: tuple[RuntimeRecord, ...]
     relation_target: str
     projected_effects: tuple[tuple[str, str], ...]
-    contract: Contract | None = None
+    contracts: tuple[Contract, ...] = ()
     assets: tuple[Asset, ...] = ()
     accepted_asset_names: tuple[str, ...] = ()
+
+    @property
+    def contract(self) -> Contract | None:
+        """Compatibility view for callers expecting a single declaration."""
+        return self.contracts[0] if len(self.contracts) == 1 else None
 
 
 def _contract_from_payload(payload: Mapping[str, Any]) -> Contract:
@@ -364,8 +369,6 @@ def project_effect_batch(
     assets = tuple(
         asset for _, projection in projections for asset in projection.assets
     )
-    if len(contracts) > 1:
-        raise ValueError("the current atomic slice supports at most one Contract")
     targets = tuple(
         (effect.effect_type, projection.relation_target)
         for effect, projection in projections
@@ -376,7 +379,7 @@ def project_effect_batch(
         ),
         relation_target=(targets[0][1] if len(targets) == 1 else candidate.id),
         projected_effects=targets,
-        contract=contracts[0] if contracts else None,
+        contracts=contracts,
         assets=assets,
         accepted_asset_names=tuple(
             name

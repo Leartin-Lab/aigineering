@@ -168,12 +168,12 @@ Implementation progress:
   a mid-commit failure rolls both facts back.
 - Complete: Candidate commitment accepts a Candidate-wide atomic effect batch.
   Effect dispatch, capability checks, and batch composition stay outside the
-  coordinator. Mixed atomic-group IDs and multiple Contract declarations fail
-  closed; any invalid effect rejects the complete batch.
-- Complete: one Contract and its activating/result Assets may publish in the
-  same Candidate. The pure FactReducer accepts pending Contracts as an explicit
-  transaction view, preserving Memory/SQLite parity and removing the ordering
-  obstacle for plugin-produced ordinary tasks.
+  coordinator. Mixed atomic-group IDs fail closed; any invalid effect rejects
+  the complete batch.
+- Complete: multiple Contracts and their activating/result Assets may publish
+  in the same Candidate. The pure FactReducer accepts pending Contracts as an
+  explicit transaction view, preserving Memory/SQLite parity and providing the
+  generic fan-out primitive for plugin-produced ordinary tasks.
 - Complete: new `worker.register` Candidates require `worker_id == actor_id`
   and an authorized, non-revoked key binding. The CLI atomically authorizes a
   supplied public key and registers its routing profile; SQLite schema v12

@@ -71,6 +71,21 @@ def _contract() -> Contract:
     return Contract(id=hash_contract_v3(**fields), **fields)
 
 
+def _contract_named(name: str, output: str) -> Contract:
+    fields = {
+        "name": name,
+        "description": f"Publish {output}",
+        "inputs": (),
+        "outputs": (output,),
+        "activation": "",
+        "budget": 1,
+        "tool_scope": (),
+        "labels": (),
+        "origin": "human",
+    }
+    return Contract(id=hash_contract_v3(**fields), **fields)
+
+
 def _proposal(*, capabilities=("asset.publish", "contract.publish"), effect=None):
     signer = _Signer()
     genesis = create_genesis_manifest(
@@ -862,6 +877,33 @@ def test_contract_and_activating_assets_commit_as_one_transaction_view(store):
         and record.payload["terminal"] == "complete"
         for _, record in store.scan_runtime_records()
     )
+
+
+def test_one_candidate_can_publish_multiple_ordinary_tasks(store):
+    first = _contract_named("research", "evidence")
+    second = _contract_named("write", "report")
+    genesis, _base = _proposal()
+    candidate = create_candidate_proposal(
+        domain_id=genesis.id,
+        actor_id="human:owner",
+        key_id="root",
+        effects=[
+            CandidateEffect("contract.declare", {"contract": contract_to_dict(first)}),
+            CandidateEffect("contract.declare", {"contract": contract_to_dict(second)}),
+        ],
+        signer=_Signer(),
+    )
+    trace = store if isinstance(store, SQLiteStore) else MemoryTraceStore()
+
+    decision = CandidateCommitter(store, trace).commit(
+        candidate, genesis, verifier_factory=_verifier_factory
+    )
+
+    assert decision.accepted is True
+    assert decision.contract is None
+    assert decision.contracts == (first, second)
+    assert store.get_contract(first.id) == first
+    assert store.get_contract(second.id) == second
 
 
 def test_asset_effect_rejects_protected_namespace():

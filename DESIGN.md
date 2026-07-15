@@ -171,10 +171,11 @@ coordinator and caps it below 300 source lines.
 
 One Candidate may carry multiple effects as one atomic group. The pure
 effect-batch projector checks every capability before commitment and rejects
-the whole Candidate if any effect is invalid. A batch supports at most one
-Contract plus any proposed Assets. Fact reduction receives that pending
-Contract explicitly, so activation and completion consequences are computed
-against the atomic transaction view rather than effect insertion order.
+the whole Candidate if any effect is invalid. A batch may publish multiple
+Contracts and Assets. Fact reduction receives pending Contracts explicitly, so
+activation and completion consequences are computed against the atomic
+transaction view rather than effect insertion order. This is the ordinary
+fan-out primitive used by task-producing plugins.
 
 Candidate correctness does not depend on a process-local idempotency lock.
 Candidate and derived consequence records have deterministic identities;

@@ -2265,12 +2265,16 @@ class SQLiteStore:
         trace_entries: list[TraceEntry],
         *,
         contract: Contract | None = None,
+        contracts: tuple[Contract, ...] = (),
         reducer_callback: Callable[[], list[TraceEntry]] | None = None,
         runtime_records: tuple[RuntimeRecord, ...] = (),
     ) -> None:
         with self._conn:
-            if contract is not None:
-                self._insert_contract(contract)
+            declarations = ((contract,) if contract is not None else ()) + tuple(
+                contracts
+            )
+            for declaration in declarations:
+                self._insert_contract(declaration)
             for asset in accepted_assets:
                 if not asset.signed_by or not verify_asset_seal(asset):
                     raise ValueError(

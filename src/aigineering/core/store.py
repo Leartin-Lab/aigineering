@@ -318,6 +318,7 @@ class MemoryStore(_ProjectionIndexMixin):
         trace_entries: list,
         *,
         contract: Contract | None = None,
+        contracts: tuple[Contract, ...] = (),
         reducer_callback=None,
         runtime_records: tuple[RuntimeRecord, ...] = (),
     ) -> None:
@@ -340,8 +341,11 @@ class MemoryStore(_ProjectionIndexMixin):
         )
         committed = False
         try:
-            if contract is not None:
-                self.add_contract(contract)
+            declarations = ((contract,) if contract is not None else ()) + tuple(
+                contracts
+            )
+            for declaration in declarations:
+                self.add_contract(declaration)
             for asset in accepted_assets:
                 if not asset.signed_by or not verify_asset_seal(asset):
                     raise ValueError(f"Asset '{asset.id}' has an invalid seal")

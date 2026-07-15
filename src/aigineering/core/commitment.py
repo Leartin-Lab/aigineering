@@ -44,8 +44,13 @@ class CommitmentDecision:
     accepted: bool
     runtime_records: tuple[RuntimeRecord, ...]
     trace_entries: tuple[TraceEntry, ...]
-    contract: Contract | None = None
+    contracts: tuple[Contract, ...] = ()
     assets: tuple[Asset, ...] = ()
+
+    @property
+    def contract(self) -> Contract | None:
+        """Compatibility view for a Candidate declaring exactly one Contract."""
+        return self.contracts[0] if len(self.contracts) == 1 else None
 
 
 def _actor_capabilities(
@@ -188,7 +193,7 @@ def reduce_candidate(
         accepted=True,
         runtime_records=(receipt, *projection.records, committed, _trace_record(trace)),
         trace_entries=(trace,),
-        contract=projection.contract,
+        contracts=projection.contracts,
         assets=projection.assets,
     )
 
@@ -224,7 +229,7 @@ class CandidateCommitter:
                 self._store,
                 self._trace,
                 decision.assets,
-                pending_contracts=((decision.contract,) if decision.contract else ()),
+                pending_contracts=decision.contracts,
             )
             decision = replace(
                 decision,
@@ -236,7 +241,7 @@ class CandidateCommitter:
         self._store.commit_ingress_batch(
             accepted_assets=list(decision.assets),
             trace_entries=list(decision.trace_entries),
-            contract=decision.contract,
+            contracts=decision.contracts,
             runtime_records=decision.runtime_records,
         )
         if self._trace is not self._store:
