@@ -170,7 +170,7 @@ def task_audit(contract_id: str, as_json: bool) -> None:
     if contract is None:
         _emit_error(f"Task '{contract_id}' not found.", as_json)
         return
-    entries = getattr(store, "get_by_contract", lambda _cid: [])(contract.id)
+    entries = store.get_by_contract(contract.id)
     status = project_task_status(contract, store)
     payload = {
         "task": status,

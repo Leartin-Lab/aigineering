@@ -26,8 +26,7 @@ def asset_group() -> None:
 
 
 def _append_trace_if_supported(store, entry) -> None:
-    if hasattr(store, "append"):
-        store.append(entry)
+    store.append(entry)
 
 
 @asset_group.command("add")

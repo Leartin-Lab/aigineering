@@ -17,21 +17,17 @@ from aigineering.cli._common import (
     _session_id,
 )
 from aigineering.cli.task_state import project_task_status
-from aigineering.cli.worker_runtime import (
-    build_worker,
+from aigineering.application import build_worker
+from aigineering.runtime import (
+    WorkerInvocationError,
     claim_next_package,
     execute_claimed_package,
     process_method_completions,
     process_rejected_submissions,
 )
 from aigineering.core.session import SessionStore
-from aigineering.core.startup_check import (
-    begin_runtime_startup,
-    end_runtime,
-    renew_heartbeat,
-)
 from aigineering.core.trace import JsonLTraceStore
-from aigineering.protocol.types import Session, TraceEntry
+from aigineering.protocol.types import Session
 
 
 def _parse_capabilities(capabilities_str: Optional[str]) -> frozenset[str] | None:
@@ -46,19 +42,16 @@ def _output_run_json(
     contract_id: str,
     trace_ids: list[str],
     session_id: str,
-    entries: list[TraceEntry],
+    task_status: dict,
 ) -> None:
-    status = (
-        "complete"
-        if entries and any(e.event_type == "complete" for e in entries)
-        else "incomplete"
-    )
     _output_json(
         {
             "contract_id": contract_id,
             "session_id": session_id,
             "trace_ids": trace_ids,
-            "status": status,
+            "status": "complete" if task_status["ok"] else task_status["status"],
+            "ok": task_status["ok"],
+            "blockers": task_status["blockers"],
         }
     )
 
@@ -235,19 +228,22 @@ def run(
     )
     session_store = SessionStore()
     session_store.create_session(session)
+    task_status = project_task_status(contract, store)
 
     if json_output:
         _output_run_json(
             contract_id=contract.id,
             trace_ids=trace_ids,
             session_id=session_id,
-            entries=entries,
+            task_status=task_status,
         )
+        if not task_status["ok"]:
+            raise click.exceptions.Exit(1)
         return
 
     if not entries:
         click.echo("No trace entries recorded.")
-        return
+        raise click.exceptions.Exit(1)
 
     for entry in entries:
         if entry.event_type == "activation":
@@ -269,6 +265,9 @@ def run(
             click.echo("✓ contract complete")
 
     click.echo(f"Trace saved to {trace_path}")
+    if not task_status["ok"]:
+        click.echo(f"Run ended without satisfied outputs: {task_status['status']}")
+        raise click.exceptions.Exit(1)
 
 
 def _run_task_pool(
@@ -287,8 +286,7 @@ def _run_task_pool(
     json_output: bool,
 ) -> None:
     store = _persistent_store()
-    runtime_result = begin_runtime_startup(store)
-    runtime_owner = runtime_result.runtime_owner
+    cycles: list[dict] = []
     try:
         worker = build_worker(
             worker_kind,
@@ -316,8 +314,6 @@ def _run_task_pool(
                         )
                     set_output(name, output)
         deadline = time.monotonic() + wait_timeout
-        cycles: list[dict] = []
-
         if target_task_id is None:
             claimed = claim_next_package(store, worker_id="cli:run-once")
             if claimed is None:
@@ -347,14 +343,13 @@ def _run_task_pool(
             return
 
         while True:
-            before_trace_count = len(getattr(store, "get_all", lambda: [])())
+            before_trace_count = len(store.get_all())
             registry = _default_method_registry()
             recovered = process_rejected_submissions(store)
             processed_before = process_method_completions(store, registry)
             claimed = claim_next_package(store, worker_id="cli:run-task")
             submission: dict | None = None
             if claimed is not None:
-                renew_heartbeat(store, runtime_owner)
                 submission = execute_claimed_package(
                     claimed,
                     worker,
@@ -362,7 +357,7 @@ def _run_task_pool(
                     method_registry=registry,
                 )
             processed_after = process_method_completions(store, registry)
-            after_entries = getattr(store, "get_all", lambda: [])()
+            after_entries = store.get_all()
             new_entries = after_entries[before_trace_count:]
             touched_contracts = sorted({entry.contract_id for entry in new_entries})
             if touched_contracts:
@@ -419,10 +414,19 @@ def _run_task_pool(
                 return
             time.sleep(max(interval, 0.05))
             store = _persistent_store()
+    except WorkerInvocationError as e:
+        _emit_run_result(
+            {
+                "ok": False,
+                "status": "failed",
+                "error": str(e),
+                "cycles": cycles,
+            },
+            json_output,
+        )
+        raise click.exceptions.Exit(1)
     except ValueError as e:
         raise click.ClickException(str(e))
-    finally:
-        end_runtime(store, runtime_owner)
 
 
 def _emit_run_result(payload: dict, json_output: bool) -> None:

@@ -49,26 +49,25 @@ def _store_descriptor(descriptor, kind: str) -> None:
     store = _persistent_store()
     ingress = RuntimeIngress(store, store)
     ingress.accept_asset(descriptor, source=f"{kind}_capability", allow_protected=True)
-    if hasattr(store, "append"):
-        store.append(
-            create_entry(
-                contract_id="control_plane",
-                event_type="asset_injected",
-                parent_id=descriptor.id,
-                relation_type=f"{kind}_capability",
-                relation_target=descriptor.name,
-                accepted_fragments=[
-                    json.dumps(
-                        {
-                            "asset_id": descriptor.id,
-                            "origin": descriptor.origin,
-                            "trust_tier": descriptor.trust_tier,
-                        },
-                        sort_keys=True,
-                    )
-                ],
-            )
+    store.append(
+        create_entry(
+            contract_id="control_plane",
+            event_type="asset_injected",
+            parent_id=descriptor.id,
+            relation_type=f"{kind}_capability",
+            relation_target=descriptor.name,
+            accepted_fragments=[
+                json.dumps(
+                    {
+                        "asset_id": descriptor.id,
+                        "origin": descriptor.origin,
+                        "trust_tier": descriptor.trust_tier,
+                    },
+                    sort_keys=True,
+                )
+            ],
         )
+    )
 
 
 def _descriptor_json(asset) -> dict[str, object]:

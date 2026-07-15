@@ -85,10 +85,10 @@ def _dispatch(cli_args: list[str]) -> None:
         result = main_cli(cli_args, standalone_mode=False)
         if result is not None:
             click.echo(str(result))
-    except SystemExit:
-        pass
-    except Exception as e:
-        click.echo(f"Error: {e}")
+    except click.exceptions.Exit as exc:
+        click.echo(f"Command exited with status {exc.exit_code}.")
+    except click.ClickException as exc:
+        click.echo(f"Error: {exc.format_message()}")
 
 
 def _show_repl_help() -> None:

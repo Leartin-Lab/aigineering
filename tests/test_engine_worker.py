@@ -6,7 +6,7 @@ import json
 
 from aigineering.agent.engine_worker import EngineWorker
 from aigineering.agent.mock import MockWorker
-from aigineering.cli.worker_runtime import claim_next_package, execute_claimed_package
+from aigineering.runtime import claim_next_package, execute_claimed_package
 from aigineering.core.runtime_ingress import RuntimeIngress
 from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.protocol.types import Asset, Contract

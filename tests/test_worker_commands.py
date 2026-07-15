@@ -15,6 +15,8 @@ from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.protocol.envelope import CandidateEnvelope
 from aigineering.protocol.package import WorkerPackage
 from aigineering.protocol.types import Asset, Contract, TraceEntry
+from aigineering.protocol.types import Candidate
+from aigineering.runtime import claim_next_package, execute_claimed_package
 
 
 def _seed_contract(store: SQLiteStore) -> Contract:
@@ -299,7 +301,7 @@ def test_submit_without_claim_rejected_for_sqlite_store():
         envelope_json = _valid_envelope_json(contract.id)
         result = runner.invoke(cli, ["worker", "submit", "--json", envelope_json])
 
-        assert result.exit_code == 0
+        assert result.exit_code != 0
         data = json.loads(result.output)
         assert data["status"] == "error"
         assert "requires claim-bound submission" in data["error"]
@@ -382,7 +384,7 @@ def test_different_key_conflict():
             cli,
             ["worker", "submit", "--json", envelope_json, "--idempotency-key", "key-B"],
         )
-        assert result2.exit_code == 0
+        assert result2.exit_code != 0
         data2 = json.loads(result2.output)
         assert data2.get("status") == "conflict"
         assert "already has a submission" in data2.get("error", "")
@@ -407,7 +409,7 @@ def test_submit_without_idempotency_key_is_claim_bound():
 
         # Second submit without idempotency key reuses a submitted claim and is rejected.
         result2 = runner.invoke(cli, ["worker", "submit", "--json", envelope_json])
-        assert result2.exit_code == 0
+        assert result2.exit_code != 0
         data2 = json.loads(result2.output)
         assert data2["status"] == "error"
         assert "claim status" in data2["error"] or "claim" in data2["error"]
@@ -442,7 +444,7 @@ def test_submit_invalid_envelope():
     runner = CliRunner()
     with runner.isolated_filesystem():
         result = runner.invoke(cli, ["worker", "submit", "--json", "not valid json"])
-        assert result.exit_code == 0
+        assert result.exit_code != 0
         data = json.loads(result.output)
         assert "error" in data
 
@@ -457,7 +459,7 @@ def test_submit_missing_contract():
             raw_output="result: ok",
         )
         result = runner.invoke(cli, ["worker", "submit", "--json", envelope.to_json()])
-        assert result.exit_code == 0
+        assert result.exit_code != 0
         data = json.loads(result.output)
         assert "error" in data
         assert "not found" in data["error"]
@@ -587,6 +589,73 @@ def test_worker_next_returns_continuation_with_method_context():
         claim = persisted.get_claim(continuation.id)
         assert claim is not None
         assert claim["package_id"] == data["package_id"]
+
+
+def test_local_worker_invocation_receives_continuation_method_context():
+    """Built-in workers and external WorkerPackages receive equivalent context."""
+
+    class CapturingWorker:
+        def __init__(self) -> None:
+            self.assets: list[Asset] = []
+
+        def invoke(self, contract, disclosed_assets):
+            self.assets = list(disclosed_assets)
+            return Candidate(
+                worker_id="local-worker",
+                raw_output='/exec {"outputs":{"report":"grounded result"}}',
+            )
+
+    store = SQLiteStore(":memory:")
+    _parent, continuation, obs = _seed_continuation_with_method_context(store)
+    claimed = claim_next_package(
+        store, worker_id="local-worker", contract_id=continuation.id
+    )
+    assert claimed is not None
+    worker = CapturingWorker()
+
+    result = execute_claimed_package(claimed, worker, store)
+
+    assert result["status"] == "accepted"
+    assert [(asset.name, asset.content) for asset in worker.assets] == [
+        (obs.name, obs.content)
+    ]
+    store.close()
+
+
+def test_local_worker_usage_metadata_reaches_projection_trace():
+    class UsageWorker:
+        def invoke(self, contract, disclosed_assets):
+            del contract, disclosed_assets
+            return Candidate(
+                worker_id="llm:test",
+                raw_output='/exec {"outputs":{"final_report":"done"}}',
+                metadata={"model": "test-model", "total_tokens": 17},
+            )
+
+    store = SQLiteStore(":memory:")
+    contract, _asset = _seed_contract_with_asset(store)
+    claimed = claim_next_package(store, worker_id="local-worker")
+    assert claimed is not None
+
+    execute_claimed_package(claimed, UsageWorker(), store)
+
+    projection = next(
+        entry
+        for entry in store.get_by_contract(contract.id)
+        if entry.event_type == "projection"
+    )
+    assert dict(projection.usage_metadata or {}) == {
+        "model": "test-model",
+        "total_tokens": 17,
+    }
+    candidate_record = store.scan_runtime_records(record_type="candidate.received")[-1][
+        1
+    ]
+    assert dict(candidate_record.payload["usage_metadata"]) == {
+        "model": "test-model",
+        "total_tokens": 17,
+    }
+    store.close()
 
 
 def test_worker_next_null_when_idle():

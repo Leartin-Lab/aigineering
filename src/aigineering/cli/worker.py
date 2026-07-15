@@ -12,7 +12,7 @@ from aigineering.cli._common import (
     _persistent_store,
     _redact_sealed,
 )
-from aigineering.cli.worker_runtime import (
+from aigineering.runtime import (
     _method_context_assets_for,
     claim_next_package,
 )
@@ -20,6 +20,8 @@ from aigineering.core.disclosure import DisclosurePolicyError, compute_disclosur
 from aigineering.core.runtime_ingress import RuntimeIngress
 from aigineering.core.worker_routing import WorkerRegistration
 from aigineering.core.submit import (
+    SubmitClaimError,
+    SubmitCommitError,
     SubmitConflictError,
     submit_candidate,
 )
@@ -125,7 +127,7 @@ def worker_next(worker_id: str, lease_seconds: int, json_output: bool) -> None:
       - Its activation expression is satisfied by available assets
       - Budget remaining > 0
       - It is not completed (no complete trace event, outputs not all satisfied)
-      - It is not suspended (no outstanding method_scheduled)
+      - Its projected blockers are empty
     """
     store = _persistent_store()
     try:
@@ -163,7 +165,7 @@ def worker_next(worker_id: str, lease_seconds: int, json_output: bool) -> None:
         if constrained:
             _output_json(
                 {
-                    "status": "waiting_for_capability",
+                    "status": "blocked_capability",
                     "worker_id": worker_id,
                     "contracts": constrained,
                     "message": "No eligible registered worker can claim constrained work.",
@@ -177,7 +179,7 @@ def worker_next(worker_id: str, lease_seconds: int, json_output: bool) -> None:
             for contract in store.get_all_contracts()
         )
         if constrained:
-            click.echo("Waiting for an eligible registered worker capability.")
+            click.echo("Blocked: no eligible registered worker capability.")
         else:
             click.echo("No ready contracts.")
 
@@ -215,11 +217,6 @@ def worker_register(
 ) -> None:
     """Register trusted routing metadata for a stateless execution worker."""
     store = _persistent_store()
-    register = getattr(store, "register_worker", None)
-    if register is None:
-        raise click.ClickException(
-            "Worker registration requires SQLite runtime storage."
-        )
     registration = WorkerRegistration(
         worker_id=worker_id,
         capabilities=capabilities,
@@ -228,7 +225,7 @@ def worker_register(
         capacity=capacity,
         enabled=not disabled,
     )
-    register(registration)
+    store.register_worker(registration)
     payload = {
         "worker_id": registration.worker_id,
         "capabilities": list(registration.capabilities),
@@ -262,13 +259,13 @@ def worker_submit(envelope_json: str, idempotency_key: Optional[str]) -> None:
         envelope = CandidateEnvelope.from_json(envelope_json)
     except (ValueError, json.JSONDecodeError) as e:
         _output_json({"error": f"Invalid envelope: {e}"})
-        return
+        raise click.exceptions.Exit(1) from None
 
     store = _persistent_store()
 
     if store.get_contract(envelope.contract_id) is None:
         _output_json({"error": f"Contract '{envelope.contract_id}' not found."})
-        return
+        raise click.exceptions.Exit(1)
 
     ingress = RuntimeIngress(store, store)
     try:
@@ -282,10 +279,16 @@ def worker_submit(envelope_json: str, idempotency_key: Optional[str]) -> None:
         )
     except SubmitConflictError as e:
         _output_json({"error": str(e), "status": "conflict"})
-        return
-    except Exception as e:
+        raise click.exceptions.Exit(1) from None
+    except (
+        SubmitClaimError,
+        SubmitCommitError,
+        DisclosurePolicyError,
+        TypeError,
+        ValueError,
+    ) as e:
         _output_json({"error": str(e), "status": "error"})
-        return
+        raise click.exceptions.Exit(1) from None
 
     # Redact sealed config from result
     result = _redact_sealed(result)

@@ -92,26 +92,25 @@ def mcp_add(
     store = _persistent_store()
     ingress = RuntimeIngress(store, store)
     ingress.accept_asset(descriptor, source="mcp_capability", allow_protected=True)
-    if hasattr(store, "append"):
-        store.append(
-            create_entry(
-                contract_id="control_plane",
-                event_type="asset_injected",
-                parent_id=descriptor.id,
-                relation_type="mcp_capability",
-                relation_target=descriptor.name,
-                accepted_fragments=[
-                    json.dumps(
-                        {
-                            "asset_id": descriptor.id,
-                            "origin": descriptor.origin,
-                            "trust_tier": descriptor.trust_tier,
-                        },
-                        sort_keys=True,
-                    )
-                ],
-            )
+    store.append(
+        create_entry(
+            contract_id="control_plane",
+            event_type="asset_injected",
+            parent_id=descriptor.id,
+            relation_type="mcp_capability",
+            relation_target=descriptor.name,
+            accepted_fragments=[
+                json.dumps(
+                    {
+                        "asset_id": descriptor.id,
+                        "origin": descriptor.origin,
+                        "trust_tier": descriptor.trust_tier,
+                    },
+                    sort_keys=True,
+                )
+            ],
         )
+    )
 
     if as_json:
         _output_json(

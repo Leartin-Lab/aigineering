@@ -1,14 +1,15 @@
-"""Shared worker execution helpers for CLI commands."""
+"""Application-neutral worker protocol execution and recovery services."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 import sqlite3
 from threading import Event, Thread
 
-from aigineering.agent.llm import LLMWorker
+from aigineering.agent.llm import LLMWorker, ProviderError
 from aigineering.agent.mock import MockWorker
+from aigineering.agent.worker import WorkerExecutionError
 from aigineering.core.activation import check_activation
 from aigineering.core.budget_manager import BudgetManager
 from aigineering.core.continuation_manager import ContinuationManager
@@ -20,19 +21,20 @@ from aigineering.core.disclosure import (
 from aigineering.core.runtime_ingress import RuntimeIngress
 from aigineering.core.store import require_operational_store
 from aigineering.core.fact_reducer import FactReducer
-from aigineering.core.ids import hash_retry
 from aigineering.core.method_runtime import MethodRuntime
 from aigineering.core.method_handlers.recovery import schedule_projection_recovery
 from aigineering.core.methods import (
     method_context_content,
     method_contract,
+    retry_contract,
     system_asset,
 )
 from aigineering.core.provenance import sign_asset
 from aigineering.core.runtime_projection import RuntimeProjection
 from aigineering.core.submit import (
-    SubmitConflictError,
+    replay_idempotent_submission,
     submit_candidate,
+    validate_submission_claim,
 )
 from aigineering.core.worker_routing import is_eligible
 from aigineering.core.trace_manager import TraceManager
@@ -53,8 +55,13 @@ from aigineering.protocol.wire import (
 class ClaimedPackage:
     contract: Contract
     disclosed_assets: tuple[Asset, ...]
+    method_context_assets: tuple[Asset, ...]
     package: WorkerPackage
     worker_id: str
+
+
+class WorkerInvocationError(RuntimeError):
+    """A claimed provider call failed and was durably closed."""
 
 
 class _ClaimLeaseKeeper:
@@ -110,31 +117,6 @@ class _ClaimLeaseKeeper:
                 return
 
 
-def build_worker(
-    worker_kind: str,
-    *,
-    model: str | None = None,
-    base_url: str = "https://api.openai.com/v1",
-    timeout: float = 60.0,
-    max_retries: int = 3,
-    capabilities: frozenset[str] | None = None,
-) -> MockWorker | LLMWorker:
-    """Build a CLI worker implementation."""
-    if worker_kind == "mock":
-        return MockWorker()
-    if worker_kind == "llm":
-        if not model:
-            raise ValueError("--model is required when --worker llm")
-        return LLMWorker(
-            model=model,
-            base_url=base_url,
-            timeout=int(timeout),
-            max_retries=max_retries,
-            capabilities=capabilities or frozenset(),
-        )
-    raise ValueError(f"unsupported worker: {worker_kind}")
-
-
 def claim_next_package(
     store,
     *,
@@ -144,6 +126,7 @@ def claim_next_package(
 ) -> ClaimedPackage | None:
     """Claim the next ready contract and return its worker package."""
     store = require_operational_store(store)
+    process_expired_claims(store)
     available_names = {a.name for a in store.get_all_assets()}
     registered_worker = store.get_worker_registration(worker_id)
     policy_blockers: list[DisclosurePolicyError] = []
@@ -189,7 +172,9 @@ def claim_next_package(
             contract_id=contract.id,
             contract=contract_to_dict(contract),
             disclosed_assets=tuple(asset_to_dict(a) for a in disclosed),
-            method_context_assets=method_context_assets,
+            method_context_assets=tuple(
+                asset_to_dict(asset) for asset in method_context_assets
+            ),
             tool_scope=contract.tool_scope,
             budget_remaining=remaining_budget,
             capability_requirements=contract.worker_capabilities,
@@ -211,24 +196,11 @@ def claim_next_package(
         )
         if claim is None:
             continue
-        package = WorkerPackage(
-            contract_id=contract.id,
-            contract=contract_to_dict(contract),
-            disclosed_assets=tuple(asset_to_dict(a) for a in disclosed),
-            method_context_assets=method_context_assets,
-            tool_scope=contract.tool_scope,
-            budget_remaining=remaining_budget,
+        package = replace(
+            package,
             claim_id=claim["claim_id"],
             claim_epoch=claim["epoch"],
             lease_until=claim["lease_until"],
-            package_id=package.package_id,
-            capability_requirements=contract.worker_capabilities,
-            worker_profile_id=(
-                registered_worker.profile_id if registered_worker else ""
-            ),
-            worker_registration_version=(
-                registered_worker.version if registered_worker else ""
-            ),
         )
         store.new_entry(
             contract.id,
@@ -242,7 +214,9 @@ def claim_next_package(
             ),
             budget_remaining=remaining_budget,
         )
-        return ClaimedPackage(contract, disclosed, package, worker_id)
+        return ClaimedPackage(
+            contract, disclosed, method_context_assets, package, worker_id
+        )
     if policy_blockers:
         reasons = [reason for exc in policy_blockers for reason in exc.reasons]
         raise DisclosurePolicyError(policy_blockers[0].contract_id, reasons)
@@ -261,7 +235,31 @@ def execute_claimed_package(
     keeper = _ClaimLeaseKeeper(claimed, store)
     keeper.start()
     try:
-        candidate = worker.invoke(claimed.contract, list(claimed.disclosed_assets))
+        try:
+            candidate = worker.invoke(
+                claimed.contract,
+                list(claimed.disclosed_assets + claimed.method_context_assets),
+            )
+        except (ProviderError, WorkerExecutionError) as exc:
+            status_code = exc.status_code if isinstance(exc, ProviderError) else 0
+            retryable = exc.is_retryable if isinstance(exc, ProviderError) else False
+            category = (
+                "provider_error"
+                if isinstance(exc, ProviderError)
+                else f"worker_error:{exc.code}"
+            )
+            _record_worker_invocation_failure(
+                claimed,
+                store,
+                status_code=status_code,
+                retryable=retryable,
+                category=category,
+            )
+            process_worker_failures(store)
+            raise WorkerInvocationError(
+                f"worker invocation failed with status {status_code}; "
+                "claim was released and recovery was scheduled"
+            ) from None
     finally:
         keeper.stop()
     if keeper.failed:
@@ -282,6 +280,7 @@ def execute_claimed_package(
         claim_id=claimed.package.claim_id,
         claim_epoch=claimed.package.claim_epoch,
         idempotency_key=f"run-{claimed.package.package_id}",
+        usage_metadata=candidate.metadata,
     )
     return submit_candidate_envelope(
         envelope,
@@ -307,6 +306,7 @@ def submit_candidate_envelope(
         worker_id=envelope.worker_id,
         raw_output=envelope.raw_output,
         parsed_action=envelope.parsed_action,
+        metadata=envelope.usage_metadata,
     )
     method_action = parse_method_action(candidate)
     if method_action is not None:
@@ -348,6 +348,8 @@ def _schedule_rejected_recovery(
     rejections: list[dict],
     store,
     trace,
+    *,
+    record_terminal: bool = True,
 ) -> None:
     budget = BudgetManager()
     for current in store.get_all_contracts():
@@ -373,12 +375,13 @@ def _schedule_rejected_recovery(
         authority_result="rejected",
         budget_remaining=budget.get_remaining(contract.id),
     )
-    store.append_runtime_record(
-        create_runtime_record(
-            "lifecycle.terminal",
-            {"contract_id": contract.id, "terminal": "failed"},
+    if record_terminal:
+        store.append_runtime_record(
+            create_runtime_record(
+                "lifecycle.terminal",
+                {"contract_id": contract.id, "terminal": "failed"},
+            )
         )
-    )
 
 
 def process_rejected_submissions(store) -> list[str]:
@@ -418,6 +421,231 @@ def process_rejected_submissions(store) -> list[str]:
     return processed
 
 
+def process_expired_claims(store) -> list[str]:
+    """Materialize expired leases and replay their recovery subtasks.
+
+    Claim leases are sufficient evidence; runtime heartbeat ownership is not
+    required.  The original contract is terminal and recovery always creates
+    a new contract, preserving the no-reclaim invariant.
+    """
+    operational = require_operational_store(store)
+    observed = datetime.now(timezone.utc)
+    observed_at = observed.isoformat()
+    records = [record for _, record in store.scan_runtime_records()]
+    grant_ids = {
+        str(record.payload["claim_id"]): record.id
+        for record in records
+        if record.record_type == "claim.granted"
+    }
+
+    for contract in store.get_all_contracts():
+        claim = store.get_claim(contract.id)
+        if claim is None or claim.get("status") != "active":
+            continue
+        lease_until = str(claim.get("lease_until", ""))
+        malformed = False
+        try:
+            deadline = datetime.fromisoformat(lease_until)
+            if deadline.tzinfo is None:
+                deadline = deadline.replace(tzinfo=timezone.utc)
+            expired = deadline < observed
+        except (TypeError, ValueError):
+            malformed = True
+            expired = True
+        if not expired:
+            continue
+        grant_id = grant_ids.get(str(claim["claim_id"]))
+        if grant_id is None:
+            raise RuntimeError(
+                f"claim {claim['claim_id']!r} has no immutable grant fact"
+            )
+        entry = create_entry(
+            contract.id,
+            "claim_expired",
+            worker_id=str(claim["worker_id"]),
+            rejected_fragments=[
+                "[claim_expired] worker lease was malformed"
+                if malformed
+                else f"[claim_expired] lease ended at {lease_until}"
+            ],
+            authority_result="rejected",
+        )
+        expiration = create_runtime_record(
+            "claim.expired",
+            {
+                "claim_id": claim["claim_id"],
+                "contract_id": contract.id,
+                "epoch": claim["epoch"],
+                "lease_until": lease_until,
+                "package_id": claim["package_id"],
+                "worker_id": claim["worker_id"],
+            },
+            causal_parents=[grant_id],
+            recorded_at=observed_at,
+        )
+        terminal = create_runtime_record(
+            "lifecycle.terminal",
+            {"contract_id": contract.id, "terminal": "failed"},
+            causal_parents=[expiration.id],
+            recorded_at=observed_at,
+        )
+        trace_record = create_runtime_record(
+            "trace.recorded",
+            {"trace": trace_entry_to_dict(entry)},
+            causal_parents=[expiration.id],
+            recorded_at=observed_at,
+        )
+        operational.commit_claim_expiration(
+            trace_entry=entry,
+            runtime_records=(expiration, terminal, trace_record),
+            claim_id=str(claim["claim_id"]),
+            claim_epoch=int(claim["epoch"]),
+            expected_lease_until=lease_until,
+            observed_at=observed_at,
+        )
+
+    records = [record for _, record in store.scan_runtime_records()]
+    processed_expiration_ids = {
+        str(record.payload["expiration_id"])
+        for record in records
+        if record.record_type == "claim_expiration.recovery_scheduled"
+    }
+    processed: list[str] = []
+    for expiration in records:
+        if (
+            expiration.record_type != "claim.expired"
+            or expiration.id in processed_expiration_ids
+        ):
+            continue
+        contract_id = str(expiration.payload["contract_id"])
+        contract = store.get_contract(contract_id)
+        if contract is None:
+            continue
+        _schedule_rejected_recovery(
+            contract,
+            "worker claim expired before Candidate submission",
+            [
+                {
+                    "category": "claim_expired",
+                    "name": "(claim)",
+                    "reject_reason": (
+                        f"lease ended at {expiration.payload['lease_until']}"
+                    ),
+                }
+            ],
+            store,
+            store,
+            record_terminal=False,
+        )
+        marker = create_runtime_record(
+            "claim_expiration.recovery_scheduled",
+            {"contract_id": contract_id, "expiration_id": expiration.id},
+            causal_parents=[expiration.id],
+        )
+        store.append_runtime_record(marker)
+        processed_expiration_ids.add(expiration.id)
+        processed.append(contract_id)
+    return processed
+
+
+def _record_worker_invocation_failure(
+    claimed: ClaimedPackage,
+    store,
+    *,
+    status_code: int,
+    retryable: bool,
+    category: str,
+) -> None:
+    existing = store.get_by_contract(claimed.contract.id)
+    parent_id = existing[-1].id if existing else None
+    entry = create_entry(
+        claimed.contract.id,
+        "worker_invocation_failed",
+        parent_id=parent_id,
+        worker_id=claimed.worker_id,
+        rejected_fragments=[f"[{category}] status={status_code} retryable={retryable}"],
+        authority_result="rejected",
+        budget_remaining=claimed.package.budget_remaining,
+    )
+    failure = create_runtime_record(
+        "worker.invocation_failed",
+        {
+            "claim_id": claimed.package.claim_id,
+            "contract_id": claimed.contract.id,
+            "package_id": claimed.package.package_id,
+            "category": category,
+            "retryable": retryable,
+            "status_code": status_code,
+            "worker_id": claimed.worker_id,
+        },
+    )
+    terminal = create_runtime_record(
+        "lifecycle.terminal",
+        {"contract_id": claimed.contract.id, "terminal": "failed"},
+        causal_parents=[failure.id],
+    )
+    trace_record = create_runtime_record(
+        "trace.recorded",
+        {"trace": trace_entry_to_dict(entry)},
+        causal_parents=[failure.id],
+    )
+    require_operational_store(store).commit_worker_invocation_failure(
+        trace_entry=entry,
+        runtime_records=(failure, terminal, trace_record),
+        claim_id=claimed.package.claim_id,
+        worker_id=claimed.worker_id,
+        package_id=claimed.package.package_id,
+        claim_epoch=claimed.package.claim_epoch,
+    )
+
+
+def process_worker_failures(store) -> list[str]:
+    """Replay recovery scheduling for durably failed provider invocations."""
+    records = [record for _, record in store.scan_runtime_records()]
+    processed_failure_ids = {
+        str(record.payload["failure_id"])
+        for record in records
+        if record.record_type == "worker_failure.recovery_scheduled"
+    }
+    processed: list[str] = []
+    for failure in records:
+        if (
+            failure.record_type != "worker.invocation_failed"
+            or failure.id in processed_failure_ids
+        ):
+            continue
+        contract_id = str(failure.payload["contract_id"])
+        contract = store.get_contract(contract_id)
+        if contract is None:
+            continue
+        _schedule_rejected_recovery(
+            contract,
+            "provider invocation failed before Candidate production",
+            [
+                {
+                    "category": str(failure.payload["category"]),
+                    "name": "(provider)",
+                    "reject_reason": (
+                        f"status={failure.payload['status_code']} "
+                        f"retryable={failure.payload['retryable']}"
+                    ),
+                }
+            ],
+            store,
+            store,
+            record_terminal=False,
+        )
+        marker = create_runtime_record(
+            "worker_failure.recovery_scheduled",
+            {"contract_id": contract_id, "failure_id": failure.id},
+            causal_parents=[failure.id],
+        )
+        store.append_runtime_record(marker)
+        processed_failure_ids.add(failure.id)
+        processed.append(contract_id)
+    return processed
+
+
 def _submit_claimed_method(
     contract: Contract,
     envelope: CandidateEnvelope,
@@ -429,58 +657,22 @@ def _submit_claimed_method(
     method_registry,
 ) -> dict:
     """Atomically schedule a claim-bound method action."""
-    if envelope.idempotency_key:
-        cached = store.get_idempotency(contract.id, envelope.idempotency_key)
-        if cached is not None:
-            cached_response = dict(cached)
-            cached_candidate_hash = cached_response.pop("_candidate_hash", "")
-            if (
-                cached_candidate_hash
-                and cached_candidate_hash != envelope.candidate_hash
-            ):
-                raise SubmitConflictError(
-                    f"Idempotency key for contract '{contract.id}' is already "
-                    "bound to a different Candidate payload"
-                )
-            cached_response["duplicate"] = True
-            return cached_response
-        if store.has_any_idempotency(contract.id):
-            raise SubmitConflictError(
-                f"Contract '{contract.id}' already has a submission with a "
-                "different idempotency key"
-            )
-    claim = store.get_claim(contract.id)
-    if (
-        claim is None
-        or claim.get("claim_id") != envelope.claim_id
-        or claim.get("epoch") != envelope.claim_epoch
-        or claim.get("worker_id") != envelope.worker_id
-        or claim.get("package_id") != envelope.package_id
-        or claim.get("status") != "active"
-    ):
-        raise ValueError("method submission failed active claim/package fencing")
+    duplicate = replay_idempotent_submission(
+        store,
+        contract_id=contract.id,
+        idempotency_key=envelope.idempotency_key,
+        candidate_hash=envelope.candidate_hash,
+    )
+    if duplicate is not None:
+        return duplicate
+    validate_submission_claim(store, contract, envelope)
 
     handler = method_registry.get(action.type)
     if handler is None or not handler.can_handle(action.type):
         raise ValueError(f"no method handler registered for /{action.type}")
 
     if action.type == "retry":
-        child = Contract(
-            id=hash_retry(contract.id),
-            parent_id=contract.parent_id,
-            name=contract.name,
-            description=contract.description,
-            inputs=contract.inputs,
-            outputs=contract.outputs,
-            activation=contract.activation,
-            budget=contract.budget,
-            tool_scope=contract.tool_scope,
-            labels=contract.labels,
-            worker_capabilities=contract.worker_capabilities,
-            worker_pools=contract.worker_pools,
-            origin=contract.origin,
-            sensitive_input_policy=contract.sensitive_input_policy,
-        )
+        child = retry_contract(contract)
         context_asset = None
         event_type = "retry_created"
     else:
@@ -502,6 +694,7 @@ def _submit_claimed_method(
         parent_id=parent_id,
         worker_id=envelope.worker_id,
         candidate_raw=candidate.raw_output,
+        usage_metadata=envelope.usage_metadata,
         relation_type=action.type,
         relation_target=child.id,
         disclosed_assets=[context_asset.id] if context_asset is not None else [],
@@ -526,6 +719,7 @@ def _submit_claimed_method(
             "package_id": envelope.package_id,
             "raw_output": candidate.raw_output,
             "worker_id": envelope.worker_id,
+            "usage_metadata": envelope.usage_metadata,
         },
     )
     method_record = create_runtime_record(
@@ -638,7 +832,7 @@ def process_method_completions(store, method_registry) -> list[str]:
     return processed
 
 
-def _method_context_assets_for(contract: Contract, store) -> tuple[dict, ...]:
+def _method_context_assets_for(contract: Contract, store) -> tuple[Asset, ...]:
     store = require_operational_store(store)
     assets: list[Asset] = []
     seen: set[str] = set()
@@ -654,4 +848,4 @@ def _method_context_assets_for(contract: Contract, store) -> tuple[dict, ...]:
                 continue
             assets.append(redact_for_disclosure(asset))
             seen.add(asset.id)
-    return tuple(asset_to_dict(asset) for asset in assets)
+    return tuple(assets)

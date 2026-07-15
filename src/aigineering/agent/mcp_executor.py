@@ -43,19 +43,30 @@ class MCPExecutor:
             server_name = tool_name.split(".", 1)[0]
             server = self._servers[server_name]
             result = server(tool_name, args)
+            if not isinstance(result, str):
+                raise TypeError("MCP result must be a string")
             ok = True
             error = ""
+            error_type = ""
         except KeyError:
             result = ""
             ok = False
             error = f"unknown mcp server for tool '{tool_name}'"
+            error_type = "KeyError"
         except Exception as e:
             result = ""
             ok = False
             error = str(e)
+            error_type = type(e).__name__
 
         obs = json.dumps(
-            {"ok": ok, "tool": tool_name, "result": result, "error": error},
+            {
+                "ok": ok,
+                "tool": tool_name,
+                "result": result,
+                "error": error,
+                "error_type": error_type,
+            },
             sort_keys=True,
             ensure_ascii=False,
         )

@@ -5,10 +5,9 @@ from __future__ import annotations
 import click
 
 from aigineering.cli._common import _output_json, _persistent_store
-from aigineering.core.ids import hash_retry
 from aigineering.core.method_handlers.retry import RetryMethodHandler
 from aigineering.core.method_runtime import MethodRuntime
-from aigineering.core.trace import MemoryTraceStore
+from aigineering.core.methods import retry_contract
 from aigineering.protocol.types import Candidate
 
 
@@ -39,10 +38,9 @@ def retry(
 
     # Method ingress (G1): dispatch through RetryMethodHandler instead of
     # directly calling store.add_contract().
-    trace_store = store if hasattr(store, "new_entry") else MemoryTraceStore()
     runtime = MethodRuntime(
         store=store,
-        trace=trace_store,
+        trace=store,
         budget={original.id: original.budget},
     )
     candidate = Candidate(
@@ -53,7 +51,7 @@ def retry(
     handler = RetryMethodHandler()
     handler.handle_method(runtime, original, "retry", candidate)
 
-    retry_id = hash_retry(contract_id)
+    retry_id = retry_contract(original).id
 
     if json_output:
         _output_json(

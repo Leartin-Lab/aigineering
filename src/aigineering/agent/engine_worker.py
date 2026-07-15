@@ -6,14 +6,15 @@ import json
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-from aigineering.cli.worker_runtime import (
+from aigineering.runtime import (
+    WorkerInvocationError,
     claim_next_package,
     execute_claimed_package,
     process_method_completions,
     process_rejected_submissions,
 )
 from aigineering.core.fact_reducer import FactReducer
-from aigineering.core.ids import hash_contract_v2
+from aigineering.core.ids import hash_contract_v3
 from aigineering.core.method_handlers.fail import FailMethodHandler
 from aigineering.core.method_handlers.plan import PlanMethodHandler
 from aigineering.core.method_handlers.replan import ReplanMethodHandler
@@ -88,7 +89,7 @@ class EngineWorker:
                         inner,
                         method_registry=registry,
                     )
-                except ValueError:
+                except (ValueError, WorkerInvocationError):
                     return self._failure("inner worker produced an invalid submission")
                 process_method_completions(inner, registry)
 
@@ -129,7 +130,12 @@ class EngineWorker:
 
 
 def _inner_contract(outer: Contract) -> Contract:
-    identity = hash_contract_v2(
+    policy = (
+        dict(outer.sensitive_input_policy)
+        if outer.sensitive_input_policy is not None
+        else None
+    )
+    identity = hash_contract_v3(
         name=outer.name,
         description=outer.description,
         inputs=list(outer.inputs),
@@ -141,6 +147,7 @@ def _inner_contract(outer: Contract) -> Contract:
         worker_capabilities=[],
         worker_pools=[],
         origin="engine_worker",
+        sensitive_input_policy=policy,
     )
     return Contract(
         id=identity,

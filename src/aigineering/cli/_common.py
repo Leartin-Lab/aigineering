@@ -12,24 +12,25 @@ import click
 from aigineering.core.ids import (
     hash_asset_content,
     hash_asset_definition,
-    hash_contract,
+    hash_contract_v3,
 )
 from aigineering.core.runtime_ingress import RuntimeIngress
-from aigineering.core.method_handlers.fail import FailMethodHandler
-from aigineering.core.method_handlers.plan import PlanMethodHandler
-from aigineering.core.method_handlers.replan import ReplanMethodHandler
-from aigineering.core.method_handlers.retry import RetryMethodHandler
-from aigineering.core.method_handlers.tool import ToolMethodHandler
+from aigineering.application import (
+    build_worker,
+    default_method_registry,
+    find_trace_for_session,
+    latest_session_file,
+    persistent_store,
+)
 from aigineering.core.method_registry import MethodRegistry
-from aigineering.core.session import SessionStore
 from aigineering.core.store import StoreProtocol
 from aigineering.core.sqlite_store import SQLiteStore
+from aigineering.core.store import require_operational_store
 from aigineering.core.trace import (
     JsonLTraceStore,
     TraceStoreProtocol,
     create_entry,
 )
-from aigineering.agent.llm import LLMWorker
 from aigineering.agent.mock import MockWorker
 from aigineering.protocol.types import Asset, Contract, TraceEntry
 
@@ -46,18 +47,12 @@ def _get_store_dir() -> Path:
 
 def _persistent_store() -> SQLiteStore:
     """Create the default local persistent store (SQLite-backed)."""
-    return SQLiteStore(db_path=".aig/store.db")
+    return persistent_store()
 
 
 def _default_method_registry() -> MethodRegistry:
     """Return the standard method-first runtime registry for CLI execution."""
-    registry = MethodRegistry()
-    registry.register("plan", PlanMethodHandler())
-    registry.register("replan", ReplanMethodHandler())
-    registry.register("retry", RetryMethodHandler())
-    registry.register("tool", ToolMethodHandler())
-    registry.register("fail", FailMethodHandler())
-    return registry
+    return default_method_registry()
 
 
 def _session_id() -> str:
@@ -67,15 +62,7 @@ def _session_id() -> str:
 
 def _latest_session_file() -> Optional[Path]:
     """Return the newest session_*.jsonl file in the trace dir, or None."""
-    trace_dir = _get_trace_dir()
-    if not trace_dir.exists():
-        return None
-    files = sorted(
-        trace_dir.glob("session_*.jsonl"),
-        key=lambda p: (p.stat().st_mtime_ns, p.name),
-        reverse=True,
-    )
-    return files[0] if files else None
+    return latest_session_file(str(_get_trace_dir()))
 
 
 def _build_asset_name_map(entries: list[TraceEntry]) -> dict[str, str]:
@@ -122,34 +109,7 @@ def _find_trace_for_session(
     traces_dir: str = ".aig/traces",
 ) -> tuple[Optional[JsonLTraceStore], Optional[list[TraceEntry]]]:
     """Find the trace file matching a session manifest."""
-    session_store = SessionStore(sessions_dir=sessions_dir)
-    session = session_store.get_session(session_id)
-    if session is None:
-        return None, None
-
-    trace_dir = Path(traces_dir)
-    trace_id_set = set(session.trace_ids)
-
-    # Try direct match first
-    direct_path = trace_dir / f"{session_id}.jsonl"
-    if direct_path.exists():
-        store = JsonLTraceStore(str(direct_path))
-        return store, store.get_all()
-
-    # Search all trace files for matching entries
-    if trace_dir.exists() and trace_id_set:
-        for fp in sorted(
-            trace_dir.glob("session_*.jsonl"),
-            key=lambda p: p.stat().st_mtime,
-            reverse=True,
-        ):
-            candidate = JsonLTraceStore(str(fp))
-            candidate_ids = {e.id for e in candidate.get_all()}
-            if trace_id_set <= candidate_ids or trace_id_set & candidate_ids:
-                entries = candidate.get_all()
-                return candidate, entries
-
-    return None, None
+    return find_trace_for_session(session_id, sessions_dir, traces_dir)
 
 
 def _run_demo(
@@ -168,19 +128,23 @@ def _run_demo(
     """Run the build_report hallucination containment demo."""
     if store is None:
         store = SQLiteStore(":memory:")
+    store = require_operational_store(store)
     if trace_store is None:
         trace_store = store
 
     ingress = RuntimeIngress(store, trace_store)
 
-    worker = _build_worker(
-        worker_kind,
-        model,
-        base_url,
-        timeout=timeout,
-        max_retries=max_retries,
-        capabilities=capabilities,
-    )
+    try:
+        worker = build_worker(
+            worker_kind,
+            model=model,
+            base_url=base_url,
+            timeout=timeout,
+            max_retries=max_retries,
+            capabilities=capabilities,
+        )
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
     if isinstance(worker, MockWorker):
         raw_output = (
             f"final_report: Report content for goal '{goal}'\n"
@@ -202,26 +166,25 @@ def _run_demo(
             capabilities=tuple(capabilities or ()),
         )
         ingress.accept_asset(config_asset, source="provider_config")
-        if hasattr(trace_store, "append"):
-            trace_store.append(
-                create_entry(
-                    contract_id="control_plane",
-                    event_type="asset_injected",
-                    parent_id=config_asset.id,
-                    relation_type="provider_config",
-                    relation_target=config_asset.name,
-                    accepted_fragments=[
-                        json.dumps(
-                            {
-                                "asset_id": config_asset.id,
-                                "origin": config_asset.origin,
-                                "trust_tier": config_asset.trust_tier,
-                            },
-                            sort_keys=True,
-                        )
-                    ],
-                )
+        trace_store.append(
+            create_entry(
+                contract_id="control_plane",
+                event_type="asset_injected",
+                parent_id=config_asset.id,
+                relation_type="provider_config",
+                relation_target=config_asset.name,
+                accepted_fragments=[
+                    json.dumps(
+                        {
+                            "asset_id": config_asset.id,
+                            "origin": config_asset.origin,
+                            "trust_tier": config_asset.trust_tier,
+                        },
+                        sort_keys=True,
+                    )
+                ],
             )
+        )
 
     data_file = Asset(
         id=hash_asset_content("data_file", "Sample data for report generation"),
@@ -245,7 +208,7 @@ def _run_demo(
     )
 
     contract = Contract(
-        id=hash_contract(
+        id=hash_contract_v3(
             name="build_report",
             description=f"Build a report for goal: {goal}",
             inputs=["data_file", "citation_db"],
@@ -265,12 +228,12 @@ def _run_demo(
         labels=list(behavior_labels),
     )
 
-    before_trace_ids = {entry.id for entry in getattr(store, "get_all", lambda: [])()}
+    before_trace_ids = {entry.id for entry in store.get_all()}
     ingress.accept_contract(contract)
     ingress.accept_asset(data_file, source="demo")
     ingress.accept_asset(citation_db, source="demo")
 
-    from aigineering.cli.worker_runtime import (
+    from aigineering.runtime import (
         claim_next_package,
         execute_claimed_package,
     )
@@ -282,38 +245,21 @@ def _run_demo(
     )
     if claimed is None:
         raise RuntimeError(f"demo contract {contract.id!r} could not be claimed")
-    execute_claimed_package(claimed, worker, store, trace_store)
+    execute_claimed_package(
+        claimed,
+        worker,
+        store,
+        trace_store,
+        method_registry=default_method_registry(),
+    )
 
     # Session JSONL is an audit export of the durable runtime trace, not an
     # independent execution store.
-    for entry in getattr(store, "get_all", lambda: [])():
+    for entry in store.get_all():
         if entry.id not in before_trace_ids:
             trace_store.append(entry)
 
     return store, trace_store, contract
-
-
-def _build_worker(
-    worker_kind: str,
-    model: Optional[str],
-    base_url: str,
-    timeout: float = 60.0,
-    max_retries: int = 3,
-    capabilities: frozenset[str] | None = None,
-) -> MockWorker | LLMWorker:
-    if worker_kind == "mock":
-        return MockWorker()
-    if worker_kind == "llm":
-        if not model:
-            raise click.ClickException("--model is required when --worker llm")
-        return LLMWorker(
-            model=model,
-            base_url=base_url,
-            timeout=int(timeout),
-            max_retries=max_retries,
-            capabilities=capabilities or frozenset(),
-        )
-    raise click.ClickException(f"unsupported worker: {worker_kind}")
 
 
 def _redact_sealed(data: dict) -> dict:

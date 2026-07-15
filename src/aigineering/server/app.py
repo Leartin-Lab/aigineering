@@ -6,14 +6,15 @@ import json
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-from aigineering.cli._common import (
-    _default_method_registry,
-    _find_trace_for_session,
-    _persistent_store,
+from aigineering.application import (
+    default_method_registry as _default_method_registry,
+    find_trace_for_session as _find_trace_for_session,
+    latest_session_file as _latest_session_file,
+    persistent_store as _persistent_store,
 )
-from aigineering.cli.worker_runtime import (
+from aigineering.runtime import (
     claim_next_package,
     execute_claimed_package,
     submit_candidate_envelope,
@@ -35,12 +36,12 @@ app = FastAPI(title="Aigineering API", version="0.5.0")
 
 class ContractCreateRequest(BaseModel):
     name: str
-    inputs: list[str] = []
-    outputs: list[str] = []
+    inputs: list[str] = Field(default_factory=list)
+    outputs: list[str] = Field(default_factory=list)
     activation: str = ""
     budget: int = 5
-    labels: list[str] = []
-    tool_scope: list[str] = []
+    labels: list[str] = Field(default_factory=list)
+    tool_scope: list[str] = Field(default_factory=list)
     description: str = ""
 
 
@@ -70,6 +71,7 @@ class WorkerSubmitRequest(BaseModel):
     claim_epoch: int
     idempotency_key: str = ""
     parsed_action: dict | None = None
+    usage_metadata: dict | None = None
 
 
 class AssetCreateRequest(BaseModel):
@@ -496,7 +498,6 @@ def get_trace(
         if entries is None:
             raise HTTPException(status_code=404, detail="Session not found")
     else:
-        from aigineering.cli._common import _latest_session_file
         from aigineering.core.trace import JsonLTraceStore
 
         store = _persistent_store()

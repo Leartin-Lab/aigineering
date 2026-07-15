@@ -6,7 +6,7 @@ from pathlib import Path
 from click.testing import CliRunner
 
 from aigineering.cli.main import cli
-from aigineering.core.ids import hash_retry
+from aigineering.core.methods import retry_contract
 from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.protocol.types import TraceEntry
 from aigineering.protocol.wire import trace_entry_to_dict
@@ -346,6 +346,7 @@ def test_retry_creates_deterministic_contract():
         contracts = store.get_all_contracts()
         build_report = next(c for c in contracts if c.name == "build_report")
         original_id = build_report.id
+        expected_id = retry_contract(build_report).id
         store.close()
 
         result1 = runner.invoke(cli, ["retry", "--contract", original_id])
@@ -358,15 +359,11 @@ def test_retry_creates_deterministic_contract():
         retry_id_2 = result2.output.strip().split("\n")[0].split(": ")[-1].strip()
 
         assert retry_id_1 == retry_id_2
-        assert retry_id_1.startswith("retry:")
-        assert retry_id_1 == hash_retry(original_id)
-
-        expected_id = hash_retry(original_id)
         assert retry_id_1 == expected_id
 
         store2 = SQLiteStore(".aig/store.db")
         retry_ids_in_store = [
-            c.id for c in store2.get_all_contracts() if c.id.startswith("retry:")
+            c.id for c in store2.get_all_contracts() if c.origin == "retry"
         ]
         assert expected_id in retry_ids_in_store
         retry_events = store2.get_by_contract(original_id)
@@ -386,15 +383,16 @@ def test_retry_json_output():
 
         store = SQLiteStore(".aig/store.db")
         contracts = store.get_all_contracts()
-        original_id = next(c.id for c in contracts if c.name == "build_report")
+        original = next(c for c in contracts if c.name == "build_report")
+        original_id = original.id
+        expected_id = retry_contract(original).id
         store.close()
 
         result = runner.invoke(cli, ["retry", "--contract", original_id, "--json"])
         assert result.exit_code == 0
         data = json.loads(result.output)
         assert data["original_contract_id"] == original_id
-        assert data["retry_contract_id"].startswith("retry:")
-        assert data["retry_contract_id"] == hash_retry(original_id)
+        assert data["retry_contract_id"] == expected_id
 
 
 def test_retry_contract_not_found():

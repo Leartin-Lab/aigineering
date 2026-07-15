@@ -4,6 +4,7 @@ import json
 
 from click.testing import CliRunner
 
+from aigineering.agent.llm import LLMWorker, ProviderError
 from aigineering.cli.main import cli
 from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.core.trace import create_entry
@@ -86,6 +87,39 @@ def test_run_once_idle_is_visible_and_nonzero():
         data = json.loads(result.output)
         assert data["ok"] is False
         assert data["status"] == "idle"
+
+
+def test_run_once_provider_failure_is_json_and_has_no_traceback(monkeypatch):
+    def fail_provider(self, contract, disclosed_assets):
+        del self, contract, disclosed_assets
+        raise ProviderError(503, "upstream-secret-detail")
+
+    monkeypatch.setattr(LLMWorker, "invoke", fail_provider)
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        contract_id = _seed_build_report_task(runner)
+        result = runner.invoke(
+            cli,
+            [
+                "run",
+                "--once",
+                "--worker",
+                "llm",
+                "--model",
+                "test-model",
+                "--json",
+            ],
+        )
+
+        assert result.exit_code == 1
+        data = json.loads(result.output)
+        assert data["ok"] is False
+        assert data["status"] == "failed"
+        assert "claim was released" in data["error"]
+        assert "Traceback" not in result.output
+        assert "upstream-secret-detail" not in result.output
+        store = SQLiteStore(".aig/store.db")
+        assert store.get_claim(contract_id)["status"] == "released"
 
 
 def test_run_task_waits_until_target_complete():
@@ -176,7 +210,7 @@ def test_run_task_uses_engine_method_path_for_plan():
         )
 
         assert result.exit_code == 1, result.output
-        assert json.loads(result.output)["status"] == "waiting"
+        assert json.loads(result.output)["status"] == "blocked_method"
         audit = runner.invoke(cli, ["task", "audit", contract_id, "--json"])
         data = json.loads(audit.output)
         event_types = {entry["event_type"] for entry in data["trace"]}

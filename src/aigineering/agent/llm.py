@@ -14,6 +14,7 @@ from types import MappingProxyType
 from typing import Any
 
 from aigineering.agent.prompt import contract_prompt, system_prompt
+from aigineering.agent.worker import WorkerExecutionError
 from aigineering.core.worker_routing import WorkerRegistration
 from aigineering.protocol.types import Asset, Candidate, Contract
 
@@ -148,12 +149,8 @@ class LLMWorker:
         """Derive a logical provider name from the base URL."""
         from urllib.parse import urlparse
 
-        try:
-            parsed = urlparse(self.base_url)
-            host = parsed.hostname or "unknown"
-            return host
-        except Exception:
-            return "unknown"
+        parsed = urlparse(self.base_url)
+        return parsed.hostname or "unknown"
 
     def invoke(
         self,
@@ -183,8 +180,9 @@ class LLMWorker:
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
         elif self._transport is None:
-            raise ValueError(
-                "LLMWorker requires api_key, AIGINEERING_API_KEY, or OPENAI_API_KEY"
+            raise WorkerExecutionError(
+                "missing_api_key",
+                "LLMWorker requires api_key, AIGINEERING_API_KEY, or OPENAI_API_KEY",
             )
 
         url = f"{self.base_url}/chat/completions"
@@ -320,16 +318,22 @@ class LLMWorker:
         ``multi`` envelope so no calls are silently dropped.
         """
         if not tool_calls:
-            raise ValueError("tool_calls must not be empty")
+            raise WorkerExecutionError(
+                "empty_tool_calls", "tool_calls must not be empty"
+            )
 
         actions: list[dict[str, object]] = []
         for tc in tool_calls:
             func = tc.get("function")
             if not isinstance(func, dict):
-                raise ValueError("tool call missing 'function' key")
+                raise WorkerExecutionError(
+                    "tool_call_missing_function", "tool call missing 'function' key"
+                )
             name = func.get("name")
             if not isinstance(name, str) or not name.strip():
-                raise ValueError("tool call missing valid 'name'")
+                raise WorkerExecutionError(
+                    "tool_call_missing_name", "tool call missing valid 'name'"
+                )
             args_str = func.get("arguments", "{}")
             if isinstance(args_str, str):
                 try:
@@ -367,11 +371,15 @@ class LLMWorker:
 def _extract_message_content(response: Mapping[str, object]) -> str:
     choices = response.get("choices")
     if not isinstance(choices, list) or not choices:
-        raise ValueError("LLM response missing choices")
+        raise WorkerExecutionError(
+            "response_missing_choices", "LLM response missing choices"
+        )
 
     first = choices[0]
     if not isinstance(first, Mapping):
-        raise ValueError("LLM response choice must be an object")
+        raise WorkerExecutionError(
+            "response_choice_not_object", "LLM response choice must be an object"
+        )
 
     message = first.get("message")
     if isinstance(message, Mapping):
@@ -383,7 +391,9 @@ def _extract_message_content(response: Mapping[str, object]) -> str:
     if isinstance(text, str):
         return text
 
-    raise ValueError("LLM response missing message content")
+    raise WorkerExecutionError(
+        "response_missing_content", "LLM response missing message content"
+    )
 
 
 def _extract_tool_calls(
@@ -471,7 +481,14 @@ def _post_json(
             decoded = response.read().decode("utf-8")
     except urllib.error.HTTPError as e:
         raise ProviderError(e.code, f"HTTP {e.code}: {e.reason}") from e
-    parsed: Any = json.loads(decoded)
+    try:
+        parsed: Any = json.loads(decoded)
+    except json.JSONDecodeError as exc:
+        raise WorkerExecutionError(
+            "response_invalid_json", "LLM response is not valid JSON"
+        ) from exc
     if not isinstance(parsed, Mapping):
-        raise ValueError("LLM response must be a JSON object")
+        raise WorkerExecutionError(
+            "response_not_object", "LLM response must be a JSON object"
+        )
     return parsed

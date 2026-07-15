@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
-from aigineering.core.runtime_projection import ContractView, RuntimeProjection
+from aigineering.core.runtime_projection import (
+    TERMINAL_EVENTS,
+    ContractView,
+    RuntimeProjection,
+)
+from aigineering.core.store import require_operational_store
 from aigineering.core.submit import _all_outputs_satisfied
 from aigineering.core.worker_routing import eligible_workers
+from aigineering.protocol.immutability import deep_thaw
 from aigineering.protocol.types import Contract, TraceEntry
-
-TERMINAL_EVENTS = frozenset({"complete", "failed", "cancelled", "unreachable"})
 
 
 def project_task_status(contract: Contract, store) -> dict:
@@ -17,6 +21,7 @@ def project_task_status(contract: Contract, store) -> dict:
     It is intentionally not runtime truth; it is the agent-facing projection
     used by ``aig task status``, ``wait``, and ``audit``.
     """
+    store = require_operational_store(store)
     entries = _trace_entries(store, contract.id)
     view = RuntimeProjection(store, store).contract_view(contract)
     terminal = _latest_terminal(entries)
@@ -35,7 +40,7 @@ def project_task_status(contract: Contract, store) -> dict:
         )
     ]
     usage = [
-        dict(entry.usage_metadata)
+        deep_thaw(entry.usage_metadata)
         for entry in entries
         if entry.usage_metadata is not None
     ]
@@ -64,10 +69,7 @@ def project_task_status(contract: Contract, store) -> dict:
 
 
 def _trace_entries(store, contract_id: str) -> list[TraceEntry]:
-    get_by_contract = getattr(store, "get_by_contract", None)
-    if get_by_contract is None:
-        return []
-    return list(get_by_contract(contract_id))
+    return list(store.get_by_contract(contract_id))
 
 
 def _latest_terminal(entries: list[TraceEntry]) -> str:
@@ -111,17 +113,16 @@ def _status_from_entries(
         elif entry.event_type == "method_resumed":
             suspended = False
     if suspended:
-        return "waiting"
+        return "blocked_method"
+    if view.claim_status == "active":
+        return "claimed"
     if not view.inputs_satisfied or not view.activation_satisfied:
         return "blocked"
     if view.budget_remaining <= 0:
         return "stalled"
     if contract.worker_capabilities or contract.worker_pools:
-        registrations = getattr(store, "get_worker_registrations", None)
-        if registrations is not None and not eligible_workers(
-            contract, registrations()
-        ):
-            return "waiting_for_capability"
+        if not eligible_workers(contract, store.get_worker_registrations()):
+            return "blocked_capability"
     return "ready"
 
 
@@ -151,10 +152,10 @@ def _silent_failure_risks(
                 "message": "task has worker projection but no terminal event or active recovery",
             }
         )
-    if status == "waiting_for_capability":
+    if status == "blocked_capability":
         risks.append(
             {
-                "code": "waiting_for_capability",
+                "code": "blocked_capability",
                 "message": "no registered worker currently satisfies routing constraints",
             }
         )

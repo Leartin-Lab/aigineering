@@ -13,6 +13,8 @@ def test_system_prompt_preserves_candidate_boundary():
     assert "/plan" in prompt
     assert "/replan" in prompt
     assert "/tool" in prompt
+    assert "/retry" in prompt
+    assert "/fail" in prompt
     assert "declared output names" in prompt
 
 
@@ -23,6 +25,16 @@ def test_system_prompt_preserves_plan_replan_boundary():
     assert "use `/plan" in prompt
     assert "gone off course" in prompt
     assert "use `/replan" in prompt
+
+
+def test_system_prompt_distinguishes_retry_and_fail():
+    prompt = system_prompt()
+
+    assert "transient execution or output failure" in prompt
+    assert "use `/retry" in prompt
+    assert "no safe plan or allowed tool can obtain it" in prompt
+    assert "fabricated facts" in prompt
+    assert "use `/fail" in prompt
 
 
 def test_contract_prompt_renders_declared_scope():
@@ -54,6 +66,17 @@ def test_contract_prompt_preserves_plan_replan_boundary():
     assert "current task needs more information" in prompt
     assert "current task has already gone off course" in prompt
     assert "Do not use /replan for missing information" in prompt
+
+
+def test_contract_prompt_renders_retry_and_fail_decision_boundary():
+    contract = Contract(id="contract_1", name="write_report")
+    prompt = contract_prompt(contract, [])
+
+    assert '- /retry {"reason":' in prompt
+    assert '- /fail {"reason":' in prompt
+    assert "same task can be attempted again" in prompt
+    assert "new evidence or a different plan" in prompt
+    assert "completion would require fabricated facts" in prompt
 
 
 def test_contract_prompt_separates_behavior_instructions_from_assets():

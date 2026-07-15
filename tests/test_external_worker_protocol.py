@@ -6,7 +6,7 @@ import json
 
 from aigineering.agent.mcp_worker import MCPWorker
 from aigineering.agent.tool_worker import ToolWorker
-from aigineering.cli.worker_runtime import claim_next_package, execute_claimed_package
+from aigineering.runtime import claim_next_package, execute_claimed_package
 from aigineering.core.capability_descriptors import (
     create_mcp_descriptor,
     create_tool_descriptor,
@@ -15,6 +15,7 @@ from aigineering.core.methods import method_contract, system_asset
 from aigineering.core.runtime_ingress import RuntimeIngress
 from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.core.tools import ToolRegistry
+from aigineering.core.worker_routing import WorkerRegistration
 from aigineering.protocol.actions import parse_action
 from aigineering.protocol.types import Contract, ToolSpec
 
@@ -56,6 +57,15 @@ def test_tool_worker_effect_is_observed_candidate_fact():
     )
     registry = ToolRegistry()
     registry.register(ToolSpec(name="lookup"), lambda args: f"value:{args['key']}")
+    assert (
+        claim_next_package(store, worker_id="llm:untrusted", contract_id=child.id)
+        is None
+    )
+    store.register_worker(
+        WorkerRegistration(
+            "tool_worker:local", capabilities=("tool-execution",), version="1"
+        )
+    )
     claimed = claim_next_package(
         store, worker_id="tool_worker:local", contract_id=child.id
     )
@@ -94,6 +104,15 @@ def test_mcp_worker_effect_is_observed_candidate_fact():
     worker = MCPWorker(
         {"search": lambda tool, args: f"{tool}:{args['q']}"},
         worker_id="mcp_worker:search",
+    )
+    assert (
+        claim_next_package(store, worker_id="llm:untrusted", contract_id=child.id)
+        is None
+    )
+    store.register_worker(
+        WorkerRegistration(
+            "mcp_worker:search", capabilities=("mcp-execution",), version="1"
+        )
     )
     claimed = claim_next_package(
         store, worker_id="mcp_worker:search", contract_id=child.id

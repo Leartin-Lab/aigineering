@@ -18,9 +18,15 @@ def system_prompt() -> str:
         '`/plan {"reason": "..."}`. If the current task has already gone '
         "off course because an assumption, path, or result is invalid, use "
         '`/replan {"reason": "..."}`. If you need an allowed tool, use '
-        '`/tool {"name": "...", "args": {}}`. Do not use /replan for '
-        "missing information. Do not add markdown, explanations, or "
-        "undeclared assets."
+        '`/tool {"name": "...", "args": {}}`. If the same task can be '
+        "attempted again after a transient execution or output failure, use "
+        '`/retry {"reason": "..."}`. If required evidence is unavailable and '
+        "no safe plan or allowed tool can obtain it, or completing the task "
+        "would require fabricated facts, use "
+        '`/fail {"reason": "..."}`. Do not use /replan for missing '
+        "information, and do not use /retry when new evidence or a different "
+        "plan is required. Do not add markdown, explanations, or undeclared "
+        "assets."
     )
 
 
@@ -46,11 +52,16 @@ def contract_prompt(contract: Contract, assets: list[Asset]) -> str:
         '- /plan {"reason": "why the current task needs more information"}',
         '- /replan {"reason": "why the current task has already gone off course"}',
         '- /tool {"name": "tool_name", "args": {}}',
+        '- /retry {"reason": "transient failure that permits the same task to be attempted again"}',
+        '- /fail {"reason": "why the task cannot be completed safely"}',
         "",
         "Decision boundary:",
         "- Use /plan when disclosed information is insufficient.",
         "- Use /replan only after an assumption, path, or result is invalid.",
         "- Do not use /replan for missing information.",
+        "- Use /retry only for a transient execution or output failure when the same task can be attempted again.",
+        "- Do not use /retry when new evidence or a different plan is required.",
+        "- Use /fail when evidence cannot be obtained safely or completion would require fabricated facts.",
         "",
     ]
     lines.extend(_method_result_instructions(contract))

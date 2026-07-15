@@ -1,7 +1,8 @@
-"""aig recover command.
+"""Compatibility operations for durable ``recovery_required`` trace facts.
 
-Lists, cancels, or recreates contracts marked ``recovery_required``
-by the startup self-check (see :mod:`aigineering.core.startup_check`).
+The formal runtime derives ordinary invocation/projection recovery directly
+from immutable records.  This command remains for databases carrying explicit
+``recovery_required`` facts from earlier releases or administrative tooling.
 """
 
 from __future__ import annotations
@@ -9,7 +10,7 @@ from __future__ import annotations
 import click
 
 from aigineering.cli._common import _output_json, _persistent_store
-from aigineering.core.ids import hash_contract_v2
+from aigineering.core.ids import hash_contract_v3
 from aigineering.core.method_handlers.recovery import RecoveryMethodHandler
 from aigineering.core.method_runtime import MethodRuntime
 from aigineering.core.runtime_ingress import RuntimeIngress
@@ -60,8 +61,8 @@ def _cancel_contracts(store, contract_ids: list[str]) -> list[str]:
 def _recreate_contracts(store, contract_ids: list[str]) -> list[dict[str, str]]:
     """Create new contracts with the same parameters as the originals.
 
-    Uses :func:`hash_contract_v2` with ``parent_id`` so the new contract
-    gets a deterministic but distinct ID.  All writes go through
+    Uses the security-complete v3 identity with ``parent_id`` so the new
+    contract gets a deterministic but distinct ID. All writes go through
     :class:`RuntimeIngress`.
     """
     ingress = RuntimeIngress(store, store)
@@ -71,8 +72,18 @@ def _recreate_contracts(store, contract_ids: list[str]) -> list[dict[str, str]]:
         if original is None:
             continue
 
+        authority = tuple(
+            output
+            for output in original.outputs
+            if output in original.minting_authority
+        )
+        policy = (
+            dict(original.sensitive_input_policy)
+            if original.sensitive_input_policy is not None
+            else None
+        )
         new_contract = Contract(
-            id=hash_contract_v2(
+            id=hash_contract_v3(
                 name=original.name,
                 description=original.description,
                 inputs=list(original.inputs),
@@ -81,8 +92,12 @@ def _recreate_contracts(store, contract_ids: list[str]) -> list[dict[str, str]]:
                 budget=original.budget,
                 tool_scope=list(original.tool_scope),
                 labels=list(original.labels),
-                origin=original.origin,
+                worker_capabilities=original.worker_capabilities,
+                worker_pools=original.worker_pools,
+                origin="recovery",
                 parent_id=original.id,
+                minting_authority=authority,
+                sensitive_input_policy=policy,
             ),
             parent_id=original.id,
             name=original.name,
@@ -93,8 +108,11 @@ def _recreate_contracts(store, contract_ids: list[str]) -> list[dict[str, str]]:
             budget=original.budget,
             tool_scope=original.tool_scope,
             labels=original.labels,
+            worker_capabilities=original.worker_capabilities,
+            worker_pools=original.worker_pools,
             origin="recovery",
-            minting_authority=original.minting_authority,
+            minting_authority=authority,
+            sensitive_input_policy=original.sensitive_input_policy,
         )
         ingress.accept_contract(new_contract)
         runtime = MethodRuntime(

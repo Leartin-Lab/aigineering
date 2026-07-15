@@ -47,6 +47,19 @@ def test_worker_returns_error_candidate_on_failure():
     assert obs["tool"] == "missing_tool"
     assert obs["result"] == ""
     assert "unknown tool" in obs["error"]
+    assert obs["error_type"] == "KeyError"
+
+
+def test_worker_rejects_non_string_tool_result_with_typed_error_candidate():
+    registry = ToolRegistry()
+    registry.register(ToolSpec(name="bad"), lambda _args: {"not": "a string"})
+
+    candidate = ToolExecutor(registry).invoke("bad", {}, "contract_1")
+    observation = json.loads(candidate.raw_output)
+
+    assert observation["ok"] is False
+    assert observation["error_type"] == "TypeError"
+    assert observation["result"] == ""
 
 
 def test_worker_parity_with_direct_registry():

@@ -5,7 +5,7 @@ import json
 from click.testing import CliRunner
 
 from aigineering.cli.main import cli
-from aigineering.core.ids import hash_contract, hash_contract_v2
+from aigineering.core.ids import hash_contract, hash_contract_v3
 from aigineering.core.runtime_ingress import RuntimeIngress
 from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.core.trace import create_entry
@@ -209,9 +209,9 @@ def test_recover_recreate():
             # Same name as original
             assert c.name in ("task_a", "task_b")
 
-        # Verify IDs match deterministic hash_contract_v2
+        # Verify IDs bind the full recreated recovery entity.
         for c in recreated:
-            expected_id = hash_contract_v2(
+            expected_id = hash_contract_v3(
                 name=c.name,
                 description="",  # original has no description
                 inputs=[],
@@ -220,7 +220,7 @@ def test_recover_recreate():
                 budget=c.budget,
                 tool_scope=[],
                 labels=[],
-                origin="human",
+                origin="recovery",
                 parent_id=c.parent_id,
             )
             assert c.id == expected_id

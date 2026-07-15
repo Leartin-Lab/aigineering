@@ -203,12 +203,14 @@ class TestCLIRetryBypass:
 
         # ── Functional test: CLI retry still creates the retry contract ──
         from aigineering.protocol.types import Contract
-        from aigineering.core.ids import hash_retry
+        from aigineering.core.methods import retry_contract
         from aigineering.cli import retry as retry_module
         from click.testing import CliRunner
         from unittest.mock import patch
 
-        store = MemoryStore()
+        from aigineering.core.sqlite_store import SQLiteStore
+
+        store = SQLiteStore(":memory:")
         original = Contract(
             id="c-original",
             parent_id=None,
@@ -220,7 +222,7 @@ class TestCLIRetryBypass:
         )
         store.add_contract(original)
 
-        expected_id = hash_retry("c-original")
+        expected_id = retry_contract(original).id
         assert store.get_contract(expected_id) is None, (
             "Precondition: retry contract must not exist before CLI runs."
         )
@@ -236,19 +238,18 @@ class TestCLIRetryBypass:
             f"G1/D-P0.1: Retry contract '{expected_id}' not found in store. "
             f"CLI output: {result.output}"
         )
-        assert retry_contract.name == original.name, (
+        assert retry_contract.name == f"{original.name}.retry", (
             f"G1/D-P0.1: Retry contract name mismatch. "
-            f"Expected '{original.name}', got '{retry_contract.name}'."
+            f"Expected '{original.name}.retry', got '{retry_contract.name}'."
         )
         assert retry_contract.parent_id == original.parent_id, (
             "G1/D-P0.1: Retry contract parent_id must match original."
         )
-        assert (
-            expected_id in result.output or hash_retry("c-original") in result.output
-        ), (
+        assert expected_id in result.output, (
             f"G1/D-P0.1: Retry contract ID must appear in CLI output. "
             f"Got: {result.output}"
         )
+        store.close()
 
 
 class TestContextOverflow:
@@ -628,117 +629,32 @@ class TestMethodHandlerIsolation:
 class TestTransactionalSubmit:
     """G3: Candidate submission must be atomic across stores."""
 
-    def test_worker_submit_atomic_asset_trace_idempotency(self):
-        """submit_candidate must atomically write assets + trace + idempotency in one transaction.
+    def test_worker_submit_rejects_nontransactional_store(self):
+        """Worker submission must not silently downgrade transaction semantics.
 
         Gate: G3 (Transactional Runtime Substrate)
         Debt: D-P0.3 (submit.py:83-153)
         """
-        import tempfile
-        import os
         from aigineering.core.store import MemoryStore
         from aigineering.core.trace import MemoryTraceStore
-        from aigineering.core.idempotency_store import IdempotencyStore
         from aigineering.core.runtime_ingress import RuntimeIngress
-        from aigineering.core.submit import submit_candidate, SubmitConflictError
+        from aigineering.core.submit import submit_candidate
         from aigineering.protocol.envelope import CandidateEnvelope
         from aigineering.protocol.types import Contract
 
         store = MemoryStore()
         trace = MemoryTraceStore()
         ingress = RuntimeIngress(store, trace)
-        with tempfile.TemporaryDirectory() as tmp:
-            idem = IdempotencyStore(path=os.path.join(tmp, "idem.jsonl"))
+        store.add_contract(Contract(id="c-atomic", outputs=["out"], budget=10))
+        env = CandidateEnvelope(
+            contract_id="c-atomic",
+            worker_id="worker-atomic",
+            raw_output='/exec {"out": "result"}',
+            idempotency_key="atomic-key-1",
+        )
 
-            contract = Contract(
-                id="c-atomic",
-                name="t",
-                description="t",
-                inputs=[],
-                outputs=["out"],
-                budget=10,
-            )
-            store.add_contract(contract)
-
-            env = CandidateEnvelope(
-                contract_id="c-atomic",
-                worker_id="worker-atomic",
-                raw_output='/exec {"out": "result"}',
-                idempotency_key="atomic-key-1",
-            )
-
-            result = submit_candidate(
-                env,
-                store,
-                trace,
-                ingress,
-                idempotency_store=idem,
-                idempotency_key=env.idempotency_key,
-            )
-            assert result["status"] in ("accepted", "partial"), (
-                f"G3/D-P0.3: first submit must succeed, got {result['status']}"
-            )
-            assert result["duplicate"] is False, (
-                "G3/D-P0.3: first submit must not be flagged as duplicate"
-            )
-            assert len(result["accepted_assets"]) == 1, (
-                f"G3/D-P0.3: exactly one asset must be committed, "
-                f"got {len(result['accepted_assets'])}"
-            )
-
-            out_assets = store.get_assets_by_name("out")
-            assert len(out_assets) == 1, (
-                f"G3/D-P0.3: out asset must be in store after submit, got {len(out_assets)}"
-            )
-
-            trace_events = trace.get_by_contract("c-atomic")
-            assert len(trace_events) >= 1, (
-                f"G3/D-P0.3: trace must have at least one entry, got {len(trace_events)}"
-            )
-
-            assert idem.has_any("c-atomic"), (
-                "G3/D-P0.3: idempotency record must be persisted after first submit"
-            )
-
-            result2 = submit_candidate(
-                env,
-                store,
-                trace,
-                ingress,
-                idempotency_store=idem,
-                idempotency_key=env.idempotency_key,
-            )
-            assert result2["duplicate"] is True, (
-                "G3/D-P0.3: second submit with same key must be flagged as duplicate"
-            )
-
-            out_assets_after = store.get_assets_by_name("out")
-            assert len(out_assets_after) == 1, (
-                f"G3/D-P0.3: duplicate submit must NOT create new assets, "
-                f"got {len(out_assets_after)}"
-            )
-
-            env3 = CandidateEnvelope(
-                contract_id="c-atomic",
-                worker_id="worker-atomic",
-                raw_output='/exec {"out": "different"}',
-                idempotency_key="atomic-key-2",
-            )
-            try:
-                submit_candidate(
-                    env3,
-                    store,
-                    trace,
-                    ingress,
-                    idempotency_store=idem,
-                    idempotency_key=env3.idempotency_key,
-                )
-            except SubmitConflictError:
-                pass
-            else:
-                raise AssertionError(
-                    "G3/D-P0.3: different idempotency_key for same contract must raise SubmitConflictError"
-                )
+        with pytest.raises(TypeError, match="transactional worker StorePort"):
+            submit_candidate(env, store, trace, ingress)
 
     def test_store_enforces_sign_asset_on_write(self):
         """Store implementations must enforce canonical seal on asset write.
