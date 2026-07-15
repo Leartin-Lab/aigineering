@@ -6,7 +6,10 @@ import json
 
 from aigineering.agent.mock import MockWorker
 from aigineering.application import default_method_registry
-from aigineering.core.candidate_publisher import CandidatePublisher
+from aigineering.core.candidate_publisher import (
+    CandidatePublisher,
+    CandidatePublisherRegistry,
+)
 from aigineering.core.control_plane import build_control_plane_contract
 from aigineering.core.domain import initialize_genesis
 from aigineering.core.runtime_ingress import RuntimeIngress
@@ -89,7 +92,11 @@ def test_plan_method_and_independent_child_complete_root_from_assets():
     assert plan_result["status"] == "accepted"
 
     assert process_method_completions(
-        store, registry, candidate_publisher=plugin_publisher
+        store,
+        registry,
+        candidate_publishers=CandidatePublisherRegistry(
+            (("planning.expand.v1", plugin_publisher),)
+        ),
     ) == [plan_contract.id]
     planning_receipts = [
         record

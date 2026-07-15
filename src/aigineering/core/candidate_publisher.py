@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from aigineering.core.commitment import CandidateCommitter, CommitmentDecision
 from aigineering.core.signing import Signer
@@ -12,6 +13,10 @@ from aigineering.protocol.candidate import (
     GenesisManifest,
     create_candidate_proposal,
 )
+
+if TYPE_CHECKING:
+    from aigineering.core.store import StoreProtocol
+    from aigineering.core.trace import TraceStoreProtocol
 
 
 def publish_effect(
@@ -68,8 +73,8 @@ def publish_effects(
 class CandidatePublisher:
     """Explicit actor-bound publisher injectable into plugins and adapters."""
 
-    store: object
-    trace: object
+    store: StoreProtocol
+    trace: TraceStoreProtocol
     genesis: GenesisManifest
     actor_key: ActorKey
     signer: Signer
@@ -90,4 +95,30 @@ class CandidatePublisher:
             effects,
             idempotency_key=idempotency_key,
             causal_parents=causal_parents,
+        )
+
+
+@dataclass(frozen=True)
+class CandidatePublisherRegistry:
+    """Immutable lookup of explicitly identified plugin publishers."""
+
+    publishers: tuple[tuple[str, CandidatePublisher], ...] = ()
+
+    def __post_init__(self) -> None:
+        normalized = tuple(sorted(self.publishers, key=lambda item: item[0]))
+        plugin_ids = tuple(plugin_id for plugin_id, _publisher in normalized)
+        if any(not plugin_id for plugin_id in plugin_ids):
+            raise ValueError("publisher plugin_id must not be empty")
+        if len(plugin_ids) != len(set(plugin_ids)):
+            raise ValueError("publisher registry contains duplicate plugin ids")
+        object.__setattr__(self, "publishers", normalized)
+
+    def get(self, plugin_id: str) -> CandidatePublisher | None:
+        return next(
+            (
+                publisher
+                for registered_id, publisher in self.publishers
+                if registered_id == plugin_id
+            ),
+            None,
         )

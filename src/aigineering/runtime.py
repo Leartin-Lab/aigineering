@@ -909,7 +909,7 @@ def _submit_claimed_method(
 
 
 def process_method_completions(
-    store, method_registry, *, candidate_publisher=None
+    store, method_registry, *, candidate_publishers=None
 ) -> list[str]:
     """Project completed method Contracts into their deterministic effects."""
     processed: list[str] = []
@@ -927,7 +927,7 @@ def process_method_completions(
         method_scheduled=set(),
         method_context={},
         ingress=RuntimeIngress(store, store, FactReducer(store, store)),
-        candidate_publisher=candidate_publisher,
+        candidate_publishers=candidate_publishers,
     )
     for contract in store.get_all_contracts():
         if contract.origin != "system" or contract.parent_id is None:

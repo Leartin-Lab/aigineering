@@ -114,10 +114,12 @@ class PlanMethodHandler:
                     )
                 )
                 rejections = [dict(item) for item in plugin_proposal.rejections]
-                if runtime.can_publish_candidates:
+                plugin_id = PlanningExpansionPlugin.plugin_id
+                if runtime.can_publish_candidates(plugin_id):
                     published = True
                     if plugin_proposal.effects:
                         decision = runtime.publish_task_effects(
+                            plugin_id,
                             plugin_proposal.effects,
                             idempotency_key=(
                                 f"planning:{self.action_type}:{contract.id}:{asset.id}"

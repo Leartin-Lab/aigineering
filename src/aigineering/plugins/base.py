@@ -15,6 +15,7 @@ class PluginRequest:
     """Disclosure-bounded input supplied to one task-producing plugin."""
 
     parent: Contract
+    source: Contract | None = None
     assets: tuple[Asset, ...] = ()
     allowed_input_names: frozenset[str] = field(default_factory=frozenset)
     allowance: int = 0

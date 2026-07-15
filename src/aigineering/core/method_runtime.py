@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     from aigineering.core.trace import TraceStoreProtocol
     from aigineering.core.trace_manager import TraceManager
     from aigineering.core.runtime_ingress import RuntimeIngress
-    from aigineering.core.candidate_publisher import CandidatePublisher
+    from aigineering.core.candidate_publisher import CandidatePublisherRegistry
     from aigineering.protocol.candidate import CandidateEffect
     from aigineering.core.commitment import CommitmentDecision
 
@@ -50,7 +50,7 @@ class MethodRuntime:
         method_scheduled: set[str] | None = None,
         mcp_servers: dict[str, object] | None = None,
         ingress: RuntimeIngress | None = None,
-        candidate_publisher: CandidatePublisher | None = None,
+        candidate_publishers: CandidatePublisherRegistry | None = None,
     ) -> None:
         self._store = store
         self._trace = _coerce_trace_manager(trace)
@@ -61,7 +61,7 @@ class MethodRuntime:
         self._method_scheduled: set[str] = (
             method_scheduled if method_scheduled is not None else set()
         )
-        self._candidate_publisher = candidate_publisher
+        self._candidate_publishers = candidate_publishers
         if ingress is not None:
             self._ingress = ingress
         else:
@@ -86,15 +86,21 @@ class MethodRuntime:
 
     def publish_task_effects(
         self,
+        plugin_id: str,
         effects: tuple[CandidateEffect, ...],
         *,
         idempotency_key: str,
         causal_parents: tuple[str, ...] = (),
     ) -> CommitmentDecision | None:
         """Publish task effects when an authenticated plugin actor is configured."""
-        if self._candidate_publisher is None:
+        publisher = (
+            self._candidate_publishers.get(plugin_id)
+            if self._candidate_publishers is not None
+            else None
+        )
+        if publisher is None:
             return None
-        decision = self._candidate_publisher.publish(
+        decision = publisher.publish(
             effects,
             idempotency_key=idempotency_key,
             causal_parents=causal_parents,
@@ -104,10 +110,12 @@ class MethodRuntime:
                 self._budget.initialize(contract.id, contract.budget)
         return decision
 
-    @property
-    def can_publish_candidates(self) -> bool:
-        """Whether this transitional runtime has an authenticated publisher."""
-        return self._candidate_publisher is not None
+    def can_publish_candidates(self, plugin_id: str) -> bool:
+        """Whether an authenticated publisher exists for ``plugin_id``."""
+        return (
+            self._candidate_publishers is not None
+            and self._candidate_publishers.get(plugin_id) is not None
+        )
 
     def get_contract(self, contract_id: str) -> Contract | None:
         """Return the contract with *contract_id*, or ``None``."""

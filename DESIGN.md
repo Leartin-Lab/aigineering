@@ -252,10 +252,13 @@ The supported operational surface is the Store/claim/submission path.
 ## Methods and workers
 
 The public `TaskPlugin` protocol is now Store-free: a plugin receives a frozen,
-disclosure-bounded `PluginRequest` and returns a `PluginProposal` containing
+disclosure-bounded `PluginRequest` (including an optional causal source task)
+and returns a `PluginProposal` containing
 ordinary Candidate effects plus visible containment notes. The first planning
 expansion plugin converts a structured plan Asset into one atomic fan-out of
 `contract.declare` effects, independently unit-testable before publication.
+The continuation plugin converts a completed method task into one ordinary
+follow-up `contract.declare` effect by the same rule.
 Publication still uses the identity-neutral Candidate publisher and a plugin
 actor key; plugins receive no trusted Store mutation handle.
 
@@ -267,10 +270,14 @@ containment compiler until that code is physically moved out of `core.methods`.
 LLM, human, script, plugin, and engine-backed executors do not yet share one
 authenticated actor protocol.
 
-The local production task loop injects an explicit actor-bound
-`CandidatePublisher` into completion projection. Plan and replan results then
+The local production task loop injects an immutable, plugin-id keyed registry of
+actor-bound `CandidatePublisher` values into completion projection. This keeps
+planning and continuation identities and capabilities distinct. Plan and replan results then
 use the same PlanningExpansionPlugin and publish their entire child-task fan-out
-as one signed Candidate. The two former near-copy handlers now share one
+as one signed Candidate; successful tool completion publishes its continuation
+task through the continuation plugin as another signed Candidate. Publication
+rejection is traced and closes the parent instead of leaving it suspended. The
+two former near-copy handlers now share one
 implementation; direct `runtime.add_contract` remains only when compatibility
 tests deliberately omit a publisher.
 

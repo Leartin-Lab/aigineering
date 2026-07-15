@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import json
 
-from aigineering.core.candidate_publisher import publish_effects
+from aigineering.core.candidate_publisher import (
+    CandidatePublisher,
+    CandidatePublisherRegistry,
+    publish_effects,
+)
 from aigineering.core.ids import (
     hash_asset_content,
     hash_asset_definition,
@@ -13,7 +17,14 @@ from aigineering.core.ids import (
 from aigineering.core.signing import Ed25519Signer
 from aigineering.core.store import MemoryStore
 from aigineering.core.trace import MemoryTraceStore
-from aigineering.plugins import PlanningExpansionPlugin, PluginRequest, TaskPlugin
+from aigineering.core.methods import method_contract
+from aigineering.plugins import (
+    ContinuationTaskPlugin,
+    PlanningExpansionPlugin,
+    PluginRequest,
+    TaskPlugin,
+)
+from aigineering.protocol.actions import WorkerAction
 from aigineering.protocol.candidate import ActorKey, create_genesis_manifest
 from aigineering.protocol.types import Asset, Contract
 
@@ -122,3 +133,47 @@ def test_planning_plugin_fanout_commits_through_candidate_publisher():
         "research",
         "write",
     }
+
+
+def test_continuation_plugin_proposes_one_ordinary_task_and_registry_is_explicit():
+    parent = _parent()
+    source = method_contract(
+        parent,
+        WorkerAction(type="tool", payload={"name": "lookup", "args": {}}),
+    )
+    plugin = ContinuationTaskPlugin()
+
+    proposal = plugin.propose(PluginRequest(parent=parent, source=source, allowance=3))
+
+    assert isinstance(plugin, TaskPlugin)
+    assert len(proposal.effects) == 1
+    assert proposal.effects[0].effect_type == "contract.declare"
+    payload = proposal.effects[0].payload["contract"]
+    assert payload["origin"] == "continuation"
+    assert payload["parent_id"] == parent.id
+    assert payload["budget"] == 3
+
+    signer = Ed25519Signer()
+    actor = ActorKey(
+        "plugin:continuation.publish.v1",
+        "continuation-1",
+        signer.kind,
+        signer.signer_id,
+        ("contract.publish",),
+    )
+    genesis = create_genesis_manifest(
+        "continuation-test", (actor,), "policy:continuation-test"
+    )
+    store = MemoryStore()
+    trace = MemoryTraceStore()
+    publisher = CandidatePublisher(store, trace, genesis, actor, signer)
+    publishers = CandidatePublisherRegistry(((plugin.plugin_id, publisher),))
+
+    decision = publishers.get(plugin.plugin_id).publish(
+        proposal.effects,
+        idempotency_key="continuation-1",
+        causal_parents=(source.id,),
+    )
+
+    assert decision.accepted is True
+    assert len(store.get_all_contracts()) == 1

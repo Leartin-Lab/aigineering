@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 
 from aigineering.core.labels import resolve_contract_labels
 from aigineering.core.method_runtime import MethodRuntime
-from aigineering.core.methods import continuation_contract, method_payload
+from aigineering.core.methods import method_payload
 from aigineering.core.output_satisfaction import all_outputs_satisfied
 from aigineering.core.runtime_projection import TERMINAL_EVENTS
 from aigineering.protocol.types import Contract
@@ -27,7 +27,7 @@ if TYPE_CHECKING:
     from aigineering.core.tools import ToolRegistry
     from aigineering.core.trace_manager import TraceManager
     from aigineering.protocol.types import Asset, TraceEntry
-    from aigineering.core.candidate_publisher import CandidatePublisher
+    from aigineering.core.candidate_publisher import CandidatePublisherRegistry
 
 
 class ContinuationManager:
@@ -57,7 +57,7 @@ class ContinuationManager:
         labels: dict[str, Label] | None = None,
         label_mode: str = "debug",
         label_context: dict[str, list[Asset]] | None = None,
-        candidate_publisher: CandidatePublisher | None = None,
+        candidate_publishers: CandidatePublisherRegistry | None = None,
     ) -> None:
         self._store = store
         self._budget_mgr = budget_mgr
@@ -78,7 +78,7 @@ class ContinuationManager:
         self._label_context: dict[str, list[Asset]] = (
             label_context if label_context is not None else {}
         )
-        self._candidate_publisher = candidate_publisher
+        self._candidate_publishers = candidate_publishers
 
     # ── Public API ──────────────────────────────────────────────────────
 
@@ -112,7 +112,7 @@ class ContinuationManager:
                         mcp_servers=self._mcp_servers,
                         suspended=self._suspended,
                         method_scheduled=self._method_scheduled,
-                        candidate_publisher=self._candidate_publisher,
+                        candidate_publishers=self._candidate_publishers,
                     )
                     if completion(runtime, contract, method_assets):
                         if method_type == "tool":
@@ -189,14 +189,56 @@ class ContinuationManager:
         """
         method = method_payload(source_contract).get("method", "method")
         budget = max(1, self._budget_mgr.get_remaining(parent.id))
-        continuation = continuation_contract(
-            parent,
-            source_contract,
-            method=str(method),
-            budget=budget,
+        from aigineering.plugins import ContinuationTaskPlugin, PluginRequest
+        from aigineering.protocol.wire import contract_from_dict
+
+        plugin = ContinuationTaskPlugin()
+        proposal = plugin.propose(
+            PluginRequest(
+                parent=parent,
+                source=source_contract,
+                assets=tuple(method_assets),
+                allowance=budget,
+            )
         )
+        continuation = contract_from_dict(proposal.effects[0].payload["contract"])
         if continuation.id not in self._method_scheduled:
-            self._add_contract(continuation)
+            publisher = (
+                self._candidate_publishers.get(plugin.plugin_id)
+                if self._candidate_publishers is not None
+                else None
+            )
+            if publisher is not None:
+                decision = publisher.publish(
+                    proposal.effects,
+                    idempotency_key=(
+                        f"continuation:{source_contract.id}:{continuation.id}"
+                    ),
+                    causal_parents=(source_contract.id,),
+                )
+                if not decision.accepted:
+                    self._add_trace(
+                        parent.id,
+                        "method_continuation_rejected",
+                        relation_type=str(method),
+                        relation_target=continuation.id,
+                        authority_result="rejected",
+                        rejected_fragments=[
+                            "[rejected] continuation publication was rejected"
+                        ],
+                        budget_remaining=self._budget_mgr.get_remaining(parent.id),
+                    )
+                    self._emit_terminal_event(
+                        parent.id,
+                        "failed",
+                        budget_remaining=self._resolve_budget(parent),
+                    )
+                    self._completed.add(parent.id)
+                    self._suspended.discard(parent.id)
+                    return
+                self._budget_mgr.initialize(continuation.id, continuation.budget)
+            else:
+                self._add_contract(continuation)
             self._method_scheduled.add(continuation.id)
             if method_assets:
                 self._method_context[continuation.id] = list(method_assets)

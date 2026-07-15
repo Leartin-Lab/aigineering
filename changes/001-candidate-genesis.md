@@ -210,6 +210,12 @@ Implementation progress:
   child fan-out as one signed Candidate; their duplicated handlers collapse to
   one parameterized implementation. Direct Contract insertion is now an
   explicit no-publisher compatibility branch rather than the production path.
+- Complete: production completion projection uses an immutable plugin publisher
+  registry rather than one ambient publisher. Planning and continuation have
+  separate durable actor identities and capabilities. Successful tool completion
+  proposes its ordinary continuation task through a Store-free plugin and signed
+  Candidate; rejected publication is traced and terminates the parent instead of
+  silently leaving suspended work.
 - Pending: replace Method scheduling/completion call sites with TaskPlugin
   publication, delete the raw execution compatibility surface and handlers,
   and migrate engine-backed inner execution to WorkerHost.

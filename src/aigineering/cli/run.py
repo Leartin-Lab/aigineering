@@ -347,15 +347,32 @@ def _run_task_pool(
                 raise click.exceptions.Exit(1)
             return
 
-        planning_publisher = ensure_local_plugin_publisher(
-            store, "planning.expand.v1", ("contract.publish",)
+        from aigineering.core.candidate_publisher import CandidatePublisherRegistry
+
+        candidate_publishers = CandidatePublisherRegistry(
+            (
+                (
+                    "planning.expand.v1",
+                    ensure_local_plugin_publisher(
+                        store, "planning.expand.v1", ("contract.publish",)
+                    ),
+                ),
+                (
+                    "continuation.publish.v1",
+                    ensure_local_plugin_publisher(
+                        store,
+                        "continuation.publish.v1",
+                        ("contract.publish", "contract.publish.protected"),
+                    ),
+                ),
+            )
         )
         while True:
             before_trace_count = len(store.get_all())
             registry = _default_method_registry()
             recovered = process_rejected_submissions(store)
             processed_before = process_method_completions(
-                store, registry, candidate_publisher=planning_publisher
+                store, registry, candidate_publishers=candidate_publishers
             )
             claimed = claim_next_package(store, worker_id=host.worker_id)
             submission: dict | None = None
@@ -367,7 +384,7 @@ def _run_task_pool(
                     method_registry=registry,
                 )
             processed_after = process_method_completions(
-                store, registry, candidate_publisher=planning_publisher
+                store, registry, candidate_publishers=candidate_publishers
             )
             after_entries = store.get_all()
             new_entries = after_entries[before_trace_count:]

@@ -107,6 +107,11 @@ def contract_to_dict(contract: Contract) -> dict[str, Any]:
     }
 
 
+def contract_from_dict(data: Mapping[str, Any]) -> Contract:
+    """Rebuild a Contract from its public wire representation."""
+    return Contract(**deep_thaw(dict(data)))
+
+
 def trace_entry_to_dict(entry: TraceEntry) -> dict[str, Any]:
     return {
         "id": entry.id,
