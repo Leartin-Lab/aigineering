@@ -8,7 +8,11 @@ from pathlib import Path
 import click
 
 from aigineering.cli._common import _output_json, _persistent_store
-from aigineering.cli._candidate import commit_local_effect, require_accepted
+from aigineering.cli._candidate import (
+    asset_proposal_effect,
+    commit_local_effect,
+    require_accepted,
+)
 from aigineering.core.asset_versions import (
     create_replacement_claim,
     create_slice_asset,
@@ -18,7 +22,6 @@ from aigineering.core.asset_versions import (
 from aigineering.core.control_plane import build_control_plane_asset
 from aigineering.core.runtime_ingress import RuntimeIngress
 from aigineering.core.trace import create_entry
-from aigineering.protocol.candidate import CandidateEffect
 
 
 @click.group("asset")
@@ -107,21 +110,7 @@ def asset_add(
         decision = require_accepted(
             commit_local_effect(
                 store,
-                CandidateEffect(
-                    "asset.propose",
-                    {
-                        "asset": {
-                            "content": proposal.content,
-                            "content_type": proposal.content_type,
-                            "disclosure_view": proposal.disclosure_view,
-                            "name": proposal.name,
-                            "origin": proposal.origin,
-                            "promptable": proposal.promptable,
-                            "source_uri": proposal.source_uri,
-                            "trust_tier": proposal.trust_tier,
-                        }
-                    },
-                ),
+                asset_proposal_effect(proposal),
                 idempotency_key=f"asset:{proposal.id}",
             )
         )

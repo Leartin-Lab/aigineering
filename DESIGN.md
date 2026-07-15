@@ -74,6 +74,11 @@ commands have not yet migrated.
 one local Candidate publisher; the three commands do not each own signature or
 Genesis-selection logic.
 
+`aig behavior add` also publishes an ordinary `asset.propose` effect. Behavior
+is therefore prompt/disclosure metadata on an Asset, not a separate commitment
+primitive. Contract, Task, Asset, and Behavior commands share effect builders
+and local identity selection.
+
 The commitment coordinator authenticates, dispatches, records decisions, and
 commits atomically; it does not parse individual effect payloads. Built-in
 effect projectors and Contract admission policy are separate pure modules. An

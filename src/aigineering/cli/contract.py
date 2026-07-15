@@ -7,10 +7,12 @@ import json
 import click
 
 from aigineering.cli._common import _persistent_store, _output_json
-from aigineering.cli._candidate import commit_local_effect, require_accepted
+from aigineering.cli._candidate import (
+    commit_local_effect,
+    contract_declaration_effect,
+    require_accepted,
+)
 from aigineering.core.control_plane import build_control_plane_contract
-from aigineering.protocol.candidate import CandidateEffect
-from aigineering.protocol.wire import contract_to_dict
 
 
 @click.group("contract")
@@ -72,9 +74,7 @@ def contract_add(
         require_accepted(
             commit_local_effect(
                 store,
-                CandidateEffect(
-                    "contract.declare", {"contract": contract_to_dict(contract)}
-                ),
+                contract_declaration_effect(contract),
                 idempotency_key=f"contract:{contract.id}",
             )
         )

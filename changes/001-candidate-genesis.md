@@ -86,6 +86,9 @@ Implementation progress:
   the commitment coordinator. The coordinator fell from 410 to 265 lines, and
   an architecture test prevents effect-specific branches or renewed growth
   beyond 300 lines.
+- Complete: `aig behavior add` reuses `asset.propose`; shared CLI effect
+  builders remove duplicated wire-payload assembly from all four migrated
+  publication commands.
 - Complete: cryptography is a base dependency; the runtime does not silently
   substitute a non-authenticating deterministic seal.
 - Pending: migrate remaining control-plane and worker submission effects.

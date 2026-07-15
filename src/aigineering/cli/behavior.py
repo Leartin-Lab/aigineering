@@ -12,8 +12,12 @@ from pathlib import Path
 import click
 
 from aigineering.cli._common import _output_json, _persistent_store
-from aigineering.core.control_plane import inject_asset
-from aigineering.core.runtime_ingress import RuntimeIngress
+from aigineering.cli._candidate import (
+    asset_proposal_effect,
+    commit_local_effect,
+    require_accepted,
+)
+from aigineering.core.control_plane import build_control_plane_asset
 
 
 BEHAVIOR_PREFIX = "behavior:"
@@ -59,12 +63,8 @@ def behavior_add(
     content = Path(file_path).read_text()
 
     store = _persistent_store()
-    trace_store = store
-    ingress = RuntimeIngress(store, trace_store)
     try:
-        asset = inject_asset(
-            store,
-            trace_store,
+        proposal = build_control_plane_asset(
             name=asset_name,
             content=content,
             origin="human",
@@ -72,10 +72,17 @@ def behavior_add(
             source_uri=str(Path(file_path).resolve()),
             promptable=True,
             content_type="text",
-            ingress=ingress,
         )
-    except ValueError as e:
-        raise click.ClickException(str(e))
+        decision = require_accepted(
+            commit_local_effect(
+                store,
+                asset_proposal_effect(proposal),
+                idempotency_key=f"asset:{proposal.id}",
+            )
+        )
+        asset = decision.assets[0]
+    except (LookupError, ValueError) as e:
+        raise click.ClickException(str(e)) from e
 
     if as_json:
         _output_json(

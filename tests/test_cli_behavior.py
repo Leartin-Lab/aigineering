@@ -3,9 +3,27 @@
 import json
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 
 from aigineering.cli.main import cli
+
+
+@pytest.fixture(autouse=True)
+def initialize_candidate_domain_before_behavior_publication(monkeypatch):
+    original = CliRunner.invoke
+
+    def invoke(runner, command, args=None, *positional, **kwargs):
+        effective = list(args or ())
+        if (
+            effective[:2] == ["behavior", "add"]
+            and not Path(".aig/identity/root.ed25519").exists()
+        ):
+            initialized = original(runner, command, ["domain", "init"])
+            assert initialized.exit_code == 0, initialized.output
+        return original(runner, command, args, *positional, **kwargs)
+
+    monkeypatch.setattr(CliRunner, "invoke", invoke)
 
 
 class TestBehaviorAdd:

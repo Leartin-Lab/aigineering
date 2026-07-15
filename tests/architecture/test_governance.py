@@ -38,7 +38,7 @@ def test_contract_cli_uses_candidate_commitment_not_legacy_ingress():
     source = (ROOT / "src/aigineering/cli/contract.py").read_text(encoding="utf-8")
 
     assert "commit_local_effect" in source
-    assert "CandidateEffect" in source
+    assert "contract_declaration_effect" in source
     assert "RuntimeIngress" not in source
     assert "inject_contract" not in source
 
@@ -48,7 +48,7 @@ def test_asset_add_uses_candidate_commitment_not_legacy_ingress():
     add_body = source.split('@asset_group.command("ls")', 1)[0]
 
     assert "commit_local_effect" in add_body
-    assert "CandidateEffect" in add_body
+    assert "asset_proposal_effect" in add_body
     assert "inject_asset" not in add_body
     assert "RuntimeIngress(" not in add_body
 
@@ -58,9 +58,19 @@ def test_task_create_uses_candidate_commitment_not_legacy_ingress():
     create_body = source.split('@task_group.command("status")', 1)[0]
 
     assert "commit_local_effect" in create_body
-    assert "CandidateEffect" in create_body
+    assert "contract_declaration_effect" in create_body
     assert "inject_contract" not in create_body
     assert "RuntimeIngress(" not in create_body
+
+
+def test_behavior_add_uses_asset_candidate_path():
+    source = (ROOT / "src/aigineering/cli/behavior.py").read_text(encoding="utf-8")
+    add_body = source.split('@behavior_group.command("list")', 1)[0]
+
+    assert "commit_local_effect" in add_body
+    assert "asset_proposal_effect" in add_body
+    assert "inject_asset" not in add_body
+    assert "RuntimeIngress(" not in add_body
 
 
 def test_commitment_coordinator_does_not_own_effect_semantics():
