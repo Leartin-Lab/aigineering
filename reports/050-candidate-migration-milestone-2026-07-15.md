@@ -64,5 +64,6 @@ This is a migration milestone, not 0.5 release acceptance.
   concurrent SQLite idempotency and removed the linear Candidate preflight
   scan. Dedicated throughput/load characterization is still pending.
 - Cross-process concurrent Candidate commitment has not yet received a dedicated
-  race/crash-injection acceptance test.
+  load characterization. Follow-up commits `cc384d5` and later add a two-
+  connection idempotency race and process-level crash rollback acceptance test.
 - No live-LLM productivity claim is renewed by this milestone.

@@ -91,6 +91,11 @@ SQLite uniqueness and transactions arbitrate concurrent replicas. The
 coordinator performs no pre-commit RuntimeRecord scan. FactReducer trace timing
 is record metadata, not part of the derived semantic payload.
 
+Candidate commitment uses the Store's existing atomic ingress transaction. A
+process crash after physical Asset insertion but before Trace/RuntimeRecord
+insertion rolls back the entire Candidate; restart observes neither a partial
+fact nor a false receipt/terminal record.
+
 A domain may persist exactly one `domain.genesis` RuntimeRecord. Initialization
 is idempotent, replacement fails closed, SQLite enforces uniqueness, and a
 CandidateCommitter can reconstruct the trust root from the Store instead of

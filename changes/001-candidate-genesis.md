@@ -94,6 +94,9 @@ Implementation progress:
   and one terminal consequence. Deterministic reducer consequences make the
   database transaction the correctness boundary; the former linear preflight
   RuntimeRecord scan has been deleted and is prohibited by architecture test.
+- Complete: process-level crash injection at
+  `after_asset_before_trace` proves Candidate Asset, receipt, trace, and terminal
+  consequences roll back as one SQLite transaction.
 - Complete: cryptography is a base dependency; the runtime does not silently
   substitute a non-authenticating deterministic seal.
 - Pending: migrate remaining control-plane and worker submission effects.
