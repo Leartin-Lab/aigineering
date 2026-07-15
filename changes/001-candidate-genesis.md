@@ -101,6 +101,9 @@ Implementation progress:
 - Complete: HTTP Contract/Asset creation and the generic `/candidates` endpoint
   require full actor-signed CandidateProposal bodies. Resource/effect mismatch
   and unsigned legacy bodies are rejected before Store mutation.
+- Complete: Contract projection derives an additional
+  `contract.publish.protected` capability requirement from effective
+  `minting_authority`, closing payload-based protected-namespace escalation.
 - Complete: cryptography is a base dependency; the runtime does not silently
   substitute a non-authenticating deterministic seal.
 - Pending: migrate remaining control-plane and worker submission effects.

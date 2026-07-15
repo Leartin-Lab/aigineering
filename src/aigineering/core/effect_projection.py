@@ -25,6 +25,7 @@ class EffectProjection:
     contract: Contract | None = None
     assets: tuple[Asset, ...] = ()
     accepted_asset_names: tuple[str, ...] = ()
+    additional_capabilities: tuple[str, ...] = ()
 
 
 def _contract_from_payload(payload: Mapping[str, Any]) -> Contract:
@@ -62,7 +63,12 @@ def project_contract_declaration(
         causal_parents=(receipt_id,),
     )
     return EffectProjection(
-        records=(record,), relation_target=contract.id, contract=contract
+        records=(record,),
+        relation_target=contract.id,
+        contract=contract,
+        additional_capabilities=(
+            ("contract.publish.protected",) if contract.minting_authority else ()
+        ),
     )
 
 

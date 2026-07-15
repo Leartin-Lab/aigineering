@@ -256,6 +256,57 @@ def test_asset_effect_rejects_protected_namespace():
     )
 
 
+def test_contract_publisher_cannot_self_grant_protected_minting_authority():
+    contract = _contract()
+    protected = Contract(
+        **{
+            **contract_to_dict(contract),
+            "id": hash_contract_v3(
+                name=contract.name,
+                description=contract.description,
+                inputs=contract.inputs,
+                outputs=("_sys_result",),
+                activation=contract.activation,
+                budget=contract.budget,
+                tool_scope=contract.tool_scope,
+                labels=contract.labels,
+                origin=contract.origin,
+                minting_authority=("_sys_result",),
+            ),
+            "outputs": ("_sys_result",),
+            "minting_authority": ("_sys_result",),
+        }
+    )
+    genesis, candidate = _proposal(
+        capabilities=("contract.publish",),
+        effect=CandidateEffect(
+            "contract.declare", {"contract": contract_to_dict(protected)}
+        ),
+    )
+
+    decision = reduce_candidate(candidate, genesis, verifier_factory=_verifier_factory)
+
+    assert decision.accepted is False
+    assert "contract.publish.protected" in next(
+        record.payload["reason"]
+        for record in decision.runtime_records
+        if record.record_type == "candidate.rejected"
+    )
+
+    privileged_genesis, privileged_candidate = _proposal(
+        capabilities=("contract.publish", "contract.publish.protected"),
+        effect=CandidateEffect(
+            "contract.declare", {"contract": contract_to_dict(protected)}
+        ),
+    )
+    privileged = reduce_candidate(
+        privileged_candidate,
+        privileged_genesis,
+        verifier_factory=_verifier_factory,
+    )
+    assert privileged.accepted is True
+
+
 def test_commitment_kernel_has_no_concrete_store_dependency():
     source = (
         Path(__file__).resolve().parents[2] / "src/aigineering/core/commitment.py"

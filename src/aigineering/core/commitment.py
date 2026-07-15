@@ -164,6 +164,18 @@ def reduce_candidate(
         projection = projector(effect, candidate, receipt.id)
     except (TypeError, ValueError) as exc:
         return _rejection_decision(candidate, receipt, str(exc))
+    capabilities = _actor_capabilities(candidate, genesis)
+    missing_capabilities = tuple(
+        capability
+        for capability in projection.additional_capabilities
+        if capability not in capabilities
+    )
+    if missing_capabilities:
+        return _rejection_decision(
+            candidate,
+            receipt,
+            f"actor lacks required capabilities {missing_capabilities!r}",
+        )
     committed = create_runtime_record(
         "candidate.committed",
         {

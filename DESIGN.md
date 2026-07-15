@@ -85,6 +85,11 @@ validate the effect type before commitment. Unsigned legacy request bodies fail
 schema validation and cannot mutate the Store. Slice and replacement-claim HTTP
 operations remain compatibility surfaces pending additional effect types.
 
+`contract.publish` does not authorize an actor to populate
+`minting_authority`. A declaration containing protected minting authority also
+requires `contract.publish.protected`; payload fields cannot self-grant that
+capability.
+
 The commitment coordinator authenticates, dispatches, records decisions, and
 commits atomically; it does not parse individual effect payloads. Built-in
 effect projectors and Contract admission policy are separate pure modules. An
