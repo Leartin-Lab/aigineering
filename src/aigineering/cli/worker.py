@@ -18,7 +18,6 @@ from aigineering.runtime import (
     claim_next_package,
 )
 from aigineering.core.disclosure import DisclosurePolicyError, compute_disclosure
-from aigineering.core.runtime_ingress import RuntimeIngress
 from aigineering.core.worker_routing import WorkerRegistration
 from aigineering.core.submit import (
     SubmitClaimError,
@@ -282,13 +281,11 @@ def worker_submit(envelope_json: str, idempotency_key: Optional[str]) -> None:
         _output_json({"error": f"Contract '{envelope.contract_id}' not found."})
         raise click.exceptions.Exit(1)
 
-    ingress = RuntimeIngress(store, store)
     try:
         result = submit_candidate(
             envelope=envelope,
             store=store,
             trace_store=store,
-            ingress=ingress,
             idempotency_store=None,
             idempotency_key=idempotency_key or "",
         )

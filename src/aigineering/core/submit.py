@@ -9,9 +9,9 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from typing import TYPE_CHECKING
 
 from aigineering.core.disclosure import compute_disclosure
+from aigineering.core.fact_materialization import reduce_asset_facts
 from aigineering.core.record_conflict import ImmutableRecordConflict
 from aigineering.core.output_satisfaction import all_outputs_satisfied
 from aigineering.core.projection import project_candidate
@@ -22,9 +22,6 @@ from aigineering.protocol.envelope import CandidateEnvelope
 from aigineering.protocol.runtime_record import RuntimeRecord, create_runtime_record
 from aigineering.protocol.types import Asset, Candidate, Contract, ProjectionResult
 from aigineering.protocol.wire import asset_to_dict, trace_entry_to_dict
-
-if TYPE_CHECKING:
-    from aigineering.core.runtime_ingress import RuntimeIngress
 
 
 class SubmitConflictError(Exception):
@@ -142,7 +139,6 @@ def submit_candidate(
     envelope: CandidateEnvelope,
     store: StoreProtocol,
     trace_store: TraceStoreProtocol,
-    ingress: RuntimeIngress,
     idempotency_store: object | None = None,
     idempotency_key: str = "",
 ) -> dict:
@@ -268,7 +264,9 @@ def submit_candidate(
         budget_remaining=max(0, contract.budget - 1),
     )
 
-    reducer_traces, reducer_records = ingress.reduce_assets(signed_assets)
+    reducer_traces, reducer_records = reduce_asset_facts(
+        store, trace_store, signed_assets
+    )
     trace_entries = [entry, budget_entry, *reducer_traces]
     if response.get("complete") is True:
         complete_entry = next(

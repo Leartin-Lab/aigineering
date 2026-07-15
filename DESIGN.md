@@ -166,6 +166,11 @@ process crash after physical Asset insertion but before Trace/RuntimeRecord
 insertion rolls back the entire Candidate; restart observes neither a partial
 fact nor a false receipt/terminal record.
 
+Claim-bound worker submission does not depend on RuntimeIngress. It calls the
+same pure Asset-fact reduction function used by typed Candidate commitment,
+then commits projection, lifecycle consequences, trace evidence, idempotency,
+and claim transition through the operational Store transaction.
+
 A domain may persist exactly one `domain.genesis` RuntimeRecord. Initialization
 is idempotent, replacement fails closed, SQLite enforces uniqueness, and a
 CandidateCommitter can reconstruct the trust root from the Store instead of
@@ -187,8 +192,7 @@ The shipped package excludes the legacy in-process Engine and state serializer;
 their source remains temporarily for migration tests. The superseded startup
 checker has been deleted: expired claims and recovery are derived directly from
 lease/runtime facts, without a second process-lifecycle trace state machine.
-The supported operational surface is the
-Store/RuntimeIngress/claim/submission path.
+The supported operational surface is the Store/claim/submission path.
 
 ## Methods and workers
 

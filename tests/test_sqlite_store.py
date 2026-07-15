@@ -691,7 +691,6 @@ def test_expired_claim_cannot_be_renewed(store):
 
 
 def test_candidate_submit_rejects_stale_fencing_epoch_before_projection(store):
-    from aigineering.core.runtime_ingress import RuntimeIngress
     from aigineering.core.submit import SubmitClaimError, submit_candidate
     from aigineering.protocol.envelope import CandidateEnvelope
 
@@ -708,7 +707,7 @@ def test_candidate_submit_rejects_stale_fencing_epoch_before_projection(store):
     )
 
     with pytest.raises(SubmitClaimError, match="epoch mismatch"):
-        submit_candidate(envelope, store, store, RuntimeIngress(store, store))
+        submit_candidate(envelope, store, store)
     assert store.get_assets_by_name("out") == []
 
 
@@ -854,7 +853,6 @@ def test_method_submission_rolls_back_child_context_and_claim(store, monkeypatch
 
 def test_candidate_submission_rolls_back_when_claim_predicate_fails(store, monkeypatch):
     """A stale claim state at commit time rejects and rolls back the submission."""
-    from aigineering.core.runtime_ingress import RuntimeIngress
     from aigineering.core.submit import SubmitCommitError, submit_candidate
     from aigineering.protocol.envelope import CandidateEnvelope
 
@@ -869,7 +867,6 @@ def test_candidate_submission_rolls_back_when_claim_predicate_fails(store, monke
         "pkg:test",
     )
     store.mark_claim_released("claim-stale")
-    ingress = RuntimeIngress(store, store)
     monkeypatch.setattr(
         store,
         "get_claim",
@@ -894,7 +891,7 @@ def test_candidate_submission_rolls_back_when_claim_predicate_fails(store, monke
     )
 
     with pytest.raises(SubmitCommitError):
-        submit_candidate(envelope, store, store, ingress)
+        submit_candidate(envelope, store, store)
 
     assert store.get_assets_by_name("out") == []
     assert store.get_trace_events("c-submit") == []
@@ -905,7 +902,6 @@ def test_candidate_submission_rolls_back_when_claim_expires_at_commit(
     store, monkeypatch
 ):
     """A claim that expires between validation and commit rejects atomically."""
-    from aigineering.core.runtime_ingress import RuntimeIngress
     from aigineering.core.submit import SubmitCommitError, submit_candidate
     from aigineering.protocol.envelope import CandidateEnvelope
 
@@ -919,7 +915,6 @@ def test_candidate_submission_rolls_back_when_claim_expires_at_commit(
         "active",
         "pkg:expired",
     )
-    ingress = RuntimeIngress(store, store)
     monkeypatch.setattr(
         store,
         "get_claim",
@@ -944,7 +939,7 @@ def test_candidate_submission_rolls_back_when_claim_expires_at_commit(
     )
 
     with pytest.raises(SubmitCommitError):
-        submit_candidate(envelope, store, store, ingress)
+        submit_candidate(envelope, store, store)
 
     assert store.get_assets_by_name("out") == []
     assert store.get_trace_events("c-expire") == []

@@ -87,7 +87,7 @@ envelope = CandidateEnvelope(
     idempotency_key="idem-1",
 )
 ingress = RuntimeIngress(store, store)
-result = submit_candidate(envelope, store, store, ingress=ingress)
+result = submit_candidate(envelope, store, store)
 print("SUBMIT_RESULT", result)
 store.close()
 """
@@ -304,7 +304,7 @@ envelope = CandidateEnvelope(
     idempotency_key="idem-double",
 )
 ingress = RuntimeIngress(store, store)
-submit_candidate(envelope, store, store, ingress=ingress)
+submit_candidate(envelope, store, store)
 store.close()
 """
 
@@ -340,7 +340,7 @@ envelope = CandidateEnvelope(
     idempotency_key="idem-double",
 )
 ingress = RuntimeIngress(store, store)
-submit_candidate(envelope, store, store, ingress=ingress)
+submit_candidate(envelope, store, store)
 store.close()
 """
 

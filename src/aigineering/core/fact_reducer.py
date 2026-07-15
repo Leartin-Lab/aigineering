@@ -8,7 +8,7 @@ cancellation.
 
 The reducer is **pure** — it never mutates store, trace, budget, or any
 other shared state.  It only reads the store and returns events.  The
-caller (RuntimeIngress) applies those events.
+caller materializes those events as atomic runtime facts.
 
 References: W1 (Fact Ingress And Reactive Reducer) of
 ``.omo/plans/050-runtime-boundary-refactor-plan.md``.
@@ -100,10 +100,10 @@ _is_business_output = is_business_output
 class FactReducer:
     """Deterministic projection of asset facts into structured events.
 
-    Called by :class:`RuntimeIngress` after every accepted asset is
-    committed to the store.  The reducer reads the current store state and
-    returns a flat list of :class:`FactReducerEvent` describing what the
-    new asset implies.
+    Called by Candidate commitment, claim-bound submission, and compatibility
+    ingress for each accepted Asset batch. The reducer reads the current store
+    state and returns a flat list of :class:`FactReducerEvent` describing what
+    the new facts imply.
 
     The reducer is **pure** — it never writes to store, trace, budget, or
     any other shared state.  State changes happen in the caller.

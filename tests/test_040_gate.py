@@ -637,14 +637,12 @@ class TestTransactionalSubmit:
         """
         from aigineering.core.store import MemoryStore
         from aigineering.core.trace import MemoryTraceStore
-        from aigineering.core.runtime_ingress import RuntimeIngress
         from aigineering.core.submit import submit_candidate
         from aigineering.protocol.envelope import CandidateEnvelope
         from aigineering.protocol.types import Contract
 
         store = MemoryStore()
         trace = MemoryTraceStore()
-        ingress = RuntimeIngress(store, trace)
         store.add_contract(Contract(id="c-atomic", outputs=["out"], budget=10))
         env = CandidateEnvelope(
             contract_id="c-atomic",
@@ -654,7 +652,7 @@ class TestTransactionalSubmit:
         )
 
         with pytest.raises(TypeError, match="transactional worker StorePort"):
-            submit_candidate(env, store, trace, ingress)
+            submit_candidate(env, store, trace)
 
     def test_store_enforces_sign_asset_on_write(self):
         """Store implementations must enforce canonical seal on asset write.
@@ -1133,7 +1131,6 @@ class TestClaimPersistence:
         import os
         from aigineering.core.claims import ClaimStore
         from aigineering.core.sqlite_store import SQLiteStore
-        from aigineering.core.runtime_ingress import RuntimeIngress
         from aigineering.core.submit import submit_candidate, SubmitClaimError
         from aigineering.core.trace import MemoryTraceStore
         from aigineering.protocol.envelope import CandidateEnvelope
@@ -1142,7 +1139,6 @@ class TestClaimPersistence:
         with tempfile.TemporaryDirectory() as tmp:
             store = SQLiteStore(db_path=os.path.join(tmp, "test.db"))
             trace = MemoryTraceStore()
-            ingress = RuntimeIngress(store, trace)
 
             contract = Contract(
                 id="c1",
@@ -1178,7 +1174,7 @@ class TestClaimPersistence:
                 claim_id=claim.claim_id,
                 claim_epoch=1,
             )
-            result = submit_candidate(env, store, trace, ingress)
+            result = submit_candidate(env, store, trace)
             assert result["status"] in ("accepted", "partial"), (
                 f"G8/D-P1.2: valid claim+worker must accept, got {result['status']}"
             )
@@ -1192,7 +1188,7 @@ class TestClaimPersistence:
                 claim_epoch=1,
             )
             try:
-                submit_candidate(env2, store, trace, ingress)
+                submit_candidate(env2, store, trace)
             except SubmitClaimError as e:
                 assert "worker" in str(e).lower(), (
                     f"G8/D-P1.2: claim worker mismatch must raise SubmitClaimError, got: {e}"
@@ -1231,7 +1227,7 @@ class TestClaimPersistence:
                 claim_epoch=1,
             )
             try:
-                submit_candidate(env3, store, trace, ingress)
+                submit_candidate(env3, store, trace)
             except SubmitClaimError as e:
                 assert "expired" in str(e).lower(), (
                     f"G8/D-P1.2: expired lease must raise SubmitClaimError, got: {e}"
@@ -1269,7 +1265,7 @@ class TestClaimPersistence:
                 claim_epoch=1,
             )
             try:
-                submit_candidate(env4, store, trace, ingress)
+                submit_candidate(env4, store, trace)
             except SubmitClaimError as e:
                 assert "status" in str(e).lower(), (
                     f"G8/D-P1.2: non-active claim must raise SubmitClaimError, got: {e}"

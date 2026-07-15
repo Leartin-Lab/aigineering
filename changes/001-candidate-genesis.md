@@ -144,9 +144,15 @@ Implementation progress:
   SQLite schema v9 and MemoryStore enforce one terminal fact per Contract, and
   recovery discovery derives resolution from records/contracts rather than
   mutable Trace interpretation.
+- Complete: claim-bound worker submission no longer constructs or accepts a
+  RuntimeIngress dependency. CandidateProposal commitment, CandidateEnvelope
+  submission, and compatibility ingress share one pure Asset-fact reduction
+  function, removing a duplicate commitment coordinator from the supported
+  worker path.
 - Complete: cryptography is a base dependency; the runtime does not silently
   substitute a non-authenticating deterministic seal.
-- Pending: migrate remaining control-plane and worker submission effects.
+- Pending: authenticate claim-bound worker submissions as CandidateProposal
+  effects and migrate Method task publication to plugins.
 
 ## Required architecture tests
 

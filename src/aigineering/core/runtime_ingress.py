@@ -1,10 +1,9 @@
-"""RuntimeIngress — unified ingress for all runtime facts.
+"""Legacy compatibility ingress for in-process Engine and Method code.
 
-All production paths (CLI, server, method runtime, skill loader, labels) route
-assets, contracts, and replacement claims through this ingress. Candidate
-submissions use the separate claim-bound ``submit_candidate`` operation.
-Direct store writes are reserved for store implementations and explicit test
-fixtures only.
+External publishers and claim-bound worker submissions no longer depend on
+this adapter. It remains temporarily for the unshipped Engine and Method
+migration tests; CandidateCommitter and ``submit_candidate`` share the same
+pure Asset-fact reduction function directly.
 
 Every accepted fact is signed, authority-checked, traced, and reduced.
 The fact reducer projects asset consequences (activation readiness, output
@@ -30,7 +29,7 @@ from aigineering.core.provenance import sign_asset
 from aigineering.core.trace import create_entry
 from aigineering.core.fact_materialization import (
     asset_committed_record,
-    materialize_fact_reduction,
+    reduce_asset_facts,
     trace_records,
 )
 from aigineering.protocol.runtime_record import RuntimeRecord, create_runtime_record
@@ -92,8 +91,9 @@ class RuntimeIngress:
         self, assets: Sequence[Asset]
     ) -> tuple[list[object], tuple[RuntimeRecord, ...]]:
         """Return the canonical consequences of one atomic Asset batch."""
-        events = self._reducer.on_assets_created(tuple(assets))
-        return materialize_fact_reduction(events, assets)
+        return reduce_asset_facts(
+            self._store, self._trace, assets, reducer=self._reducer
+        )
 
     # -- Asset acceptance ---------------------------------------------------
 

@@ -258,3 +258,17 @@ def test_commitment_coordinator_does_not_own_effect_semantics():
     assert "worker_registration" not in source
     assert "scan_runtime_records" not in source
     assert len(source.splitlines()) < 300
+
+
+def test_worker_submission_uses_shared_fact_reduction_without_runtime_ingress():
+    submit = (ROOT / "src/aigineering/core/submit.py").read_text(encoding="utf-8")
+    runtime = (ROOT / "src/aigineering/runtime.py").read_text(encoding="utf-8")
+    worker_cli = (ROOT / "src/aigineering/cli/worker.py").read_text(encoding="utf-8")
+    submit_surface = runtime.split("def submit_candidate_envelope", 1)[1].split(
+        "def _schedule_rejected_recovery", 1
+    )[0]
+
+    assert "reduce_asset_facts" in submit
+    assert "RuntimeIngress" not in submit
+    assert "RuntimeIngress" not in submit_surface
+    assert "RuntimeIngress" not in worker_cli

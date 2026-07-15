@@ -329,12 +329,10 @@ def submit_candidate_envelope(
             trace,
             method_registry,
         )
-    ingress = RuntimeIngress(store, trace)
     result = submit_candidate(
         envelope=envelope,
         store=store,
         trace_store=trace,
-        ingress=ingress,
         idempotency_key=envelope.idempotency_key,
     )
     if result["status"] == "rejected":

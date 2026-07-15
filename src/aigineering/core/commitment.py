@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 
 from aigineering.core.effect_projection import BUILTIN_EFFECTS
 from aigineering.core.fact_materialization import (
-    materialize_fact_reduction,
+    reduce_asset_facts,
     trace_records,
 )
 from aigineering.core.trace import create_entry
@@ -237,13 +237,8 @@ class CandidateCommitter:
             candidate, genesis, verifier_factory=verifier_factory
         )
         if decision.assets:
-            from aigineering.core.fact_reducer import FactReducer
-
-            events = FactReducer(self._store, self._trace).on_assets_created(
-                decision.assets
-            )
-            reducer_traces, reducer_records = materialize_fact_reduction(
-                events, decision.assets
+            reducer_traces, reducer_records = reduce_asset_facts(
+                self._store, self._trace, decision.assets
             )
             decision = replace(
                 decision,

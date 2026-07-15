@@ -18,8 +18,6 @@ from aigineering.runtime import (
     process_rejected_submissions,
     process_worker_failures,
 )
-from aigineering.core.fact_reducer import FactReducer
-from aigineering.core.runtime_ingress import RuntimeIngress
 from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.core.submit import submit_candidate
 from aigineering.core.trace import create_entry
@@ -260,9 +258,7 @@ def test_rejected_submission_recovery_replays_after_crash_gap():
         claim_id=claimed.package.claim_id,
         claim_epoch=claimed.package.claim_epoch,
     )
-    ingress = RuntimeIngress(store, store, FactReducer(store, store))
-
-    result = submit_candidate(envelope, store, store, ingress)
+    result = submit_candidate(envelope, store, store)
 
     assert result["status"] == "rejected"
     assert not store.scan_runtime_records(record_type="lifecycle.terminal")
