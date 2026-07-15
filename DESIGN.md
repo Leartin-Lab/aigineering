@@ -132,6 +132,11 @@ the same transaction; neither the generic commitment decision nor its batch
 port contains worker-specific fields. The CLI no longer writes routing state
 directly, and registration version is explicit at publication.
 
+Engine-as-Worker bootstraps each isolated invocation domain with an ephemeral
+Ed25519 Genesis actor. Outer disclosure Assets and the inner root Contract are
+published through the same identity-neutral Candidate publisher used by local
+CLI composition; the adapter has no direct RuntimeIngress write path.
+
 The commitment coordinator authenticates, dispatches, records decisions, and
 commits atomically; it does not parse individual effect payloads. Built-in
 effect projectors and Contract admission policy are separate pure modules. An

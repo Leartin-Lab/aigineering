@@ -13,7 +13,8 @@ from aigineering.runtime import (
     process_method_completions,
     process_rejected_submissions,
 )
-from aigineering.core.fact_reducer import FactReducer
+from aigineering.core.candidate_publisher import publish_effect
+from aigineering.core.domain import initialize_genesis
 from aigineering.core.ids import hash_contract_v3
 from aigineering.core.method_handlers.fail import FailMethodHandler
 from aigineering.core.method_handlers.plan import PlanMethodHandler
@@ -23,8 +24,13 @@ from aigineering.core.method_handlers.tool import ToolMethodHandler
 from aigineering.core.method_registry import MethodRegistry
 from aigineering.core.output_satisfaction import is_business_output
 from aigineering.core.provenance import verify_asset_seal
-from aigineering.core.runtime_ingress import RuntimeIngress
+from aigineering.core.signing import Ed25519Signer
 from aigineering.core.sqlite_store import SQLiteStore
+from aigineering.protocol.candidate import ActorKey, create_genesis_manifest
+from aigineering.protocol.effect_builders import (
+    asset_proposal_effect,
+    contract_declaration_effect,
+)
 from aigineering.protocol.types import Candidate, Contract
 
 if TYPE_CHECKING:
@@ -54,19 +60,52 @@ class EngineWorker:
         """Return only the outer Contract's declared outputs as a Candidate."""
         inner = SQLiteStore(":memory:")
         try:
-            ingress = RuntimeIngress(inner, inner, FactReducer(inner, inner))
+            signer = Ed25519Signer()
+            actor_key = ActorKey(
+                self.worker_id,
+                "inner-root",
+                signer.kind,
+                signer.signer_id,
+                (
+                    "asset.publish",
+                    "asset.publish.protected",
+                    "contract.publish",
+                ),
+            )
+            genesis = create_genesis_manifest(
+                f"{self.worker_id}:invocation",
+                [actor_key],
+                "policy:engine-worker-inner-v1",
+            )
+            initialize_genesis(inner, genesis)
             for asset in disclosed_assets:
                 if not verify_asset_seal(asset):
                     return self._failure(
                         "outer disclosure contains an invalid asset seal"
                     )
-                ingress.accept_asset(
-                    asset,
-                    source="outer_disclosure",
-                    allow_protected=asset.name.startswith("_"),
+                decision = publish_effect(
+                    inner,
+                    inner,
+                    genesis,
+                    actor_key,
+                    signer,
+                    asset_proposal_effect(asset),
+                    idempotency_key=f"inner-asset:{asset.id}",
                 )
+                if not decision.accepted:
+                    return self._failure("inner domain rejected disclosed input")
             inner_contract = _inner_contract(contract)
-            ingress.accept_contract(inner_contract)
+            decision = publish_effect(
+                inner,
+                inner,
+                genesis,
+                actor_key,
+                signer,
+                contract_declaration_effect(inner_contract),
+                idempotency_key=f"inner-contract:{inner_contract.id}",
+            )
+            if not decision.accepted:
+                return self._failure("inner domain rejected root contract")
             registry = _method_registry()
             for _ in range(self._max_steps):
                 process_rejected_submissions(inner)

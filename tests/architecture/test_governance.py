@@ -207,6 +207,20 @@ def test_worker_registration_cli_uses_typed_candidate_effect():
     assert "store.register_worker" not in register
 
 
+def test_engine_worker_bootstraps_inner_domain_through_candidate_publication():
+    source = (ROOT / "src/aigineering/agent/engine_worker.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "initialize_genesis" in source
+    assert "publish_effect" in source
+    assert "asset_proposal_effect" in source
+    assert "contract_declaration_effect" in source
+    assert "RuntimeIngress" not in source
+    assert "accept_asset" not in source
+    assert "accept_contract" not in source
+
+
 def test_commitment_coordinator_does_not_own_effect_semantics():
     path = ROOT / "src/aigineering/core/commitment.py"
     source = path.read_text(encoding="utf-8")

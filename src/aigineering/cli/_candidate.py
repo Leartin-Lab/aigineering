@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from aigineering.cli.identity import load_actor_signer
-from aigineering.core.commitment import CandidateCommitter, CommitmentDecision
+from aigineering.core.candidate_publisher import publish_effect
+from aigineering.core.commitment import CommitmentDecision
 from aigineering.core.domain import load_genesis
-from aigineering.protocol.candidate import CandidateEffect, create_candidate_proposal
+from aigineering.protocol.candidate import CandidateEffect
 
 
 def commit_local_effect(
@@ -24,15 +25,15 @@ def commit_local_effect(
         )
     except StopIteration as exc:
         raise ValueError("local actor key is not authorized by domain Genesis") from exc
-    candidate = create_candidate_proposal(
-        domain_id=genesis.id,
-        actor_id=actor_key.actor_id,
-        key_id=actor_key.key_id,
-        effects=[effect],
-        signer=signer,
+    return publish_effect(
+        store,
+        store,
+        genesis,
+        actor_key,
+        signer,
+        effect,
         idempotency_key=idempotency_key,
     )
-    return CandidateCommitter(store, store).commit(candidate)
 
 
 def require_accepted(decision: CommitmentDecision) -> CommitmentDecision:

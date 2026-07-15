@@ -130,6 +130,9 @@ Implementation progress:
 - Complete: replacement assertions publish through `asset.relate`; actor
   identity is derived from the verified Candidate, not request metadata, and
   Stores derive the claim index from immutable `replacement.claimed` records.
+- Complete: Engine-as-Worker creates an invocation-scoped Genesis identity and
+  publishes disclosed inputs and its inner root Contract as Candidates through
+  an identity-neutral publisher shared with CLI composition.
 - Complete: cryptography is a base dependency; the runtime does not silently
   substitute a non-authenticating deterministic seal.
 - Pending: migrate remaining control-plane and worker submission effects.
