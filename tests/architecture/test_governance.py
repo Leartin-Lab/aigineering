@@ -301,3 +301,22 @@ def test_worker_submission_uses_shared_fact_reduction_without_runtime_ingress():
     assert "RuntimeIngress" not in submit
     assert "RuntimeIngress" not in submit_surface
     assert "RuntimeIngress" not in worker_cli
+
+
+def test_claim_bound_delegation_semantics_live_in_plugin_not_runtime_service():
+    runtime = (ROOT / "src/aigineering/runtime.py").read_text(encoding="utf-8")
+    worker = (ROOT / "src/aigineering/agent/worker.py").read_text(encoding="utf-8")
+    plugin = (ROOT / "src/aigineering/plugins/delegation.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "TaskDelegationPlugin().project" in runtime
+    assert "method_contract" not in runtime
+    assert "retry_contract" not in runtime
+    assert "method_context_content" not in runtime
+    assert "TaskDelegationPlugin().propose" in worker
+    assert "task_delegation_effect" in plugin
+    assert "def project" in plugin
+    assert "RuntimeIngress" not in plugin
+    assert "self._store" not in plugin
+    assert "accept_contract" not in plugin
