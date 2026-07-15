@@ -171,11 +171,15 @@ Implementation progress:
   coordinator. Mixed atomic-group IDs, multiple Contract declarations, and
   Contract-plus-Asset batches fail closed until their causal projection is
   implemented; any invalid effect rejects the complete batch.
+- Complete: new `worker.register` Candidates require `worker_id == actor_id`
+  and an authorized, non-revoked key binding. The CLI atomically authorizes a
+  supplied public key and registers its routing profile; SQLite schema v12
+  persists the binding in the rebuildable worker projection. Legacy blank
+  bindings remain readable only for explicit migration compatibility.
 - Complete: cryptography is a base dependency; the runtime does not silently
   substitute a non-authenticating deterministic seal.
-- Pending: bind worker routing registration to authorized keys, authenticate
-  claim-bound worker submissions as
-  CandidateProposal effects, and migrate Method task publication to plugins.
+- Pending: authenticate claim-bound worker submissions as CandidateProposal
+  effects and migrate Method task publication to plugins.
 
 ## Required architecture tests
 

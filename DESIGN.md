@@ -149,6 +149,13 @@ the same transaction; neither the generic commitment decision nor its batch
 port contains worker-specific fields. The CLI no longer writes routing state
 directly, and registration version is explicit at publication.
 
+New Candidate-native registrations bind `worker_id` to the same `actor_id` and
+an authorized, non-revoked `key_id`. `aig worker register` requires the public
+key and commits actor authorization plus routing registration in one Candidate
+batch; repeat versions may reuse only the exact existing key. SQLite schema v12
+retains this binding in its disposable routing projection. Blank bindings are
+legacy migration data, not valid new Candidate registrations.
+
 Engine-as-Worker bootstraps each isolated invocation domain with an ephemeral
 Ed25519 Genesis actor. Outer disclosure Assets and the inner root Contract are
 published through the same identity-neutral Candidate publisher used by local

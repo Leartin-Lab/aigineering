@@ -59,7 +59,7 @@ from aigineering.protocol.wire import (
 
 _logger = logging.getLogger(__name__)
 
-CURRENT_SCHEMA_VERSION = 11
+CURRENT_SCHEMA_VERSION = 12
 
 # ---------------------------------------------------------------------------
 # Activation name extraction (shared with store.py)
@@ -233,6 +233,8 @@ CREATE TABLE IF NOT EXISTS contract_declared_outputs (
 _DDL_CREATE_WORKER_REGISTRATIONS = """
 CREATE TABLE IF NOT EXISTS worker_registrations (
     worker_id TEXT PRIMARY KEY,
+    actor_id TEXT NOT NULL DEFAULT '',
+    key_id TEXT NOT NULL DEFAULT '',
     capabilities TEXT NOT NULL DEFAULT '[]',
     pools TEXT NOT NULL DEFAULT '[]',
     profile_id TEXT NOT NULL DEFAULT '',
@@ -415,6 +417,9 @@ class SQLiteStore:
             if current < 11:
                 self._migrate_to_v11()
                 self._record_schema_version(11)
+            if current < 12:
+                self._migrate_to_v12()
+                self._record_schema_version(12)
 
     def _migrate_to_v2(self) -> None:
         """Add 040 transactional worker state and contract authority metadata."""
@@ -609,6 +614,23 @@ class SQLiteStore:
             "json_extract(payload_json, '$.key_id')) "
             "WHERE record_type = 'actor.revoked'"
         )
+
+    def _migrate_to_v12(self) -> None:
+        """Bind the worker routing projection to Candidate actor keys."""
+        columns = {
+            row[1]
+            for row in self._conn.execute("PRAGMA table_info(worker_registrations)")
+        }
+        if "actor_id" not in columns:
+            self._conn.execute(
+                "ALTER TABLE worker_registrations "
+                "ADD COLUMN actor_id TEXT NOT NULL DEFAULT ''"
+            )
+        if "key_id" not in columns:
+            self._conn.execute(
+                "ALTER TABLE worker_registrations "
+                "ADD COLUMN key_id TEXT NOT NULL DEFAULT ''"
+            )
 
     # ── Immutable runtime-record envelope ────────────────────────────────
 
@@ -1040,10 +1062,12 @@ class SQLiteStore:
     def _upsert_worker_registration(self, registration: WorkerRegistration) -> None:
         self._conn.execute(
             """INSERT INTO worker_registrations (
-                worker_id, capabilities, pools, profile_id, capacity,
-                enabled, version, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                worker_id, actor_id, key_id, capabilities, pools, profile_id,
+                capacity, enabled, version, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(worker_id) DO UPDATE SET
+                actor_id = excluded.actor_id,
+                key_id = excluded.key_id,
                 capabilities = excluded.capabilities,
                 pools = excluded.pools,
                 profile_id = excluded.profile_id,
@@ -1053,6 +1077,8 @@ class SQLiteStore:
                 updated_at = excluded.updated_at""",
             (
                 registration.worker_id,
+                registration.actor_id,
+                registration.key_id,
                 json.dumps(list(registration.capabilities)),
                 json.dumps(list(registration.pools)),
                 registration.profile_id,
@@ -1071,9 +1097,11 @@ class SQLiteStore:
                 registration = registration_from_record(record)
                 self._conn.execute(
                     """INSERT INTO worker_registrations (
-                        worker_id, capabilities, pools, profile_id, capacity,
-                        enabled, version, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(worker_id) DO UPDATE SET
+                        worker_id, actor_id, key_id, capabilities, pools,
+                        profile_id, capacity, enabled, version, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(worker_id) DO UPDATE SET
+                        actor_id = excluded.actor_id,
+                        key_id = excluded.key_id,
                         capabilities = excluded.capabilities,
                         pools = excluded.pools,
                         profile_id = excluded.profile_id,
@@ -1083,6 +1111,8 @@ class SQLiteStore:
                         updated_at = excluded.updated_at""",
                     (
                         registration.worker_id,
+                        registration.actor_id,
+                        registration.key_id,
                         json.dumps(list(registration.capabilities)),
                         json.dumps(list(registration.pools)),
                         registration.profile_id,
@@ -1112,6 +1142,8 @@ class SQLiteStore:
         ).fetchone()[0]
         return WorkerRegistration(
             worker_id=row["worker_id"],
+            actor_id=row["actor_id"],
+            key_id=row["key_id"],
             capabilities=tuple(json.loads(row["capabilities"])),
             pools=tuple(json.loads(row["pools"])),
             profile_id=row["profile_id"],

@@ -111,12 +111,14 @@ def test_reducer_is_pure_and_accepts_authorized_contract():
 
 def test_worker_registration_candidate_updates_rebuildable_routing_view(store):
     registration = WorkerRegistration(
-        "llm:vision",
+        "human:owner",
         capabilities=("text", "vision"),
         pools=("advanced",),
         profile_id="deepseek:v4",
         capacity=2,
         version="3",
+        actor_id="human:owner",
+        key_id="root",
     )
     genesis, candidate = _proposal(
         capabilities=("worker.register",),
@@ -131,10 +133,13 @@ def test_worker_registration_candidate_updates_rebuildable_routing_view(store):
                     "capacity": registration.capacity,
                     "enabled": registration.enabled,
                     "version": registration.version,
+                    "actor_id": registration.actor_id,
+                    "key_id": registration.key_id,
                 }
             },
         ),
     )
+    initialize_genesis(store, genesis)
 
     trace = store if isinstance(store, SQLiteStore) else MemoryTraceStore()
     decision = CandidateCommitter(store, trace).commit(
@@ -156,7 +161,14 @@ def test_worker_registration_requires_dedicated_actor_capability():
     genesis, candidate = _proposal(
         capabilities=("contract.publish",),
         effect=CandidateEffect(
-            "worker.register", {"registration": {"worker_id": "unauthorized"}}
+            "worker.register",
+            {
+                "registration": {
+                    "worker_id": "human:owner",
+                    "actor_id": "human:owner",
+                    "key_id": "root",
+                }
+            },
         ),
     )
 
@@ -190,7 +202,12 @@ def test_multi_effect_candidate_commits_actor_and_worker_registration_atomically
         worker_signer.signer_id,
         ("asset.publish",),
     )
-    registration = WorkerRegistration("worker:atomic", version="1")
+    registration = WorkerRegistration(
+        "worker:atomic",
+        version="1",
+        actor_id="worker:atomic",
+        key_id="key-1",
+    )
     candidate = create_candidate_proposal(
         domain_id=genesis.id,
         actor_id="human:owner",
@@ -242,7 +259,14 @@ def test_invalid_effect_rejects_entire_candidate_batch(store):
             actor_authorization_effect(worker_key),
             CandidateEffect(
                 "worker.register",
-                {"registration": {"worker_id": "worker:rejected", "capacity": 0}},
+                {
+                    "registration": {
+                        "worker_id": "worker:rejected",
+                        "actor_id": "worker:rejected",
+                        "key_id": "key-1",
+                        "capacity": 0,
+                    }
+                },
             ),
         ],
         signer=root_signer,

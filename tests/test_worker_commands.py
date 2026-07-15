@@ -11,6 +11,7 @@ from aigineering.core.ids import (
     hash_contract,
 )
 from aigineering.core.provenance import sign_asset
+from aigineering.core.signing import Ed25519Signer
 from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.protocol.envelope import CandidateEnvelope
 from aigineering.protocol.package import WorkerPackage
@@ -47,6 +48,7 @@ def test_worker_register_publishes_signed_candidate():
     runner = CliRunner()
     with runner.isolated_filesystem():
         assert runner.invoke(cli, ["domain", "init"]).exit_code == 0
+        signer = Ed25519Signer()
         result = runner.invoke(
             cli,
             [
@@ -54,6 +56,10 @@ def test_worker_register_publishes_signed_candidate():
                 "register",
                 "--worker-id",
                 "llm:vision",
+                "--key-id",
+                "vision-1",
+                "--public-key",
+                signer.signer_id,
                 "--capability",
                 "vision",
                 "--pool",
@@ -72,12 +78,57 @@ def test_worker_register_publishes_signed_candidate():
         assert registration is not None
         assert registration.capabilities == ("vision",)
         assert registration.pools == ("advanced",)
+        assert registration.actor_id == "llm:vision"
+        assert registration.key_id == "vision-1"
         record_types = {
             record.record_type for _, record in store.scan_runtime_records()
         }
-        assert {"candidate.received", "candidate.committed", "worker.registered"} <= (
-            record_types
+        assert {
+            "actor.authorized",
+            "candidate.received",
+            "candidate.committed",
+            "worker.registered",
+        } <= record_types
+        store.close()
+
+
+def test_worker_reregistration_reuses_exact_actor_key_and_rejects_rebinding():
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        assert runner.invoke(cli, ["domain", "init"]).exit_code == 0
+        signer = Ed25519Signer()
+        base = [
+            "worker",
+            "register",
+            "--worker-id",
+            "worker:stable",
+            "--key-id",
+            "stable-1",
+            "--public-key",
+            signer.signer_id,
+            "--json",
+        ]
+        assert runner.invoke(cli, [*base, "--version", "1"]).exit_code == 0
+        second = runner.invoke(cli, [*base, "--version", "2"])
+        assert second.exit_code == 0, second.output
+
+        rebinding = runner.invoke(
+            cli,
+            [
+                *base[:-3],
+                "--public-key",
+                Ed25519Signer().signer_id,
+                "--json",
+                "--version",
+                "3",
+            ],
         )
+        assert rebinding.exit_code != 0
+        assert "already exists or is revoked" in rebinding.output
+
+        store = SQLiteStore(".aig/store.db")
+        assert store.get_worker_registration("worker:stable").version == "2"
+        assert len(store.scan_runtime_records(record_type="actor.authorized")) == 1
         store.close()
 
 

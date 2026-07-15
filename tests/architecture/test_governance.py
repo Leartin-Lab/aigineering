@@ -241,7 +241,8 @@ def test_worker_registration_cli_uses_typed_candidate_effect():
     )[0]
 
     assert "worker_registration_effect" in register
-    assert "commit_local_effect" in register
+    assert "actor_authorization_effect" in register
+    assert "commit_local_effects" in register
     assert "store.register_worker" not in register
 
 

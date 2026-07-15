@@ -30,6 +30,8 @@ class WorkerRegistration:
     active_claims: int = 0
     enabled: bool = True
     version: str = "1"
+    actor_id: str = ""
+    key_id: str = ""
 
     def __post_init__(self) -> None:
         if not self.worker_id:
@@ -51,6 +53,8 @@ def worker_registration_payload(registration: WorkerRegistration) -> dict:
         "profile_id": registration.profile_id,
         "version": registration.version,
         "worker_id": registration.worker_id,
+        "actor_id": registration.actor_id,
+        "key_id": registration.key_id,
     }
 
 
@@ -77,6 +81,8 @@ def registration_from_record(
         active_claims=active_claims,
         enabled=bool(payload["enabled"]),
         version=str(payload["version"]),
+        actor_id=str(payload.get("actor_id", "")),
+        key_id=str(payload.get("key_id", "")),
     )
 
 

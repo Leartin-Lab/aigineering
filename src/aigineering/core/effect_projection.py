@@ -136,7 +136,6 @@ def project_asset_proposal(
 def project_worker_registration(
     effect: CandidateEffect, candidate: CandidateProposal, receipt_id: str
 ) -> EffectProjection:
-    del candidate
     value = effect.payload.get("registration")
     if not isinstance(value, Mapping):
         raise ValueError("worker.register requires an object payload.registration")
@@ -149,10 +148,19 @@ def project_worker_registration(
         capacity=int(data.get("capacity", 1)),
         enabled=bool(data.get("enabled", True)),
         version=str(data.get("version", "1")),
+        actor_id=str(data.get("actor_id", "")),
+        key_id=str(data.get("key_id", "")),
     )
+    if not registration.actor_id or not registration.key_id:
+        raise ValueError("worker.register requires actor_id and key_id binding")
+    if registration.worker_id != registration.actor_id:
+        raise ValueError("worker.register worker_id must equal its actor_id")
     record = create_runtime_record(
         "worker.registered",
-        worker_registration_payload(registration),
+        {
+            **worker_registration_payload(registration),
+            "registered_by": candidate.actor_id,
+        },
         causal_parents=(receipt_id,),
     )
     return EffectProjection(

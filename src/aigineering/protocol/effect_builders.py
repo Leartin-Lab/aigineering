@@ -47,6 +47,8 @@ def worker_registration_effect(registration: WorkerRegistration) -> CandidateEff
                 "profile_id": registration.profile_id,
                 "version": registration.version,
                 "worker_id": registration.worker_id,
+                "actor_id": registration.actor_id,
+                "key_id": registration.key_id,
             }
         },
     )

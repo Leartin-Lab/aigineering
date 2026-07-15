@@ -12,12 +12,14 @@ from aigineering.cli._common import (
     _persistent_store,
     _redact_sealed,
 )
-from aigineering.cli._candidate import commit_local_effect, require_accepted
+from aigineering.cli._candidate import commit_local_effects, require_accepted
 from aigineering.runtime import (
     _method_context_assets_for,
     claim_next_package,
 )
 from aigineering.core.disclosure import DisclosurePolicyError, compute_disclosure
+from aigineering.core.actor_facts import load_effective_actor_keys
+from aigineering.core.domain import load_genesis
 from aigineering.core.worker_routing import WorkerRegistration
 from aigineering.core.submit import (
     SubmitClaimError,
@@ -25,8 +27,12 @@ from aigineering.core.submit import (
     SubmitConflictError,
     submit_candidate,
 )
+from aigineering.protocol.candidate import ActorKey
 from aigineering.protocol.envelope import CandidateEnvelope
-from aigineering.protocol.effect_builders import worker_registration_effect
+from aigineering.protocol.effect_builders import (
+    actor_authorization_effect,
+    worker_registration_effect,
+)
 from aigineering.protocol.wire import contract_to_dict
 
 
@@ -204,6 +210,21 @@ def worker_next(worker_id: str, lease_seconds: int, json_output: bool) -> None:
 )
 @click.option("--capacity", default=1, show_default=True, type=click.IntRange(min=1))
 @click.option("--version", default="1", show_default=True)
+@click.option("--key-id", required=True, help="Authorized Candidate signing key ID.")
+@click.option(
+    "--public-key", required=True, help="Candidate signing public key material."
+)
+@click.option(
+    "--signature-kind", default="ed25519", show_default=True, help="Key algorithm."
+)
+@click.option(
+    "--candidate-capability",
+    "candidate_capabilities",
+    multiple=True,
+    default=("worker.submit",),
+    show_default=True,
+    help="Candidate effect capability granted to the worker key.",
+)
 @click.option(
     "--disabled", is_flag=True, default=False, help="Register as unavailable."
 )
@@ -215,6 +236,10 @@ def worker_register(
     profile_id: str,
     capacity: int,
     version: str,
+    key_id: str,
+    public_key: str,
+    signature_kind: str,
+    candidate_capabilities: tuple[str, ...],
     disabled: bool,
     json_output: bool,
 ) -> None:
@@ -228,12 +253,41 @@ def worker_register(
         capacity=capacity,
         enabled=not disabled,
         version=version,
+        actor_id=worker_id,
+        key_id=key_id,
+    )
+    actor_key = ActorKey(
+        worker_id,
+        key_id,
+        signature_kind,
+        public_key,
+        candidate_capabilities,
     )
     try:
-        require_accepted(
-            commit_local_effect(
-                store,
+        existing = next(
+            (
+                key
+                for key in load_effective_actor_keys(store, load_genesis(store))
+                if (key.actor_id, key.key_id) == (worker_id, key_id)
+            ),
+            None,
+        )
+        if existing is not None and existing != actor_key:
+            raise ValueError(
+                f"actor key {worker_id}/{key_id} already exists or is revoked"
+            )
+        effects = (
+            (worker_registration_effect(registration),)
+            if existing is not None
+            else (
+                actor_authorization_effect(actor_key),
                 worker_registration_effect(registration),
+            )
+        )
+        require_accepted(
+            commit_local_effects(
+                store,
+                effects,
                 idempotency_key=f"worker:{worker_id}:{version}",
             )
         )
@@ -247,6 +301,8 @@ def worker_register(
         "capacity": registration.capacity,
         "enabled": registration.enabled,
         "version": registration.version,
+        "actor_id": registration.actor_id,
+        "key_id": registration.key_id,
     }
     if json_output:
         _output_json(payload)

@@ -140,6 +140,7 @@ def validate_actor_runtime_record(record: RuntimeRecord, store) -> None:
         ACTOR_AUTHORIZED,
         ACTOR_REVOKED,
         "candidate.received",
+        "worker.registered",
     }:
         return
     genesis_identities = genesis_actor_identities(store)
@@ -158,3 +159,26 @@ def validate_actor_runtime_record(record: RuntimeRecord, store) -> None:
         known_identities=genesis_identities + authorized_identities,
     )
     validate_candidate_receipt_actor(record, revocations)
+    if record.record_type == "worker.registered":
+        actor_id = str(record.payload.get("actor_id", ""))
+        key_id = str(record.payload.get("key_id", ""))
+        if not actor_id and not key_id:
+            return  # Explicit legacy-migration compatibility only.
+        if str(record.payload.get("worker_id", "")) != actor_id:
+            raise ValueError("worker.registered worker_id must equal actor_id")
+        identity = (actor_id, key_id)
+        if identity not in set(genesis_identities + authorized_identities):
+            raise ValueError(
+                f"worker.registered references unknown actor key {actor_id}/{key_id}"
+            )
+        if any(
+            (
+                str(revocation.payload.get("actor_id", "")),
+                str(revocation.payload.get("key_id", "")),
+            )
+            == identity
+            for _, revocation in revocations
+        ):
+            raise ValueError(
+                f"worker.registered references revoked actor key {actor_id}/{key_id}"
+            )
