@@ -5,10 +5,9 @@ from __future__ import annotations
 import click
 
 from aigineering.cli._common import _output_json, _persistent_store
-from aigineering.core.method_handlers.retry import RetryMethodHandler
-from aigineering.core.method_runtime import MethodRuntime
+from aigineering.cli._candidate import commit_local_effect, require_accepted
 from aigineering.core.methods import retry_contract
-from aigineering.protocol.types import Candidate
+from aigineering.protocol.effect_builders import contract_declaration_effect
 
 
 @click.command("retry")
@@ -26,7 +25,7 @@ def retry(
     contract_id: str,
     json_output: bool,
 ) -> None:
-    """Method-first retry: create a new contract from an existing one with deterministic retry ID."""
+    """Publish a security-equivalent retry Contract through a signed Candidate."""
     store = _persistent_store()
     original = store.get_contract(contract_id)
     if original is None:
@@ -36,22 +35,19 @@ def retry(
             click.echo(f"Contract '{contract_id}' not found.")
         return
 
-    # Method ingress (G1): dispatch through RetryMethodHandler instead of
-    # directly calling store.add_contract().
-    runtime = MethodRuntime(
-        store=store,
-        trace=store,
-        budget={original.id: original.budget},
-    )
-    candidate = Candidate(
-        worker_id="cli",
-        raw_output="/retry",
-        parsed_action={"type": "retry"},
-    )
-    handler = RetryMethodHandler()
-    handler.handle_method(runtime, original, "retry", candidate)
-
-    retry_id = retry_contract(original).id
+    proposed = retry_contract(original)
+    try:
+        require_accepted(
+            commit_local_effect(
+                store,
+                contract_declaration_effect(proposed),
+                idempotency_key=f"retry:{original.id}:{proposed.id}",
+                causal_parents=(original.id,),
+            )
+        )
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
+    retry_id = proposed.id
 
     if json_output:
         _output_json(

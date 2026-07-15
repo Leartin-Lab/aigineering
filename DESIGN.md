@@ -132,6 +132,11 @@ invariant before append, and SQLite schema v9 adds a unique expression index on
 the terminal record's contract ID, so competing replicas cannot commit
 different terminal outcomes.
 
+Administrative `aig retry` is also ordinary Contract publication. It builds a
+deterministic security-equivalent retry Contract, publishes `contract.declare`,
+and binds the original attempt as a Candidate causal parent; it does not invoke
+the legacy Method runtime.
+
 Protected capability and MCP descriptor Assets reuse `asset.propose`. A
 protected name derives an additional `asset.publish.protected` requirement;
 ordinary asset publishers cannot acquire it from payload fields. The local

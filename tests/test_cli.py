@@ -370,11 +370,16 @@ def test_retry_creates_deterministic_contract():
             c.id for c in store2.get_all_contracts() if c.origin == "retry"
         ]
         assert expected_id in retry_ids_in_store
-        retry_events = store2.get_by_contract(original_id)
-        assert any(
-            e.event_type == "retry_created" and e.relation_target == expected_id
-            for e in retry_events
-        )
+        receipts = [
+            record
+            for _, record in store2.scan_runtime_records(
+                record_type="candidate.received"
+            )
+            if original_id in record.causal_parents
+        ]
+        assert len(receipts) == 1
+        committed = store2.get_by_event_type("candidate_committed")
+        assert any(entry.relation_target == expected_id for entry in committed)
         store2.close()
 
 

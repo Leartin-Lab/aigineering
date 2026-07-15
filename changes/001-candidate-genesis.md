@@ -149,6 +149,10 @@ Implementation progress:
   submission, and compatibility ingress share one pure Asset-fact reduction
   function, removing a duplicate commitment coordinator from the supported
   worker path.
+- Complete: the operator retry command publishes its deterministic retry
+  Contract through `contract.declare`; the original attempt is bound as a
+  Candidate causal parent. CLI retry no longer instantiates MethodRuntime or a
+  feature-specific handler.
 - Complete: cryptography is a base dependency; the runtime does not silently
   substitute a non-authenticating deterministic seal.
 - Pending: authenticate claim-bound worker submissions as CandidateProposal

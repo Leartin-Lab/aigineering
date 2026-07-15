@@ -165,6 +165,16 @@ def test_recovery_cancel_uses_candidate_and_trace_is_not_task_state():
     assert 'record_type="lifecycle.terminal"' in source
 
 
+def test_retry_cli_publishes_an_ordinary_contract_candidate():
+    source = (ROOT / "src/aigineering/cli/retry.py").read_text(encoding="utf-8")
+
+    assert "contract_declaration_effect" in source
+    assert "commit_local_effect" in source
+    assert "causal_parents=(original.id,)" in source
+    assert "MethodRuntime" not in source
+    assert "RetryMethodHandler" not in source
+
+
 def test_capability_and_mcp_descriptors_use_protected_asset_candidates():
     for relative in (
         "src/aigineering/cli/capability.py",

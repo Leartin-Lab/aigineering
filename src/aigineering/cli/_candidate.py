@@ -14,6 +14,7 @@ def commit_local_effect(
     effect: CandidateEffect,
     *,
     idempotency_key: str,
+    causal_parents: tuple[str, ...] = (),
 ) -> CommitmentDecision:
     genesis = load_genesis(store)
     signer = load_actor_signer()
@@ -33,6 +34,7 @@ def commit_local_effect(
         signer,
         effect,
         idempotency_key=idempotency_key,
+        causal_parents=causal_parents,
     )
 
 

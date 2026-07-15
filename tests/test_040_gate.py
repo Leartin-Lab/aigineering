@@ -209,6 +209,7 @@ class TestCLIRetryBypass:
         from unittest.mock import patch
 
         from aigineering.core.sqlite_store import SQLiteStore
+        from aigineering.cli.identity import ensure_local_domain
 
         store = SQLiteStore(":memory:")
         original = Contract(
@@ -228,8 +229,10 @@ class TestCLIRetryBypass:
         )
 
         runner = CliRunner()
-        with patch.object(retry_module, "_persistent_store", return_value=store):
-            result = runner.invoke(retry_module.retry, ["--contract", "c-original"])
+        with runner.isolated_filesystem():
+            ensure_local_domain(store)
+            with patch.object(retry_module, "_persistent_store", return_value=store):
+                result = runner.invoke(retry_module.retry, ["--contract", "c-original"])
 
         assert result.exit_code == 0, f"G1/D-P0.1: CLI retry failed: {result.output}"
 
