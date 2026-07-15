@@ -16,8 +16,7 @@ from aigineering.application import (
 )
 from aigineering.runtime import (
     claim_next_package,
-    execute_claimed_package,
-    submit_candidate_envelope,
+    submit_worker_proposal,
 )
 
 from aigineering.core.commitment import CandidateCommitter
@@ -26,7 +25,6 @@ from aigineering.core.submit import (
     SubmitCommitError,
     SubmitConflictError,
 )
-from aigineering.protocol.envelope import CandidateEnvelope
 from aigineering.protocol.candidate import candidate_proposal_from_dict
 from aigineering.protocol.effect_builders import (
     asset_proposal_effect,
@@ -59,11 +57,6 @@ class CandidateProposalRequest(BaseModel):
     protocol_version: int = 1
 
 
-class ContractRunRequest(BaseModel):
-    worker: str = "mock"
-    output_content: str = ""
-
-
 class WorkerClaimRequest(BaseModel):
     worker_id: str
     contract_id: str | None = None
@@ -74,18 +67,6 @@ class WorkerRenewRequest(BaseModel):
     worker_id: str
     claim_epoch: int
     lease_seconds: int = 60
-
-
-class WorkerSubmitRequest(BaseModel):
-    contract_id: str
-    worker_id: str
-    raw_output: str
-    package_id: str
-    claim_id: str
-    claim_epoch: int
-    idempotency_key: str = ""
-    parsed_action: dict | None = None
-    usage_metadata: dict | None = None
 
 
 class AssetSliceCandidateRequest(CandidateProposalRequest):
@@ -130,13 +111,6 @@ class TraceEntryResponse(BaseModel):
     event_type: str
     authority_result: Optional[str] = None
     timestamp: str
-
-
-class ContractRunResponse(BaseModel):
-    contract_id: str
-    status: str
-    trace_ids: list[str]
-    output_asset_ids: list[str]
 
 
 class ReplacementClaimResponse(BaseModel):
@@ -434,6 +408,17 @@ def claim_worker_package(body: WorkerClaimRequest):
     if body.lease_seconds < 1:
         raise HTTPException(status_code=400, detail="lease_seconds must be positive")
     store = _persistent_store()
+    registration = store.get_worker_registration(body.worker_id)
+    if (
+        registration is None
+        or not registration.enabled
+        or registration.actor_id != body.worker_id
+        or not registration.key_id
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="worker must have an enabled actor-key registration before claim",
+        )
     try:
         claimed = claim_next_package(
             store,
@@ -469,13 +454,13 @@ def renew_worker_claim(claim_id: str, body: WorkerRenewRequest):
 
 
 @app.post("/worker/submissions")
-def submit_worker_candidate(body: WorkerSubmitRequest):
-    """Commit a fenced candidate; any replica may service the request."""
+def submit_worker_candidate(body: CandidateProposalRequest):
+    """Commit a signed and claim-fenced worker Candidate on any replica."""
     try:
-        envelope = CandidateEnvelope(**body.model_dump())
+        proposal = candidate_proposal_from_dict(body.model_dump())
         store = _persistent_store()
-        return submit_candidate_envelope(
-            envelope,
+        return submit_worker_proposal(
+            proposal,
             store,
             method_registry=_default_method_registry(),
         )
@@ -487,48 +472,13 @@ def submit_worker_candidate(body: WorkerSubmitRequest):
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
-@app.post("/contracts/{contract_id}/run", response_model=ContractRunResponse)
-def run_contract(contract_id: str, body: ContractRunRequest):
-    """Claim and run one contract through the worker protocol."""
-    if body.worker != "mock":
-        raise HTTPException(status_code=400, detail="Only mock worker is supported")
-
-    from aigineering.agent.mock import MockWorker
-
-    store = _persistent_store()
-    contract = store.get_contract(contract_id)
-    if contract is None:
-        raise HTTPException(status_code=404, detail="Contract not found")
-
-    output_content = body.output_content or f"API output for {contract.name}"
-    raw_output = "\n".join(
-        f"{output_name}: {output_content}" for output_name in contract.outputs
-    )
-    worker = MockWorker()
-    worker.set_output(contract.name, raw_output)
-    try:
-        claimed = claim_next_package(
-            store,
-            worker_id="server:mock",
-            contract_id=contract.id,
-        )
-        if claimed is None:
-            raise HTTPException(
-                status_code=409,
-                detail="Contract is not enabled or is already claimed/terminal",
-            )
-        result = execute_claimed_package(claimed, worker, store)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-
-    entries = store.get_by_contract(contract.id)
-    outputs = store.get_assets_by_contract(contract.id)
-    status = "complete" if result.get("complete") is True else result["status"]
-    return ContractRunResponse(
-        contract_id=contract.id,
-        status=status,
-        trace_ids=[entry.id for entry in entries],
-        output_asset_ids=[asset.id for asset in outputs],
+@app.post("/contracts/{contract_id}/run", status_code=410)
+def run_contract(contract_id: str):
+    """Reject the removed server-side worker impersonation endpoint."""
+    del contract_id
+    raise HTTPException(
+        status_code=410,
+        detail="Use /worker/claims and signed /worker/submissions",
     )
 
 

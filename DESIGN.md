@@ -118,6 +118,13 @@ validate the effect type before commitment. Unsigned legacy request bodies fail
 schema validation and cannot mutate the Store. Slice and replacement-claim HTTP
 operations remain compatibility surfaces pending additional effect types.
 
+`POST /worker/submissions` likewise accepts only a signed `worker.output`
+CandidateProposal. Server claims require an enabled actor/key-bound worker, so
+an anonymous claimant cannot lock work it is unable to submit. The former
+server-side mock `/contracts/{id}/run` mutation endpoint returns 410 and directs
+clients to the claim/submission protocol; the server never impersonates a
+worker actor.
+
 `contract.publish` does not authorize an actor to populate
 `minting_authority`. A declaration containing protected minting authority also
 requires `contract.publish.protected`; payload fields cannot self-grant that
@@ -199,6 +206,14 @@ effect committer, so `/candidates` cannot bypass claim/package fencing.
 Authentication, claim, policy, and binding failures append Candidate rejection
 records and Trace evidence before returning an error; an invalid worker result
 cannot disappear as an API-only failure.
+
+Local CLI execution now uses `WorkerHost`. Each concrete worker adapter has a
+durable delegated Ed25519 key and Candidate registration; the local root key
+only authorizes that actor. Claims use the worker actor ID, ordinary output and
+the transitional Method path both retain authenticated Candidate receipt and
+output evidence, and SQLite applies the same key/claim fencing to both. The raw
+`execute_claimed_package(worker, ...)` form remains only as an internal test and
+Method migration compatibility surface.
 
 A domain may persist exactly one `domain.genesis` RuntimeRecord. Initialization
 is idempotent, replacement fails closed, SQLite enforces uniqueness, and a

@@ -17,6 +17,7 @@ from aigineering.cli._common import (
     _session_id,
 )
 from aigineering.cli.task_state import project_task_status
+from aigineering.cli.identity import ensure_local_worker_host
 from aigineering.application import build_worker
 from aigineering.runtime import (
     WorkerInvocationError,
@@ -313,9 +314,10 @@ def _run_task_pool(
                             "--mock-preset must use contract_name=raw_output"
                         )
                     set_output(name, output)
+        host = ensure_local_worker_host(store, worker)
         deadline = time.monotonic() + wait_timeout
         if target_task_id is None:
-            claimed = claim_next_package(store, worker_id="cli:run-once")
+            claimed = claim_next_package(store, worker_id=host.worker_id)
             if claimed is None:
                 _emit_run_result(
                     {
@@ -327,7 +329,7 @@ def _run_task_pool(
                     json_output,
                 )
                 raise click.exceptions.Exit(1)
-            result = execute_claimed_package(claimed, worker, store)
+            result = execute_claimed_package(claimed, host, store)
             status = project_task_status(claimed.contract, store)
             status["ok"] = status["status"] == "completed"
             status["submission_status"] = result["status"]
@@ -347,12 +349,12 @@ def _run_task_pool(
             registry = _default_method_registry()
             recovered = process_rejected_submissions(store)
             processed_before = process_method_completions(store, registry)
-            claimed = claim_next_package(store, worker_id="cli:run-task")
+            claimed = claim_next_package(store, worker_id=host.worker_id)
             submission: dict | None = None
             if claimed is not None:
                 submission = execute_claimed_package(
                     claimed,
-                    worker,
+                    host,
                     store,
                     method_registry=registry,
                 )

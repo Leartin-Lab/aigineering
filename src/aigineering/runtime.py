@@ -9,7 +9,7 @@ from threading import Event, Thread
 
 from aigineering.agent.llm import LLMWorker, ProviderError
 from aigineering.agent.mock import MockWorker
-from aigineering.agent.worker import WorkerExecutionError
+from aigineering.agent.worker import WorkerExecutionError, WorkerHost
 from aigineering.core.activation import check_activation
 from aigineering.core.budget_manager import BudgetManager
 from aigineering.core.continuation_manager import ContinuationManager
@@ -32,10 +32,17 @@ from aigineering.core.methods import (
 from aigineering.core.provenance import sign_asset
 from aigineering.core.runtime_projection import RuntimeProjection
 from aigineering.core.submit import (
+    SubmitClaimError,
+    SubmitCommitError,
+    SubmitConflictError,
+    WorkerCandidateAuthentication,
+    authenticate_worker_candidate,
     replay_idempotent_submission,
+    submit_authenticated_worker_candidate,
     submit_candidate,
     validate_submission_claim,
 )
+from aigineering.core.commitment import record_candidate_rejection
 from aigineering.core.worker_routing import is_eligible
 from aigineering.core.trace_manager import TraceManager
 from aigineering.core.trace import create_entry
@@ -225,7 +232,7 @@ def claim_next_package(
 
 def execute_claimed_package(
     claimed: ClaimedPackage,
-    worker: MockWorker | LLMWorker,
+    worker: MockWorker | LLMWorker | WorkerHost,
     store,
     trace_store=None,
     method_registry=None,
@@ -282,12 +289,85 @@ def execute_claimed_package(
         idempotency_key=f"run-{claimed.package.package_id}",
         usage_metadata=candidate.metadata,
     )
+    if isinstance(worker, WorkerHost):
+        return submit_worker_proposal(
+            worker.sign_envelope(envelope),
+            store,
+            trace_store=trace,
+            method_registry=method_registry,
+        )
     return submit_candidate_envelope(
         envelope,
         store,
         trace_store=trace,
         method_registry=method_registry,
     )
+
+
+def submit_worker_proposal(
+    proposal,
+    store,
+    *,
+    trace_store=None,
+    method_registry=None,
+) -> dict:
+    """Submit one WorkerHost-signed proposal, including transitional methods."""
+    trace = trace_store if trace_store is not None else store
+    envelope, authentication = authenticate_worker_candidate(proposal, store, trace)
+    contract = store.get_contract(envelope.contract_id)
+    if contract is None:
+        raise ValueError(f"Contract '{envelope.contract_id}' not found in store")
+    candidate = Candidate(
+        worker_id=envelope.worker_id,
+        raw_output=envelope.raw_output,
+        parsed_action=envelope.parsed_action,
+        metadata=envelope.usage_metadata,
+    )
+    method_action = parse_method_action(candidate)
+    if method_action is None:
+        result = submit_authenticated_worker_candidate(
+            envelope, authentication, store, trace
+        )
+        if result["status"] == "rejected":
+            process_rejected_submissions(store)
+        return result
+    try:
+        if method_registry is None:
+            raise ValueError(
+                f"worker produced /{method_action.type} but no method registry is configured"
+            )
+        budget_consumed = sum(
+            1
+            for entry in trace.get_by_contract(contract.id)
+            if entry.event_type == "budget_consumed"
+        )
+        return _submit_claimed_method(
+            contract,
+            envelope,
+            candidate,
+            method_action,
+            max(0, contract.budget - budget_consumed),
+            store,
+            trace,
+            method_registry,
+            authentication=authentication,
+        )
+    except (
+        DisclosurePolicyError,
+        SubmitClaimError,
+        SubmitCommitError,
+        SubmitConflictError,
+        TypeError,
+        ValueError,
+    ) as exc:
+        record_candidate_rejection(
+            proposal,
+            str(exc),
+            store,
+            trace,
+            receipt=authentication.receipt,
+        )
+        raise
 
 
 def submit_candidate_envelope(
@@ -389,7 +469,8 @@ def process_rejected_submissions(store) -> list[str]:
     candidates = {
         record.payload["candidate_id"]: record
         for record in records
-        if record.record_type == "candidate.received"
+        if record.record_type in {"candidate.received", "worker.output.received"}
+        and "raw_output" in record.payload
     }
     terminal_contracts = {
         record.payload["contract_id"]
@@ -653,13 +734,18 @@ def _submit_claimed_method(
     store,
     trace,
     method_registry,
+    *,
+    authentication: WorkerCandidateAuthentication | None = None,
 ) -> dict:
     """Atomically schedule a claim-bound method action."""
+    candidate_id = (
+        authentication.candidate_id if authentication else envelope.candidate_hash
+    )
     duplicate = replay_idempotent_submission(
         store,
         contract_id=contract.id,
         idempotency_key=envelope.idempotency_key,
-        candidate_hash=envelope.candidate_hash,
+        candidate_hash=candidate_id,
     )
     if duplicate is not None:
         return duplicate
@@ -706,20 +792,44 @@ def _submit_claimed_method(
         relation_type=action.type,
         budget_remaining=remaining,
     )
-    candidate_record = create_runtime_record(
-        "candidate.received",
-        {
-            "candidate_id": envelope.candidate_hash,
-            "claim_epoch": envelope.claim_epoch,
-            "claim_id": envelope.claim_id,
-            "contract_id": contract.id,
-            "method": action.type,
-            "package_id": envelope.package_id,
-            "raw_output": candidate.raw_output,
-            "worker_id": envelope.worker_id,
-            "usage_metadata": envelope.usage_metadata,
-        },
+    candidate_record = (
+        authentication.receipt
+        if authentication
+        else create_runtime_record(
+            "candidate.received",
+            {
+                "candidate_id": candidate_id,
+                "claim_epoch": envelope.claim_epoch,
+                "claim_id": envelope.claim_id,
+                "contract_id": contract.id,
+                "method": action.type,
+                "package_id": envelope.package_id,
+                "raw_output": candidate.raw_output,
+                "worker_id": envelope.worker_id,
+                "usage_metadata": envelope.usage_metadata,
+            },
+        )
     )
+    output_record = None
+    method_parent_id = candidate_record.id
+    if authentication is not None:
+        output_record = create_runtime_record(
+            "worker.output.received",
+            {
+                "candidate_id": candidate_id,
+                "claim_epoch": envelope.claim_epoch,
+                "claim_id": envelope.claim_id,
+                "contract_id": contract.id,
+                "idempotency_key": envelope.idempotency_key,
+                "method": action.type,
+                "package_id": envelope.package_id,
+                "raw_output": candidate.raw_output,
+                "usage_metadata": envelope.usage_metadata,
+                "worker_id": envelope.worker_id,
+            },
+            causal_parents=[candidate_record.id],
+        )
+        method_parent_id = output_record.id
     method_record = create_runtime_record(
         "method.scheduled",
         {
@@ -727,37 +837,41 @@ def _submit_claimed_method(
             "method": action.type,
             "relation_target": child.id,
         },
-        causal_parents=[candidate_record.id],
+        causal_parents=[method_parent_id],
     )
-    runtime_records = [
-        candidate_record,
-        method_record,
-        create_runtime_record(
-            "budget.consumed",
-            {
-                "amount": 1,
-                "contract_id": contract.id,
-                "remaining": remaining,
-                "trace_id": budget_entry.id,
-            },
-            causal_parents=[method_record.id],
-        ),
-        create_runtime_record(
-            "contract.declared",
-            {"contract": contract_to_dict(child)},
-            causal_parents=[method_record.id],
-        ),
-        create_runtime_record(
-            "trace.recorded",
-            {"trace": trace_entry_to_dict(method_entry)},
-            causal_parents=[method_record.id],
-        ),
-        create_runtime_record(
-            "trace.recorded",
-            {"trace": trace_entry_to_dict(budget_entry)},
-            causal_parents=[method_record.id],
-        ),
-    ]
+    runtime_records = [candidate_record]
+    if output_record is not None:
+        runtime_records.append(output_record)
+    runtime_records.extend(
+        [
+            method_record,
+            create_runtime_record(
+                "budget.consumed",
+                {
+                    "amount": 1,
+                    "contract_id": contract.id,
+                    "remaining": remaining,
+                    "trace_id": budget_entry.id,
+                },
+                causal_parents=[method_record.id],
+            ),
+            create_runtime_record(
+                "contract.declared",
+                {"contract": contract_to_dict(child)},
+                causal_parents=[method_record.id],
+            ),
+            create_runtime_record(
+                "trace.recorded",
+                {"trace": trace_entry_to_dict(method_entry)},
+                causal_parents=[method_record.id],
+            ),
+            create_runtime_record(
+                "trace.recorded",
+                {"trace": trace_entry_to_dict(budget_entry)},
+                causal_parents=[method_record.id],
+            ),
+        ]
+    )
     if context_asset is not None:
         runtime_records.append(
             create_runtime_record(
@@ -784,11 +898,12 @@ def _submit_claimed_method(
         trace_entries=[method_entry, budget_entry],
         runtime_records=tuple(runtime_records),
         idempotency_key=envelope.idempotency_key,
-        idempotency_result={**response, "_candidate_hash": envelope.candidate_hash},
+        idempotency_result={**response, "_candidate_hash": candidate_id},
         claim_id=envelope.claim_id,
         worker_id=envelope.worker_id,
         package_id=envelope.package_id,
         claim_epoch=envelope.claim_epoch,
+        candidate_key_id=authentication.key_id if authentication else "",
     )
     return response
 

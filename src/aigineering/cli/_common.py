@@ -240,17 +240,20 @@ def _run_demo(
         claim_next_package,
         execute_claimed_package,
     )
+    from aigineering.cli.identity import ensure_local_worker_host
+
+    host = ensure_local_worker_host(store, worker)
 
     claimed = claim_next_package(
         store,
-        worker_id="cli:demo",
+        worker_id=host.worker_id,
         contract_id=contract.id,
     )
     if claimed is None:
         raise RuntimeError(f"demo contract {contract.id!r} could not be claimed")
     execute_claimed_package(
         claimed,
-        worker,
+        host,
         store,
         trace_store,
         method_registry=default_method_registry(),

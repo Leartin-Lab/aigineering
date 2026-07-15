@@ -1975,29 +1975,7 @@ class SQLiteStore:
         """
         with self._conn:
             if candidate_key_id:
-                # A SELECT does not start SQLite's write transaction.  Acquire
-                # writer arbitration before reading the routing projection so
-                # another replica cannot rebind the worker between this check
-                # and the first committed effect.
-                self._conn.execute(
-                    "UPDATE worker_registrations SET updated_at = updated_at "
-                    "WHERE worker_id = ?",
-                    (worker_id,),
-                )
-                registration = self._conn.execute(
-                    "SELECT actor_id, key_id, enabled FROM worker_registrations "
-                    "WHERE worker_id = ?",
-                    (worker_id,),
-                ).fetchone()
-                if (
-                    registration is None
-                    or not bool(registration["enabled"])
-                    or registration["actor_id"] != worker_id
-                    or registration["key_id"] != candidate_key_id
-                ):
-                    raise sqlite3.IntegrityError(
-                        "worker actor-key binding changed during submit"
-                    )
+                self._lock_worker_key_binding(worker_id, candidate_key_id)
             for asset in accepted_assets:
                 if not asset.signed_by or not verify_asset_seal(asset):
                     raise ValueError(
@@ -2093,9 +2071,12 @@ class SQLiteStore:
         worker_id: str,
         package_id: str,
         claim_epoch: int,
+        candidate_key_id: str = "",
     ) -> bool:
         """Atomically schedule a method child and consume its parent claim."""
         with self._conn:
+            if candidate_key_id:
+                self._lock_worker_key_binding(worker_id, candidate_key_id)
             self._insert_contract(child_contract)
             if context_asset is not None:
                 if not context_asset.signed_by or not verify_asset_seal(context_asset):
@@ -2170,6 +2151,30 @@ class SQLiteStore:
                 )
             )
         return True
+
+    def _lock_worker_key_binding(self, worker_id: str, key_id: str) -> None:
+        """Acquire writer arbitration and verify the current routing identity."""
+        # A SELECT does not start SQLite's write transaction. This no-op write
+        # prevents another replica from rebinding the worker before commitment.
+        self._conn.execute(
+            "UPDATE worker_registrations SET updated_at = updated_at "
+            "WHERE worker_id = ?",
+            (worker_id,),
+        )
+        registration = self._conn.execute(
+            "SELECT actor_id, key_id, enabled FROM worker_registrations "
+            "WHERE worker_id = ?",
+            (worker_id,),
+        ).fetchone()
+        if (
+            registration is None
+            or not bool(registration["enabled"])
+            or registration["actor_id"] != worker_id
+            or registration["key_id"] != key_id
+        ):
+            raise sqlite3.IntegrityError(
+                "worker actor-key binding changed during submit"
+            )
 
     def commit_worker_invocation_failure(
         self,

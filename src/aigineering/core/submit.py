@@ -47,9 +47,16 @@ class SubmitCommitError(Exception):
 class WorkerCandidateAuthentication:
     """Verified identity carried across projection into the Store transaction."""
 
+    candidate: CandidateProposal
     receipt: RuntimeRecord
-    candidate_id: str
-    key_id: str
+
+    @property
+    def candidate_id(self) -> str:
+        return self.candidate.id
+
+    @property
+    def key_id(self) -> str:
+        return self.candidate.key_id
 
 
 def replay_idempotent_submission(
@@ -354,6 +361,55 @@ def submit_worker_candidate(
 ) -> dict:
     """Authenticate and commit one signed, claim-bound worker output Candidate."""
     operational = require_operational_store(store)
+    envelope, authentication = authenticate_worker_candidate(
+        candidate, operational, trace_store
+    )
+    return submit_authenticated_worker_candidate(
+        envelope, authentication, operational, trace_store
+    )
+
+
+def submit_authenticated_worker_candidate(
+    envelope: CandidateEnvelope,
+    authentication: WorkerCandidateAuthentication,
+    store: StoreProtocol,
+    trace_store: TraceStoreProtocol,
+) -> dict:
+    """Commit output after a reusable WorkerHost authentication decision."""
+    operational = require_operational_store(store)
+    try:
+        return submit_candidate(
+            envelope,
+            operational,
+            trace_store,
+            idempotency_key=authentication.candidate.idempotency_key,
+            authentication=authentication,
+        )
+    except (
+        DisclosurePolicyError,
+        SubmitClaimError,
+        SubmitCommitError,
+        SubmitConflictError,
+        TypeError,
+        ValueError,
+    ) as exc:
+        record_candidate_rejection(
+            authentication.candidate,
+            str(exc),
+            operational,
+            trace_store,
+            receipt=authentication.receipt,
+        )
+        raise
+
+
+def authenticate_worker_candidate(
+    candidate: CandidateProposal,
+    store,
+    trace_store,
+) -> tuple[CandidateEnvelope, WorkerCandidateAuthentication]:
+    """Verify actor and worker semantics without committing proposed output."""
+    operational = require_operational_store(store)
     genesis = load_genesis(operational)
     actor_keys = load_effective_actor_keys(operational, genesis)
     try:
@@ -366,21 +422,8 @@ def submit_worker_candidate(
         record_candidate_rejection(candidate, str(exc), operational, trace_store)
         raise
     try:
-        return _submit_authenticated_worker_candidate(
-            candidate,
-            receipt,
-            actor_keys,
-            operational,
-            trace_store,
-        )
-    except (
-        DisclosurePolicyError,
-        SubmitClaimError,
-        SubmitCommitError,
-        SubmitConflictError,
-        TypeError,
-        ValueError,
-    ) as exc:
+        envelope = _worker_candidate_envelope(candidate, actor_keys, operational)
+    except (TypeError, ValueError) as exc:
         record_candidate_rejection(
             candidate,
             str(exc),
@@ -389,16 +432,11 @@ def submit_worker_candidate(
             receipt=receipt,
         )
         raise
+    return envelope, WorkerCandidateAuthentication(candidate, receipt)
 
 
-def _submit_authenticated_worker_candidate(
-    candidate: CandidateProposal,
-    receipt: RuntimeRecord,
-    actor_keys,
-    store,
-    trace_store,
-) -> dict:
-    """Validate worker semantics after Candidate authentication."""
+def _worker_candidate_envelope(candidate, actor_keys, store) -> CandidateEnvelope:
+    """Parse an authenticated worker effect and enforce routing identity."""
     if (
         len(candidate.effects) != 1
         or candidate.effects[0].effect_type != "worker.output"
@@ -434,17 +472,7 @@ def _submit_authenticated_worker_candidate(
         candidate.key_id,
     ):
         raise ValueError("Candidate actor key does not match worker registration")
-    return submit_candidate(
-        envelope,
-        store,
-        trace_store,
-        idempotency_key=candidate.idempotency_key,
-        authentication=WorkerCandidateAuthentication(
-            receipt=receipt,
-            candidate_id=candidate.id,
-            key_id=candidate.key_id,
-        ),
-    )
+    return envelope
 
 
 def _submission_runtime_records(

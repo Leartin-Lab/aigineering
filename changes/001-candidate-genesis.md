@@ -197,9 +197,17 @@ Implementation progress:
   `contract.declare` effects; its worker behavior and Candidate integration are
   tested independently. It temporarily delegates to the existing containment
   compiler while that implementation is moved out of `core.methods`.
-- Pending: move signing into the internal WorkerHost execution adapter, then
-  replace Method scheduling/completion call sites with TaskPlugin publication
-  and delete the compatibility handlers.
+- Complete: WorkerHost binds a stateless execution adapter to one actor key and
+  signs its claim-bound envelope. Local CLI workers persist delegated keys,
+  register by Candidate, claim as that actor, and use the signed path for both
+  ordinary output and transitional Method actions. SQLite key fencing is shared
+  by ordinary and Method submission transactions.
+- Complete: the HTTP worker submission endpoint accepts signed Candidates only;
+  server claims require an enabled actor-key binding. The server-side mock run
+  endpoint no longer impersonates a worker or mutates runtime state.
+- Pending: replace Method scheduling/completion call sites with TaskPlugin
+  publication, delete the raw execution compatibility surface and handlers,
+  and migrate engine-backed inner execution to WorkerHost.
 
 ## Required architecture tests
 

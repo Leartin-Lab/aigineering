@@ -17,6 +17,7 @@ from aigineering.core.asset_versions import (
 from aigineering.core.domain import initialize_genesis
 from aigineering.core.signing import Ed25519Signer
 from aigineering.core.sqlite_store import SQLiteStore
+from aigineering.core.worker_routing import WorkerRegistration
 from aigineering.protocol.candidate import (
     ActorKey,
     CandidateEffect,
@@ -26,9 +27,13 @@ from aigineering.protocol.candidate import (
 )
 from aigineering.protocol.wire import contract_to_dict
 from aigineering.protocol.effect_builders import (
+    actor_authorization_effect,
     asset_proposal_effect,
     replacement_claim_effect,
+    worker_output_effect,
+    worker_registration_effect,
 )
+from aigineering.protocol.envelope import CandidateEnvelope
 from aigineering.server.app import app
 
 
@@ -42,7 +47,13 @@ def _signed_client():
                 "root",
                 signer.kind,
                 signer.signer_id,
-                ("asset.publish", "asset.relate", "contract.publish"),
+                (
+                    "actor.authorize",
+                    "asset.publish",
+                    "asset.relate",
+                    "contract.publish",
+                    "worker.register",
+                ),
             )
         ],
         "policy:test",
@@ -62,6 +73,62 @@ def _candidate_body(actor, effect: CandidateEffect):
             key_id="root",
             effects=[effect],
             signer=signer,
+        )
+    )
+
+
+def _register_worker(client, actor, worker_id: str):
+    root_signer, genesis = actor
+    worker_signer = Ed25519Signer()
+    key = ActorKey(
+        worker_id,
+        "worker-1",
+        worker_signer.kind,
+        worker_signer.signer_id,
+        ("worker.submit",),
+    )
+    registration = WorkerRegistration(
+        worker_id,
+        actor_id=worker_id,
+        key_id=key.key_id,
+    )
+    proposal = create_candidate_proposal(
+        domain_id=genesis.id,
+        actor_id="test:client",
+        key_id="root",
+        effects=[
+            actor_authorization_effect(key),
+            worker_registration_effect(registration),
+        ],
+        signer=root_signer,
+        idempotency_key=f"register:{worker_id}",
+    )
+    response = client.post("/candidates", json=candidate_proposal_to_dict(proposal))
+    assert response.status_code == 200, response.text
+    return worker_signer, key
+
+
+def _worker_submission(actor, worker_key, package, raw_output: str):
+    signer, key = worker_key
+    _root_signer, genesis = actor
+    idempotency_key = f"remote-{package['package_id']}"
+    envelope = CandidateEnvelope(
+        contract_id=package["contract_id"],
+        worker_id=key.actor_id,
+        raw_output=raw_output,
+        package_id=package["package_id"],
+        claim_id=package["claim_id"],
+        claim_epoch=package["claim_epoch"],
+        idempotency_key=idempotency_key,
+    )
+    return candidate_proposal_to_dict(
+        create_candidate_proposal(
+            domain_id=genesis.id,
+            actor_id=key.actor_id,
+            key_id=key.key_id,
+            effects=[worker_output_effect(envelope)],
+            signer=signer,
+            idempotency_key=idempotency_key,
         )
     )
 
@@ -226,7 +293,7 @@ def test_list_assets_and_contracts(tmp_path, monkeypatch):
     assert [row["name"] for row in contracts.json()] == ["api_task"]
 
 
-def test_run_contract_persists_outputs_and_trace(tmp_path, monkeypatch):
+def test_server_side_worker_impersonation_endpoint_is_removed(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     client, actor = _signed_client()
 
@@ -238,29 +305,14 @@ def test_run_contract_persists_outputs_and_trace(tmp_path, monkeypatch):
         f"/contracts/{contract_id}/run",
         json={"worker": "mock", "output_content": "done"},
     )
-    assert run.status_code == 200, run.text
-    body = run.json()
-    assert body["contract_id"] == contract_id
-    assert body["status"] == "complete"
-    assert body["trace_ids"]
-    assert len(body["output_asset_ids"]) == 1
-
-    output = client.get("/assets/out")
-    assert output.status_code == 200, output.text
-    assert output.json()[0]["content"] == "done"
-
-    trace = client.get("/trace")
-    assert trace.status_code == 200, trace.text
-    assert "complete" in [entry["event_type"] for entry in trace.json()]
+    assert run.status_code == 410, run.text
+    assert "/worker/claims" in run.json()["detail"]
     store = SQLiteStore(".aig/store.db")
-    record_types = [record.record_type for _, record in store.scan_runtime_records()]
-    assert "claim.granted" in record_types
-    assert "candidate.received" in record_types
-    assert "projection.decided" in record_types
-    assert "claim.submitted" in record_types
+    assert store.get_assets_by_name("out") == []
+    assert store.get_claim(contract_id) is None
 
 
-def test_run_contract_rejects_non_mock_worker(tmp_path, monkeypatch):
+def test_removed_run_endpoint_does_not_vary_by_worker_kind(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     client, actor = _signed_client()
 
@@ -271,8 +323,8 @@ def test_run_contract_rejects_non_mock_worker(tmp_path, monkeypatch):
         f"/contracts/{created.json()['id']}/run",
         json={"worker": "llm"},
     )
-    assert run.status_code == 400
-    assert "mock worker" in run.json()["detail"]
+    assert run.status_code == 410
+    assert "signed /worker/submissions" in run.json()["detail"]
 
 
 def test_worker_protocol_cross_replica_claim_renew_submit(tmp_path, monkeypatch):
@@ -284,6 +336,7 @@ def test_worker_protocol_cross_replica_claim_renew_submit(tmp_path, monkeypatch)
         replica_a, actor, name="replicated", outputs=["out"], budget=1
     )
     contract_id = created.json()["id"]
+    worker_key = _register_worker(replica_a, actor, "remote-worker")
 
     claimed = replica_a.post(
         "/worker/claims",
@@ -305,15 +358,9 @@ def test_worker_protocol_cross_replica_claim_renew_submit(tmp_path, monkeypatch)
     )
     assert renewed.status_code == 200, renewed.text
 
-    submission = {
-        "contract_id": contract_id,
-        "worker_id": "remote-worker",
-        "raw_output": "out: accepted across replicas",
-        "package_id": package["package_id"],
-        "claim_id": package["claim_id"],
-        "claim_epoch": package["claim_epoch"],
-        "idempotency_key": f"remote-{package['package_id']}",
-    }
+    submission = _worker_submission(
+        actor, worker_key, package, "out: accepted across replicas"
+    )
     submitted = replica_c.post("/worker/submissions", json=submission)
     assert submitted.status_code == 200, submitted.text
     assert submitted.json()["complete"] is True
@@ -324,7 +371,7 @@ def test_worker_protocol_cross_replica_claim_renew_submit(tmp_path, monkeypatch)
     assert duplicate.json()["duplicate"] is True
     changed = replica_a.post(
         "/worker/submissions",
-        json={**submission, "raw_output": "out: changed replay"},
+        json=_worker_submission(actor, worker_key, package, "out: changed replay"),
     )
     assert changed.status_code == 409
 
@@ -335,6 +382,23 @@ def test_worker_protocol_cross_replica_claim_renew_submit(tmp_path, monkeypatch)
     assert record_types.count("claim.submitted") == 1
 
 
+def test_unregistered_worker_cannot_lock_a_server_task(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    client, actor = _signed_client()
+    created = _post_contract(
+        client, actor, name="protected_claim", outputs=["out"], budget=1
+    )
+
+    claimed = client.post(
+        "/worker/claims",
+        json={"worker_id": "unknown-worker", "contract_id": created.json()["id"]},
+    )
+
+    assert claimed.status_code == 422
+    store = SQLiteStore(".aig/store.db")
+    assert store.get_claim(created.json()["id"]) is None
+
+
 def test_worker_protocol_method_submission_uses_same_fenced_path(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     client, actor = _signed_client()
@@ -342,21 +406,19 @@ def test_worker_protocol_method_submission_uses_same_fenced_path(tmp_path, monke
         client, actor, name="remote_plan", outputs=["report"], budget=2
     )
     contract_id = created.json()["id"]
+    worker_key = _register_worker(client, actor, "remote-planner")
     claimed = client.post(
         "/worker/claims",
         json={"worker_id": "remote-planner", "contract_id": contract_id},
     )
     package = claimed.json()
 
-    submission = {
-        "contract_id": contract_id,
-        "worker_id": "remote-planner",
-        "raw_output": '/plan {"reason": "decompose remotely"}',
-        "package_id": package["package_id"],
-        "claim_id": package["claim_id"],
-        "claim_epoch": package["claim_epoch"],
-        "idempotency_key": f"remote-{package['package_id']}",
-    }
+    submission = _worker_submission(
+        actor,
+        worker_key,
+        package,
+        '/plan {"reason": "decompose remotely"}',
+    )
     submitted = client.post("/worker/submissions", json=submission)
 
     assert submitted.status_code == 200, submitted.text
@@ -370,7 +432,9 @@ def test_worker_protocol_method_submission_uses_same_fenced_path(tmp_path, monke
     assert duplicate.json()["duplicate"] is True
     changed = client.post(
         "/worker/submissions",
-        json={**submission, "raw_output": '/plan {"reason": "changed"}'},
+        json=_worker_submission(
+            actor, worker_key, package, '/plan {"reason": "changed"}'
+        ),
     )
     assert changed.status_code == 409
 
