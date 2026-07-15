@@ -33,10 +33,12 @@ def test_legacy_runtime_files_stay_out_of_release_artifacts():
 
     for path in (
         "src/aigineering/core/engine.py",
-        "src/aigineering/core/startup_check.py",
         "src/aigineering/core/state_serializer.py",
     ):
         assert path in project
+
+    assert "src/aigineering/core/startup_check.py" not in project
+    assert not (ROOT / "src/aigineering/core/startup_check.py").exists()
 
 
 def test_contract_cli_uses_candidate_commitment_not_legacy_ingress():

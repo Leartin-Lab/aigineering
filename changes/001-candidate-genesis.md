@@ -137,6 +137,9 @@ Implementation progress:
   `inject_asset`/`inject_contract` compatibility functions and their duplicate
   direct-ingress test suite were deleted after production callers reached the
   Candidate boundary.
+- Complete: the unshipped startup checker and its process-lifecycle Trace state
+  machine were deleted. Supported recovery already derives orphan handling
+  from claim leases and immutable runtime facts.
 - Complete: cryptography is a base dependency; the runtime does not silently
   substitute a non-authenticating deterministic seal.
 - Pending: migrate remaining control-plane and worker submission effects.
@@ -153,7 +156,7 @@ Implementation progress:
 
 ## Deletion ledger
 
-- `core/engine.py`, `core/startup_check.py`, `core/state_serializer.py`
+- `core/engine.py`, `core/state_serializer.py`
 - feature-specific Method runtime/registry/handlers after plugin migration
 - `RuntimeIngress.accept_asset` and `accept_contract` after Candidate adapters
   have no callers

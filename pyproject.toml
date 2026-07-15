@@ -38,14 +38,12 @@ build-backend = "hatchling.build"
 packages = ["src/aigineering"]
 exclude = [
     "src/aigineering/core/engine.py",
-    "src/aigineering/core/startup_check.py",
     "src/aigineering/core/state_serializer.py",
 ]
 
 [tool.hatch.build.targets.sdist]
 exclude = [
     "src/aigineering/core/engine.py",
-    "src/aigineering/core/startup_check.py",
     "src/aigineering/core/state_serializer.py",
     "tests/**",
 ]

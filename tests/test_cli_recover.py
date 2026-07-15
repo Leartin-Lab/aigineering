@@ -76,7 +76,7 @@ def _make_recovery_scenario(db_path: str) -> tuple[SQLiteStore, Contract, Contra
     ingress.accept_contract(contract_a)
     ingress.accept_contract(contract_b)
 
-    # Append recovery_required trace entries (like startup_check does).
+    # Append legacy recovery_required trace entries for compatibility input.
     for c in (contract_a, contract_b):
         entry = create_entry(
             contract_id=c.id,

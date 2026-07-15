@@ -176,9 +176,12 @@ terminal records, current claim, routing compatibility, and allowance. “Waitin
 is therefore a query result, not a durable Contract state. A restarted or backup
 runtime can rebuild its projections from the shared Store and continue claims.
 
-The shipped package excludes the legacy in-process Engine, startup checker, and
-state serializer. Their source remains temporarily for migration tests. The
-supported operational surface is the Store/RuntimeIngress/claim/submission path.
+The shipped package excludes the legacy in-process Engine and state serializer;
+their source remains temporarily for migration tests. The superseded startup
+checker has been deleted: expired claims and recovery are derived directly from
+lease/runtime facts, without a second process-lifecycle trace state machine.
+The supported operational surface is the
+Store/RuntimeIngress/claim/submission path.
 
 ## Methods and workers
 
