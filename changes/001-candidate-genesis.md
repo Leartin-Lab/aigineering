@@ -124,6 +124,9 @@ Implementation progress:
   `worker.register` Candidate effect. Store commitment atomically appends its
   immutable fact and updates the rebuildable current routing projection; CLI
   registration no longer calls Store mutation directly.
+- Complete: local and HTTP Asset slicing publish `asset.propose` Candidates
+  with preserved lineage. The HTTP convenience route recomputes the expected
+  slice and rejects unsigned or mismatched proposed payloads before mutation.
 - Complete: cryptography is a base dependency; the runtime does not silently
   substitute a non-authenticating deterministic seal.
 - Pending: migrate remaining control-plane and worker submission effects.

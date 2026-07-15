@@ -58,6 +58,21 @@ def test_asset_add_uses_candidate_commitment_not_legacy_ingress():
     assert "RuntimeIngress(" not in add_body
 
 
+def test_asset_slice_uses_candidate_commitment_and_preserves_lineage():
+    source = (ROOT / "src/aigineering/cli/asset.py").read_text(encoding="utf-8")
+    body = source.split("def asset_slice", 1)[1].split(
+        '@asset_group.command("replace")', 1
+    )[0]
+
+    assert "commit_local_effect" in body
+    assert "asset_proposal_effect" in body
+    assert "accept_asset" not in body
+    projection = (ROOT / "src/aigineering/core/effect_projection.py").read_text(
+        encoding="utf-8"
+    )
+    assert 'lineage_id=str(data.get("lineage_id", ""))' in projection
+
+
 def test_task_create_uses_candidate_commitment_not_legacy_ingress():
     source = (ROOT / "src/aigineering/cli/task.py").read_text(encoding="utf-8")
     create_body = source.split('@task_group.command("status")', 1)[0]
@@ -89,6 +104,19 @@ def test_http_asset_and_contract_creation_require_signed_candidates():
     assert "AssetCreateRequest" not in source
     assert "inject_contract" not in creation_surface
     assert "inject_asset" not in creation_surface
+
+
+def test_http_slice_recomputes_signed_candidate_payload_before_commit():
+    source = (ROOT / "src/aigineering/server/app.py").read_text(encoding="utf-8")
+    body = source.split("def slice_asset", 1)[1].split(
+        '@app.post(\n    "/replacement-claims"', 1
+    )[0]
+
+    assert "AssetSliceCandidateRequest" in source
+    assert "_require_single_effect" in body
+    assert "asset_proposal_effect(expected)" in body
+    assert "_commit_candidate_request" in body
+    assert "RuntimeIngress" not in body
 
 
 def test_recovery_recreate_publishes_contract_candidate():

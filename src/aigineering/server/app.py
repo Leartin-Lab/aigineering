@@ -29,6 +29,8 @@ from aigineering.core.submit import (
 )
 from aigineering.protocol.envelope import CandidateEnvelope
 from aigineering.protocol.candidate import candidate_proposal_from_dict
+from aigineering.protocol.effect_builders import asset_proposal_effect
+from aigineering.protocol.immutability import deep_thaw
 
 app = FastAPI(title="Aigineering API", version="0.5.0")
 
@@ -84,8 +86,7 @@ class WorkerSubmitRequest(BaseModel):
     usage_metadata: dict | None = None
 
 
-class AssetSliceRequest(BaseModel):
-    slice_name: str
+class AssetSliceCandidateRequest(CandidateProposalRequest):
     range: str = ""
 
 
@@ -309,7 +310,7 @@ def get_asset_versions(name: str):
 
 
 @app.post("/assets/{name}/slice", response_model=AssetResponse, status_code=201)
-def slice_asset(name: str, body: AssetSliceRequest):
+def slice_asset(name: str, body: AssetSliceCandidateRequest):
     """Create a new asset from a line or character slice of an existing asset."""
     from aigineering.core.asset_versions import create_slice_asset, resolve_latest
 
@@ -317,17 +318,28 @@ def slice_asset(name: str, body: AssetSliceRequest):
     source = resolve_latest(store, name)
     if source is None:
         raise HTTPException(status_code=404, detail=f"No asset named '{name}'")
+    _require_single_effect(body, "asset.propose")
+    proposed = body.effects[0].payload.get("asset")
+    if not isinstance(proposed, dict) or not proposed.get("name"):
+        raise HTTPException(status_code=422, detail="slice requires asset.name")
     try:
-        asset = create_slice_asset(
+        expected = create_slice_asset(
             source,
-            slice_name=body.slice_name,
+            slice_name=str(proposed["name"]),
             range_spec=body.range,
         )
-        ingress = RuntimeIngress(store, store)
-        ingress.accept_asset(asset, source="asset_slice")
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    return _asset_response(asset)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    expected_payload = deep_thaw(asset_proposal_effect(expected).payload)
+    if body.effects[0].payload != expected_payload:
+        raise HTTPException(
+            status_code=422,
+            detail="signed asset.propose payload does not match the requested slice",
+        )
+    decision = _commit_candidate_request(body)
+    if not decision.accepted:
+        raise HTTPException(status_code=403, detail=_rejection_reason(decision))
+    return _asset_response(decision.assets[0])
 
 
 @app.post(

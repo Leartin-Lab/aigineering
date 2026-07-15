@@ -92,6 +92,12 @@ files and builds proposed Assets. The CLI publishes its protected descriptor
 and prompt content through `asset.propose`, so filesystem parsing has no Store
 or ingress dependency.
 
+Asset slicing is a deterministic client-side transformation followed by an
+ordinary signed `asset.propose`. The effect preserves lineage metadata. The
+HTTP convenience endpoint accepts that complete signed proposal and verifies
+its payload against the requested source/range before commitment; unsigned
+slice requests cannot mutate the Store.
+
 The optional HTTP API accepts full signed CandidateProposal bodies at
 `POST /candidates`, `POST /contracts`, and `POST /assets`. Resource endpoints
 validate the effect type before commitment. Unsigned legacy request bodies fail

@@ -363,10 +363,11 @@ class TestAssetVersionWorkflow:
             assert sliced["content"] == "two\nthree\n"
 
             store = SQLiteStore(".aig/store.db")
-            injected = store.get_by_event_type("asset_injected")
-            assert any(
-                e.relation_type == "asset_slice" and e.relation_target == "doc.middle"
-                for e in injected
+            committed = store.get_by_event_type("candidate_committed")
+            assert any("doc.middle" in e.accepted_asset_names for e in committed)
+            assert (
+                store.get_assets_by_name("doc.middle")[0].lineage_id
+                == data["lineage_id"]
             )
 
     def test_slice_invalid_range_fails_closed(self):

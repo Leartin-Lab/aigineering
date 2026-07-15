@@ -10,6 +10,7 @@ pytest.importorskip("httpx")
 from fastapi.testclient import TestClient
 
 from aigineering.core.control_plane import build_control_plane_contract
+from aigineering.core.asset_versions import create_slice_asset
 from aigineering.core.domain import initialize_genesis
 from aigineering.core.signing import Ed25519Signer
 from aigineering.core.sqlite_store import SQLiteStore
@@ -21,6 +22,7 @@ from aigineering.protocol.candidate import (
     create_genesis_manifest,
 )
 from aigineering.protocol.wire import contract_to_dict
+from aigineering.protocol.effect_builders import asset_proposal_effect
 from aigineering.server.app import app
 
 
@@ -381,10 +383,35 @@ def test_asset_slice_versions_and_replacement_claims(tmp_path, monkeypatch):
     assert created.status_code == 201, created.text
     source = created.json()
 
-    sliced = client.post(
+    unsigned = client.post(
         "/assets/doc/slice",
         json={"slice_name": "doc_excerpt", "range": "lines:2-3"},
     )
+    assert unsigned.status_code == 422
+
+    mismatched = _candidate_body(
+        actor,
+        CandidateEffect(
+            "asset.propose",
+            {"asset": {"name": "doc_excerpt", "content": "forged"}},
+        ),
+    )
+    mismatched["range"] = "lines:2-3"
+    mismatch_response = client.post("/assets/doc/slice", json=mismatched)
+    assert mismatch_response.status_code == 422
+
+    store = SQLiteStore(".aig/store.db")
+    source_asset = store.get_asset(source["id"])
+    assert source_asset is not None
+    proposed_slice = create_slice_asset(
+        source_asset,
+        slice_name="doc_excerpt",
+        range_spec="lines:2-3",
+    )
+    store.close()
+    slice_candidate = _candidate_body(actor, asset_proposal_effect(proposed_slice))
+    slice_candidate["range"] = "lines:2-3"
+    sliced = client.post("/assets/doc/slice", json=slice_candidate)
     assert sliced.status_code == 201, sliced.text
     replacement = sliced.json()
     assert replacement["name"] == "doc_excerpt"

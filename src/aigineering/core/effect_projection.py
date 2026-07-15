@@ -103,6 +103,7 @@ def project_asset_proposal(
             signer_kind=f"candidate:{candidate.signature_kind}",
             promptable=bool(data.get("promptable", True)),
             disclosure_view=str(data.get("disclosure_view", "original")),
+            lineage_id=str(data.get("lineage_id", "")),
             definition_hash=hash_asset_definition(name),
             content_hash=content_hash,
         ),

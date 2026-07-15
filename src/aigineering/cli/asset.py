@@ -17,7 +17,6 @@ from aigineering.core.asset_versions import (
 )
 from aigineering.core.control_plane import build_control_plane_asset
 from aigineering.core.runtime_ingress import RuntimeIngress
-from aigineering.core.trace import create_entry
 from aigineering.protocol.effect_builders import asset_proposal_effect
 
 
@@ -25,10 +24,6 @@ from aigineering.protocol.effect_builders import asset_proposal_effect
 def asset_group() -> None:
     """Inject and inspect assets through the control plane."""
     pass
-
-
-def _append_trace_if_supported(store, entry) -> None:
-    store.append(entry)
 
 
 @asset_group.command("add")
@@ -211,29 +206,17 @@ def asset_slice(name: str, slice_name: str, range_spec: str, as_json: bool) -> N
         )
     except ValueError as e:
         raise click.ClickException(str(e))
-    ingress = RuntimeIngress(store, store)
-    ingress.accept_asset(sliced, source="asset_slice")
-    _append_trace_if_supported(
-        store,
-        create_entry(
-            contract_id="control_plane",
-            event_type="asset_injected",
-            parent_id=sliced.id,
-            relation_type="asset_slice",
-            relation_target=sliced.name,
-            accepted_fragments=[
-                json.dumps(
-                    {
-                        "asset_id": sliced.id,
-                        "origin": sliced.origin,
-                        "trust_tier": sliced.trust_tier,
-                        "lineage_id": sliced.lineage_id,
-                    },
-                    sort_keys=True,
-                )
-            ],
-        ),
-    )
+    try:
+        decision = require_accepted(
+            commit_local_effect(
+                store,
+                asset_proposal_effect(sliced),
+                idempotency_key=f"asset-slice:{sliced.id}",
+            )
+        )
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
+    sliced = decision.assets[0]
 
     if as_json:
         _output_json(

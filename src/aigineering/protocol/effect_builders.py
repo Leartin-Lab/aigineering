@@ -24,6 +24,7 @@ def asset_proposal_effect(asset: Asset) -> CandidateEffect:
                 "content": asset.content,
                 "content_type": asset.content_type,
                 "disclosure_view": asset.disclosure_view,
+                "lineage_id": asset.lineage_id,
                 "name": asset.name,
                 "origin": asset.origin,
                 "promptable": asset.promptable,
