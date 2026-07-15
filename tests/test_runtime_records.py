@@ -13,6 +13,7 @@ from aigineering.protocol.runtime_record import (
     RuntimeRecord,
     create_runtime_record,
 )
+from aigineering.protocol.types import Contract
 
 
 @pytest.fixture(params=["memory", "sqlite"])
@@ -66,8 +67,11 @@ def test_runtime_record_rejects_id_reuse_and_invalid_content_id(store):
 
 def test_sqlite_runtime_records_survive_reopen(tmp_path):
     path = tmp_path / "runtime.db"
-    record = create_runtime_record("lifecycle.terminal", {"contract_id": "c1"})
+    record = create_runtime_record(
+        "lifecycle.terminal", {"contract_id": "c1", "terminal": "complete"}
+    )
     first = SQLiteStore(str(path))
+    first.add_contract(Contract(id="c1", name="runtime-record-owner"))
     first.append_runtime_record(record)
     first.close()
 

@@ -27,6 +27,7 @@ from aigineering.core.ids import (
     now_iso,
     validate_contract_identity,
 )
+from aigineering.core.lifecycle_facts import validate_terminal_record
 from aigineering.core.provenance import verify_asset_seal
 from aigineering.core.record_conflict import ImmutableRecordConflict
 from aigineering.core.asset_versions import (
@@ -57,7 +58,7 @@ from aigineering.protocol.wire import (
 
 _logger = logging.getLogger(__name__)
 
-CURRENT_SCHEMA_VERSION = 8
+CURRENT_SCHEMA_VERSION = 9
 
 # ---------------------------------------------------------------------------
 # Activation name extraction (shared with store.py)
@@ -271,6 +272,7 @@ _DDL_INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_worker_registrations_enabled ON worker_registrations(enabled)",
     "CREATE INDEX IF NOT EXISTS idx_runtime_records_type_revision ON runtime_records(record_type, revision)",
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_runtime_records_one_genesis ON runtime_records(record_type) WHERE record_type = 'domain.genesis'",
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_runtime_records_one_terminal_per_contract ON runtime_records(json_extract(payload_json, '$.contract_id')) WHERE record_type = 'lifecycle.terminal'",
 ]
 
 # ---------------------------------------------------------------------------
@@ -401,6 +403,9 @@ class SQLiteStore:
             if current < 8:
                 self._migrate_to_v8()
                 self._record_schema_version(8)
+            if current < 9:
+                self._migrate_to_v9()
+                self._record_schema_version(9)
 
     def _migrate_to_v2(self) -> None:
         """Add 040 transactional worker state and contract authority metadata."""
@@ -566,6 +571,15 @@ class SQLiteStore:
             "ON runtime_records(record_type) WHERE record_type = 'domain.genesis'"
         )
 
+    def _migrate_to_v9(self) -> None:
+        """Enforce one immutable terminal fact per Contract."""
+        self._conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS "
+            "idx_runtime_records_one_terminal_per_contract "
+            "ON runtime_records(json_extract(payload_json, '$.contract_id')) "
+            "WHERE record_type = 'lifecycle.terminal'"
+        )
+
     # ── Immutable runtime-record envelope ────────────────────────────────
 
     def append_runtime_record(self, record: RuntimeRecord) -> int:
@@ -574,6 +588,16 @@ class SQLiteStore:
 
     def _insert_runtime_record(self, record: RuntimeRecord) -> int:
         """Insert within the caller's transaction without committing it."""
+        validate_terminal_record(
+            record,
+            self.scan_runtime_records(record_type="lifecycle.terminal"),
+        )
+        if record.record_type == "lifecycle.terminal":
+            contract_id = str(record.payload["contract_id"])
+            if self.get_contract(contract_id) is None:
+                raise ValueError(
+                    f"lifecycle.terminal references unknown Contract {contract_id!r}"
+                )
         registration = None
         if record.record_type == "worker.registered":
             registration = registration_from_record(record)

@@ -65,3 +65,10 @@ def replacement_claim_effect(claim: ReplacementClaim) -> CandidateEffect:
             }
         },
     )
+
+
+def contract_cancellation_effect(contract_id: str, reason: str) -> CandidateEffect:
+    return CandidateEffect(
+        "contract.cancel",
+        {"contract_id": contract_id, "reason": reason},
+    )

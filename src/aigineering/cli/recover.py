@@ -12,23 +12,42 @@ import click
 from aigineering.cli._common import _output_json, _persistent_store
 from aigineering.cli._candidate import commit_local_effect, require_accepted
 from aigineering.core.ids import hash_contract_v3
-from aigineering.protocol.effect_builders import contract_declaration_effect
-from aigineering.core.method_handlers.recovery import RecoveryMethodHandler
-from aigineering.core.method_runtime import MethodRuntime
-from aigineering.protocol.types import Candidate, Contract
+from aigineering.protocol.effect_builders import (
+    contract_cancellation_effect,
+    contract_declaration_effect,
+)
+from aigineering.protocol.types import Contract
 
 
 def _find_recovery_required_contract_ids(store) -> list[str]:
     """Return contract IDs that have ``recovery_required`` trace events,
     deduplicated and in trace-entry order."""
     entries = store.get_by_event_type("recovery_required")
+    terminal_contracts = {
+        str(record.payload["contract_id"])
+        for _, record in store.scan_runtime_records(record_type="lifecycle.terminal")
+    }
+    recreated_contracts = {
+        contract.parent_id
+        for contract in store.get_all_contracts()
+        if contract.origin == "recovery" and contract.parent_id is not None
+    }
     seen: set[str] = set()
     ids: list[str] = []
     for entry in entries:
         contract_entries = store.get_by_contract(entry.contract_id)
-        terminal = {"complete", "failed", "cancelled", "unreachable"}
-        resolved = {"recovery_resolved"}
-        if any(item.event_type in terminal | resolved for item in contract_entries):
+        legacy_resolved = {
+            "complete",
+            "failed",
+            "cancelled",
+            "unreachable",
+            "recovery_resolved",
+        }
+        if (
+            entry.contract_id in terminal_contracts
+            or entry.contract_id in recreated_contracts
+            or any(item.event_type in legacy_resolved for item in contract_entries)
+        ):
             continue
         if entry.contract_id not in seen:
             seen.add(entry.contract_id)
@@ -37,25 +56,22 @@ def _find_recovery_required_contract_ids(store) -> list[str]:
 
 
 def _cancel_contracts(store, contract_ids: list[str]) -> list[str]:
-    """Cancel recovery-required contracts through the recovery method ingress."""
-    handler = RecoveryMethodHandler()
+    """Cancel recovery-required contracts through signed Candidate effects."""
     cancelled: list[str] = []
     for cid in contract_ids:
         contract = store.get_contract(cid)
         if contract is None:
             continue
-        runtime = MethodRuntime(
-            store=store,
-            trace=store,
-            budget={contract.id: contract.budget},
+        require_accepted(
+            commit_local_effect(
+                store,
+                contract_cancellation_effect(
+                    contract.id, "operator cancelled recovery-required contract"
+                ),
+                idempotency_key=f"recover-cancel:{contract.id}",
+            )
         )
-        candidate = Candidate(
-            worker_id="cli:recover",
-            raw_output='/recover {"action": "cancel"}',
-            parsed_action={"type": "recover", "action": "cancel"},
-        )
-        if handler.handle_cancel(runtime, contract, candidate):
-            cancelled.append(cid)
+        cancelled.append(cid)
     return cancelled
 
 
@@ -121,18 +137,6 @@ def _recreate_contracts(store, contract_ids: list[str]) -> list[dict[str, str]]:
                 idempotency_key=f"recover:{original.id}:{new_contract.id}",
             )
         )
-        runtime = MethodRuntime(
-            store=store,
-            trace=store,
-            budget={original.id: original.budget},
-        )
-        runtime.append_trace(
-            original.id,
-            "recovery_resolved",
-            relation_type="recover",
-            relation_target=new_contract.id,
-            budget_remaining=runtime.resolve_budget(original.id),
-        )
         recreated.append({"original_id": cid, "new_id": new_contract.id})
     return recreated
 
@@ -191,7 +195,10 @@ def recover(
     recreated: list[dict[str, str]] = []
 
     if do_cancel:
-        cancelled = _cancel_contracts(store, contract_ids)
+        try:
+            cancelled = _cancel_contracts(store, contract_ids)
+        except (LookupError, ValueError) as exc:
+            raise click.ClickException(str(exc)) from exc
 
     if do_recreate:
         try:

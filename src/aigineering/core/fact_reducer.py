@@ -126,6 +126,12 @@ class FactReducer:
         """Project one atomic batch without depending on insertion order."""
         events: list[FactReducerEvent] = []
         pending_names = {asset.name for asset in assets}
+        terminal_contract_ids = {
+            str(record.payload.get("contract_id", ""))
+            for _, record in self._store.scan_runtime_records(
+                record_type="lifecycle.terminal"
+            )
+        }
 
         # 1. Method result detection
         for asset in assets:
@@ -143,7 +149,9 @@ class FactReducer:
         completed: set[str] = set()
         for asset in assets:
             events.extend(
-                self._detect_output_satisfaction(asset, pending_names, completed)
+                self._detect_output_satisfaction(
+                    asset, pending_names, completed, terminal_contract_ids
+                )
             )
 
         return events
@@ -208,12 +216,15 @@ class FactReducer:
         asset: Asset,
         pending_names: set[str],
         completed: set[str],
+        terminal_contract_ids: set[str],
     ) -> list[FactReducerEvent]:
         """Find contracts that declare *asset.name* as an output and are
         now fully satisfied."""
         events: list[FactReducerEvent] = []
 
         for contract in self._store.get_all_contracts():
+            if contract.id in terminal_contract_ids:
+                continue
             if asset.name not in contract.outputs:
                 continue
 
@@ -247,12 +258,19 @@ class FactReducer:
                     )
                 )
                 # For newly-completed contracts, identify unfinished children.
-                events.extend(self._detect_unfinished_children(contract))
+                events.extend(
+                    self._detect_unfinished_children(
+                        contract, pending_names, terminal_contract_ids | completed
+                    )
+                )
 
         return events
 
     def _detect_unfinished_children(
-        self, completed_contract: Contract
+        self,
+        completed_contract: Contract,
+        pending_names: set[str],
+        terminal_contract_ids: set[str],
     ) -> list[FactReducerEvent]:
         """Find child contracts that should be cancelled after *completed_contract*
         finishes."""
@@ -261,8 +279,10 @@ class FactReducer:
         for contract in self._store.get_all_contracts():
             if contract.parent_id != completed_contract.id:
                 continue
+            if contract.id in terminal_contract_ids:
+                continue
             # If the child still has outstanding outputs, it's unfinished.
-            if not self._all_outputs_satisfied(contract):
+            if not self._all_outputs_satisfied(contract, pending_names):
                 events.append(
                     FactReducerEvent(
                         type="child_cancelled",
@@ -275,7 +295,9 @@ class FactReducer:
 
     # -- Helpers ------------------------------------------------------------
 
-    def _all_outputs_satisfied(self, contract: Contract) -> bool:
+    def _all_outputs_satisfied(
+        self, contract: Contract, pending_names: set[str] | None = None
+    ) -> bool:
         """Return True when all declared outputs of *contract* exist in
         the store AND are business outputs (not tool/MCP observations).
 
@@ -283,7 +305,11 @@ class FactReducer:
         observation-like assets as their declared outputs, so source class
         filtering is only applied to non-system contracts.
         """
-        return all_outputs_satisfied(contract, self._store)
+        return all_outputs_satisfied(
+            contract,
+            self._store,
+            extra_output_names=pending_names or set(),
+        )
 
 
 # ---------------------------------------------------------------------------

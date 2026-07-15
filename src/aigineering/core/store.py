@@ -21,6 +21,7 @@ from aigineering.core.asset_versions import (
 from aigineering.core.provenance import verify_asset_seal
 from aigineering.core.record_conflict import ImmutableRecordConflict
 from aigineering.core.ids import compute_content_hash, validate_contract_identity
+from aigineering.core.lifecycle_facts import validate_terminal_record
 from aigineering.core.worker_routing import (
     registration_is_replay,
     registration_from_record,
@@ -253,6 +254,16 @@ class MemoryStore(_ProjectionIndexMixin):
             self._worker_registrations[registration.worker_id] = registration
 
     def append_runtime_record(self, record: RuntimeRecord) -> int:
+        validate_terminal_record(
+            record,
+            self.scan_runtime_records(record_type="lifecycle.terminal"),
+        )
+        if record.record_type == "lifecycle.terminal":
+            contract_id = str(record.payload["contract_id"])
+            if self.get_contract(contract_id) is None:
+                raise ValueError(
+                    f"lifecycle.terminal references unknown Contract {contract_id!r}"
+                )
         registration = None
         if record.record_type == "worker.registered":
             registration = registration_from_record(record)

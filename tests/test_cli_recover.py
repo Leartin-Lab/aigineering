@@ -22,7 +22,7 @@ def initialize_candidate_domain_before_recreate(monkeypatch):
         effective = list(args or ())
         if (
             effective[:1] == ["recover"]
-            and "--recreate" in effective
+            and ({"--recreate", "--cancel"} & set(effective))
             and not Path(".aig/identity/root.ed25519").exists()
         ):
             initialized = original(runner, command, ["domain", "init"])
@@ -95,6 +95,14 @@ def _make_recovery_scenario(db_path: str) -> tuple[SQLiteStore, Contract, Contra
     return store, contract_a, contract_b
 
 
+def _cancelled_contract_ids(store: SQLiteStore) -> set[str]:
+    return {
+        str(record.payload["contract_id"])
+        for _, record in store.scan_runtime_records(record_type="lifecycle.terminal")
+        if record.payload["terminal"] == "cancelled"
+    }
+
+
 # ---------------------------------------------------------------------------
 # Default (list-only) behaviour
 # ---------------------------------------------------------------------------
@@ -160,7 +168,7 @@ def test_recover_json_no_recovery_required():
 
 
 def test_recover_cancel():
-    """aig recover --cancel emits terminal cancellation through method ingress."""
+    """aig recover --cancel emits terminal cancellation through a Candidate."""
     runner = CliRunner()
     with runner.isolated_filesystem():
         store, ca, cb = _make_recovery_scenario(".aig/store.db")
@@ -170,9 +178,7 @@ def test_recover_cancel():
         assert result.exit_code == 0
         assert "Cancelled: 2" in result.output
 
-        cancelled = store.get_by_event_type("cancelled")
-        assert {entry.contract_id for entry in cancelled} >= {ca.id, cb.id}
-        assert all(entry.relation_type == "recover" for entry in cancelled)
+        assert _cancelled_contract_ids(store) >= {ca.id, cb.id}
 
         follow_up = runner.invoke(cli, ["recover", "--json"])
         assert follow_up.exit_code == 0
@@ -292,8 +298,7 @@ def test_recover_cancel_and_recreate():
         assert "Cancelled: 2" in result.output
         assert "Recreated: 2" in result.output
 
-        cancelled = store.get_by_event_type("cancelled")
-        assert {entry.contract_id for entry in cancelled} >= {ca.id, cb.id}
+        assert _cancelled_contract_ids(store) >= {ca.id, cb.id}
 
         # Verify new contracts (2 originals + 2 recreated = 4)
         assert len(store.get_all_contracts()) == 4

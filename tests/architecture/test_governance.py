@@ -152,6 +152,19 @@ def test_recovery_recreate_publishes_contract_candidate():
     assert "RuntimeIngress" not in recreate
 
 
+def test_recovery_cancel_uses_candidate_and_trace_is_not_task_state():
+    source = (ROOT / "src/aigineering/cli/recover.py").read_text(encoding="utf-8")
+    cancel = source.split("def _cancel_contracts", 1)[1].split(
+        "def _recreate_contracts", 1
+    )[0]
+
+    assert "contract_cancellation_effect" in cancel
+    assert "commit_local_effect" in cancel
+    assert "RecoveryMethodHandler" not in source
+    assert "MethodRuntime" not in source
+    assert 'record_type="lifecycle.terminal"' in source
+
+
 def test_capability_and_mcp_descriptors_use_protected_asset_candidates():
     for relative in (
         "src/aigineering/cli/capability.py",

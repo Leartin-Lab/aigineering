@@ -140,6 +140,10 @@ Implementation progress:
 - Complete: the unshipped startup checker and its process-lifecycle Trace state
   machine were deleted. Supported recovery already derives orphan handling
   from claim leases and immutable runtime facts.
+- Complete: recovery cancellation publishes a `contract.cancel` Candidate.
+  SQLite schema v9 and MemoryStore enforce one terminal fact per Contract, and
+  recovery discovery derives resolution from records/contracts rather than
+  mutable Trace interpretation.
 - Complete: cryptography is a base dependency; the runtime does not silently
   substitute a non-authenticating deterministic seal.
 - Pending: migrate remaining control-plane and worker submission effects.

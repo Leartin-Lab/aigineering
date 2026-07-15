@@ -180,6 +180,26 @@ def project_replacement_claim(
     return EffectProjection(records=(record,), relation_target=claim.id)
 
 
+def project_contract_cancellation(
+    effect: CandidateEffect, candidate: CandidateProposal, receipt_id: str
+) -> EffectProjection:
+    contract_id = str(effect.payload.get("contract_id", ""))
+    reason = str(effect.payload.get("reason", ""))
+    if not contract_id or not reason:
+        raise ValueError("contract.cancel requires contract_id and reason")
+    record = create_runtime_record(
+        "lifecycle.terminal",
+        {
+            "actor_id": candidate.actor_id,
+            "contract_id": contract_id,
+            "reason": reason,
+            "terminal": "cancelled",
+        },
+        causal_parents=(receipt_id,),
+    )
+    return EffectProjection(records=(record,), relation_target=contract_id)
+
+
 EffectProjector = Callable[[CandidateEffect, CandidateProposal, str], EffectProjection]
 BUILTIN_EFFECTS: Mapping[str, tuple[str, EffectProjector]] = MappingProxyType(
     {
@@ -187,5 +207,6 @@ BUILTIN_EFFECTS: Mapping[str, tuple[str, EffectProjector]] = MappingProxyType(
         "contract.declare": ("contract.publish", project_contract_declaration),
         "worker.register": ("worker.register", project_worker_registration),
         "asset.relate": ("asset.relate", project_replacement_claim),
+        "contract.cancel": ("contract.cancel", project_contract_cancellation),
     }
 )

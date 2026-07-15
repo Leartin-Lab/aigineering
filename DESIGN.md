@@ -122,8 +122,15 @@ requires `contract.publish.protected`; payload fields cannot self-grant that
 capability.
 
 Administrative `aig recover --recreate` publishes its replacement Contract via
-the same signed `contract.declare` path. Recovery cancellation still uses the
-legacy Method terminal transition and remains an active migration item.
+the same signed `contract.declare` path. `aig recover --cancel` publishes a
+capability-gated `contract.cancel` effect; actor identity and reason are bound
+to the Candidate. Recovery resolution is derived from terminal RuntimeRecords
+or recovery child Contracts rather than Trace state.
+
+Contract terminal facts are single-assignment. MemoryStore validates this
+invariant before append, and SQLite schema v9 adds a unique expression index on
+the terminal record's contract ID, so competing replicas cannot commit
+different terminal outcomes.
 
 Protected capability and MCP descriptor Assets reuse `asset.propose`. A
 protected name derives an additional `asset.publish.protected` requirement;
