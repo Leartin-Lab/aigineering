@@ -54,6 +54,34 @@ def _contract(**overrides) -> Contract:
     return Contract(**values)
 
 
+def _recovery_publishers(store, suffix: str) -> CandidatePublisherRegistry:
+    signer = Ed25519Signer()
+    actor = ActorKey(
+        f"plugin:recovery.publish.{suffix}",
+        f"recovery-{suffix}",
+        signer.kind,
+        signer.signer_id,
+        (
+            "asset.publish",
+            "asset.publish.protected",
+            "contract.publish",
+            "contract.publish.protected",
+        ),
+    )
+    genesis = create_genesis_manifest(
+        f"recovery-{suffix}", (actor,), f"policy:recovery-{suffix}"
+    )
+    initialize_genesis(store, genesis)
+    return CandidatePublisherRegistry(
+        (
+            (
+                "recovery.publish.v1",
+                CandidatePublisher(store, store, genesis, actor, signer),
+            ),
+        )
+    )
+
+
 def test_eligibility_requires_all_capabilities_and_one_permitted_pool():
     contract = _contract()
     workers = [
@@ -269,7 +297,8 @@ def test_rejected_submission_recovery_replays_after_crash_gap():
     result = submit_candidate(envelope, store, store)
 
     assert result["status"] == "rejected"
-    assert not store.scan_runtime_records(record_type="lifecycle.terminal")
+    terminal_records = store.scan_runtime_records(record_type="lifecycle.terminal")
+    assert terminal_records[-1][1].payload["terminal"] == "failed"
 
     signer = Ed25519Signer()
     actor = ActorKey(
@@ -396,9 +425,15 @@ def test_provider_failure_releases_claim_without_persisting_secret():
     store.add_contract(contract)
     claimed = claim_next_package(store, worker_id="worker")
     assert claimed is not None
+    publishers = _recovery_publishers(store, "provider-failure")
 
     with pytest.raises(WorkerInvocationError, match="claim was released"):
-        execute_claimed_package(claimed, FailingWorker(), store)
+        execute_claimed_package(
+            claimed,
+            FailingWorker(),
+            store,
+            candidate_publishers=publishers,
+        )
 
     assert store.get_claim(contract.id)["status"] == "released"
     assert process_worker_failures(store) == []
@@ -458,9 +493,15 @@ def test_malformed_provider_response_releases_claim_and_recovers():
         api_key="test-only",
         transport=lambda _url, _headers, _payload: {},
     )
+    publishers = _recovery_publishers(store, "malformed-response")
 
     with pytest.raises(WorkerInvocationError, match="claim was released"):
-        execute_claimed_package(claimed, worker, store)
+        execute_claimed_package(
+            claimed,
+            worker,
+            store,
+            candidate_publishers=publishers,
+        )
 
     assert store.get_claim(contract.id)["status"] == "released"
     failure = store.scan_runtime_records(record_type="worker.invocation_failed")
@@ -475,10 +516,13 @@ def test_expired_claim_becomes_terminal_and_schedules_new_recovery_contract():
     store.add_contract(contract)
     claimed = claim_next_package(store, worker_id="worker", lease_seconds=1)
     assert claimed is not None
+    publishers = _recovery_publishers(store, "expired-claim")
     time.sleep(1.05)
 
-    assert process_expired_claims(store) == [contract.id]
-    assert process_expired_claims(store) == []
+    assert process_expired_claims(store, candidate_publishers=publishers) == [
+        contract.id
+    ]
+    assert process_expired_claims(store, candidate_publishers=publishers) == []
     assert store.get_claim(contract.id)["status"] == "expired"
     assert (
         claim_next_package(store, worker_id="replacement", contract_id=contract.id)

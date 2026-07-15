@@ -550,6 +550,14 @@ def _submission_runtime_records(
         causal_parents=[projection_parent.id],
     )
     records.append(projection)
+    if projection_result.status.value == "rejected":
+        records.append(
+            create_runtime_record(
+                "lifecycle.terminal",
+                {"contract_id": envelope.contract_id, "terminal": "failed"},
+                causal_parents=[projection.id],
+            )
+        )
     records.extend(
         create_runtime_record(
             "asset.committed",

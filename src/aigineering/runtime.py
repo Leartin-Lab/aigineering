@@ -18,9 +18,7 @@ from aigineering.core.disclosure import (
     compute_disclosure,
     redact_for_disclosure,
 )
-from aigineering.core.runtime_ingress import RuntimeIngress
 from aigineering.core.store import require_operational_store
-from aigineering.core.fact_reducer import FactReducer
 from aigineering.core.method_runtime import MethodRuntime
 from aigineering.core.method_handlers.recovery import schedule_projection_recovery
 from aigineering.core.runtime_projection import RuntimeProjection
@@ -256,7 +254,10 @@ def execute_claimed_package(
                 retryable=retryable,
                 category=category,
             )
-            process_worker_failures(store, candidate_publishers=candidate_publishers)
+            if candidate_publishers is not None:
+                process_worker_failures(
+                    store, candidate_publishers=candidate_publishers
+                )
             raise WorkerInvocationError(
                 f"worker invocation failed with status {status_code}; "
                 "claim was released and recovery was scheduled"
@@ -401,7 +402,7 @@ def submit_candidate_envelope(
         trace_store=trace,
         idempotency_key=envelope.idempotency_key,
     )
-    if result["status"] == "rejected":
+    if result["status"] == "rejected" and candidate_publishers is not None:
         process_rejected_submissions(store, candidate_publishers=candidate_publishers)
     return result
 
@@ -416,6 +417,10 @@ def _schedule_rejected_recovery(
     record_terminal: bool = True,
     candidate_publishers=None,
 ) -> None:
+    if candidate_publishers is None:
+        raise RuntimeError(
+            "recovery replay requires an authenticated recovery Candidate publisher"
+        )
     budget = BudgetManager()
     for current in store.get_all_contracts():
         budget.initialize(current.id, current.budget)
@@ -424,7 +429,6 @@ def _schedule_rejected_recovery(
         store=store,
         trace=trace_manager,
         budget=budget,
-        ingress=RuntimeIngress(store, trace, FactReducer(store, trace)),
         candidate_publishers=candidate_publishers,
     )
     recovery = schedule_projection_recovery(
@@ -465,12 +469,17 @@ def process_rejected_submissions(store, *, candidate_publishers=None) -> list[st
         for record in records
         if record.record_type == "lifecycle.terminal"
     }
+    recovered_projection_ids = {
+        str(record.payload["projection_id"])
+        for record in records
+        if record.record_type == "projection_rejection.recovery_scheduled"
+    }
     for record in records:
         if record.record_type != "projection.decided":
             continue
         payload = record.payload
         contract_id = str(payload["contract_id"])
-        if payload["status"] != "rejected" or contract_id in terminal_contracts:
+        if payload["status"] != "rejected" or record.id in recovered_projection_ids:
             continue
         contract = store.get_contract(contract_id)
         if contract is None:
@@ -491,8 +500,16 @@ def process_rejected_submissions(store, *, candidate_publishers=None) -> list[st
             [dict(rejection) for rejection in payload["rejections"]],
             store,
             store,
+            record_terminal=contract_id not in terminal_contracts,
             candidate_publishers=candidate_publishers,
         )
+        marker = create_runtime_record(
+            "projection_rejection.recovery_scheduled",
+            {"contract_id": contract_id, "projection_id": record.id},
+            causal_parents=[record.id],
+        )
+        store.append_runtime_record(marker)
+        recovered_projection_ids.add(record.id)
         terminal_contracts.add(contract_id)
         processed.append(contract_id)
     return processed

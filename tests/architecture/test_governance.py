@@ -337,6 +337,27 @@ def test_production_completion_projection_has_no_direct_ingress():
     assert "FactReducer" not in completion
 
 
+def test_recovery_replay_requires_authenticated_candidate_publisher():
+    runtime = (ROOT / "src/aigineering/runtime.py").read_text(encoding="utf-8")
+    replay = runtime.split("def _schedule_rejected_recovery", 1)[1].split(
+        "def process_rejected_submissions", 1
+    )[0]
+
+    assert "authenticated recovery Candidate publisher" in replay
+    assert "candidate_publishers is None" in replay
+    assert "RuntimeIngress" not in runtime
+    assert "FactReducer" not in runtime
+
+
+def test_projection_failure_terminal_is_distinct_from_recovery_progress():
+    submit = (ROOT / "src/aigineering/core/submit.py").read_text(encoding="utf-8")
+    runtime = (ROOT / "src/aigineering/runtime.py").read_text(encoding="utf-8")
+
+    assert '"lifecycle.terminal"' in submit
+    assert '"projection_rejection.recovery_scheduled"' in runtime
+    assert "recovered_projection_ids" in runtime
+
+
 def test_local_recovery_replay_publishes_contract_and_context_as_candidate():
     recovery = (ROOT / "src/aigineering/core/method_handlers/recovery.py").read_text(
         encoding="utf-8"

@@ -256,6 +256,13 @@ Local projection-, expiration-, provider-, and malformed-plan recovery now
 receives the same plugin publisher registry. Recovery Contract plus protected
 failure-context Asset commit as one signed `recovery.publish.v1` Candidate;
 publication rejection remains visible and the failed source is still terminal.
+Projection rejection records that failed terminal atomically with Candidate
+commit. A separate projection-recovery progress fact tracks whether replacement
+work was published, so terminality cannot be mistaken for completed recovery.
+The runtime replay service cannot manufacture a trusted ingress when that
+publisher is absent: explicit replay fails as a configuration error, while
+external HTTP submission durably records the rejection for an independently
+configured recovery runtime.
 Durable local key provisioning now lives in application-level
 `local_identity.py`, not CLI semantics; CLI commands share one fixed runtime
 publisher registry. The HTTP submission endpoint never reads local private keys

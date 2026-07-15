@@ -259,6 +259,14 @@ Implementation progress:
   or provider-failure facts lack the Contract/raw Candidate evidence required
   to derive their consequence. These broken causal chains can no longer be
   silently skipped forever on every restart.
+- Complete: recovery replay itself requires an authenticated
+  `recovery.publish.v1` publisher. Production runtime code no longer imports
+  RuntimeIngress or FactReducer as a fallback; external submission records a
+  replayable rejection instead of manufacturing a local private identity.
+- Complete: a fully rejected projection commits the source task's failed
+  terminal fact atomically. Recovery progress has its own immutable marker, so
+  absence of a recovery publisher is visible without falsely claiming that
+  replacement work was scheduled.
 - Complete: the HTTP worker submission endpoint accepts signed Candidates only;
   server claims require an enabled actor-key binding. The server-side mock run
   endpoint no longer impersonates a worker or mutates runtime state.
