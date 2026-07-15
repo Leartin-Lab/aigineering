@@ -226,6 +226,10 @@ Implementation progress:
   CompletionPlugin/CompletionRegistry protocol with no task-publication API.
   The old MethodRegistry is now referenced only by the source-only legacy
   Engine compatibility path.
+- Complete: plan/replan completion projection moved out of core Method handlers
+  into application-registered completion plugins. The legacy plan handler is a
+  small source-only Engine scheduling adapter, and replan remains a parameter
+  specialization rather than duplicated logic.
 - Complete: recovery replayers fail loudly when durable rejection, expiration,
   or provider-failure facts lack the Contract/raw Candidate evidence required
   to derive their consequence. These broken causal chains can no longer be

@@ -233,6 +233,10 @@ ordinary replacement task immediately and has no system-task completion phase.
 The application uses the minimal public `CompletionPlugin`/
 `CompletionRegistry` protocol, which exposes only `handle_completion`; the old
 MethodRegistry is confined to the source-only legacy Engine compatibility path.
+Plan and replan completion now live in `plugins/planning_completion.py` and are
+registered directly by application composition. Their old core handlers are
+thin Engine scheduling adapters; the former replan copy remains only a
+parameterized compatibility subclass.
 Authentication, claim, policy, and binding failures append Candidate rejection
 records and Trace evidence before returning an error; an invalid worker result
 cannot disappear as an API-only failure.

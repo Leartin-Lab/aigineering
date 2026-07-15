@@ -336,3 +336,7 @@ def test_retry_delegation_does_not_ship_as_completion_registry_semantics():
     assert "default_completion_registry" in application
     assert "MethodRegistry" not in application
     assert "CompletionRegistry" in application
+    assert "PlanMethodHandler" not in application
+    assert "ReplanMethodHandler" not in application
+    assert "PlanningCompletionPlugin" in application
+    assert "ReplanningCompletionPlugin" in application
