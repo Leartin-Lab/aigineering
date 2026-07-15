@@ -1,7 +1,9 @@
 """Tests for aig recover CLI command."""
 
 import json
+from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 
 from aigineering.cli.main import cli
@@ -10,6 +12,24 @@ from aigineering.core.runtime_ingress import RuntimeIngress
 from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.core.trace import create_entry
 from aigineering.protocol.types import Contract
+
+
+@pytest.fixture(autouse=True)
+def initialize_candidate_domain_before_recreate(monkeypatch):
+    original = CliRunner.invoke
+
+    def invoke(runner, command, args=None, *positional, **kwargs):
+        effective = list(args or ())
+        if (
+            effective[:1] == ["recover"]
+            and "--recreate" in effective
+            and not Path(".aig/identity/root.ed25519").exists()
+        ):
+            initialized = original(runner, command, ["domain", "init"])
+            assert initialized.exit_code == 0, initialized.output
+        return original(runner, command, args, *positional, **kwargs)
+
+    monkeypatch.setattr(CliRunner, "invoke", invoke)
 
 
 def _make_recovery_scenario(db_path: str) -> tuple[SQLiteStore, Contract, Contract]:

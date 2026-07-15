@@ -104,6 +104,9 @@ Implementation progress:
 - Complete: Contract projection derives an additional
   `contract.publish.protected` capability requirement from effective
   `minting_authority`, closing payload-based protected-namespace escalation.
+- Complete: recovery recreation no longer writes Contracts through
+  RuntimeIngress; it uses the local signed Candidate publisher. Cancellation is
+  intentionally still pending a typed lifecycle effect.
 - Complete: cryptography is a base dependency; the runtime does not silently
   substitute a non-authenticating deterministic seal.
 - Pending: migrate remaining control-plane and worker submission effects.

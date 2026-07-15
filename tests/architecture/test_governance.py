@@ -91,6 +91,18 @@ def test_http_asset_and_contract_creation_require_signed_candidates():
     assert "inject_asset" not in creation_surface
 
 
+def test_recovery_recreate_publishes_contract_candidate():
+    source = (ROOT / "src/aigineering/cli/recover.py").read_text(encoding="utf-8")
+    recreate = source.split("def _recreate_contracts", 1)[1].split("@click.command", 1)[
+        0
+    ]
+
+    assert "commit_local_effect" in recreate
+    assert "contract_declaration_effect" in recreate
+    assert "accept_contract" not in recreate
+    assert "RuntimeIngress" not in recreate
+
+
 def test_commitment_coordinator_does_not_own_effect_semantics():
     path = ROOT / "src/aigineering/core/commitment.py"
     source = path.read_text(encoding="utf-8")

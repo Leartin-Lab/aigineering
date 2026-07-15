@@ -10,10 +10,14 @@ from __future__ import annotations
 import click
 
 from aigineering.cli._common import _output_json, _persistent_store
+from aigineering.cli._candidate import (
+    commit_local_effect,
+    contract_declaration_effect,
+    require_accepted,
+)
 from aigineering.core.ids import hash_contract_v3
 from aigineering.core.method_handlers.recovery import RecoveryMethodHandler
 from aigineering.core.method_runtime import MethodRuntime
-from aigineering.core.runtime_ingress import RuntimeIngress
 from aigineering.protocol.types import Candidate, Contract
 
 
@@ -62,10 +66,9 @@ def _recreate_contracts(store, contract_ids: list[str]) -> list[dict[str, str]]:
     """Create new contracts with the same parameters as the originals.
 
     Uses the security-complete v3 identity with ``parent_id`` so the new
-    contract gets a deterministic but distinct ID. All writes go through
-    :class:`RuntimeIngress`.
+    contract gets a deterministic but distinct ID. Publication is an ordinary
+    signed ``contract.declare`` Candidate.
     """
-    ingress = RuntimeIngress(store, store)
     recreated: list[dict[str, str]] = []
     for cid in contract_ids:
         original = store.get_contract(cid)
@@ -114,7 +117,13 @@ def _recreate_contracts(store, contract_ids: list[str]) -> list[dict[str, str]]:
             minting_authority=authority,
             sensitive_input_policy=original.sensitive_input_policy,
         )
-        ingress.accept_contract(new_contract)
+        require_accepted(
+            commit_local_effect(
+                store,
+                contract_declaration_effect(new_contract),
+                idempotency_key=f"recover:{original.id}:{new_contract.id}",
+            )
+        )
         runtime = MethodRuntime(
             store=store,
             trace=store,
@@ -188,7 +197,10 @@ def recover(
         cancelled = _cancel_contracts(store, contract_ids)
 
     if do_recreate:
-        recreated = _recreate_contracts(store, contract_ids)
+        try:
+            recreated = _recreate_contracts(store, contract_ids)
+        except (LookupError, ValueError) as exc:
+            raise click.ClickException(str(exc)) from exc
 
     if json_output:
         _output_json(
