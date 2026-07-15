@@ -2,34 +2,10 @@
 
 from __future__ import annotations
 
-from aigineering.cli.domain import load_actor_signer
+from aigineering.cli.identity import load_actor_signer
 from aigineering.core.commitment import CandidateCommitter, CommitmentDecision
 from aigineering.core.domain import load_genesis
 from aigineering.protocol.candidate import CandidateEffect, create_candidate_proposal
-from aigineering.protocol.types import Asset, Contract
-from aigineering.protocol.wire import contract_to_dict
-
-
-def contract_declaration_effect(contract: Contract) -> CandidateEffect:
-    return CandidateEffect("contract.declare", {"contract": contract_to_dict(contract)})
-
-
-def asset_proposal_effect(asset: Asset) -> CandidateEffect:
-    return CandidateEffect(
-        "asset.propose",
-        {
-            "asset": {
-                "content": asset.content,
-                "content_type": asset.content_type,
-                "disclosure_view": asset.disclosure_view,
-                "name": asset.name,
-                "origin": asset.origin,
-                "promptable": asset.promptable,
-                "source_uri": asset.source_uri,
-                "trust_tier": asset.trust_tier,
-            }
-        },
-    )
 
 
 def commit_local_effect(

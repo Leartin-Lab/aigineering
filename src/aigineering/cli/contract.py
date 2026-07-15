@@ -7,12 +7,9 @@ import json
 import click
 
 from aigineering.cli._common import _persistent_store, _output_json
-from aigineering.cli._candidate import (
-    commit_local_effect,
-    contract_declaration_effect,
-    require_accepted,
-)
+from aigineering.cli._candidate import commit_local_effect, require_accepted
 from aigineering.core.control_plane import build_control_plane_contract
+from aigineering.protocol.effect_builders import contract_declaration_effect
 
 
 @click.group("contract")

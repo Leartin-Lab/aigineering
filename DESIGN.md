@@ -19,7 +19,8 @@ the protocol does not rely on a process-local task lock.
 
 ## Implemented runtime path
 
-1. A Contract is accepted through `RuntimeIngress.accept_contract`.
+1. An external root Contract is published as a signed `contract.declare`
+   Candidate; legacy Method children remain a documented transition path.
 2. An eligible worker atomically claims it and receives a WorkerPackage.
 3. The worker returns raw output in a claim-bound CandidateEnvelope.
 4. `submit_candidate` validates package, worker, claim, lease, epoch, and
@@ -38,6 +39,8 @@ the protocol does not rely on a process-local task lock.
   routing requirements, and authority.
 - CandidateEnvelope: claim-bound untrusted worker response. In the current
   path its semantic body is raw model output, not typed effects.
+- CandidateProposal: actor-authenticated typed effects used by external
+  Contract and Asset publishers.
 - RuntimeRecord: versioned, content-addressed append-only event used for
   reconstruction.
 - TraceEntry: human- and machine-readable audit evidence for decisions.
@@ -51,11 +54,11 @@ enforced by tests. In particular, worker output is never a fact; projection is
 pure; undeclared and protected outputs are rejected visibly; and SQLite commits
 the effects of a submission atomically.
 
-Assets and Contracts created by the CLI or control plane still enter through
-trusted `RuntimeIngress` methods. They are not yet represented as signed typed
-Candidates. Deterministic Asset seals provide replay integrity, not actor
-authentication. These are known transition boundaries, not properties hidden
-by the design documentation.
+Migrated CLI and HTTP publishers represent Contracts and Assets as signed typed
+Candidates. Remaining slice, replacement-claim, Method-child, and raw worker
+submission compatibility paths are known transition boundaries, not properties
+hidden by the design documentation. Deterministic Asset seals provide replay
+integrity, not actor authentication.
 
 The transition API now also implements GenesisManifest, actor keys,
 CandidateProposal, typed CandidateEffect values, canonical wire serialization,
@@ -66,8 +69,7 @@ audit evidence, and the Contract. `aig domain init` creates a local Ed25519 root
 identity with a mode-0600 private key. `aig contract add` and `aig asset add`
 publish only through signed `contract.declare` and `asset.propose` Candidates.
 Asset commitment runs the same FactReducer consequences as compatibility
-ingress, including activation and terminal records. Other control-plane
-commands have not yet migrated.
+ingress, including activation and terminal records.
 
 `aig task create` is an aliasing user surface over the same
 `contract.declare` publication path. CLI identity assembly is centralized in
@@ -76,8 +78,14 @@ Genesis-selection logic.
 
 `aig behavior add` also publishes an ordinary `asset.propose` effect. Behavior
 is therefore prompt/disclosure metadata on an Asset, not a separate commitment
-primitive. Contract, Task, Asset, and Behavior commands share effect builders
-and local identity selection.
+primitive. Contract, Task, Asset, and Behavior commands share protocol-level
+effect builders and local identity selection.
+
+The quick demo performs Genesis/key creation only when the local domain is
+absent. That one bootstrap is the explicit exception; provider configuration,
+input Assets, and the demo Contract are then published through the same signed
+Candidate commitment path. A separate audit export deduplicates durable Trace
+entries by identity instead of becoming a second execution store.
 
 The optional HTTP API accepts full signed CandidateProposal bodies at
 `POST /candidates`, `POST /contracts`, and `POST /assets`. Resource endpoints

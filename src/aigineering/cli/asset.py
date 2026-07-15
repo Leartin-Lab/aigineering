@@ -8,11 +8,7 @@ from pathlib import Path
 import click
 
 from aigineering.cli._common import _output_json, _persistent_store
-from aigineering.cli._candidate import (
-    asset_proposal_effect,
-    commit_local_effect,
-    require_accepted,
-)
+from aigineering.cli._candidate import commit_local_effect, require_accepted
 from aigineering.core.asset_versions import (
     create_replacement_claim,
     create_slice_asset,
@@ -22,6 +18,7 @@ from aigineering.core.asset_versions import (
 from aigineering.core.control_plane import build_control_plane_asset
 from aigineering.core.runtime_ingress import RuntimeIngress
 from aigineering.core.trace import create_entry
+from aigineering.protocol.effect_builders import asset_proposal_effect
 
 
 @click.group("asset")

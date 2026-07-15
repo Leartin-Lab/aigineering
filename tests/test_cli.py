@@ -128,9 +128,13 @@ def test_run_persists_assets_contracts_and_session_manifest():
         record_types = [
             record.record_type for _, record in store.scan_runtime_records()
         ]
+        assert "domain.genesis" in record_types
+        assert record_types.count("candidate.committed") >= 3
         assert "claim.granted" in record_types
         assert "candidate.received" in record_types
         assert "claim.submitted" in record_types
+        trace_ids = [entry.id for entry in store.get_all()]
+        assert len(trace_ids) == len(set(trace_ids))
         store.close()
 
 

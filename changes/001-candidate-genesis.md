@@ -111,6 +111,12 @@ Implementation progress:
   `asset.propose` Candidates. Protected Asset names derive the independent
   `asset.publish.protected` capability and feature-specific direct Trace writes
   were removed.
+- Complete: the quick demo's provider configuration, input Assets, and root
+  Contract publish as signed Candidates. First-run local Genesis/key creation
+  remains the single explicit bootstrap exception, and audit export no longer
+  duplicates traces already written by commitment.
+- Complete: standard effect payload builders live in the protocol layer, so
+  runtime composition can publish Candidates without importing CLI semantics.
 - Complete: cryptography is a base dependency; the runtime does not silently
   substitute a non-authenticating deterministic seal.
 - Pending: migrate remaining control-plane and worker submission effects.

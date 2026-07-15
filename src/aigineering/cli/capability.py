@@ -9,17 +9,14 @@ from typing import Any
 import click
 
 from aigineering.cli._common import _output_json, _persistent_store
-from aigineering.cli._candidate import (
-    asset_proposal_effect,
-    commit_local_effect,
-    require_accepted,
-)
+from aigineering.cli._candidate import commit_local_effect, require_accepted
 from aigineering.core.capability_descriptors import (
     create_memory_descriptor,
     create_persona_descriptor,
     create_tool_descriptor,
     verify_descriptor,
 )
+from aigineering.protocol.effect_builders import asset_proposal_effect
 
 _PREFIXES = (
     "_tool_capability_",

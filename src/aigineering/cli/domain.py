@@ -2,45 +2,17 @@
 
 from __future__ import annotations
 
-import os
-from pathlib import Path
-
 import click
 
 from aigineering.cli._common import _output_json, _persistent_store
+from aigineering.cli.identity import (
+    LOCAL_ROOT_CAPABILITIES,
+    actor_key_path,
+    write_actor_key,
+)
 from aigineering.core.domain import initialize_genesis, load_genesis
 from aigineering.core.signing import Ed25519Signer
 from aigineering.protocol.candidate import ActorKey, create_genesis_manifest
-
-
-def actor_key_path() -> Path:
-    return Path(os.environ.get("AIG_ACTOR_KEY_FILE", ".aig/identity/root.ed25519"))
-
-
-def write_actor_key(path: Path, signer: Ed25519Signer) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    except FileExistsError as exc:
-        raise ValueError(f"actor key already exists at {path}") from exc
-    with os.fdopen(descriptor, "w", encoding="ascii") as stream:
-        stream.write(signer.private_key_hex + "\n")
-
-
-def load_actor_signer(path: Path | None = None) -> Ed25519Signer:
-    selected = path or actor_key_path()
-    try:
-        mode = selected.stat().st_mode & 0o777
-        if mode & 0o077:
-            raise ValueError(
-                f"actor key {selected} permissions are too broad; require mode 0600"
-            )
-        encoded = selected.read_text(encoding="ascii").strip()
-    except FileNotFoundError as exc:
-        raise ValueError(
-            f"actor key not found at {selected}; run 'aig domain init'"
-        ) from exc
-    return Ed25519Signer.from_private_key_hex(encoded)
 
 
 @click.group("domain")
@@ -69,11 +41,7 @@ def domain_init(domain_name: str, actor_id: str, key_id: str, as_json: bool) -> 
                     key_id,
                     signer.kind,
                     signer.signer_id,
-                    (
-                        "asset.publish",
-                        "asset.publish.protected",
-                        "contract.publish",
-                    ),
+                    LOCAL_ROOT_CAPABILITIES,
                 )
             ],
             "policy:bootstrap-v1",

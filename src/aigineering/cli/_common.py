@@ -14,7 +14,6 @@ from aigineering.core.ids import (
     hash_asset_definition,
     hash_contract_v3,
 )
-from aigineering.core.runtime_ingress import RuntimeIngress
 from aigineering.application import (
     build_worker,
     default_method_registry,
@@ -22,6 +21,8 @@ from aigineering.application import (
     latest_session_file,
     persistent_store,
 )
+from aigineering.cli._candidate import commit_local_effect, require_accepted
+from aigineering.cli.identity import ensure_local_domain
 from aigineering.core.method_registry import MethodRegistry
 from aigineering.core.store import StoreProtocol
 from aigineering.core.sqlite_store import SQLiteStore
@@ -29,9 +30,12 @@ from aigineering.core.store import require_operational_store
 from aigineering.core.trace import (
     JsonLTraceStore,
     TraceStoreProtocol,
-    create_entry,
 )
 from aigineering.agent.mock import MockWorker
+from aigineering.protocol.effect_builders import (
+    asset_proposal_effect,
+    contract_declaration_effect,
+)
 from aigineering.protocol.types import Asset, Contract, TraceEntry
 
 
@@ -132,7 +136,11 @@ def _run_demo(
     if trace_store is None:
         trace_store = store
 
-    ingress = RuntimeIngress(store, trace_store)
+    try:
+        ensure_local_domain(store)
+    except (OSError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    publication_id = time.time_ns()
 
     try:
         worker = build_worker(
@@ -165,24 +173,11 @@ def _run_demo(
             max_retries=max_retries,
             capabilities=tuple(capabilities or ()),
         )
-        ingress.accept_asset(config_asset, source="provider_config")
-        trace_store.append(
-            create_entry(
-                contract_id="control_plane",
-                event_type="asset_injected",
-                parent_id=config_asset.id,
-                relation_type="provider_config",
-                relation_target=config_asset.name,
-                accepted_fragments=[
-                    json.dumps(
-                        {
-                            "asset_id": config_asset.id,
-                            "origin": config_asset.origin,
-                            "trust_tier": config_asset.trust_tier,
-                        },
-                        sort_keys=True,
-                    )
-                ],
+        require_accepted(
+            commit_local_effect(
+                store,
+                asset_proposal_effect(config_asset),
+                idempotency_key=f"demo:{publication_id}:provider-config",
             )
         )
 
@@ -228,10 +223,18 @@ def _run_demo(
         labels=list(behavior_labels),
     )
 
-    before_trace_ids = {entry.id for entry in store.get_all()}
-    ingress.accept_contract(contract)
-    ingress.accept_asset(data_file, source="demo")
-    ingress.accept_asset(citation_db, source="demo")
+    for suffix, effect in (
+        ("contract", contract_declaration_effect(contract)),
+        ("data-file", asset_proposal_effect(data_file)),
+        ("citation-db", asset_proposal_effect(citation_db)),
+    ):
+        require_accepted(
+            commit_local_effect(
+                store,
+                effect,
+                idempotency_key=f"demo:{publication_id}:{suffix}",
+            )
+        )
 
     from aigineering.runtime import (
         claim_next_package,
@@ -255,8 +258,9 @@ def _run_demo(
 
     # Session JSONL is an audit export of the durable runtime trace, not an
     # independent execution store.
+    exported_trace_ids = {entry.id for entry in trace_store.get_all()}
     for entry in store.get_all():
-        if entry.id not in before_trace_ids:
+        if entry.id not in exported_trace_ids:
             trace_store.append(entry)
 
     return store, trace_store, contract

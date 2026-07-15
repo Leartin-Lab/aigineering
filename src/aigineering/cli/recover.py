@@ -10,12 +10,9 @@ from __future__ import annotations
 import click
 
 from aigineering.cli._common import _output_json, _persistent_store
-from aigineering.cli._candidate import (
-    commit_local_effect,
-    contract_declaration_effect,
-    require_accepted,
-)
+from aigineering.cli._candidate import commit_local_effect, require_accepted
 from aigineering.core.ids import hash_contract_v3
+from aigineering.protocol.effect_builders import contract_declaration_effect
 from aigineering.core.method_handlers.recovery import RecoveryMethodHandler
 from aigineering.core.method_runtime import MethodRuntime
 from aigineering.protocol.types import Candidate, Contract

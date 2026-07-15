@@ -9,13 +9,10 @@ from pathlib import Path
 import click
 
 from aigineering.cli._common import _output_json, _persistent_store
-from aigineering.cli._candidate import (
-    commit_local_effect,
-    contract_declaration_effect,
-    require_accepted,
-)
+from aigineering.cli._candidate import commit_local_effect, require_accepted
 from aigineering.cli.task_state import project_task_status
 from aigineering.core.control_plane import build_control_plane_contract
+from aigineering.protocol.effect_builders import contract_declaration_effect
 from aigineering.protocol.wire import trace_entry_to_dict
 
 

@@ -9,15 +9,12 @@ from typing import Any
 import click
 
 from aigineering.cli._common import _output_json, _persistent_store
-from aigineering.cli._candidate import (
-    asset_proposal_effect,
-    commit_local_effect,
-    require_accepted,
-)
+from aigineering.cli._candidate import commit_local_effect, require_accepted
 from aigineering.core.capability_descriptors import (
     create_mcp_descriptor,
     verify_descriptor,
 )
+from aigineering.protocol.effect_builders import asset_proposal_effect
 
 MCP_PREFIX = "_mcp_"
 

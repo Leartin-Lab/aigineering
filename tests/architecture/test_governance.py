@@ -115,6 +115,28 @@ def test_capability_and_mcp_descriptors_use_protected_asset_candidates():
         assert "RuntimeIngress" not in source
 
 
+def test_demo_bootstrap_publishes_all_ordinary_state_as_candidates():
+    source = (ROOT / "src/aigineering/cli/_common.py").read_text(encoding="utf-8")
+    demo = source.split("def _run_demo", 1)[1].split("def _redact_sealed", 1)[0]
+
+    assert "commit_local_effect" in source
+    assert "contract_declaration_effect" in demo
+    assert "asset_proposal_effect" in demo
+    assert "RuntimeIngress" not in demo
+    assert "accept_contract" not in demo
+    assert "accept_asset" not in demo
+
+
+def test_effect_payload_builders_are_protocol_helpers_not_cli_semantics():
+    source = (ROOT / "src/aigineering/protocol/effect_builders.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "aigineering.cli" not in source
+    assert "contract.declare" in source
+    assert "asset.propose" in source
+
+
 def test_commitment_coordinator_does_not_own_effect_semantics():
     path = ROOT / "src/aigineering/core/commitment.py"
     source = path.read_text(encoding="utf-8")
