@@ -245,3 +245,65 @@ def test_tool_completion_plugin_publishes_continuation_candidate():
         and record.payload.get("effect_types") == ("contract.declare",)
     ]
     assert len(receipts) == 1
+
+
+def test_fail_completion_plugin_closes_parent_and_publishes_report_candidate():
+    store = SQLiteStore(":memory:")
+    signer = Ed25519Signer()
+    actor = ActorKey(
+        "plugin:fail.report.v1",
+        "fail-report-1",
+        signer.kind,
+        signer.signer_id,
+        ("asset.publish", "asset.publish.protected"),
+    )
+    genesis = create_genesis_manifest("runtime-fail", (actor,), "policy:runtime-fail")
+    initialize_genesis(store, genesis)
+    publisher = CandidatePublisher(store, store, genesis, actor, signer)
+    ingress = RuntimeIngress(store, store)
+    root = ingress.accept_contract(
+        build_control_plane_contract(
+            name="failing_task",
+            outputs=("unreachable_output",),
+            budget=3,
+        )
+    )
+    worker = MockWorker()
+    worker.set_output(root.name, '/fail {"reason":"source unavailable"}')
+    root_claim = claim_next_package(store, worker_id="worker", contract_id=root.id)
+    assert root_claim is not None
+    scheduled = execute_claimed_package(root_claim, worker, store)
+    fail_contract = store.get_contract(scheduled["child_contract_id"])
+    assert fail_contract is not None
+    worker.set_output(
+        fail_contract.name,
+        "/exec "
+        + json.dumps({fail_contract.outputs[0]: '{"reason":"source unavailable"}'}),
+    )
+    fail_claim = claim_next_package(
+        store, worker_id="worker", contract_id=fail_contract.id
+    )
+    assert fail_claim is not None
+    assert execute_claimed_package(fail_claim, worker, store)["status"] == "accepted"
+
+    processed = process_method_completions(
+        store,
+        default_completion_registry(),
+        candidate_publishers=CandidatePublisherRegistry(
+            (("fail.report.v1", publisher),)
+        ),
+    )
+
+    assert processed == [fail_contract.id]
+    root_view = RuntimeProjection(store, store).contract_view(root)
+    assert root_view.terminal == "failed"
+    assert root_view.enabled is False
+    reports = store.get_assets_by_name(f"_fail_report_{fail_contract.id}")
+    assert len(reports) == 1
+    receipts = [
+        record
+        for _, record in store.scan_runtime_records(record_type="candidate.received")
+        if record.payload.get("actor_id") == actor.actor_id
+        and record.payload.get("effect_types") == ("asset.propose",)
+    ]
+    assert len(receipts) == 1

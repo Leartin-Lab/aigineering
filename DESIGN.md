@@ -242,6 +242,11 @@ application composition no longer imports the legacy ToolMethodHandler or its
 in-process MCP/tool execution machinery. A multistep runtime test proves that
 observation completion publishes its continuation as a separate signed
 Candidate.
+Explicit failure completion now lives in FailCompletionPlugin. It publishes the
+protected failure report through its own Candidate actor and records the parent
+as `failed` even if report publication is rejected. The application no longer
+imports FailMethodHandler, and `/fail` can no longer leave a processed child
+with a non-terminal, unsatisfied parent.
 Authentication, claim, policy, and binding failures append Candidate rejection
 records and Trace evidence before returning an error; an invalid worker result
 cannot disappear as an API-only failure.

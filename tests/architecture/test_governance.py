@@ -342,3 +342,5 @@ def test_retry_delegation_does_not_ship_as_completion_registry_semantics():
     assert "ReplanningCompletionPlugin" in application
     assert "ToolMethodHandler" not in application
     assert "ToolCompletionPlugin" in application
+    assert "FailMethodHandler" not in application
+    assert "FailCompletionPlugin" in application

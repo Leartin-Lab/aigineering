@@ -289,16 +289,49 @@ class MethodRuntime:
         terminal event is therefore emitted through this constrained runtime
         API, with an idempotency check against durable trace history.
         """
+        return self._record_terminal(
+            contract,
+            "cancelled",
+            reason=reason,
+            relation_type="recover",
+            relation_target=relation_target,
+        )
+
+    def fail_contract(
+        self,
+        contract: Contract,
+        *,
+        reason: str,
+        relation_target: str = "",
+    ) -> bool:
+        """Record one explicit failed terminal for unfinished parent work."""
+        return self._record_terminal(
+            contract,
+            "failed",
+            reason=reason,
+            relation_type="fail",
+            relation_target=relation_target,
+        )
+
+    def _record_terminal(
+        self,
+        contract: Contract,
+        event_type: str,
+        *,
+        reason: str,
+        relation_type: str,
+        relation_target: str,
+    ) -> bool:
         terminal_events = {"complete", "failed", "cancelled", "unreachable"}
         existing = self._trace.store.get_by_contract(contract.id)
         if any(entry.event_type in terminal_events for entry in existing):
             return False
         self.append_trace(
             contract.id,
-            "cancelled",
-            relation_type="recover",
+            event_type,
+            relation_type=relation_type,
             relation_target=relation_target or contract.id,
-            rejected_fragments=[f"[cancelled] recovery: {reason}"],
+            rejected_fragments=[f"[{event_type}] {relation_type}: {reason}"],
             budget_remaining=self.resolve_budget(contract.id),
         )
         return True

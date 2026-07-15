@@ -7,9 +7,9 @@ from typing import Optional
 
 from aigineering.agent.llm import LLMWorker
 from aigineering.agent.mock import MockWorker
-from aigineering.core.method_handlers.fail import FailMethodHandler
 from aigineering.plugins import (
     CompletionRegistry,
+    FailCompletionPlugin,
     PlanningCompletionPlugin,
     ReplanningCompletionPlugin,
     ToolCompletionPlugin,
@@ -31,7 +31,7 @@ def default_completion_registry() -> CompletionRegistry:
     registry.register("plan", PlanningCompletionPlugin())
     registry.register("replan", ReplanningCompletionPlugin())
     registry.register("tool", ToolCompletionPlugin())
-    registry.register("fail", FailMethodHandler())
+    registry.register("fail", FailCompletionPlugin())
     return registry
 
 

@@ -234,6 +234,11 @@ Implementation progress:
   acknowledge a worker-produced declared observation and publish a signed
   continuation Candidate. Application composition no longer imports the legacy
   in-process ToolMethodHandler execution stack.
+- Complete: FailCompletionPlugin publishes protected failure reports through a
+  dedicated Candidate actor and explicitly fails the unfinished parent. This
+  closes the prior silent state where the fail child was marked processed while
+  the parent had neither outputs nor a terminal fact. Application composition
+  no longer imports FailMethodHandler.
 - Complete: recovery replayers fail loudly when durable rejection, expiration,
   or provider-failure facts lack the Contract/raw Candidate evidence required
   to derive their consequence. These broken causal chains can no longer be

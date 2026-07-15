@@ -365,6 +365,14 @@ def _run_task_pool(
                         ("contract.publish", "contract.publish.protected"),
                     ),
                 ),
+                (
+                    "fail.report.v1",
+                    ensure_local_plugin_publisher(
+                        store,
+                        "fail.report.v1",
+                        ("asset.publish", "asset.publish.protected"),
+                    ),
+                ),
             )
         )
         while True:
