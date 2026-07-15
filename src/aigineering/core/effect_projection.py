@@ -30,7 +30,6 @@ class EffectProjection:
     assets: tuple[Asset, ...] = ()
     accepted_asset_names: tuple[str, ...] = ()
     additional_capabilities: tuple[str, ...] = ()
-    worker_registration: WorkerRegistration | None = None
 
 
 def _contract_from_payload(payload: Mapping[str, Any]) -> Contract:
@@ -146,7 +145,6 @@ def project_worker_registration(
     return EffectProjection(
         records=(record,),
         relation_target=registration.worker_id,
-        worker_registration=registration,
     )
 
 

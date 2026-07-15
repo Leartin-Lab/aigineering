@@ -134,7 +134,11 @@ def test_worker_registration_candidate_updates_rebuildable_routing_view(store):
     )
 
     assert decision.accepted is True
-    assert decision.worker_registration == registration
+    assert any(
+        record.record_type == "worker.registered"
+        and record.payload["worker_id"] == registration.worker_id
+        for record in decision.runtime_records
+    )
     assert store.get_worker_registration(registration.worker_id) == registration
     store.rebuild_worker_registration_projection()
     assert store.get_worker_registration(registration.worker_id) == registration

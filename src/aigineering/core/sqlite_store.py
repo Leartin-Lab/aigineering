@@ -570,6 +570,13 @@ class SQLiteStore:
 
     def _insert_runtime_record(self, record: RuntimeRecord) -> int:
         """Insert within the caller's transaction without committing it."""
+        registration = None
+        if record.record_type == "worker.registered":
+            registration = registration_from_record(record)
+            registration_is_replay(
+                self.scan_runtime_records(record_type="worker.registered"),
+                registration,
+            )
         row = self._conn.execute(
             "SELECT * FROM runtime_records WHERE record_id = ?", (record.id,)
         ).fetchone()
@@ -578,6 +585,8 @@ class SQLiteStore:
             if runtime_record_effective_payload(
                 existing
             ) == runtime_record_effective_payload(record):
+                if registration is not None:
+                    self._upsert_worker_registration(registration)
                 return int(row["revision"])
             raise ImmutableRecordConflict("runtime record", record.id)
         validate_runtime_record(record)
@@ -608,6 +617,8 @@ class SQLiteStore:
             ) == runtime_record_effective_payload(record):
                 return int(row["revision"])
             raise ImmutableRecordConflict("runtime record", record.id) from None
+        if registration is not None:
+            self._upsert_worker_registration(registration)
         return int(cursor.lastrowid)
 
     def get_runtime_record(self, record_id: str) -> RuntimeRecord | None:
@@ -960,15 +971,7 @@ class SQLiteStore:
 
     def register_worker(self, registration: WorkerRegistration) -> None:
         """Append one registration version and update its derived current view."""
-        with self._conn:
-            record = worker_registration_record(registration)
-            if registration_is_replay(
-                self.scan_runtime_records(record_type="worker.registered"),
-                registration,
-            ):
-                return
-            self.append_runtime_record(record)
-            self._upsert_worker_registration(registration)
+        self.append_runtime_record(worker_registration_record(registration))
 
     def _upsert_worker_registration(self, registration: WorkerRegistration) -> None:
         self._conn.execute(
@@ -2143,14 +2146,8 @@ class SQLiteStore:
         contract: Contract | None = None,
         reducer_callback: Callable[[], list[TraceEntry]] | None = None,
         runtime_records: tuple[RuntimeRecord, ...] = (),
-        worker_registration: WorkerRegistration | None = None,
     ) -> None:
         with self._conn:
-            if worker_registration is not None:
-                registration_is_replay(
-                    self.scan_runtime_records(record_type="worker.registered"),
-                    worker_registration,
-                )
             if contract is not None:
                 self._insert_contract(contract)
             for asset in accepted_assets:
@@ -2169,8 +2166,6 @@ class SQLiteStore:
                 self._insert_trace_entry(entry)
             for record in runtime_records:
                 self._insert_runtime_record(record)
-            if worker_registration is not None:
-                self._upsert_worker_registration(worker_registration)
             check_crash_point("after_trace_before_budget")
             check_crash_point("after_budget_before_complete")
 

@@ -114,8 +114,10 @@ Genesis owner is explicitly granted this administrative capability.
 
 Worker routing registration uses a dedicated `worker.register` effect and
 capability. Commitment atomically appends the immutable registration fact and
-updates the rebuildable routing projection; the CLI no longer writes routing
-state directly to a Store. Registration version is explicit at publication.
+the Store applies that RuntimeRecord to its rebuildable routing projection in
+the same transaction; neither the generic commitment decision nor its batch
+port contains worker-specific fields. The CLI no longer writes routing state
+directly, and registration version is explicit at publication.
 
 The commitment coordinator authenticates, dispatches, records decisions, and
 commits atomically; it does not parse individual effect payloads. Built-in

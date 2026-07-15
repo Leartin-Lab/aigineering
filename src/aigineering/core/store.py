@@ -234,14 +234,7 @@ class MemoryStore(_ProjectionIndexMixin):
         self._runtime_revision = 0
 
     def register_worker(self, registration) -> None:
-        record = worker_registration_record(registration)
-        if registration_is_replay(
-            self.scan_runtime_records(record_type="worker.registered"), registration
-        ):
-            self._worker_registrations[registration.worker_id] = registration
-            return
-        self.append_runtime_record(record)
-        self._worker_registrations[registration.worker_id] = registration
+        self.append_runtime_record(worker_registration_record(registration))
 
     def get_worker_registration(self, worker_id: str):
         return self._worker_registrations.get(worker_id)
@@ -256,17 +249,28 @@ class MemoryStore(_ProjectionIndexMixin):
             self._worker_registrations[registration.worker_id] = registration
 
     def append_runtime_record(self, record: RuntimeRecord) -> int:
+        registration = None
+        if record.record_type == "worker.registered":
+            registration = registration_from_record(record)
+            registration_is_replay(
+                self.scan_runtime_records(record_type="worker.registered"),
+                registration,
+            )
         existing = self._runtime_records.get(record.id)
         if existing is not None:
             revision, existing_record = existing
             if runtime_record_effective_payload(
                 existing_record
             ) == runtime_record_effective_payload(record):
+                if registration is not None:
+                    self._worker_registrations[registration.worker_id] = registration
                 return revision
             raise ImmutableRecordConflict("runtime record", record.id)
         validate_runtime_record(record)
         self._runtime_revision += 1
         self._runtime_records[record.id] = (self._runtime_revision, record)
+        if registration is not None:
+            self._worker_registrations[registration.worker_id] = registration
         return self._runtime_revision
 
     def get_runtime_record(self, record_id: str) -> RuntimeRecord | None:
@@ -294,7 +298,6 @@ class MemoryStore(_ProjectionIndexMixin):
         contract: Contract | None = None,
         reducer_callback=None,
         runtime_records: tuple[RuntimeRecord, ...] = (),
-        worker_registration=None,
     ) -> None:
         """Apply one ingress batch with rollback-equivalent memory semantics."""
         del trace_entries
@@ -323,17 +326,8 @@ class MemoryStore(_ProjectionIndexMixin):
                 self._persist_asset(asset)
             if reducer_callback is not None:
                 reducer_callback()
-            if worker_registration is not None:
-                registration_is_replay(
-                    self.scan_runtime_records(record_type="worker.registered"),
-                    worker_registration,
-                )
             for record in runtime_records:
                 self.append_runtime_record(record)
-            if worker_registration is not None:
-                self._worker_registrations[worker_registration.worker_id] = (
-                    worker_registration
-                )
             committed = True
         finally:
             if not committed:

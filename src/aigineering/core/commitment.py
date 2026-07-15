@@ -27,7 +27,6 @@ from aigineering.protocol.candidate import (
 )
 from aigineering.protocol.runtime_record import RuntimeRecord, create_runtime_record
 from aigineering.protocol.types import Asset, Contract, TraceEntry
-from aigineering.core.worker_routing import WorkerRegistration
 from aigineering.protocol.wire import trace_entry_to_dict
 
 if TYPE_CHECKING:
@@ -45,7 +44,6 @@ class CommitmentDecision:
     trace_entries: tuple[TraceEntry, ...]
     contract: Contract | None = None
     assets: tuple[Asset, ...] = ()
-    worker_registration: WorkerRegistration | None = None
 
 
 def _actor_capabilities(
@@ -212,7 +210,6 @@ def reduce_candidate(
         trace_entries=(trace,),
         contract=projection.contract,
         assets=projection.assets,
-        worker_registration=projection.worker_registration,
     )
 
 
@@ -260,7 +257,6 @@ class CandidateCommitter:
             trace_entries=list(decision.trace_entries),
             contract=decision.contract,
             runtime_records=decision.runtime_records,
-            worker_registration=decision.worker_registration,
         )
         if self._trace is not self._store:
             for entry in decision.trace_entries:
