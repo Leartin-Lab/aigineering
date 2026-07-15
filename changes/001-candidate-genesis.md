@@ -207,6 +207,11 @@ Implementation progress:
   explicit method actions; the claim-bound runtime rejects attempts to
   reinterpret a signed ordinary `worker.output` as delegation. Delegation
   receipt and method scheduling are a typed causal chain.
+- Complete: the TaskDelegationPlugin, rather than the runtime service, projects
+  plan/replan/tool/fail/retry requests into a contained child task and optional
+  context Asset. Each supported method type has the same plugin-level
+  conformance test; SQLite still commits the projection and claim transition
+  atomically.
 - Complete: the HTTP worker submission endpoint accepts signed Candidates only;
   server claims require an enabled actor-key binding. The server-side mock run
   endpoint no longer impersonates a worker or mutates runtime state.

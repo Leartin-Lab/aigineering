@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
+
+import pytest
 
 from aigineering.core.candidate_publisher import (
     CandidatePublisher,
@@ -22,6 +25,7 @@ from aigineering.plugins import (
     ContinuationTaskPlugin,
     PlanningExpansionPlugin,
     PluginRequest,
+    TaskDelegationPlugin,
     TaskPlugin,
 )
 from aigineering.protocol.actions import WorkerAction
@@ -177,3 +181,56 @@ def test_continuation_plugin_proposes_one_ordinary_task_and_registry_is_explicit
 
     assert decision.accepted is True
     assert len(store.get_all_contracts()) == 1
+
+
+@pytest.mark.parametrize("action_type", ["plan", "replan", "tool", "fail"])
+def test_delegation_plugin_projects_each_method_task_without_store(action_type):
+    parent = _parent()
+    payload = (
+        {"name": "lookup", "args": {}}
+        if action_type == "tool"
+        else {"reason": "test delegation"}
+    )
+    if action_type == "tool":
+        parent = replace(
+            parent,
+            id=hash_contract_v3(
+                name=parent.name,
+                description=parent.description,
+                inputs=parent.inputs,
+                outputs=parent.outputs,
+                activation=parent.activation,
+                budget=parent.budget,
+                tool_scope=("lookup",),
+                labels=parent.labels,
+                origin=parent.origin,
+            ),
+            tool_scope=("lookup",),
+        )
+
+    projection = TaskDelegationPlugin().project(
+        parent,
+        WorkerAction(type=action_type, payload=payload),
+    )
+
+    assert projection.child.parent_id == parent.id
+    assert projection.child.origin == "system"
+    assert f"method:{action_type}" in projection.child.labels
+    assert projection.context_asset is not None
+    assert projection.context_asset.name == f"_method_ctx_{parent.id}"
+    assert projection.event_type == "method_scheduled"
+
+
+def test_delegation_plugin_projects_retry_as_an_independent_task():
+    parent = _parent()
+
+    projection = TaskDelegationPlugin().project(
+        parent,
+        WorkerAction(type="retry", payload={"reason": "retry"}),
+    )
+
+    assert projection.child.origin == "retry"
+    assert projection.child.parent_id == parent.parent_id
+    assert projection.child.outputs == parent.outputs
+    assert projection.context_asset is None
+    assert projection.event_type == "retry_created"

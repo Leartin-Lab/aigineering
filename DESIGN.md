@@ -211,7 +211,10 @@ claim transition. `worker.output` and `task.delegate` are deliberately
 unsupported by the generic effect committer, so `/candidates` cannot bypass
 claim/package fencing. A WorkerHost uses the TaskDelegationPlugin to select the
 delegation effect; signed method submissions cannot be reinterpreted from an
-ordinary output effect.
+ordinary output effect. The same Store-free plugin projects every supported
+delegation action (`plan`, `replan`, `tool`, `fail`, and `retry`) into its
+contained child Contract and optional activation-context Asset; the runtime
+transaction only commits that projection with the source claim transition.
 Authentication, claim, policy, and binding failures append Candidate rejection
 records and Trace evidence before returning an error; an invalid worker result
 cannot disappear as an API-only failure.

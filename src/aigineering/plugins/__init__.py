@@ -2,12 +2,13 @@
 
 from aigineering.plugins.base import PluginProposal, PluginRequest, TaskPlugin
 from aigineering.plugins.continuation import ContinuationTaskPlugin
-from aigineering.plugins.delegation import TaskDelegationPlugin
+from aigineering.plugins.delegation import DelegationProjection, TaskDelegationPlugin
 from aigineering.plugins.planning import PlanningExpansionPlugin
 
 __all__ = (
     "PlanningExpansionPlugin",
     "ContinuationTaskPlugin",
+    "DelegationProjection",
     "PluginProposal",
     "PluginRequest",
     "TaskPlugin",

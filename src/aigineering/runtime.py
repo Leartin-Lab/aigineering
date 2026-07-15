@@ -23,13 +23,6 @@ from aigineering.core.store import require_operational_store
 from aigineering.core.fact_reducer import FactReducer
 from aigineering.core.method_runtime import MethodRuntime
 from aigineering.core.method_handlers.recovery import schedule_projection_recovery
-from aigineering.core.methods import (
-    method_context_content,
-    method_contract,
-    retry_contract,
-    system_asset,
-)
-from aigineering.core.provenance import sign_asset
 from aigineering.core.runtime_projection import RuntimeProjection
 from aigineering.core.submit import (
     SubmitClaimError,
@@ -760,20 +753,12 @@ def _submit_claimed_method(
     if handler is None or not handler.can_handle(action.type):
         raise ValueError(f"no method handler registered for /{action.type}")
 
-    if action.type == "retry":
-        child = retry_contract(contract)
-        context_asset = None
-        event_type = "retry_created"
-    else:
-        child = method_contract(contract, action)
-        context_asset = sign_asset(
-            system_asset(
-                name=f"_method_ctx_{contract.id}",
-                content=method_context_content(contract, action, child),
-                created_by=contract.id,
-            )
-        )
-        event_type = "method_scheduled"
+    from aigineering.plugins import TaskDelegationPlugin
+
+    delegation = TaskDelegationPlugin().project(contract, action)
+    child = delegation.child
+    context_asset = delegation.context_asset
+    event_type = delegation.event_type
 
     existing = trace.get_by_contract(contract.id)
     parent_id = existing[-1].id if existing else None
