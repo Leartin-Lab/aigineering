@@ -1,0 +1,24 @@
+"""Pure Contract admission policy shared by Candidate and compatibility paths."""
+
+from __future__ import annotations
+
+from aigineering.core.activation import validate_execution_activation
+from aigineering.core.authority import matched_reserved_prefix
+from aigineering.core.ids import validate_contract_identity
+from aigineering.protocol.types import Contract
+
+
+def validate_contract_commitment(
+    contract: Contract, *, require_canonical_v3: bool = True
+) -> None:
+    if require_canonical_v3 and not contract.id.startswith("task:v3:"):
+        raise ValueError("Candidate contracts require a canonical task:v3 identity")
+    validate_contract_identity(contract)
+    validate_execution_activation(contract.activation)
+    for output_name in contract.outputs:
+        prefix = matched_reserved_prefix(output_name)
+        if prefix is not None and output_name not in contract.minting_authority:
+            raise ValueError(
+                f"Contract output {output_name!r} uses protected prefix {prefix!r} "
+                "without minting authority"
+            )

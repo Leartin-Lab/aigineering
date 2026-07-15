@@ -82,6 +82,10 @@ Implementation progress:
 - Complete: Candidate-level idempotency preserves full Trace payloads needed
   for byte-equivalent projection reconstruction instead of discarding recording
   metadata to force hash equality.
+- Complete: effect parsing/projection and Contract admission are separated from
+  the commitment coordinator. The coordinator fell from 410 to 265 lines, and
+  an architecture test prevents effect-specific branches or renewed growth
+  beyond 300 lines.
 - Complete: cryptography is a base dependency; the runtime does not silently
   substitute a non-authenticating deterministic seal.
 - Pending: migrate remaining control-plane and worker submission effects.

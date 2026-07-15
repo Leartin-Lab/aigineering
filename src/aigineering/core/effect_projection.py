@@ -1,0 +1,118 @@
+"""Built-in typed-effect projectors for the commitment reducer."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from types import MappingProxyType
+from typing import Any, Callable, Mapping
+
+from aigineering.core.authority import matched_reserved_prefix
+from aigineering.core.contract_admission import validate_contract_commitment
+from aigineering.core.fact_materialization import asset_committed_record
+from aigineering.core.ids import hash_asset_content, hash_asset_definition
+from aigineering.core.provenance import sign_asset
+from aigineering.protocol.candidate import CandidateEffect, CandidateProposal
+from aigineering.protocol.immutability import deep_thaw
+from aigineering.protocol.runtime_record import RuntimeRecord, create_runtime_record
+from aigineering.protocol.types import Asset, Contract
+from aigineering.protocol.wire import contract_to_dict
+
+
+@dataclass(frozen=True)
+class EffectProjection:
+    records: tuple[RuntimeRecord, ...]
+    relation_target: str
+    contract: Contract | None = None
+    assets: tuple[Asset, ...] = ()
+    accepted_asset_names: tuple[str, ...] = ()
+
+
+def _contract_from_payload(payload: Mapping[str, Any]) -> Contract:
+    value = payload.get("contract")
+    if not isinstance(value, Mapping):
+        raise ValueError("contract.declare requires an object payload.contract")
+    data = deep_thaw(value)
+    return Contract(
+        id=str(data.get("id", "")),
+        parent_id=data.get("parent_id"),
+        name=str(data.get("name", "")),
+        description=str(data.get("description", "")),
+        inputs=tuple(data.get("inputs", ())),
+        outputs=tuple(data.get("outputs", ())),
+        activation=str(data.get("activation", "")),
+        budget=int(data.get("budget", 0)),
+        tool_scope=tuple(data.get("tool_scope", ())),
+        labels=tuple(data.get("labels", ())),
+        worker_capabilities=tuple(data.get("worker_capabilities", ())),
+        worker_pools=tuple(data.get("worker_pools", ())),
+        origin=str(data.get("origin", "human")),
+        minting_authority=tuple(data.get("minting_authority", ())),
+        sensitive_input_policy=data.get("sensitive_input_policy"),
+    )
+
+
+def project_contract_declaration(
+    effect: CandidateEffect, candidate: CandidateProposal, receipt_id: str
+) -> EffectProjection:
+    contract = _contract_from_payload(effect.payload)
+    validate_contract_commitment(contract)
+    record = create_runtime_record(
+        "contract.declared",
+        {"candidate_id": candidate.id, "contract": contract_to_dict(contract)},
+        causal_parents=(receipt_id,),
+    )
+    return EffectProjection(
+        records=(record,), relation_target=contract.id, contract=contract
+    )
+
+
+def project_asset_proposal(
+    effect: CandidateEffect, candidate: CandidateProposal, receipt_id: str
+) -> EffectProjection:
+    value = effect.payload.get("asset")
+    if not isinstance(value, Mapping):
+        raise ValueError("asset.propose requires an object payload.asset")
+    data = deep_thaw(value)
+    name = str(data.get("name", ""))
+    content = str(data.get("content", ""))
+    if not name:
+        raise ValueError("asset.propose asset.name must not be empty")
+    prefix = matched_reserved_prefix(name)
+    if prefix is not None:
+        raise ValueError(f"Asset name {name!r} uses protected prefix {prefix!r}")
+    content_hash = hash_asset_content(name, content)
+    asset = sign_asset(
+        Asset(
+            id=content_hash,
+            name=name,
+            content=content,
+            content_type=str(data.get("content_type", "text")),
+            created_by=candidate.actor_id,
+            origin=str(data.get("origin", "human")),
+            trust_tier=str(data.get("trust_tier", "human")),
+            source_uri=str(data.get("source_uri", "")),
+            signed_by=candidate.actor_id,
+            signer_kind=f"candidate:{candidate.signature_kind}",
+            promptable=bool(data.get("promptable", True)),
+            disclosure_view=str(data.get("disclosure_view", "original")),
+            definition_hash=hash_asset_definition(name),
+            content_hash=content_hash,
+        ),
+        signed_by=candidate.actor_id,
+    )
+    record = asset_committed_record(asset, causal_parents=(receipt_id,))
+    return EffectProjection(
+        records=(record,),
+        relation_target=asset.id,
+        assets=(asset,),
+        accepted_asset_names=(asset.name,),
+    )
+
+
+EffectProjector = Callable[[CandidateEffect, CandidateProposal, str], EffectProjection]
+BUILTIN_EFFECTS: Mapping[str, tuple[str, EffectProjector]] = MappingProxyType(
+    {
+        "asset.propose": ("asset.publish", project_asset_proposal),
+        "contract.declare": ("contract.publish", project_contract_declaration),
+    }
+)

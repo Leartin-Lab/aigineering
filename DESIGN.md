@@ -74,6 +74,12 @@ commands have not yet migrated.
 one local Candidate publisher; the three commands do not each own signature or
 Genesis-selection logic.
 
+The commitment coordinator authenticates, dispatches, records decisions, and
+commits atomically; it does not parse individual effect payloads. Built-in
+effect projectors and Contract admission policy are separate pure modules. An
+architecture gate keeps effect names and payload semantics out of the
+coordinator and caps it below 300 source lines.
+
 A domain may persist exactly one `domain.genesis` RuntimeRecord. Initialization
 is idempotent, replacement fails closed, SQLite enforces uniqueness, and a
 CandidateCommitter can reconstruct the trust root from the Store instead of

@@ -61,3 +61,12 @@ def test_task_create_uses_candidate_commitment_not_legacy_ingress():
     assert "CandidateEffect" in create_body
     assert "inject_contract" not in create_body
     assert "RuntimeIngress(" not in create_body
+
+
+def test_commitment_coordinator_does_not_own_effect_semantics():
+    path = ROOT / "src/aigineering/core/commitment.py"
+    source = path.read_text(encoding="utf-8")
+
+    assert "asset.propose" not in source
+    assert "contract.declare" not in source
+    assert len(source.splitlines()) < 300

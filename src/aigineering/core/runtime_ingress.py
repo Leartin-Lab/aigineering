@@ -25,7 +25,7 @@ from aigineering.core.authority import (
     ReservedNamespaceError,
     matched_reserved_prefix,
 )
-from aigineering.core.commitment import validate_contract_commitment
+from aigineering.core.contract_admission import validate_contract_commitment
 from aigineering.core.provenance import sign_asset
 from aigineering.core.trace import create_entry
 from aigineering.core.fact_materialization import (
