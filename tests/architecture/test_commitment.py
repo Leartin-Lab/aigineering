@@ -721,6 +721,11 @@ def test_committer_is_conformant_and_idempotent(store):
             ),
             "canonical task:v3 identity",
         ),
+        (
+            ("worker.submit",),
+            CandidateEffect("worker.output", {"envelope": {}}),
+            "unsupported effect type",
+        ),
     ],
 )
 def test_invalid_effects_are_visible_rejections(capabilities, effect, reason):

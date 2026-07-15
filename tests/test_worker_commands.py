@@ -13,7 +13,13 @@ from aigineering.core.ids import (
 from aigineering.core.provenance import sign_asset
 from aigineering.core.signing import Ed25519Signer
 from aigineering.core.sqlite_store import SQLiteStore
+from aigineering.core.domain import load_genesis
+from aigineering.protocol.candidate import (
+    candidate_proposal_to_dict,
+    create_candidate_proposal,
+)
 from aigineering.protocol.envelope import CandidateEnvelope
+from aigineering.protocol.effect_builders import worker_output_effect
 from aigineering.protocol.package import WorkerPackage
 from aigineering.protocol.types import Asset, Contract, TraceEntry
 from aigineering.protocol.types import Candidate
@@ -202,18 +208,62 @@ def _seed_continuation_with_method_context(
     return parent, continuation, obs
 
 
-def _valid_envelope_json(contract_id: str) -> str:
-    """Build a valid CandidateEnvelope JSON string."""
+_CLI_WORKER_SIGNER = Ed25519Signer()
+
+
+def _ensure_cli_worker_identity(runner: CliRunner) -> None:
+    store = SQLiteStore(".aig/store.db")
+    try:
+        load_genesis(store)
+    except LookupError:
+        assert runner.invoke(cli, ["domain", "init"]).exit_code == 0
+    if store.get_worker_registration("cli-worker") is None:
+        result = runner.invoke(
+            cli,
+            [
+                "worker",
+                "register",
+                "--worker-id",
+                "cli-worker",
+                "--key-id",
+                "cli-worker-1",
+                "--public-key",
+                _CLI_WORKER_SIGNER.signer_id,
+                "--json",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+
+
+def _signed_worker_candidate_json(envelope: CandidateEnvelope) -> str:
+    store = SQLiteStore(".aig/store.db")
+    genesis = load_genesis(store)
+    candidate = create_candidate_proposal(
+        domain_id=genesis.id,
+        actor_id=envelope.worker_id,
+        key_id="cli-worker-1",
+        effects=(worker_output_effect(envelope),),
+        signer=_CLI_WORKER_SIGNER,
+        idempotency_key=envelope.idempotency_key,
+    )
+    return json.dumps(candidate_proposal_to_dict(candidate))
+
+
+def _valid_candidate_json(runner: CliRunner, contract_id: str) -> str:
+    """Build a signed but unclaimed worker Candidate."""
+    _ensure_cli_worker_identity(runner)
     envelope = CandidateEnvelope(
         contract_id=contract_id,
-        worker_id="test_worker",
+        worker_id="cli-worker",
         raw_output="final_report: This is the report content",
+        idempotency_key=f"idem-{contract_id}",
     )
-    return envelope.to_json()
+    return _signed_worker_candidate_json(envelope)
 
 
 def _claimed_package(runner: CliRunner) -> dict:
     """Claim the next ready contract through the operational worker protocol."""
+    _ensure_cli_worker_identity(runner)
     result = runner.invoke(
         cli, ["worker", "next", "--worker-id", "cli-worker", "--json"]
     )
@@ -225,12 +275,12 @@ def _claimed_package(runner: CliRunner) -> dict:
     return data
 
 
-def _envelope_json_from_package(
+def _candidate_json_from_package(
     pkg_data: dict,
     raw_output: str = "final_report: This is the report content",
     idempotency_key: str | None = None,
 ) -> str:
-    """Build a CandidateEnvelope bound to a worker package claim."""
+    """Build a signed Candidate bound to a worker package claim."""
     envelope = CandidateEnvelope(
         contract_id=pkg_data["contract_id"],
         worker_id="cli-worker",
@@ -244,7 +294,7 @@ def _envelope_json_from_package(
             else idempotency_key
         ),
     )
-    return envelope.to_json()
+    return _signed_worker_candidate_json(envelope)
 
 
 # ---------------------------------------------------------------------------
@@ -345,7 +395,7 @@ def test_submit_creates_projection_assets():
         contract, asset = _seed_contract_with_asset(store)
 
         pkg_data = _claimed_package(runner)
-        envelope_json = _envelope_json_from_package(pkg_data)
+        envelope_json = _candidate_json_from_package(pkg_data)
         result = runner.invoke(cli, ["worker", "submit", "--json", envelope_json])
 
         assert result.exit_code == 0, f"stderr: {result.output}"
@@ -374,10 +424,46 @@ def test_submit_creates_projection_assets():
         projection = next(
             record for record in records if record.record_type == "projection.decided"
         )
+        output = next(
+            record
+            for record in records
+            if record.record_type == "worker.output.received"
+        )
+        receipt = next(
+            record
+            for record in records
+            if record.record_type == "candidate.received"
+            and record.payload.get("actor_id") == "cli-worker"
+        )
+        assert output.causal_parents == (receipt.id,)
+        assert projection.causal_parents == (output.id,)
         claim_submitted = next(
             record for record in records if record.record_type == "claim.submitted"
         )
         assert projection.id in claim_submitted.causal_parents
+
+
+def test_submit_rejects_tampered_signed_worker_candidate():
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        store = SQLiteStore(".aig/store.db")
+        contract, _asset = _seed_contract_with_asset(store)
+        pkg_data = _claimed_package(runner)
+        candidate = json.loads(_candidate_json_from_package(pkg_data))
+        candidate["effects"][0]["payload"]["envelope"]["raw_output"] = (
+            "final_report: tampered after signing"
+        )
+
+        result = runner.invoke(
+            cli, ["worker", "submit", "--json", json.dumps(candidate)]
+        )
+
+        assert result.exit_code != 0
+        data = json.loads(result.output)
+        assert "content id" in data["error"] or "signature" in data["error"]
+        persisted = SQLiteStore(".aig/store.db")
+        assert persisted.get_assets_by_name("final_report") == []
+        assert persisted.get_claim(contract.id)["status"] == "active"
 
 
 def test_submit_without_claim_rejected_for_sqlite_store():
@@ -387,7 +473,7 @@ def test_submit_without_claim_rejected_for_sqlite_store():
         store = SQLiteStore(".aig/store.db")
         contract, asset = _seed_contract_with_asset(store)
 
-        envelope_json = _valid_envelope_json(contract.id)
+        envelope_json = _valid_candidate_json(runner, contract.id)
         result = runner.invoke(cli, ["worker", "submit", "--json", envelope_json])
 
         assert result.exit_code != 0
@@ -406,8 +492,8 @@ def test_idempotent_duplicate_submit():
         contract, asset = _seed_contract_with_asset(store)
 
         pkg_data = _claimed_package(runner)
-        envelope_json = _envelope_json_from_package(pkg_data)
         idem_key = "idem-abc-123"
+        envelope_json = _candidate_json_from_package(pkg_data, idempotency_key=idem_key)
 
         # First submit
         result1 = runner.invoke(
@@ -459,19 +545,20 @@ def test_different_key_conflict():
         contract, asset = _seed_contract_with_asset(store)
 
         pkg_data = _claimed_package(runner)
-        envelope_json = _envelope_json_from_package(pkg_data)
+        candidate_a = _candidate_json_from_package(pkg_data, idempotency_key="key-A")
 
         # First submit with key A
         result1 = runner.invoke(
             cli,
-            ["worker", "submit", "--json", envelope_json, "--idempotency-key", "key-A"],
+            ["worker", "submit", "--json", candidate_a, "--idempotency-key", "key-A"],
         )
         assert result1.exit_code == 0
 
         # Second submit with key B → conflict
+        candidate_b = _candidate_json_from_package(pkg_data, idempotency_key="key-B")
         result2 = runner.invoke(
             cli,
-            ["worker", "submit", "--json", envelope_json, "--idempotency-key", "key-B"],
+            ["worker", "submit", "--json", candidate_b, "--idempotency-key", "key-B"],
         )
         assert result2.exit_code != 0
         data2 = json.loads(result2.output)
@@ -479,29 +566,21 @@ def test_different_key_conflict():
         assert "already has a submission" in data2.get("error", "")
 
 
-def test_submit_without_idempotency_key_is_claim_bound():
-    """Submit without idempotency key works once, but old claim replay is rejected."""
+def test_signed_submit_requires_idempotency_key():
+    """Authenticated submissions fail closed without a signed idempotency key."""
     runner = CliRunner()
     with runner.isolated_filesystem():
         store = SQLiteStore(".aig/store.db")
         contract, asset = _seed_contract_with_asset(store)
 
         pkg_data = _claimed_package(runner)
-        envelope_json = _envelope_json_from_package(pkg_data, idempotency_key="")
+        envelope_json = _candidate_json_from_package(pkg_data, idempotency_key="")
 
-        # First submit without idempotency key
-        result1 = runner.invoke(cli, ["worker", "submit", "--json", envelope_json])
-        assert result1.exit_code == 0
-        data1 = json.loads(result1.output)
-        assert data1["status"] == "accepted"
-        assert not data1["duplicate"]
-
-        # Second submit without idempotency key reuses a submitted claim and is rejected.
-        result2 = runner.invoke(cli, ["worker", "submit", "--json", envelope_json])
-        assert result2.exit_code != 0
-        data2 = json.loads(result2.output)
-        assert data2["status"] == "error"
-        assert "claim status" in data2["error"] or "claim" in data2["error"]
+        result = runner.invoke(cli, ["worker", "submit", "--json", envelope_json])
+        assert result.exit_code != 0
+        data = json.loads(result.output)
+        assert data["status"] == "error"
+        assert "idempotency_key" in data["error"]
 
 
 def test_sealed_config_not_in_output():
@@ -512,7 +591,7 @@ def test_sealed_config_not_in_output():
         contract, asset = _seed_contract_with_asset(store)
 
         pkg_data = _claimed_package(runner)
-        envelope_json = _envelope_json_from_package(pkg_data)
+        envelope_json = _candidate_json_from_package(pkg_data)
         result = runner.invoke(cli, ["worker", "submit", "--json", envelope_json])
 
         assert result.exit_code == 0
@@ -542,12 +621,17 @@ def test_submit_missing_contract():
     """Submit to nonexistent contract returns error."""
     runner = CliRunner()
     with runner.isolated_filesystem():
+        _ensure_cli_worker_identity(runner)
         envelope = CandidateEnvelope(
             contract_id="nonexistent_contract",
-            worker_id="test_worker",
+            worker_id="cli-worker",
             raw_output="result: ok",
+            idempotency_key="missing-contract",
         )
-        result = runner.invoke(cli, ["worker", "submit", "--json", envelope.to_json()])
+        result = runner.invoke(
+            cli,
+            ["worker", "submit", "--json", _signed_worker_candidate_json(envelope)],
+        )
         assert result.exit_code != 0
         data = json.loads(result.output)
         assert "error" in data
@@ -570,9 +654,11 @@ def test_submit_rejected_candidate():
             package_id=pkg_data["package_id"],
             claim_id=pkg_data["claim_id"],
             claim_epoch=pkg_data["claim_epoch"],
+            idempotency_key="rejected-candidate",
         )
         result = runner.invoke(
-            cli, ["worker", "submit", "--json", bad_envelope.to_json()]
+            cli,
+            ["worker", "submit", "--json", _signed_worker_candidate_json(bad_envelope)],
         )
 
         assert result.exit_code == 0
@@ -597,9 +683,11 @@ def test_submit_rejected_preserves_trace():
             package_id=pkg_data["package_id"],
             claim_id=pkg_data["claim_id"],
             claim_epoch=pkg_data["claim_epoch"],
+            idempotency_key="rejected-trace",
         )
         result = runner.invoke(
-            cli, ["worker", "submit", "--json", bad_envelope.to_json()]
+            cli,
+            ["worker", "submit", "--json", _signed_worker_candidate_json(bad_envelope)],
         )
 
         assert result.exit_code == 0
@@ -804,9 +892,8 @@ def test_worker_next_skips_completed_contract():
         contract, asset = _seed_contract_with_asset(store)
 
         # Submit once to satisfy the output
-        next_result = runner.invoke(cli, ["worker", "next", "--json"])
-        pkg_data = json.loads(next_result.output)
-        envelope_json = _envelope_json_from_package(pkg_data)
+        pkg_data = _claimed_package(runner)
+        envelope_json = _candidate_json_from_package(pkg_data)
         runner.invoke(cli, ["worker", "submit", "--json", envelope_json])
 
         # Now next should return null (contract completed)
@@ -825,14 +912,12 @@ def test_worker_next_submit_full_cycle():
         contract, asset = _seed_contract_with_asset(store)
 
         # ── Step 1: worker next — get a package ─────────────────────────
-        result = runner.invoke(cli, ["worker", "next", "--json"])
-        assert result.exit_code == 0
-        pkg_data = json.loads(result.output)
+        pkg_data = _claimed_package(runner)
         assert pkg_data is not None
         assert pkg_data["contract_id"] == contract.id
 
         # ── Step 2: worker submit — send candidate result ───────────────
-        envelope_json = _envelope_json_from_package(pkg_data)
+        envelope_json = _candidate_json_from_package(pkg_data)
         result = runner.invoke(cli, ["worker", "submit", "--json", envelope_json])
         assert result.exit_code == 0
         submit_data = json.loads(result.output)

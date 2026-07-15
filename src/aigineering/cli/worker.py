@@ -25,10 +25,9 @@ from aigineering.core.submit import (
     SubmitClaimError,
     SubmitCommitError,
     SubmitConflictError,
-    submit_candidate,
+    submit_worker_candidate,
 )
-from aigineering.protocol.candidate import ActorKey
-from aigineering.protocol.envelope import CandidateEnvelope
+from aigineering.protocol.candidate import ActorKey, candidate_proposal_from_dict
 from aigineering.protocol.effect_builders import (
     actor_authorization_effect,
     worker_registration_effect,
@@ -312,38 +311,43 @@ def worker_register(
 
 @worker.command("submit")
 @click.option(
-    "--json", "envelope_json", required=True, help="CandidateEnvelope JSON string"
+    "--json", "candidate_json", required=True, help="Signed CandidateProposal JSON"
 )
 @click.option(
     "--idempotency-key",
     default=None,
     help="Idempotency key for deduplication",
 )
-def worker_submit(envelope_json: str, idempotency_key: Optional[str]) -> None:
-    """Submit a candidate envelope for projection and commitment.
+def worker_submit(candidate_json: str, idempotency_key: Optional[str]) -> None:
+    """Submit a signed worker Candidate for projection and commitment.
 
-    ENVELOPE_JSON must be a valid CandidateEnvelope serialized as JSON.
+    CANDIDATE_JSON must contain exactly one ``worker.output`` effect.
     Output is always JSON.
     """
     try:
-        envelope = CandidateEnvelope.from_json(envelope_json)
+        data = json.loads(candidate_json)
+        if not isinstance(data, dict):
+            raise ValueError("CandidateProposal must be a JSON object")
+        candidate = candidate_proposal_from_dict(data)
     except (ValueError, json.JSONDecodeError) as e:
-        _output_json({"error": f"Invalid envelope: {e}"})
+        _output_json({"error": f"Invalid CandidateProposal: {e}"})
         raise click.exceptions.Exit(1) from None
 
     store = _persistent_store()
-
-    if store.get_contract(envelope.contract_id) is None:
-        _output_json({"error": f"Contract '{envelope.contract_id}' not found."})
+    if idempotency_key and idempotency_key != candidate.idempotency_key:
+        _output_json(
+            {
+                "error": "--idempotency-key must match the signed Candidate value",
+                "status": "error",
+            }
+        )
         raise click.exceptions.Exit(1)
 
     try:
-        result = submit_candidate(
-            envelope=envelope,
+        result = submit_worker_candidate(
+            candidate=candidate,
             store=store,
             trace_store=store,
-            idempotency_store=None,
-            idempotency_key=idempotency_key or "",
         )
     except SubmitConflictError as e:
         _output_json({"error": str(e), "status": "conflict"})

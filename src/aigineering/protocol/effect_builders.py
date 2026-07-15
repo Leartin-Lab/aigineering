@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from aigineering.protocol.candidate import ActorKey, CandidateEffect
+from aigineering.protocol.envelope import CandidateEnvelope
 from aigineering.protocol.types import Asset, Contract, ReplacementClaim
 from aigineering.protocol.wire import contract_to_dict
 
@@ -115,3 +116,8 @@ def actor_rotation_effect(
             },
         },
     )
+
+
+def worker_output_effect(envelope: CandidateEnvelope) -> CandidateEffect:
+    """Wrap one claim-bound worker result in an authenticated Candidate effect."""
+    return CandidateEffect("worker.output", {"envelope": envelope.to_dict()})

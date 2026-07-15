@@ -1966,6 +1966,7 @@ class SQLiteStore:
         package_id: str = "",
         claim_epoch: int = 0,
         runtime_records: tuple[RuntimeRecord, ...] = (),
+        candidate_key_id: str = "",
     ) -> bool:
         """Commit accepted assets, trace, idempotency, and claim state atomically.
 
@@ -1973,6 +1974,30 @@ class SQLiteStore:
         active claim predicate at commit time.
         """
         with self._conn:
+            if candidate_key_id:
+                # A SELECT does not start SQLite's write transaction.  Acquire
+                # writer arbitration before reading the routing projection so
+                # another replica cannot rebind the worker between this check
+                # and the first committed effect.
+                self._conn.execute(
+                    "UPDATE worker_registrations SET updated_at = updated_at "
+                    "WHERE worker_id = ?",
+                    (worker_id,),
+                )
+                registration = self._conn.execute(
+                    "SELECT actor_id, key_id, enabled FROM worker_registrations "
+                    "WHERE worker_id = ?",
+                    (worker_id,),
+                ).fetchone()
+                if (
+                    registration is None
+                    or not bool(registration["enabled"])
+                    or registration["actor_id"] != worker_id
+                    or registration["key_id"] != candidate_key_id
+                ):
+                    raise sqlite3.IntegrityError(
+                        "worker actor-key binding changed during submit"
+                    )
             for asset in accepted_assets:
                 if not asset.signed_by or not verify_asset_seal(asset):
                     raise ValueError(

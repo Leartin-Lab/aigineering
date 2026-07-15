@@ -10,8 +10,9 @@ not replace this description of the running system.
 Aigineering is a zero-trust runtime for turning untrusted worker output into
 auditable facts. The runtime is asset-driven and append-oriented. A worker does
 not mutate shared state: it claims a Contract, receives a disclosure-bounded
-WorkerPackage, and submits a CandidateEnvelope. Projection and authority checks
-decide which declared outputs may become Assets.
+WorkerPackage, and submits a signed CandidateProposal containing one claim-bound
+`worker.output` envelope. Projection and authority checks decide which declared
+outputs may become Assets.
 
 The 0.5 reference implementation is single-domain and SQLite-first. SQLite WAL,
 transactions, leases, and unique constraints provide the concurrency control;
@@ -22,9 +23,9 @@ the protocol does not rely on a process-local task lock.
 1. An external root Contract is published as a signed `contract.declare`
    Candidate; legacy Method children remain a documented transition path.
 2. An eligible worker atomically claims it and receives a WorkerPackage.
-3. The worker returns raw output in a claim-bound CandidateEnvelope.
-4. `submit_candidate` validates package, worker, claim, lease, epoch, and
-   idempotency bindings.
+3. The worker signs raw output and claim metadata as one `worker.output` effect.
+4. `submit_worker_candidate` authenticates the actor, capability, routing-key,
+   package, worker, claim, lease, epoch, and idempotency bindings.
 5. Pure projection parses the candidate and applies declared-output and
    reserved-namespace authority rules.
 6. SQLite atomically commits accepted Assets, rejection/acceptance TraceEntry
@@ -37,10 +38,11 @@ the protocol does not rely on a process-local task lock.
 - Asset: immutable content with provenance metadata. Assets are runtime facts.
 - Contract: immutable declaration of inputs, outputs, activation, allowance,
   routing requirements, and authority.
-- CandidateEnvelope: claim-bound untrusted worker response. In the current
-  path its semantic body is raw model output, not typed effects.
+- CandidateEnvelope: immutable claim/package and raw-output payload nested
+  inside a worker Candidate; the internal WorkerHost compatibility path still
+  constructs it before signing is moved into the host.
 - CandidateProposal: actor-authenticated typed effects used by external
-  Contract and Asset publishers.
+  publishers and the external worker-submit protocol.
 - RuntimeRecord: versioned, content-addressed append-only event used for
   reconstruction.
 - TraceEntry: human- and machine-readable audit evidence for decisions.
@@ -185,10 +187,14 @@ process crash after physical Asset insertion but before Trace/RuntimeRecord
 insertion rolls back the entire Candidate; restart observes neither a partial
 fact nor a false receipt/terminal record.
 
-Claim-bound worker submission does not depend on RuntimeIngress. It calls the
-same pure Asset-fact reduction function used by typed Candidate commitment,
-then commits projection, lifecycle consequences, trace evidence, idempotency,
-and claim transition through the operational Store transaction.
+Claim-bound external worker submission does not depend on RuntimeIngress. The
+dedicated `worker.output` interpreter verifies the Candidate signature,
+`worker.submit` capability, worker-to-key registration, and signed idempotency
+binding before calling the same pure projection and Asset-fact reducer. SQLite
+rechecks routing-key and claim predicates while atomically committing receipt,
+output evidence, projection, lifecycle consequences, trace, idempotency, and
+claim transition. `worker.output` is deliberately unsupported by the generic
+effect committer, so `/candidates` cannot bypass claim/package fencing.
 
 A domain may persist exactly one `domain.genesis` RuntimeRecord. Initialization
 is idempotent, replacement fails closed, SQLite enforces uniqueness, and a

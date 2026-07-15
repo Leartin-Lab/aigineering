@@ -178,8 +178,16 @@ Implementation progress:
   bindings remain readable only for explicit migration compatibility.
 - Complete: cryptography is a base dependency; the runtime does not silently
   substitute a non-authenticating deterministic seal.
-- Pending: authenticate claim-bound worker submissions as CandidateProposal
-  effects and migrate Method task publication to plugins.
+- Complete: external claim-bound worker submission accepts only an
+  actor-signed CandidateProposal containing one `worker.output` effect. The
+  actor must have `worker.submit`, match the registered worker/key binding, and
+  sign the same non-empty idempotency key as the embedded envelope. SQLite
+  rechecks key binding with the claim predicate in the commitment transaction;
+  authenticated receipt, output evidence, and projection form one causal chain.
+  The generic Candidate committer intentionally rejects `worker.output` so it
+  cannot become a claim-bypass path.
+- Pending: move signing into the internal WorkerHost execution adapter, then
+  migrate Method task publication to plugins.
 
 ## Required architecture tests
 

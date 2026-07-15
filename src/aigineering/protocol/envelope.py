@@ -93,7 +93,11 @@ class CandidateEnvelope:
 
     def to_json(self) -> str:
         """Serialize to a JSON string."""
-        d: dict[str, object] = {
+        return json.dumps(self.to_dict(), sort_keys=True, ensure_ascii=False)
+
+    def to_dict(self) -> dict[str, object]:
+        """Serialize to a JSON-compatible mapping."""
+        return {
             "protocol_version": self.protocol_version,
             "contract_id": self.contract_id,
             "worker_id": self.worker_id,
@@ -113,7 +117,6 @@ class CandidateEnvelope:
                 else None
             ),
         }
-        return json.dumps(d, sort_keys=True, ensure_ascii=False)
 
     @classmethod
     def from_json(cls, data: str) -> CandidateEnvelope:
@@ -121,6 +124,11 @@ class CandidateEnvelope:
         d = json.loads(data)
         if not isinstance(d, dict):
             raise ValueError("candidate envelope must be a JSON object")
+        return cls.from_dict(d)
+
+    @classmethod
+    def from_dict(cls, d: Mapping[str, Any]) -> CandidateEnvelope:
+        """Deserialize from a mapping. Fails closed on unknown version."""
 
         version = d.get("protocol_version")
         if version is None:
