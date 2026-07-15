@@ -1,0 +1,277 @@
+"""Authenticated, typed Candidate protocol values.
+
+Receipt proves who proposed effects and that their bytes were not changed.  It
+does not make an effect a runtime fact; commitment belongs to a separate reducer.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field, replace
+from typing import Any, Callable, Mapping
+
+from aigineering.core.ids import canonical_json, compute_content_hash
+from aigineering.core.signing import Signer, Verifier, create_verifier
+from aigineering.protocol.immutability import deep_freeze, deep_thaw
+from aigineering.protocol.runtime_record import RuntimeRecord, create_runtime_record
+
+
+CANDIDATE_PROTOCOL_VERSION = 1
+
+
+@dataclass(frozen=True)
+class ActorKey:
+    """One actor key authorized by a Genesis manifest."""
+
+    actor_id: str
+    key_id: str
+    kind: str
+    public_key: str
+    capabilities: tuple[str, ...] = field(default_factory=tuple)
+    revoked: bool = False
+
+    def __post_init__(self) -> None:
+        for field_name in ("actor_id", "key_id", "kind", "public_key"):
+            if not getattr(self, field_name):
+                raise ValueError(f"ActorKey.{field_name} must not be empty")
+        object.__setattr__(self, "capabilities", tuple(sorted(self.capabilities)))
+
+
+@dataclass(frozen=True)
+class GenesisManifest:
+    """Immutable trust root for one Candidate domain."""
+
+    id: str
+    domain: str
+    root_keys: tuple[ActorKey, ...]
+    policy_hash: str
+    schema_version: int = 1
+
+    def __post_init__(self) -> None:
+        if not self.domain:
+            raise ValueError("GenesisManifest.domain must not be empty")
+        if not self.root_keys:
+            raise ValueError("GenesisManifest.root_keys must not be empty")
+        if not self.policy_hash:
+            raise ValueError("GenesisManifest.policy_hash must not be empty")
+        identities = [(key.actor_id, key.key_id) for key in self.root_keys]
+        if len(identities) != len(set(identities)):
+            raise ValueError("GenesisManifest contains duplicate actor/key identities")
+        object.__setattr__(
+            self,
+            "root_keys",
+            tuple(sorted(self.root_keys, key=lambda key: (key.actor_id, key.key_id))),
+        )
+
+
+def _actor_key_dict(key: ActorKey) -> dict[str, Any]:
+    return {
+        "actor_id": key.actor_id,
+        "capabilities": list(key.capabilities),
+        "key_id": key.key_id,
+        "kind": key.kind,
+        "public_key": key.public_key,
+        "revoked": key.revoked,
+    }
+
+
+def genesis_effective_payload(manifest: GenesisManifest) -> dict[str, Any]:
+    return {
+        "domain": manifest.domain,
+        "policy_hash": manifest.policy_hash,
+        "root_keys": [_actor_key_dict(key) for key in manifest.root_keys],
+        "schema_version": manifest.schema_version,
+    }
+
+
+def create_genesis_manifest(
+    domain: str,
+    root_keys: tuple[ActorKey, ...] | list[ActorKey],
+    policy_hash: str,
+    *,
+    schema_version: int = 1,
+) -> GenesisManifest:
+    provisional = GenesisManifest(
+        id="pending",
+        domain=domain,
+        root_keys=tuple(root_keys),
+        policy_hash=policy_hash,
+        schema_version=schema_version,
+    )
+    manifest_id = "genesis:" + compute_content_hash(
+        canonical_json(genesis_effective_payload(provisional))
+    )
+    return replace(provisional, id=manifest_id)
+
+
+def validate_genesis_manifest(manifest: GenesisManifest) -> None:
+    expected = create_genesis_manifest(
+        manifest.domain,
+        manifest.root_keys,
+        manifest.policy_hash,
+        schema_version=manifest.schema_version,
+    ).id
+    if manifest.id != expected:
+        raise ValueError(
+            f"Genesis manifest id mismatch: supplied {manifest.id!r}, "
+            f"expected {expected!r}"
+        )
+
+
+@dataclass(frozen=True)
+class CandidateEffect:
+    """One proposed typed effect; its payload is recursively immutable."""
+
+    effect_type: str
+    payload: Mapping[str, Any]
+    atomic_group: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.effect_type or "." not in self.effect_type:
+            raise ValueError(
+                "effect_type must be a namespaced value such as asset.propose"
+            )
+        object.__setattr__(self, "payload", deep_freeze(dict(self.payload)))
+
+
+@dataclass(frozen=True)
+class CandidateProposal:
+    """Content-addressed and actor-signed collection of proposed effects."""
+
+    id: str
+    domain_id: str
+    actor_id: str
+    key_id: str
+    signature_kind: str
+    signature: str
+    effects: tuple[CandidateEffect, ...]
+    causal_parents: tuple[str, ...] = field(default_factory=tuple)
+    idempotency_key: str = ""
+    protocol_version: int = CANDIDATE_PROTOCOL_VERSION
+
+    def __post_init__(self) -> None:
+        for field_name in ("domain_id", "actor_id", "key_id", "signature_kind"):
+            if not getattr(self, field_name):
+                raise ValueError(f"CandidateProposal.{field_name} must not be empty")
+        if not self.effects:
+            raise ValueError("CandidateProposal.effects must not be empty")
+        object.__setattr__(self, "effects", tuple(self.effects))
+        object.__setattr__(self, "causal_parents", tuple(self.causal_parents))
+
+
+def candidate_effective_payload(candidate: CandidateProposal) -> dict[str, Any]:
+    """Return the bytes-bound payload, excluding ID and signature."""
+    return {
+        "actor_id": candidate.actor_id,
+        "causal_parents": list(candidate.causal_parents),
+        "domain_id": candidate.domain_id,
+        "effects": [
+            {
+                "atomic_group": effect.atomic_group,
+                "effect_type": effect.effect_type,
+                "payload": deep_thaw(effect.payload),
+            }
+            for effect in candidate.effects
+        ],
+        "idempotency_key": candidate.idempotency_key,
+        "key_id": candidate.key_id,
+        "protocol_version": candidate.protocol_version,
+        "signature_kind": candidate.signature_kind,
+    }
+
+
+def candidate_signing_bytes(candidate: CandidateProposal) -> bytes:
+    return canonical_json(candidate_effective_payload(candidate)).encode("utf-8")
+
+
+def create_candidate_proposal(
+    *,
+    domain_id: str,
+    actor_id: str,
+    key_id: str,
+    effects: tuple[CandidateEffect, ...] | list[CandidateEffect],
+    signer: Signer,
+    causal_parents: tuple[str, ...] | list[str] = (),
+    idempotency_key: str = "",
+) -> CandidateProposal:
+    provisional = CandidateProposal(
+        id="pending",
+        domain_id=domain_id,
+        actor_id=actor_id,
+        key_id=key_id,
+        signature_kind=signer.kind,
+        signature="pending",
+        effects=tuple(effects),
+        causal_parents=tuple(causal_parents),
+        idempotency_key=idempotency_key,
+    )
+    candidate_id = "candidate:v1:" + compute_content_hash(
+        canonical_json(candidate_effective_payload(provisional))
+    )
+    identified = replace(provisional, id=candidate_id)
+    return replace(
+        identified, signature=signer.sign(candidate_signing_bytes(identified))
+    )
+
+
+VerifierFactory = Callable[[str], Verifier]
+
+
+def verify_candidate_proposal(
+    candidate: CandidateProposal,
+    genesis: GenesisManifest,
+    *,
+    verifier_factory: VerifierFactory = create_verifier,
+) -> None:
+    """Fail closed unless identity, domain, bytes, and signature all match."""
+    validate_genesis_manifest(genesis)
+    if candidate.domain_id != genesis.id:
+        raise ValueError("Candidate domain does not match Genesis manifest")
+    matching = [
+        key
+        for key in genesis.root_keys
+        if key.actor_id == candidate.actor_id and key.key_id == candidate.key_id
+    ]
+    if len(matching) != 1:
+        raise ValueError("Candidate actor/key is not authorized by Genesis")
+    key = matching[0]
+    if key.revoked:
+        raise ValueError("Candidate actor key is revoked")
+    if key.kind != candidate.signature_kind:
+        raise ValueError("Candidate signature kind does not match actor key")
+    if candidate.signature_kind in {"deterministic", "asig_"}:
+        raise ValueError(
+            "Deterministic content seals cannot authenticate Candidate actors"
+        )
+    expected_id = "candidate:v1:" + compute_content_hash(
+        canonical_json(candidate_effective_payload(candidate))
+    )
+    if candidate.id != expected_id:
+        raise ValueError("Candidate content id does not match effective payload")
+    verifier = verifier_factory(candidate.signature_kind)
+    if not verifier.verify(
+        candidate_signing_bytes(candidate), candidate.signature, key.public_key
+    ):
+        raise ValueError("Candidate signature verification failed")
+
+
+def candidate_received_record(
+    candidate: CandidateProposal,
+    genesis: GenesisManifest,
+    *,
+    verifier_factory: VerifierFactory = create_verifier,
+) -> RuntimeRecord:
+    """Verify a Candidate and represent receipt without accepting its effects."""
+    verify_candidate_proposal(candidate, genesis, verifier_factory=verifier_factory)
+    return create_runtime_record(
+        "candidate.received",
+        {
+            "actor_id": candidate.actor_id,
+            "candidate_id": candidate.id,
+            "domain_id": candidate.domain_id,
+            "effect_types": [effect.effect_type for effect in candidate.effects],
+            "key_id": candidate.key_id,
+            "signature": candidate.signature,
+            "signature_kind": candidate.signature_kind,
+        },
+        causal_parents=candidate.causal_parents,
+    )

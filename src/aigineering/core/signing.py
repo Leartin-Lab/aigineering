@@ -163,7 +163,7 @@ def create_signer(kind: str = "deterministic", **kwargs) -> Signer:
 
 def create_verifier(kind: str) -> Verifier:
     """Factory: create a verifier by kind."""
-    if kind == "deterministic":
+    if kind in {"deterministic", DeterministicSigner.kind}:
         return DeterministicVerifier()
     if kind == "ed25519":
         return Ed25519Verifier()

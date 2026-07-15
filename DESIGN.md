@@ -1,0 +1,90 @@
+# Aigineering 0.5 Design
+
+This document describes the behavior implemented by the public repository.
+Target designs belong in `changes/` until their code, tests, and migration are
+complete. Architecture decisions explain why a durable choice exists; they do
+not replace this description of the running system.
+
+## Product boundary
+
+Aigineering is a zero-trust runtime for turning untrusted worker output into
+auditable facts. The runtime is asset-driven and append-oriented. A worker does
+not mutate shared state: it claims a Contract, receives a disclosure-bounded
+WorkerPackage, and submits a CandidateEnvelope. Projection and authority checks
+decide which declared outputs may become Assets.
+
+The 0.5 reference implementation is single-domain and SQLite-first. SQLite WAL,
+transactions, leases, and unique constraints provide the concurrency control;
+the protocol does not rely on a process-local task lock.
+
+## Implemented runtime path
+
+1. A Contract is accepted through `RuntimeIngress.accept_contract`.
+2. An eligible worker atomically claims it and receives a WorkerPackage.
+3. The worker returns raw output in a claim-bound CandidateEnvelope.
+4. `submit_candidate` validates package, worker, claim, lease, epoch, and
+   idempotency bindings.
+5. Pure projection parses the candidate and applies declared-output and
+   reserved-namespace authority rules.
+6. SQLite atomically commits accepted Assets, rejection/acceptance TraceEntry
+   records, idempotency state, runtime records, and the claim transition.
+7. RuntimeRecord replay reconstructs lifecycle projections. Trace is audit
+   evidence; it is not a second mutable task state machine.
+
+## Current data model
+
+- Asset: immutable content with provenance metadata. Assets are runtime facts.
+- Contract: immutable declaration of inputs, outputs, activation, allowance,
+  routing requirements, and authority.
+- CandidateEnvelope: claim-bound untrusted worker response. In the current
+  path its semantic body is raw model output, not typed effects.
+- RuntimeRecord: versioned, content-addressed append-only event used for
+  reconstruction.
+- TraceEntry: human- and machine-readable audit evidence for decisions.
+- Claim and WorkerPackage: ephemeral coordination records whose transitions are
+  transactionally recorded and reconstructable.
+
+## Commitment boundary
+
+The non-negotiable rules are specified in `docs/boundary-invariants.md` and
+enforced by tests. In particular, worker output is never a fact; projection is
+pure; undeclared and protected outputs are rejected visibly; and SQLite commits
+the effects of a submission atomically.
+
+Assets and Contracts created by the CLI or control plane still enter through
+trusted `RuntimeIngress` methods. They are not yet represented as signed typed
+Candidates. Deterministic Asset seals provide replay integrity, not actor
+authentication. These are known transition boundaries, not properties hidden
+by the design documentation.
+
+## Scheduling and reconstruction
+
+Eligibility is derived from facts: input availability, activation expression,
+terminal records, current claim, routing compatibility, and allowance. “Waiting”
+is therefore a query result, not a durable Contract state. A restarted or backup
+runtime can rebuild its projections from the shared Store and continue claims.
+
+The shipped package excludes the legacy in-process Engine, startup checker, and
+state serializer. Their source remains temporarily for migration tests. The
+supported operational surface is the Store/RuntimeIngress/claim/submission path.
+
+## Methods and workers
+
+The current source tree still contains plan, replan, retry, recovery, fail, and
+tool Method handlers. They create explicit child Contracts rather than hidden
+agent state, but they remain feature-specific runtime code and are part of the
+0.5 refactor debt. LLM, human, script, plugin, and engine-backed executors do not
+yet share one authenticated actor protocol.
+
+## Active change
+
+`changes/001-candidate-genesis.md` migrates the runtime toward signed typed
+Candidates, a Genesis trust root, one commitment reducer, and plugin-produced
+ordinary tasks. Until that change closes, this file remains authoritative about
+what is actually supported.
+
+## Verification evidence
+
+Architecture constraints live in `tests/architecture/`. Release-grade evidence
+is retained in `reports/`; ordinary test output and exploratory notes are not.
+
