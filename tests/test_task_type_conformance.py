@@ -15,6 +15,7 @@ from aigineering.agent.prompt import contract_prompt
 from aigineering.core.ids import hash_contract_v3, validate_contract_identity
 from aigineering.core.method_handlers.recovery import schedule_projection_recovery
 from aigineering.core.method_runtime import MethodRuntime
+from aigineering.core.runtime_ingress import RuntimeIngress
 from aigineering.core.methods import (
     continuation_contract,
     method_contract,
@@ -138,7 +139,12 @@ def _contracts_by_type() -> dict[str, Contract]:
 
     store = MemoryStore()
     trace = TraceStore()
-    runtime = MethodRuntime(store, trace, {root.id: root.budget})
+    runtime = MethodRuntime(
+        store,
+        trace,
+        {root.id: root.budget},
+        ingress=RuntimeIngress(store, trace),
+    )
     runtime.add_contract(root)
     recovery = schedule_projection_recovery(
         runtime,

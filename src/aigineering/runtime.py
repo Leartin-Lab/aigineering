@@ -911,7 +911,6 @@ def process_method_completions(
         suspended=set(),
         method_scheduled=set(),
         method_context={},
-        ingress=RuntimeIngress(store, store, FactReducer(store, store)),
         candidate_publishers=candidate_publishers,
     )
     for contract in store.get_all_contracts():

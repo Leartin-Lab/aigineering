@@ -7,6 +7,7 @@ from aigineering.agent.tool_executor import ToolExecutor
 from aigineering.core.capability_descriptors import create_tool_descriptor
 from aigineering.core.method_handlers.tool import ToolMethodHandler
 from aigineering.core.method_runtime import MethodRuntime
+from aigineering.core.runtime_ingress import RuntimeIngress
 from aigineering.core.store import MemoryStore
 from aigineering.core.tools import ToolRegistry
 from aigineering.core.trace import TraceStore
@@ -102,7 +103,13 @@ def test_tool_handler_uses_tool_worker():
 
     assert hasattr(handler_mod, "ToolExecutor")
 
-    runtime = MethodRuntime(store, trace_store, {}, tools=tools)
+    runtime = MethodRuntime(
+        store,
+        trace_store,
+        {},
+        tools=tools,
+        ingress=RuntimeIngress(store, trace_store),
+    )
     tool_contract = Contract(
         id="tool_child_1",
         parent_id="parent_1",

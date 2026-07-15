@@ -247,6 +247,11 @@ protected failure report through its own Candidate actor and records the parent
 as `failed` even if report publication is rejected. The application no longer
 imports FailMethodHandler, and `/fail` can no longer leave a processed child
 with a non-terminal, unsatisfied parent.
+Production completion projection no longer constructs RuntimeIngress or a
+FactReducer. MethodRuntime receives direct ingress only from the excluded legacy
+Engine or explicit compatibility tests; without one, direct Contract/Asset
+mutation fails and completion plugins must use their registered Candidate
+publisher.
 Authentication, claim, policy, and binding failures append Candidate rejection
 records and Trace evidence before returning an error; an invalid worker result
 cannot disappear as an API-only failure.

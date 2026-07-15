@@ -62,15 +62,7 @@ class MethodRuntime:
             method_scheduled if method_scheduled is not None else set()
         )
         self._candidate_publishers = candidate_publishers
-        if ingress is not None:
-            self._ingress = ingress
-        else:
-            from aigineering.core.fact_reducer import FactReducer
-            from aigineering.core.runtime_ingress import RuntimeIngress
-
-            self._ingress = RuntimeIngress(
-                store, self._trace.store, FactReducer(store, self._trace.store)
-            )
+        self._ingress = ingress
 
     # -- Contract management -------------------------------------------------
 
@@ -81,7 +73,7 @@ class MethodRuntime:
         method handling.  It replaces direct ``engine._store.add_contract()``
         and ``engine._budget[cid] = ...`` patterns.
         """
-        self._ingress.accept_contract(contract)
+        self._require_ingress().accept_contract(contract)
         self._budget.initialize(contract.id, contract.budget)
 
     def publish_task_effects(
@@ -174,7 +166,9 @@ class MethodRuntime:
             trust_tier=trust_tier,
             minted_by=minted_by,
         )
-        return self._ingress.accept_asset(asset, source="method", allow_protected=True)
+        return self._require_ingress().accept_asset(
+            asset, source="method", allow_protected=True
+        )
 
     # -- Budget --------------------------------------------------------------
 
@@ -335,6 +329,13 @@ class MethodRuntime:
             budget_remaining=self.resolve_budget(contract.id),
         )
         return True
+
+    def _require_ingress(self) -> RuntimeIngress:
+        if self._ingress is None:
+            raise RuntimeError(
+                "direct completion mutation is disabled; configure a Candidate publisher"
+            )
+        return self._ingress
 
 
 def _coerce_budget_manager(budget: BudgetManager | dict[str, int]) -> BudgetManager:

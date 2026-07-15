@@ -327,6 +327,14 @@ def test_claim_bound_delegation_semantics_live_in_plugin_not_runtime_service():
     assert "accept_contract" not in plugin
 
 
+def test_production_completion_projection_has_no_direct_ingress():
+    runtime = (ROOT / "src/aigineering/runtime.py").read_text(encoding="utf-8")
+    completion = runtime.split("def process_method_completions", 1)[1]
+
+    assert "RuntimeIngress" not in completion
+    assert "FactReducer" not in completion
+
+
 def test_retry_delegation_does_not_ship_as_completion_registry_semantics():
     application = (ROOT / "src/aigineering/application.py").read_text(encoding="utf-8")
 

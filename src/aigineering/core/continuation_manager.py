@@ -112,6 +112,7 @@ class ContinuationManager:
                         mcp_servers=self._mcp_servers,
                         suspended=self._suspended,
                         method_scheduled=self._method_scheduled,
+                        ingress=self._ingress,
                         candidate_publishers=self._candidate_publishers,
                     )
                     if completion(runtime, contract, method_assets):

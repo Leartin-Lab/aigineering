@@ -239,6 +239,10 @@ Implementation progress:
   closes the prior silent state where the fail child was marked processed while
   the parent had neither outputs nor a terminal fact. Application composition
   no longer imports FailMethodHandler.
+- Complete: production completion projection has no RuntimeIngress/FactReducer
+  dependency. Direct compatibility mutation now requires explicit ingress;
+  Candidate-native completion cannot silently manufacture one when a publisher
+  is missing.
 - Complete: recovery replayers fail loudly when durable rejection, expiration,
   or provider-failure facts lack the Contract/raw Candidate evidence required
   to derive their consequence. These broken causal chains can no longer be

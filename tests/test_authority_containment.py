@@ -725,6 +725,7 @@ def test_missing_parent_fails_closed():
     from aigineering.core.store import MemoryStore
     from aigineering.core.method_handlers.plan import PlanMethodHandler
     from aigineering.core.method_runtime import MethodRuntime
+    from aigineering.core.runtime_ingress import RuntimeIngress
     from aigineering.core.trace import TraceStore
 
     store = MemoryStore()
@@ -791,7 +792,9 @@ def test_missing_parent_fails_closed():
         ]
     )
 
-    runtime = MethodRuntime(store, trace_store, {})
+    runtime = MethodRuntime(
+        store, trace_store, {}, ingress=RuntimeIngress(store, trace_store)
+    )
     handled = PlanMethodHandler().handle_completion(
         runtime, method_contract, [plan_asset]
     )

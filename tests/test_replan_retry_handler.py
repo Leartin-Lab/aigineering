@@ -8,6 +8,7 @@ from aigineering.core.method_registry import MethodRegistry
 from aigineering.core.method_handlers.replan import ReplanMethodHandler
 from aigineering.core.method_handlers.retry import RetryMethodHandler
 from aigineering.core.method_runtime import MethodRuntime
+from aigineering.core.runtime_ingress import RuntimeIngress
 from aigineering.core.methods import retry_contract
 from aigineering.core.store import MemoryStore
 from aigineering.core.trace import TraceStore
@@ -285,7 +286,12 @@ def test_retry_handler_idempotent():
 
     from aigineering.protocol.types import Candidate
 
-    runtime = MethodRuntime(store, trace_store, {contract_id: 5})
+    runtime = MethodRuntime(
+        store,
+        trace_store,
+        {contract_id: 5},
+        ingress=RuntimeIngress(store, trace_store),
+    )
 
     candidate = Candidate(worker_id="test", raw_output='/retry {"reason": "first"}')
 

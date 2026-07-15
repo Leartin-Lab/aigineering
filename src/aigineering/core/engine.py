@@ -879,6 +879,7 @@ def _make_runtime(engine: Engine) -> MethodRuntime:
         mcp_servers=engine._mcp_servers,
         suspended=engine._suspended,
         method_scheduled=engine._method_scheduled,
+        ingress=engine._ingress,
     )
 
 

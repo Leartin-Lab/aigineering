@@ -10,6 +10,7 @@ from aigineering.core.capability_descriptors import (
 from aigineering.core.method_registry import MethodRegistry
 from aigineering.core.method_handlers.tool import ToolMethodHandler
 from aigineering.core.method_runtime import MethodRuntime
+from aigineering.core.runtime_ingress import RuntimeIngress
 from aigineering.core.store import MemoryStore
 from aigineering.core.tools import ToolRegistry
 from aigineering.core.trace import TraceStore
@@ -101,7 +102,13 @@ def test_handler_executes_tool_on_completion():
         )
     )
 
-    runtime = MethodRuntime(store, trace_store, {}, tools=tools)
+    runtime = MethodRuntime(
+        store,
+        trace_store,
+        {},
+        tools=tools,
+        ingress=RuntimeIngress(store, trace_store),
+    )
     tool_contract = Contract(
         id="tool_child_1",
         parent_id="parent_1",
@@ -160,6 +167,7 @@ def test_handler_executes_mcp_tool_on_completion():
         trace_store,
         {},
         mcp_servers={"search": search_server},
+        ingress=RuntimeIngress(store, trace_store),
     )
     tool_contract = Contract(
         id="mcp_child_1",
@@ -210,7 +218,13 @@ def test_handler_requires_verified_tool_descriptor():
         return "executed"
 
     tools.register(ToolSpec(name="lookup"), should_not_run)
-    runtime = MethodRuntime(store, trace_store, {}, tools=tools)
+    runtime = MethodRuntime(
+        store,
+        trace_store,
+        {},
+        tools=tools,
+        ingress=RuntimeIngress(store, trace_store),
+    )
     tool_contract = Contract(
         id="tool_child_1",
         parent_id="parent_1",
@@ -254,7 +268,13 @@ def test_handler_requires_verified_tool_descriptor():
             trust_tier="untrusted",
         )
     )
-    runtime = MethodRuntime(store, trace_store, {}, tools=tools)
+    runtime = MethodRuntime(
+        store,
+        trace_store,
+        {},
+        tools=tools,
+        ingress=RuntimeIngress(store, trace_store),
+    )
     result = handler.handle_completion(runtime, tool_contract, [])
     assert result is True
     assert calls == []
@@ -272,7 +292,13 @@ def test_handler_rejects_unknown_tool():
     store = MemoryStore()
     trace_store = TraceStore()
 
-    runtime = MethodRuntime(store, trace_store, {}, tools=None)
+    runtime = MethodRuntime(
+        store,
+        trace_store,
+        {},
+        tools=None,
+        ingress=RuntimeIngress(store, trace_store),
+    )
     tool_contract = Contract(
         id="tool_child_1",
         parent_id="parent_1",
@@ -322,7 +348,13 @@ def test_handler_respects_tool_scope():
         )
     )
 
-    runtime = MethodRuntime(store, trace_store, {}, tools=tools)
+    runtime = MethodRuntime(
+        store,
+        trace_store,
+        {},
+        tools=tools,
+        ingress=RuntimeIngress(store, trace_store),
+    )
     tool_contract = Contract(
         id="tool_child_1",
         parent_id="parent_1",
