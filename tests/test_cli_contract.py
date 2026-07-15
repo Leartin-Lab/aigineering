@@ -1,6 +1,7 @@
 """Tests for the CLI aig contract add/ls/show/run commands."""
 
 import json
+from pathlib import Path
 
 from click.testing import CliRunner
 
@@ -20,6 +21,9 @@ def _add_contract(
     as_json: bool = False,
 ):
     """Helper to invoke contract add with common options."""
+    if not Path(".aig/identity/root.ed25519").exists():
+        initialized = runner.invoke(cli, ["domain", "init"])
+        assert initialized.exit_code == 0, initialized.output
     args = ["contract", "add", "--name", name]
     for inp in inputs:
         args.extend(["--input", inp])

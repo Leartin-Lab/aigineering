@@ -117,9 +117,7 @@ def inject_asset(
 # ---------------------------------------------------------------------------
 
 
-def inject_contract(
-    store,
-    trace_store,
+def build_control_plane_contract(
     *,
     name: str,
     inputs: tuple[str, ...] = (),
@@ -131,9 +129,8 @@ def inject_contract(
     tool_scope: tuple[str, ...] = (),
     sensitive_input_policy: dict | None = None,
     allow_protected_outputs: bool = False,
-    ingress: RuntimeIngress,
 ) -> Contract:
-    """Inject a contract through the control plane.
+    """Build and validate a human-origin Contract without committing it.
 
     Control-plane contracts are human/administrator-created work items.
     They are hashed, persisted, traced, and subject to authority checks
@@ -144,13 +141,6 @@ def inject_contract(
     allow_protected_outputs : bool
         Deprecated fail-closed compatibility parameter. Control-plane work
         contracts never receive runtime minting authority; true is rejected.
-    ingress : RuntimeIngress
-        Required ingress for contract persistence and tracing.
-
-    Returns
-    -------
-    Contract
-        The hashed, persisted contract.
     """
     from aigineering.protocol.types import Contract
 
@@ -181,7 +171,7 @@ def inject_contract(
         sensitive_input_policy=policy,
     )
 
-    contract = Contract(
+    return Contract(
         id=identity,
         name=name,
         description=description,
@@ -192,6 +182,37 @@ def inject_contract(
         labels=labels,
         tool_scope=tool_scope,
         sensitive_input_policy=policy,
+    )
+
+
+def inject_contract(
+    store,
+    trace_store,
+    *,
+    name: str,
+    inputs: tuple[str, ...] = (),
+    outputs: tuple[str, ...] = (),
+    activation: str = "",
+    budget: int = 5,
+    description: str = "",
+    labels: tuple[str, ...] = (),
+    tool_scope: tuple[str, ...] = (),
+    sensitive_input_policy: dict | None = None,
+    allow_protected_outputs: bool = False,
+    ingress: RuntimeIngress,
+) -> Contract:
+    """Compatibility ingress; new callers publish the built Contract as Candidate."""
+    contract = build_control_plane_contract(
+        name=name,
+        inputs=inputs,
+        outputs=outputs,
+        activation=activation,
+        budget=budget,
+        description=description,
+        labels=labels,
+        tool_scope=tool_scope,
+        sensitive_input_policy=sensitive_input_policy,
+        allow_protected_outputs=allow_protected_outputs,
     )
     ingress.accept_contract(contract)
     return contract

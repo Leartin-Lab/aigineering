@@ -1,9 +1,14 @@
 # ADR-008: Unified Runtime Ingress
 
-**Status:** Accepted
+**Status:** Accepted (superseded in part by Change 001)
 **Date:** 2026-06-23
 **Scope:** v0.5.0 delivery-blocking
 **Related:** ADR-001, ADR-003, ADR-005, ADR-007, internal ADR-031, ADR-039, ADR-042, ADR-043
+
+> Transition note (2026-07-15): `aig contract add` now publishes a signed
+> `contract.declare` Candidate through the commitment reducer. RuntimeIngress
+> remains the compatibility ingress for surfaces not yet migrated. See
+> `DESIGN.md` and `changes/001-candidate-genesis.md` for current truth.
 
 ## Context
 

@@ -1,9 +1,13 @@
 # ADR-009: Runtime Communication Modes
 
-**Status:** Accepted
+**Status:** Accepted (superseded in part by Change 001)
 **Date:** 2026-06-23
 **Scope:** v0.5.0 delivery-blocking
 **Related:** ADR-008, ADR-006, internal ADR-039, ADR-042, ADR-043
+
+> Transition note (2026-07-15): authenticated typed Candidates and persisted
+> Genesis now replace RuntimeIngress for Contract publication. Other modes are
+> migrating incrementally; `DESIGN.md` is the current implemented truth.
 
 ## Context
 

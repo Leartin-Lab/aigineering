@@ -62,14 +62,20 @@ CandidateProposal, typed CandidateEffect values, canonical wire serialization,
 and signature verification. `CandidateCommitter` supports one complete
 `contract.declare` slice: it verifies the actor, applies the shared Contract
 admission policy, and transactionally records receipt, acceptance or rejection,
-audit evidence, and the Contract. It deliberately does not yet replace the CLI
-or support other effect types.
+audit evidence, and the Contract. `aig domain init` creates a local Ed25519 root
+identity with a mode-0600 private key, and `aig contract add` now publishes only
+through that signed Candidate path. Other control-plane commands have not yet
+migrated and no other typed effect is accepted.
 
 A domain may persist exactly one `domain.genesis` RuntimeRecord. Initialization
 is idempotent, replacement fails closed, SQLite enforces uniqueness, and a
 CandidateCommitter can reconstruct the trust root from the Store instead of
 receiving ambient process configuration. Genesis bootstrap is the sole direct
 append exception in the candidate-native transition.
+
+`cryptography` is a required runtime dependency because actor authentication is
+a base security property. Deterministic content seals remain available for
+integrity compatibility but are explicitly rejected as Candidate identity.
 
 ## Scheduling and reconstruction
 

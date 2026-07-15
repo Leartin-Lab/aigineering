@@ -78,6 +78,14 @@ class TestEd25519Signer:
         assert signer.signer_id == pubkey_hex
         assert len(pubkey_hex) == 64
 
+    def test_private_key_round_trip(self):
+        original = Ed25519Signer()
+        restored = Ed25519Signer.from_private_key_hex(original.private_key_hex)
+
+        assert restored.signer_id == original.signer_id
+        signature = restored.sign(b"after restart")
+        assert Ed25519Verifier().verify(b"after restart", signature, original.signer_id)
+
 
 class TestFactory:
     def test_create_deterministic(self):

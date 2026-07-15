@@ -38,6 +38,10 @@ aig demo "build report with citations"
 # Or run with persistence through the worker protocol
 aig run "build report with citations" --worker mock
 
+# Initialize the local signed Candidate domain before publishing Contracts
+aig domain init
+aig contract add --name research --output report
+
 # Use an OpenAI-compatible LLM worker
 export AIGINEERING_API_KEY="..."
 aig run "build report with citations" --worker llm --model gpt-4.1-mini
@@ -86,7 +90,9 @@ command uses the same claim/package/invoke/submit boundary as external workers.
 - SQLite trace records persist LLM usage metadata for token/cost accounting.
 
 **Productivity Surface**
-- Control-plane asset and contract injection via `aig asset` and `aig contract`.
+- Signed Contract publication via an Ed25519 actor key and Candidate commitment
+  (`aig domain init`, then `aig contract add`). Other control-plane surfaces are
+  still migrating from RuntimeIngress under Change 001.
 - Additive asset slicing, replacement claims, version lists, and lineage views.
 - Behavior prompt assets via `aig behavior`.
 - Tool, memory, persona, MCP, and skill descriptors as signed capability assets.

@@ -32,3 +32,12 @@ def test_legacy_runtime_files_stay_out_of_release_artifacts():
         "src/aigineering/core/state_serializer.py",
     ):
         assert path in project
+
+
+def test_contract_cli_uses_candidate_commitment_not_legacy_ingress():
+    source = (ROOT / "src/aigineering/cli/contract.py").read_text(encoding="utf-8")
+
+    assert "CandidateCommitter" in source
+    assert "create_candidate_proposal" in source
+    assert "RuntimeIngress" not in source
+    assert "inject_contract" not in source

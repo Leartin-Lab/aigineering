@@ -67,9 +67,12 @@ Implementation progress:
 - Complete: Genesis is an immutable, reconstructable Store record; SQLite
   schema v8 enforces one Genesis per domain Store and the committer loads it
   without process-local trust state.
-- Pending: durable Genesis/key configuration and migration of the CLI default
-  publication path; the base install does not silently substitute a
-  non-authenticating deterministic seal.
+- Complete: `aig domain init` persists an Ed25519 root identity and mode-0600
+  private key; `aig contract add` uses the signed Candidate path and refuses to
+  run without initialization or with an unauthorized local key.
+- Complete: cryptography is a base dependency; the runtime does not silently
+  substitute a non-authenticating deterministic seal.
+- Pending: migrate remaining control-plane and worker submission effects.
 
 ## Required architecture tests
 

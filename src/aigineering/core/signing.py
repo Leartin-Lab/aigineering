@@ -115,6 +115,28 @@ class Ed25519Signer(Signer):
         )
         self._public_key_hex = pub_bytes.hex()
 
+    @classmethod
+    def from_private_key_hex(cls, private_key_hex: str) -> Ed25519Signer:
+        if not _CRYPTO_AVAILABLE:
+            raise ImportError("Ed25519Signer requires the 'cryptography' package.")
+        try:
+            private_key = ed25519.Ed25519PrivateKey.from_private_bytes(
+                bytes.fromhex(private_key_hex)
+            )
+        except (ValueError, TypeError) as exc:
+            raise ValueError("invalid Ed25519 private key encoding") from exc
+        return cls(private_key)
+
+    @property
+    def private_key_hex(self) -> str:
+        """Raw private key encoding for explicit local key persistence."""
+        raw = self._private_key.private_bytes(
+            encoding=serialization.Encoding.Raw,
+            format=serialization.PrivateFormat.Raw,
+            encryption_algorithm=serialization.NoEncryption(),
+        )
+        return raw.hex()
+
     @property
     def signer_id(self) -> str:
         return self._public_key_hex
