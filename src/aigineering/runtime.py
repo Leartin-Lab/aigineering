@@ -322,7 +322,7 @@ def submit_worker_proposal(
         result = submit_authenticated_worker_candidate(
             envelope, authentication, store, trace
         )
-        if result["status"] == "rejected":
+        if result["status"] == "rejected" and candidate_publishers is not None:
             process_rejected_submissions(
                 store, candidate_publishers=candidate_publishers
             )

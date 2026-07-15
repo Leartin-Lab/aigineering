@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from aigineering.cli.identity import load_actor_signer
+from aigineering.local_identity import load_actor_signer
 from aigineering.core.candidate_publisher import publish_effects
 from aigineering.core.commitment import CommitmentDecision
 from aigineering.core.domain import load_genesis

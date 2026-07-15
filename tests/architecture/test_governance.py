@@ -339,14 +339,36 @@ def test_local_recovery_replay_publishes_contract_and_context_as_candidate():
     recovery = (ROOT / "src/aigineering/core/method_handlers/recovery.py").read_text(
         encoding="utf-8"
     )
-    run = (ROOT / "src/aigineering/cli/run.py").read_text(encoding="utf-8")
+    identity = (ROOT / "src/aigineering/local_identity.py").read_text(encoding="utf-8")
 
     assert 'can_publish_candidates("recovery.publish.v1")' in recovery
     assert "contract_declaration_effect(recovery)" in recovery
     assert "asset_proposal_effect(context_template)" in recovery
-    assert '"recovery.publish.v1"' in run
-    assert '"contract.publish.protected"' in run
-    assert '"asset.publish.protected"' in run
+    assert '"recovery.publish.v1"' in identity
+    assert '"contract.publish.protected"' in identity
+    assert '"asset.publish.protected"' in identity
+
+
+def test_http_worker_ingress_never_provisions_local_private_keys_or_direct_recovery():
+    server = (ROOT / "src/aigineering/server/app.py").read_text(encoding="utf-8")
+    submit = server.split("def submit_worker_candidate", 1)[1].split(
+        '@app.post("/contracts/{contract_id}/run"', 1
+    )[0]
+
+    assert "ensure_local_runtime_publishers" not in submit
+    assert "RuntimeIngress" not in submit
+    assert "process_rejected_submissions" not in submit
+
+
+def test_local_identity_is_application_service_not_cli_implementation():
+    compatibility = (ROOT / "src/aigineering/cli/identity.py").read_text(
+        encoding="utf-8"
+    )
+    local = (ROOT / "src/aigineering/local_identity.py").read_text(encoding="utf-8")
+
+    assert "from aigineering.local_identity import" in compatibility
+    assert "aigineering.core" not in compatibility
+    assert "aigineering.cli" not in local
 
 
 def test_retry_delegation_does_not_ship_as_completion_registry_semantics():

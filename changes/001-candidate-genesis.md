@@ -247,6 +247,11 @@ Implementation progress:
   failure-context Asset atomically through a dedicated recovery plugin actor.
   Rejected projection, expired claim, provider failure, and malformed planning
   result paths all accept the same explicit publisher registry.
+- Complete: local actor/plugin key persistence moved out of the CLI layer into
+  application-level local identity composition. HTTP worker ingress neither
+  provisions server-local private keys nor falls back to direct recovery; its
+  rejected Candidate fact is available for an independently configured replay
+  runtime.
 - Complete: recovery replayers fail loudly when durable rejection, expiration,
   or provider-failure facts lack the Contract/raw Candidate evidence required
   to derive their consequence. These broken causal chains can no longer be

@@ -5,7 +5,7 @@ from __future__ import annotations
 import click
 
 from aigineering.cli._common import _output_json, _persistent_store
-from aigineering.cli.identity import (
+from aigineering.local_identity import (
     LOCAL_ROOT_CAPABILITIES,
     actor_key_path,
     write_actor_key,

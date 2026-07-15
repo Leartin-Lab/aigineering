@@ -17,8 +17,8 @@ from aigineering.cli._common import (
     _session_id,
 )
 from aigineering.cli.task_state import project_task_status
-from aigineering.cli.identity import (
-    ensure_local_plugin_publisher,
+from aigineering.local_identity import (
+    ensure_local_runtime_publishers,
     ensure_local_worker_host,
 )
 from aigineering.application import build_worker
@@ -319,47 +319,7 @@ def _run_task_pool(
                     set_output(name, output)
         host = ensure_local_worker_host(store, worker)
         deadline = time.monotonic() + wait_timeout
-        from aigineering.core.candidate_publisher import CandidatePublisherRegistry
-
-        candidate_publishers = CandidatePublisherRegistry(
-            (
-                (
-                    "planning.expand.v1",
-                    ensure_local_plugin_publisher(
-                        store, "planning.expand.v1", ("contract.publish",)
-                    ),
-                ),
-                (
-                    "continuation.publish.v1",
-                    ensure_local_plugin_publisher(
-                        store,
-                        "continuation.publish.v1",
-                        ("contract.publish", "contract.publish.protected"),
-                    ),
-                ),
-                (
-                    "fail.report.v1",
-                    ensure_local_plugin_publisher(
-                        store,
-                        "fail.report.v1",
-                        ("asset.publish", "asset.publish.protected"),
-                    ),
-                ),
-                (
-                    "recovery.publish.v1",
-                    ensure_local_plugin_publisher(
-                        store,
-                        "recovery.publish.v1",
-                        (
-                            "asset.publish",
-                            "asset.publish.protected",
-                            "contract.publish",
-                            "contract.publish.protected",
-                        ),
-                    ),
-                ),
-            )
-        )
+        candidate_publishers = ensure_local_runtime_publishers(store)
         if target_task_id is None:
             claimed = claim_next_package(
                 store,

@@ -22,7 +22,7 @@ from aigineering.application import (
     persistent_store,
 )
 from aigineering.cli._candidate import commit_local_effect, require_accepted
-from aigineering.cli.identity import ensure_local_domain
+from aigineering.local_identity import ensure_local_domain
 from aigineering.plugins import CompletionRegistry
 from aigineering.core.store import StoreProtocol
 from aigineering.core.sqlite_store import SQLiteStore
@@ -240,7 +240,7 @@ def _run_demo(
         claim_next_package,
         execute_claimed_package,
     )
-    from aigineering.cli.identity import ensure_local_worker_host
+    from aigineering.local_identity import ensure_local_worker_host
 
     host = ensure_local_worker_host(store, worker)
 
