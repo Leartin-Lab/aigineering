@@ -9,11 +9,13 @@ from aigineering.agent.mcp_executor import MCPExecutor
 from aigineering.agent.tool_executor import ToolExecutor
 from aigineering.core.capability_descriptors import verify_descriptor
 from aigineering.core.methods import method_payload
+from aigineering.core.projection import project_candidate
 from aigineering.protocol.actions import parse_method_action
+from aigineering.protocol.types import Candidate, ProjectionStatus
 
 if TYPE_CHECKING:
     from aigineering.core.method_runtime import MethodRuntime
-    from aigineering.protocol.types import Asset, Candidate, Contract
+    from aigineering.protocol.types import Asset, Contract
 
 
 class ToolMethodHandler:
@@ -96,6 +98,7 @@ class ToolMethodHandler:
         ok = False
         result = ""
         error = ""
+        error_type = ""
         if not isinstance(tool_name, str) or not tool_name:
             error = "tool action missing string payload.name"
         elif tool_name not in contract.tool_scope:
@@ -128,6 +131,7 @@ class ToolMethodHandler:
                 ok = obs.get("ok", False)
                 result = obs.get("result", "")
                 error = obs.get("error", "")
+                error_type = obs.get("error_type", "")
         elif runtime.get_tool_registry() is None:
             error = "no ToolRegistry configured"
         else:
@@ -152,6 +156,7 @@ class ToolMethodHandler:
                 ok = obs.get("ok", False)
                 result = obs.get("result", "")
                 error = obs.get("error", "")
+                error_type = obs.get("error_type", "")
 
         obs_name = (
             contract.outputs[0] if contract.outputs else f"_tool_obs_{contract.id}"
@@ -162,9 +167,38 @@ class ToolMethodHandler:
                 "tool": tool_name,
                 "result": result,
                 "error": error,
+                "error_type": error_type,
             },
             sort_keys=True,
             ensure_ascii=False,
+        )
+
+        projected_candidate = Candidate(
+            worker_id=(
+                f"mcp_worker:{tool_name}" if is_mcp_tool else f"tool_worker:{tool_name}"
+            ),
+            raw_output=json.dumps(
+                {"type": "exec", "outputs": {obs_name: obs_content}},
+                sort_keys=True,
+                ensure_ascii=False,
+            ),
+            parsed_action={"type": "exec", "outputs": {obs_name: obs_content}},
+        )
+        projection = project_candidate(contract, projected_candidate)
+        if projection.status is ProjectionStatus.REJECTED:
+            runtime.record_rejection(
+                contract.id,
+                "; ".join(
+                    item.reject_reason for item in projection.rejected_candidates
+                ),
+                relation_type="tool",
+                relation_target=tool_name if isinstance(tool_name, str) else None,
+                authority_result="rejected",
+            )
+            return True
+
+        projected_observation = next(
+            asset for asset in projection.accepted_assets if asset.name == obs_name
         )
 
         # Mint the call system asset (promptable=False — internal artifact)
@@ -180,12 +214,12 @@ class ToolMethodHandler:
         obs_asset = runtime.mint_authorized_system_asset(
             contract,
             obs_name,
-            obs_content,
+            projected_observation.content,
             contract.id,
             source_uri=f"tool://{tool_name}" if isinstance(tool_name, str) else "",
             origin="mcp" if is_mcp_tool else "tool",
             trust_tier="observed",
-            minted_by="mcp_adapter" if is_mcp_tool else "tool_adapter",
+            minted_by=projected_candidate.worker_id,
         )
 
         runtime.append_trace(

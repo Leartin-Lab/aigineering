@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from types import MappingProxyType
 from collections.abc import Mapping
 from typing import Any, Optional
+
+from aigineering.protocol.immutability import deep_freeze
 
 
 @dataclass(frozen=True)
@@ -49,7 +50,7 @@ class Contract:
     worker_pools: tuple[str, ...] = field(default_factory=tuple)
     origin: str = "human"
     minting_authority: tuple[str, ...] = field(default_factory=tuple)
-    sensitive_input_policy: Optional[MappingProxyType] = None
+    sensitive_input_policy: Optional[Mapping[str, Any]] = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "inputs", tuple(self.inputs))
@@ -63,7 +64,7 @@ class Contract:
             object.__setattr__(
                 self,
                 "sensitive_input_policy",
-                MappingProxyType(dict(self.sensitive_input_policy)),
+                deep_freeze(self.sensitive_input_policy),
             )
 
 
@@ -76,23 +77,19 @@ class Candidate:
 
     def __post_init__(self) -> None:
         if self.parsed_action is not None:
-            object.__setattr__(
-                self, "parsed_action", MappingProxyType(dict(self.parsed_action))
-            )
+            object.__setattr__(self, "parsed_action", deep_freeze(self.parsed_action))
         if self.metadata is not None:
-            object.__setattr__(self, "metadata", MappingProxyType(dict(self.metadata)))
+            object.__setattr__(self, "metadata", deep_freeze(self.metadata))
 
 
 @dataclass(frozen=True)
 class ToolSpec:
     name: str
     description: str = ""
-    input_schema: MappingProxyType = field(default_factory=dict)
+    input_schema: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        object.__setattr__(
-            self, "input_schema", MappingProxyType(dict(self.input_schema))
-        )
+        object.__setattr__(self, "input_schema", deep_freeze(self.input_schema))
 
 
 @dataclass(frozen=True)
@@ -113,7 +110,7 @@ class TraceEntry:
     relation_type: Optional[str] = None
     relation_target: Optional[str] = None
     timestamp: str = ""
-    usage_metadata: Optional[MappingProxyType] = None
+    usage_metadata: Optional[Mapping[str, Any]] = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "disclosed_assets", tuple(self.disclosed_assets))
@@ -123,9 +120,7 @@ class TraceEntry:
         )
         object.__setattr__(self, "rejected_fragments", tuple(self.rejected_fragments))
         if self.usage_metadata is not None:
-            object.__setattr__(
-                self, "usage_metadata", MappingProxyType(dict(self.usage_metadata))
-            )
+            object.__setattr__(self, "usage_metadata", deep_freeze(self.usage_metadata))
 
 
 class RejectionCategory(Enum):
@@ -259,7 +254,7 @@ class ProjectionResult:
         object.__setattr__(self, "rejected_candidates", tuple(self.rejected_candidates))
         if self.authority_policy is not None:
             object.__setattr__(
-                self, "authority_policy", MappingProxyType(dict(self.authority_policy))
+                self, "authority_policy", deep_freeze(self.authority_policy)
             )
 
 
@@ -270,17 +265,13 @@ class Session:
     contract_ids: tuple[str, ...] = field(default_factory=tuple)
     asset_ids: tuple[str, ...] = field(default_factory=tuple)
     trace_ids: tuple[str, ...] = field(default_factory=tuple)
-    config_snapshot: MappingProxyType = field(default_factory=dict)
-    worker_snapshot: MappingProxyType = field(default_factory=dict)
+    config_snapshot: Mapping[str, Any] = field(default_factory=dict)
+    worker_snapshot: Mapping[str, Any] = field(default_factory=dict)
     created_at: str = ""
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "contract_ids", tuple(self.contract_ids))
         object.__setattr__(self, "asset_ids", tuple(self.asset_ids))
         object.__setattr__(self, "trace_ids", tuple(self.trace_ids))
-        object.__setattr__(
-            self, "config_snapshot", MappingProxyType(dict(self.config_snapshot))
-        )
-        object.__setattr__(
-            self, "worker_snapshot", MappingProxyType(dict(self.worker_snapshot))
-        )
+        object.__setattr__(self, "config_snapshot", deep_freeze(self.config_snapshot))
+        object.__setattr__(self, "worker_snapshot", deep_freeze(self.worker_snapshot))

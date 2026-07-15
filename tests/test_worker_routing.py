@@ -2,21 +2,27 @@
 
 from __future__ import annotations
 
+import sqlite3
 import time
 
 import pytest
 
+from aigineering.agent.llm import LLMWorker, ProviderError
 from aigineering.agent.prompt import contract_prompt
 from aigineering.cli.task_state import project_task_status
-from aigineering.cli.worker_runtime import (
+from aigineering.runtime import (
+    WorkerInvocationError,
     claim_next_package,
     execute_claimed_package,
+    process_expired_claims,
     process_rejected_submissions,
+    process_worker_failures,
 )
 from aigineering.core.fact_reducer import FactReducer
 from aigineering.core.runtime_ingress import RuntimeIngress
 from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.core.submit import submit_candidate
+from aigineering.core.trace import create_entry
 from aigineering.core.record_conflict import ImmutableRecordConflict
 from aigineering.core.store import MemoryStore
 from aigineering.core.worker_routing import (
@@ -24,8 +30,9 @@ from aigineering.core.worker_routing import (
     eligible_workers,
     select_worker,
 )
-from aigineering.protocol.types import Candidate, Contract
 from aigineering.protocol.envelope import CandidateEnvelope
+from aigineering.protocol.types import Candidate, Contract
+from aigineering.protocol.wire import trace_entry_to_dict
 
 
 def _contract(**overrides) -> Contract:
@@ -119,10 +126,10 @@ def test_missing_capability_is_visible_in_task_projection():
 
     status = project_task_status(contract, store)
 
-    assert status["status"] == "waiting_for_capability"
+    assert status["status"] == "blocked_capability"
     assert status["silent_failure_risks"] == [
         {
-            "code": "waiting_for_capability",
+            "code": "blocked_capability",
             "message": "no registered worker currently satisfies routing constraints",
         }
     ]
@@ -270,4 +277,119 @@ def test_rejected_submission_recovery_replays_after_crash_gap():
         and child.origin == "recovery"
         for child in contracts
     ), contracts
+    store.close()
+
+
+def test_provider_failure_releases_claim_without_persisting_secret():
+    class FailingWorker:
+        def invoke(self, contract, disclosed_assets):
+            del contract, disclosed_assets
+            raise ProviderError(503, "provider-secret-must-not-be-persisted")
+
+    store = SQLiteStore(":memory:")
+    contract = Contract(id="task:provider-failure", outputs=("report",), budget=1)
+    store.add_contract(contract)
+    claimed = claim_next_package(store, worker_id="worker")
+    assert claimed is not None
+
+    with pytest.raises(WorkerInvocationError, match="claim was released"):
+        execute_claimed_package(claimed, FailingWorker(), store)
+
+    assert store.get_claim(contract.id)["status"] == "released"
+    assert process_worker_failures(store) == []
+    records = [record for _, record in store.scan_runtime_records()]
+    record_types = [record.record_type for record in records]
+    assert "worker.invocation_failed" in record_types
+    assert "worker_failure.recovery_scheduled" in record_types
+    assert "claim.released" in record_types
+    assert any(
+        record.record_type == "lifecycle.terminal"
+        and record.payload["terminal"] == "failed"
+        for record in records
+    )
+    persisted = repr(
+        (
+            [dict(record.payload) for record in records],
+            [trace_entry_to_dict(entry) for entry in store.get_all()],
+        )
+    )
+    assert "provider-secret-must-not-be-persisted" not in persisted
+    assert any(child.origin == "recovery" for child in store.get_all_contracts())
+    store.close()
+
+
+def test_stale_provider_failure_cannot_release_a_different_claim():
+    store = SQLiteStore(":memory:")
+    contract = Contract(id="task:fenced-provider-failure", outputs=("report",))
+    store.add_contract(contract)
+    claimed = claim_next_package(store, worker_id="worker")
+    assert claimed is not None
+
+    with pytest.raises(
+        sqlite3.IntegrityError, match="active worker claim predicate failed"
+    ):
+        store.commit_worker_invocation_failure(
+            trace_entry=create_entry(contract.id, "attempted_stale_failure"),
+            runtime_records=(),
+            claim_id=claimed.package.claim_id,
+            worker_id="different-worker",
+            package_id=claimed.package.package_id,
+            claim_epoch=claimed.package.claim_epoch,
+        )
+
+    assert store.get_claim(contract.id)["status"] == "active"
+    assert store.get_by_contract(contract.id)[-1].event_type == "worker_routed"
+    store.close()
+
+
+def test_malformed_provider_response_releases_claim_and_recovers():
+    store = SQLiteStore(":memory:")
+    contract = Contract(id="task:malformed-response", outputs=("report",), budget=1)
+    store.add_contract(contract)
+    claimed = claim_next_package(store, worker_id="llm:test")
+    assert claimed is not None
+    worker = LLMWorker(
+        model="test",
+        api_key="test-only",
+        transport=lambda _url, _headers, _payload: {},
+    )
+
+    with pytest.raises(WorkerInvocationError, match="claim was released"):
+        execute_claimed_package(claimed, worker, store)
+
+    assert store.get_claim(contract.id)["status"] == "released"
+    failure = store.scan_runtime_records(record_type="worker.invocation_failed")
+    assert failure[-1][1].payload["category"] == "worker_error:response_missing_choices"
+    assert any(child.origin == "recovery" for child in store.get_all_contracts())
+    store.close()
+
+
+def test_expired_claim_becomes_terminal_and_schedules_new_recovery_contract():
+    store = SQLiteStore(":memory:")
+    contract = Contract(id="task:expired-claim", outputs=("report",), budget=1)
+    store.add_contract(contract)
+    claimed = claim_next_package(store, worker_id="worker", lease_seconds=1)
+    assert claimed is not None
+    time.sleep(1.05)
+
+    assert process_expired_claims(store) == [contract.id]
+    assert process_expired_claims(store) == []
+    assert store.get_claim(contract.id)["status"] == "expired"
+    assert (
+        claim_next_package(store, worker_id="replacement", contract_id=contract.id)
+        is None
+    )
+    terminal = [
+        record
+        for _, record in store.scan_runtime_records(record_type="lifecycle.terminal")
+        if record.payload["contract_id"] == contract.id
+    ]
+    assert len(terminal) == 1
+    assert terminal[0].payload["terminal"] == "failed"
+    assert any(
+        child.origin == "recovery" and child.name == f"{contract.id}.recover"
+        for child in store.get_all_contracts()
+    )
+    store.rebuild_claim_projection()
+    assert store.get_claim(contract.id)["status"] == "expired"
     store.close()

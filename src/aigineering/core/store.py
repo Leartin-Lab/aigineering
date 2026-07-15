@@ -9,13 +9,14 @@ from pathlib import Path
 from typing import Optional, Protocol, runtime_checkable
 
 from aigineering.core.authority import (
-    RESERVED_PREFIXES,
     ReservedNamespaceError,
     _is_protected_name,
+    matched_reserved_prefix,
 )
+from aigineering.core.activation import activation_names
 from aigineering.core.provenance import verify_asset_seal
 from aigineering.core.record_conflict import ImmutableRecordConflict
-from aigineering.core.ids import compute_content_hash
+from aigineering.core.ids import compute_content_hash, validate_contract_identity
 from aigineering.core.worker_routing import (
     registration_from_record,
     worker_registration_record,
@@ -23,6 +24,7 @@ from aigineering.core.worker_routing import (
 from aigineering.protocol.types import Asset, Contract
 from aigineering.protocol.runtime_record import (
     RuntimeRecord,
+    create_runtime_record,
     runtime_record_effective_payload,
     validate_runtime_record,
 )
@@ -67,6 +69,8 @@ class StoreProtocol(Protocol):
         self, *, after_revision: int = 0, record_type: str | None = None
     ) -> list[tuple[int, RuntimeRecord]]: ...
     def get_runtime_revision(self) -> int: ...
+    def commit_ingress_batch(self, *args, **kwargs) -> None: ...
+    def commit_replacement_claim(self, claim, trace_entry) -> None: ...
 
 
 @runtime_checkable
@@ -101,6 +105,17 @@ class OperationalStoreProtocol(StoreProtocol, Protocol):
     def has_any_idempotency(self, contract_id: str) -> bool: ...
     def commit_candidate_submission(self, *args, **kwargs) -> bool: ...
     def commit_method_submission(self, *args, **kwargs) -> bool: ...
+    def commit_worker_invocation_failure(self, *args, **kwargs) -> bool: ...
+    def commit_claim_expiration(self, *args, **kwargs) -> bool: ...
+
+
+def require_runtime_store(store: object) -> StoreProtocol:
+    """Reject adapters that cannot preserve canonical ingress semantics."""
+    if not isinstance(store, StoreProtocol):
+        raise TypeError(
+            f"{type(store).__name__} does not implement the required runtime StorePort"
+        )
+    return store
 
 
 def require_operational_store(store: StoreProtocol) -> OperationalStoreProtocol:
@@ -116,30 +131,6 @@ def require_operational_store(store: StoreProtocol) -> OperationalStoreProtocol:
 # ---------------------------------------------------------------------------
 # Activation name extraction
 # ---------------------------------------------------------------------------
-
-_ACTIVATION_KEYWORDS: frozenset[str] = frozenset({"AND", "OR", "NOT"})
-
-
-def _extract_activation_names(expression: str) -> set[str]:
-    """Extract asset names from an activation expression.
-
-    Returns the set of non-keyword, non-punctuation tokens.
-    For complex/unparseable expressions returns an empty set (pass-through).
-    """
-    import re
-
-    if not expression or not expression.strip():
-        return set()
-    names: set[str] = set()
-    for token in re.split(r"\s+", expression.strip()):
-        token = token.strip("()")
-        if not token:
-            continue
-        if token.upper() in _ACTIVATION_KEYWORDS:
-            continue
-        if re.fullmatch(r"[a-zA-Z_][a-zA-Z0-9_-]*", token):
-            names.add(token)
-    return names
 
 
 def _projection_index_digest(
@@ -211,7 +202,7 @@ class _ProjectionIndexMixin:
         self._declared_outputs_index.clear()
         for contract in self.contracts.values():
             self.register_activation_refs(
-                contract.id, _extract_activation_names(contract.activation)
+                contract.id, activation_names(contract.activation)
             )
             self.register_declared_outputs(contract.id, set(contract.outputs))
 
@@ -302,6 +293,56 @@ class MemoryStore(_ProjectionIndexMixin):
     def get_runtime_revision(self) -> int:
         return self._runtime_revision
 
+    def commit_ingress_batch(
+        self,
+        accepted_assets: list[Asset],
+        trace_entries: list,
+        *,
+        contract: Contract | None = None,
+        reducer_callback=None,
+        runtime_records: tuple[RuntimeRecord, ...] = (),
+    ) -> None:
+        """Apply one ingress batch with rollback-equivalent memory semantics."""
+        del trace_entries
+        for record in runtime_records:
+            validate_runtime_record(record)
+        snapshot = (
+            self.assets.copy(),
+            self.contracts.copy(),
+            {key: value.copy() for key, value in self._activation_index.items()},
+            {
+                key: value.copy()
+                for key, value in self._reverse_activation_index.items()
+            },
+            {key: value.copy() for key, value in self._declared_outputs_index.items()},
+            self._runtime_records.copy(),
+            self._runtime_revision,
+        )
+        committed = False
+        try:
+            if contract is not None:
+                self.add_contract(contract)
+            for asset in accepted_assets:
+                if not asset.signed_by or not verify_asset_seal(asset):
+                    raise ValueError(f"Asset '{asset.id}' has an invalid seal")
+                self._persist_asset(asset)
+            if reducer_callback is not None:
+                reducer_callback()
+            for record in runtime_records:
+                self.append_runtime_record(record)
+            committed = True
+        finally:
+            if not committed:
+                (
+                    self.assets,
+                    self.contracts,
+                    self._activation_index,
+                    self._reverse_activation_index,
+                    self._declared_outputs_index,
+                    self._runtime_records,
+                    self._runtime_revision,
+                ) = snapshot
+
     def add_asset(self, asset: Asset) -> None:
         if not asset.signed_by or not verify_asset_seal(asset):
             raise ValueError(
@@ -309,15 +350,7 @@ class MemoryStore(_ProjectionIndexMixin):
                 f"(signed_by={asset.signed_by!r})"
             )
         if _is_protected_name(asset.name):
-            prefix = next(
-                (
-                    p
-                    for p in RESERVED_PREFIXES
-                    if asset.name.startswith(p)
-                    or (p.endswith("_") and asset.name == p.rstrip("_"))
-                ),
-                "?",
-            )
+            prefix = matched_reserved_prefix(asset.name) or "?"
             raise ReservedNamespaceError(asset.name, prefix)
         existing = self.assets.get(asset.id)
         if existing is not None:
@@ -355,6 +388,7 @@ class MemoryStore(_ProjectionIndexMixin):
         return list(self.assets.values())
 
     def add_contract(self, contract: Contract) -> None:
+        validate_contract_identity(contract)
         existing = self.contracts.get(contract.id)
         if existing is not None:
             if existing == contract:
@@ -362,7 +396,7 @@ class MemoryStore(_ProjectionIndexMixin):
             raise ImmutableRecordConflict("contract", contract.id)
         self.contracts[contract.id] = contract
         self.register_activation_refs(
-            contract.id, _extract_activation_names(contract.activation)
+            contract.id, activation_names(contract.activation)
         )
         self.register_declared_outputs(contract.id, set(contract.outputs))
 
@@ -394,11 +428,40 @@ class MemoryStore(_ProjectionIndexMixin):
             raise ImmutableRecordConflict("replacement claim", claim.id)
         self._claims.append(claim)
 
+    def commit_replacement_claim(self, claim, trace_entry) -> None:
+        self.add_replacement_claim(claim)
+        self.append_runtime_record(
+            create_runtime_record(
+                "replacement.claimed",
+                {"claim": _replacement_claim_payload(claim)},
+            )
+        )
+        from aigineering.protocol.wire import trace_entry_to_dict
+
+        self.append_runtime_record(
+            create_runtime_record(
+                "trace.recorded", {"trace": trace_entry_to_dict(trace_entry)}
+            )
+        )
+
     def get_claims_by_definition(self, definition_hash: str) -> list:
         return [c for c in self._claims if c.definition_hash == definition_hash]
 
     def get_claims_for_asset(self, asset_id: str) -> list:
         return [c for c in self._claims if c.source_asset_id == asset_id]
+
+
+def _replacement_claim_payload(claim) -> dict[str, object]:
+    return {
+        "id": claim.id,
+        "source_asset_id": claim.source_asset_id,
+        "replacement_asset_id": claim.replacement_asset_id,
+        "definition_hash": claim.definition_hash,
+        "claim_type": claim.claim_type,
+        "signed_by": claim.signed_by,
+        "provenance_seal": claim.provenance_seal,
+        "lineage_id": claim.lineage_id,
+    }
 
 
 class JsonLStore(_ProjectionIndexMixin):
@@ -524,15 +587,7 @@ class JsonLStore(_ProjectionIndexMixin):
                 f"(signed_by={asset.signed_by!r})"
             )
         if _is_protected_name(asset.name):
-            prefix = next(
-                (
-                    p
-                    for p in RESERVED_PREFIXES
-                    if asset.name.startswith(p)
-                    or (p.endswith("_") and asset.name == p.rstrip("_"))
-                ),
-                "?",
-            )
+            prefix = matched_reserved_prefix(asset.name) or "?"
             raise ReservedNamespaceError(asset.name, prefix)
         self._persist_asset(asset)
 
@@ -585,6 +640,7 @@ class JsonLStore(_ProjectionIndexMixin):
         return latest
 
     def add_contract(self, contract: Contract) -> None:
+        validate_contract_identity(contract)
         existing = self.contracts.get(contract.id)
         if existing is not None:
             if existing == contract:
@@ -594,7 +650,7 @@ class JsonLStore(_ProjectionIndexMixin):
         self._write_jsonl_line(self._contracts_path, line)
         self.contracts[contract.id] = contract
         self.register_activation_refs(
-            contract.id, _extract_activation_names(contract.activation)
+            contract.id, activation_names(contract.activation)
         )
         self.register_declared_outputs(contract.id, set(contract.outputs))
 

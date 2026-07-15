@@ -13,36 +13,16 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from aigineering.core.authority import RESERVED_PREFIXES
+from aigineering.core.authority import _is_protected_name
 from aigineering.core.ids import (
     hash_asset_definition,
     hash_asset_content,
-    hash_contract,
+    hash_contract_v3,
 )
 
 if TYPE_CHECKING:
     from aigineering.core.runtime_ingress import RuntimeIngress
     from aigineering.protocol.types import Asset, Contract
-
-# ---------------------------------------------------------------------------
-# Protected prefix enforcement
-# ---------------------------------------------------------------------------
-
-# Single source of truth: authority.py RESERVED_PREFIXES.
-# The control plane enforces the same reserved prefix set as the authority
-# gate so there is one canonical list of protected runtime namespaces.
-
-
-def _is_protected_name(name: str) -> bool:
-    """Return True when *name* starts with a protected prefix."""
-    for prefix in RESERVED_PREFIXES:
-        if name.startswith(prefix):
-            return True
-        # Also match the bare prefix form: "_sys_" should match "_sys"
-        if prefix.endswith("_") and name == prefix.rstrip("_"):
-            return True
-    return False
-
 
 # ---------------------------------------------------------------------------
 # Asset injection
@@ -162,8 +142,8 @@ def inject_contract(
     Parameters
     ----------
     allow_protected_outputs : bool
-        When False (default), outputs starting with protected prefixes
-        cause ValueError.  Set True only for system/admin use.
+        Deprecated fail-closed compatibility parameter. Control-plane work
+        contracts never receive runtime minting authority; true is rejected.
     ingress : RuntimeIngress
         Required ingress for contract persistence and tracing.
 
@@ -178,17 +158,31 @@ def inject_contract(
         for output_name in outputs:
             if _is_protected_name(output_name):
                 raise ValueError(
-                    f"Contract output '{output_name}' uses a protected prefix. "
-                    f"Use allow_protected_outputs=True if intentional."
+                    f"Contract output '{output_name}' uses a protected prefix; "
+                    "control-plane work contracts cannot mint runtime names."
                 )
 
-    # Build minting_authority for protected outputs when explicitly allowed
-    minting_auth: tuple[str, ...] = ()
     if allow_protected_outputs:
-        minting_auth = tuple(o for o in outputs if _is_protected_name(o))
+        raise ValueError(
+            "control-plane work contracts cannot receive runtime minting authority"
+        )
+
+    policy = sensitive_input_policy if sensitive_input_policy is not None else None
+    identity = hash_contract_v3(
+        name=name,
+        description=description,
+        inputs=inputs,
+        outputs=outputs,
+        activation=activation,
+        budget=budget,
+        tool_scope=tool_scope,
+        labels=labels,
+        origin="human",
+        sensitive_input_policy=policy,
+    )
 
     contract = Contract(
-        id="",
+        id=identity,
         name=name,
         description=description,
         inputs=inputs,
@@ -197,23 +191,7 @@ def inject_contract(
         budget=budget,
         labels=labels,
         tool_scope=tool_scope,
-        sensitive_input_policy=sensitive_input_policy or {},
-        minting_authority=minting_auth,
+        sensitive_input_policy=policy,
     )
-    hashed = Contract(
-        id=hash_contract(
-            name=contract.name,
-            description=contract.description,
-            inputs=list(contract.inputs),
-            outputs=list(contract.outputs),
-            activation=contract.activation,
-            budget=contract.budget,
-            tool_scope=list(contract.tool_scope),
-            labels=list(contract.labels),
-            origin=contract.origin,
-        ),
-        **{k: v for k, v in contract.__dict__.items() if k != "id"},
-    )
-
-    ingress.accept_contract(hashed)
-    return hashed
+    ingress.accept_contract(contract)
+    return contract

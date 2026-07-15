@@ -12,7 +12,9 @@ import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from aigineering.core.activation import activation_names as extract_activation_names
 from aigineering.core.authority import RESERVED_PREFIXES
+from aigineering.protocol.immutability import deep_freeze, deep_thaw
 
 if TYPE_CHECKING:
     from aigineering.protocol.types import Asset, Contract
@@ -106,7 +108,11 @@ class PlanScaffold:
         object.__setattr__(self, "step_1_tasks", tuple(self.step_1_tasks))
         object.__setattr__(self, "step_2_data_flow", tuple(self.step_2_data_flow))
         object.__setattr__(self, "step_3_activation", tuple(self.step_3_activation))
-        object.__setattr__(self, "final_contracts", tuple(self.final_contracts))
+        object.__setattr__(
+            self,
+            "final_contracts",
+            tuple(deep_freeze(contract) for contract in self.final_contracts),
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -325,7 +331,7 @@ def validate_plan_scaffold(
 
         # Activation expression: check that referenced names are declared
         if activation_expr:
-            activation_refs = _extract_activation_names(activation_expr)
+            activation_refs = extract_activation_names(activation_expr)
             unknown_refs = activation_refs - all_provided - set(produces)
             if unknown_refs:
                 errors.append(
@@ -520,7 +526,7 @@ def contracts_from_scaffold(
     if not scaffold.step_1_tasks:
         if scaffold.final_contracts:
             temp_content = json.dumps(
-                {"contracts": list(scaffold.final_contracts)}, sort_keys=True
+                {"contracts": deep_thaw(scaffold.final_contracts)}, sort_keys=True
             )
             temp_asset = _temp_asset(temp_content)
             return contracts_from_plan_asset(temp_asset, parent_id, parent_contract)
@@ -552,28 +558,6 @@ def _temp_asset(content: str) -> Asset:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-_ACTIVATION_KEYWORDS: frozenset[str] = frozenset({"AND", "OR", "NOT"})
-
-
-def _extract_activation_names(expression: str) -> set[str]:
-    """Extract asset names from an activation expression.
-
-    Returns the set of non-keyword, non-punctuation tokens.
-    For complex/unparseable expressions returns an empty set (pass-through).
-    """
-    if not expression or not expression.strip():
-        return set()
-    names: set[str] = set()
-    for token in re.split(r"\s+", expression.strip()):
-        token = token.strip("()")
-        if not token:
-            continue
-        if token.upper() in _ACTIVATION_KEYWORDS:
-            continue
-        if re.fullmatch(r"[a-zA-Z_][a-zA-Z0-9_-]*", token):
-            names.add(token)
-    return names
 
 
 def _string_list(value: object) -> list[str]:

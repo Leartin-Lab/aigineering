@@ -15,7 +15,7 @@ from aigineering.protocol.types import Contract
 _CLAIM_SCRIPT = """
 import sys
 import time
-from aigineering.cli.worker_runtime import claim_next_package
+from aigineering.runtime import claim_next_package
 from aigineering.core.sqlite_store import SQLiteStore
 
 db_path, contract_id, replica, start_at = sys.argv[1:]

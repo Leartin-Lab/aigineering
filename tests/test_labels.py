@@ -59,8 +59,8 @@ def test_label_injects_existing_asset():
         ingress=RuntimeIngress(store, MemoryTraceStore()),
     )
 
-    assert result.injected_assets == [skill]
-    assert result.placeholder_assets == []
+    assert result.injected_assets == (skill,)
+    assert result.placeholder_assets == ()
 
 
 def test_label_missing_dependency_creates_placeholder_asset():
@@ -134,8 +134,8 @@ def test_behavior_label_injects_configured_behavior_asset():
         contract, {}, store, ingress=RuntimeIngress(store, MemoryTraceStore())
     )
 
-    assert result.injected_assets == [behavior]
-    assert result.placeholder_assets == []
+    assert result.injected_assets == (behavior,)
+    assert result.placeholder_assets == ()
 
 
 def test_behavior_label_rejects_low_trust_behavior_asset():

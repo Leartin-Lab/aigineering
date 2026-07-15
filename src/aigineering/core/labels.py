@@ -32,17 +32,25 @@ class Label:
     """Declarative rule that injects asset references into a contract context."""
 
     name: str
-    assets: list[str] = field(default_factory=list)
+    assets: tuple[str, ...] = field(default_factory=tuple)
     description: str = ""
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "assets", tuple(self.assets))
 
 
 @dataclass(frozen=True)
 class LabelResolution:
     """Result of resolving labels against the current asset store."""
 
-    label_names: list[str]
-    injected_assets: list[Asset]
-    placeholder_assets: list[Asset]
+    label_names: tuple[str, ...]
+    injected_assets: tuple[Asset, ...]
+    placeholder_assets: tuple[Asset, ...]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "label_names", tuple(self.label_names))
+        object.__setattr__(self, "injected_assets", tuple(self.injected_assets))
+        object.__setattr__(self, "placeholder_assets", tuple(self.placeholder_assets))
 
 
 def _placeholder_asset(label_name: str, asset_name: str) -> Asset:

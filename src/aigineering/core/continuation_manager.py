@@ -11,11 +11,11 @@ import json
 
 from typing import TYPE_CHECKING
 
-from aigineering.core.ids import hash_contract_v2
 from aigineering.core.labels import resolve_contract_labels
 from aigineering.core.method_runtime import MethodRuntime
-from aigineering.core.methods import method_payload
+from aigineering.core.methods import continuation_contract, method_payload
 from aigineering.core.output_satisfaction import all_outputs_satisfied
+from aigineering.core.runtime_projection import TERMINAL_EVENTS
 from aigineering.protocol.types import Contract
 
 if TYPE_CHECKING:
@@ -32,12 +32,12 @@ if TYPE_CHECKING:
 class ContinuationManager:
     """Resumes parents after method contracts complete; schedules continuation contracts.
 
-    Accepts all mutable engine state (completed, suspended, method_scheduled,
-    method_context, pending_trace_entries) via explicit dependency injection so
-    that :class:`Engine` can delegate without exposing private members.
+    The set/dict arguments are ephemeral deduplication caches. Production
+    reconstructs them for each projection pass; durable authority remains in
+    Contract, Asset, Trace, claim, and RuntimeRecord facts.
     """
 
-    _TERMINAL_EVENTS = frozenset({"complete", "failed", "cancelled", "unreachable"})
+    _TERMINAL_EVENTS = TERMINAL_EVENTS
 
     def __init__(
         self,
@@ -185,35 +185,11 @@ class ContinuationManager:
         """
         method = method_payload(source_contract).get("method", "method")
         budget = max(1, self._budget_mgr.get_remaining(parent.id))
-        name = f"{parent.name or parent.id}.{method}.continue.{source_contract.id}"
-        continuation = Contract(
-            id=hash_contract_v2(
-                name=name,
-                description=parent.description,
-                inputs=[],
-                outputs=list(parent.outputs),
-                activation="",
-                budget=budget,
-                tool_scope=list(parent.tool_scope),
-                labels=list(parent.labels),
-                worker_capabilities=list(parent.worker_capabilities),
-                worker_pools=list(parent.worker_pools),
-                origin="continuation",
-                parent_id=parent.id,
-            ),
-            parent_id=parent.id,
-            name=name,
-            description=parent.description,
-            outputs=parent.outputs,
-            activation="",
+        continuation = continuation_contract(
+            parent,
+            source_contract,
+            method=str(method),
             budget=budget,
-            tool_scope=parent.tool_scope,
-            labels=parent.labels,
-            worker_capabilities=parent.worker_capabilities,
-            worker_pools=parent.worker_pools,
-            origin="continuation",
-            minting_authority=parent.minting_authority,
-            sensitive_input_policy=parent.sensitive_input_policy,
         )
         if continuation.id not in self._method_scheduled:
             self._add_contract(continuation)

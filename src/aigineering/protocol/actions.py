@@ -7,6 +7,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from aigineering.protocol.immutability import deep_freeze
+
 if TYPE_CHECKING:
     from aigineering.protocol.types import Candidate
 
@@ -22,12 +24,16 @@ class WorkerAction:
     """Parsed worker action."""
 
     type: str
-    outputs: dict[str, str] = field(default_factory=dict)
-    payload: dict[str, Any] = field(default_factory=dict)
+    outputs: Mapping[str, str] = field(default_factory=dict)
+    payload: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "outputs", deep_freeze(self.outputs))
+        object.__setattr__(self, "payload", deep_freeze(self.payload))
 
 
 def parse_action(raw_output: str) -> WorkerAction:
-    """Parse `/exec`, `/plan`, `/replan`, and `/tool` worker actions."""
+    """Parse one of the worker actions supported by the wire protocol."""
 
     stripped = _strip_fence(raw_output.strip())
     if not stripped.startswith("/"):
@@ -69,7 +75,7 @@ def parse_method_action(candidate: "Candidate") -> WorkerAction | None:
     """Parse a method action from a candidate's parsed_action or raw_output.
 
     Returns **None** if the candidate does not contain a valid method action
-    (plan, replan, tool, retry).
+    (plan, replan, tool, retry, fail).
     """
     parsed = candidate.parsed_action
     if isinstance(parsed, Mapping) and parsed.get("type") in {

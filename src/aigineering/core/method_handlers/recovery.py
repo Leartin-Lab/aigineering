@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING
 
-from aigineering.core.ids import hash_contract_v2
+from aigineering.core.ids import hash_contract_v3
 from aigineering.protocol.types import Candidate, Contract
 
 if TYPE_CHECKING:
@@ -78,7 +78,13 @@ def schedule_method_result_recovery(
         sort_keys=True,
         ensure_ascii=False,
     )
-    cid = hash_contract_v2(
+    authority = (output_name, context_name)
+    policy = (
+        dict(failed_contract.sensitive_input_policy)
+        if failed_contract.sensitive_input_policy is not None
+        else None
+    )
+    cid = hash_contract_v3(
         name=name,
         description=description,
         inputs=[context_name],
@@ -91,6 +97,8 @@ def schedule_method_result_recovery(
         worker_pools=failed_contract.worker_pools,
         origin="system",
         parent_id=parent_id,
+        minting_authority=authority,
+        sensitive_input_policy=policy,
     )
     if runtime.get_contract(cid) is not None:
         return None
@@ -106,8 +114,11 @@ def schedule_method_result_recovery(
         budget=1,
         tool_scope=[],
         labels=[f"method:{method_type}"],
+        worker_capabilities=failed_contract.worker_capabilities,
+        worker_pools=failed_contract.worker_pools,
         origin="system",
-        minting_authority=(output_name, context_name),
+        minting_authority=authority,
+        sensitive_input_policy=failed_contract.sensitive_input_policy,
     )
     runtime.add_contract(recovery)
     context_asset = runtime.mint_authorized_system_asset(
@@ -175,7 +186,18 @@ def schedule_projection_recovery(
     )
     inputs = _dedupe([context_name, *failed_contract.inputs])
     activation = _append_activation(failed_contract.activation, context_name)
-    cid = hash_contract_v2(
+    output_authority = tuple(
+        output
+        for output in failed_contract.outputs
+        if output in failed_contract.minting_authority
+    )
+    authority = (context_name, *output_authority)
+    policy = (
+        dict(failed_contract.sensitive_input_policy)
+        if failed_contract.sensitive_input_policy is not None
+        else None
+    )
+    cid = hash_contract_v3(
         name=name,
         description=description,
         inputs=inputs,
@@ -188,6 +210,8 @@ def schedule_projection_recovery(
         worker_pools=list(failed_contract.worker_pools),
         origin="recovery",
         parent_id=failed_contract.parent_id,
+        minting_authority=authority,
+        sensitive_input_policy=policy,
     )
     if runtime.get_contract(cid) is not None:
         return None
@@ -206,7 +230,7 @@ def schedule_projection_recovery(
         worker_capabilities=failed_contract.worker_capabilities,
         worker_pools=failed_contract.worker_pools,
         origin="recovery",
-        minting_authority=(context_name, *failed_contract.minting_authority),
+        minting_authority=authority,
         sensitive_input_policy=failed_contract.sensitive_input_policy,
     )
     runtime.add_contract(recovery)

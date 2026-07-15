@@ -174,8 +174,8 @@ class TestTaskIdentityParentCollision:
         )
 
     def test_retry_contract_has_distinct_id(self):
-        """Retry contracts have deterministic but distinct IDs."""
-        from aigineering.core.ids import hash_retry
+        """Retry contracts bind the complete replacement security definition."""
+        from aigineering.core.methods import retry_contract
 
         original_id = hash_contract(
             "retry_test",
@@ -188,11 +188,17 @@ class TestTaskIdentityParentCollision:
             [],
             "human",
         )
-        retry_id = hash_retry(original_id)
+        original = Contract(
+            id=original_id,
+            name="retry_test",
+            outputs=["out"],
+            budget=3,
+        )
+        retry_id = retry_contract(original).id
 
         assert retry_id != original_id
-        assert retry_id.startswith("retry:")
-        assert retry_id == hash_retry(original_id), "must be deterministic"
+        assert retry_id.startswith("task:v3:")
+        assert retry_id == retry_contract(original).id, "must be deterministic"
 
 
 # ============================================================================
@@ -440,9 +446,7 @@ class TestDirectWriteBan:
         {
             "store.py",
             "sqlite_store.py",
-            "runtime_transaction.py",
             "runtime_ingress.py",
-            "idempotency_store.py",
         }
     )
 

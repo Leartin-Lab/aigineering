@@ -23,7 +23,7 @@ if TYPE_CHECKING:
     from aigineering.protocol.types import Contract, TraceEntry
 
 
-_TERMINAL_EVENTS = frozenset({"complete", "failed", "cancelled", "unreachable"})
+TERMINAL_EVENTS = frozenset({"complete", "failed", "cancelled", "unreachable"})
 _ACTIVATION_OPERATORS = frozenset({"AND", "OR", "NOT"})
 
 
@@ -40,6 +40,8 @@ class ContractView:
     outputs_satisfied: bool
     terminal: str | None
     terminal_events: tuple[str, ...]
+    current_claim_id: str | None
+    claim_status: str | None
     budget_remaining: int
     projection_hash: str
 
@@ -106,7 +108,7 @@ class RuntimeProjection:
                 | {
                     entry.event_type
                     for entry in entries
-                    if entry.event_type in _TERMINAL_EVENTS
+                    if entry.event_type in TERMINAL_EVENTS
                 }
             )
         )
@@ -121,6 +123,7 @@ class RuntimeProjection:
             if typed_budget is not None
             else _budget_remaining(contract, entries)
         )
+        current_claim_id, claim_status = self._claim_view(contract.id)
         method_pending = False
         for entry in entries:
             if entry.event_type in {
@@ -152,12 +155,16 @@ class RuntimeProjection:
             blockers.append("budget_exhausted")
         if method_pending:
             blockers.append("method_pending")
+        if current_claim_id is not None:
+            blockers.append(f"claim:{claim_status}")
 
         canonical = {
             "activation_satisfied": activation_satisfied,
             "blockers": blockers,
             "budget_remaining": budget_remaining,
             "contract_id": contract.id,
+            "current_claim_id": current_claim_id,
+            "claim_status": claim_status,
             "inputs_satisfied": inputs_satisfied,
             "missing_assets": list(missing_assets),
             "outputs_satisfied": outputs_satisfied,
@@ -177,6 +184,8 @@ class RuntimeProjection:
             outputs_satisfied=outputs_satisfied,
             terminal=terminal,
             terminal_events=terminal_events,
+            current_claim_id=current_claim_id,
+            claim_status=claim_status,
             budget_remaining=budget_remaining,
             projection_hash=projection_hash,
         )
@@ -257,12 +266,36 @@ class RuntimeProjection:
         )
 
     def _record_selected(self, revision: int, recorded_at: str) -> bool:
+        if self._as_of is None and self._as_of_revision is None:
+            return True
         if self._as_of_revision is not None:
             return revision <= self._as_of_revision
         assert self._as_of is not None
         return datetime.fromisoformat(recorded_at) <= datetime.fromisoformat(
             self._as_of
         )
+
+    def _claim_view(self, contract_id: str) -> tuple[str | None, str | None]:
+        claim_id: str | None = None
+        status: str | None = None
+        for revision, record in self._store.scan_runtime_records():
+            if not self._record_selected(revision, record.recorded_at):
+                continue
+            payload = record.payload
+            if (
+                record.record_type == "claim.granted"
+                and payload["contract_id"] == contract_id
+            ):
+                claim_id = str(payload["claim_id"])
+                status = "active"
+            elif (
+                claim_id is not None
+                and record.record_type
+                in {"claim.expired", "claim.released", "claim.submitted"}
+                and payload["claim_id"] == claim_id
+            ):
+                status = record.record_type.removeprefix("claim.")
+        return claim_id, status
 
 
 def _activation_names(expression: str) -> set[str]:

@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from aigineering.core.ids import hash_contract, hash_contract_v2
+from aigineering.core.ids import hash_contract, hash_contract_v3
 from aigineering.core.methods import contracts_from_plan_asset
 from aigineering.protocol.types import Asset, Contract
 
@@ -367,7 +367,7 @@ def test_tool_scope_subset_accepted_with_correct_identity():
     assert len(accepted) == 1
     assert len(rejected) == 0
     assert accepted[0].tool_scope == ("read",)
-    expected_id = hash_contract_v2(
+    expected_id = hash_contract_v3(
         name="draft",
         description="Draft the report.",
         inputs=["source"],

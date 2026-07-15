@@ -8,6 +8,10 @@ import unicodedata
 from datetime import datetime, timezone
 from typing import Any, Optional
 
+from aigineering.protocol.immutability import deep_thaw
+
+CONTRACT_SELF_REFERENCE = "{contract_id}"
+
 # ---------------------------------------------------------------------------
 # Canonical JSON serialization (RFC 8785 – style)
 # ---------------------------------------------------------------------------
@@ -132,6 +136,84 @@ def hash_contract_v2(
         fields["worker_pools"] = sorted(worker_pools)
     canonical = canonical_json(fields)
     return f"task:{compute_content_hash(canonical)}"
+
+
+def hash_contract_v3(
+    *,
+    name: str,
+    description: str,
+    inputs: list[str] | tuple[str, ...],
+    outputs: list[str] | tuple[str, ...],
+    activation: str,
+    budget: int,
+    tool_scope: list[str] | tuple[str, ...],
+    labels: list[str] | tuple[str, ...],
+    origin: str,
+    parent_id: str | None = None,
+    worker_capabilities: list[str] | tuple[str, ...] = (),
+    worker_pools: list[str] | tuple[str, ...] = (),
+    minting_authority: list[str] | tuple[str, ...] = (),
+    sensitive_input_policy: dict[str, Any] | None = None,
+) -> str:
+    """Security-complete Contract identity with normalized self references."""
+    fields: dict[str, object] = {
+        "activation": activation,
+        "budget": budget,
+        "description": description,
+        "inputs": sorted(inputs),
+        "labels": sorted(labels),
+        "minting_authority": sorted(minting_authority),
+        "name": name,
+        "origin": origin,
+        "outputs": sorted(outputs),
+        "parent_id": parent_id,
+        "sensitive_input_policy": deep_thaw(sensitive_input_policy),
+        "tool_scope": sorted(tool_scope),
+        "worker_capabilities": sorted(worker_capabilities),
+        "worker_pools": sorted(worker_pools),
+    }
+    return f"task:v3:{compute_content_hash(canonical_json(fields))}"
+
+
+def contract_identity_v3(contract) -> str:
+    """Recompute a v3 identity from one materialized Contract entity."""
+    normalized_authority = [
+        value.replace(contract.id, CONTRACT_SELF_REFERENCE)
+        for value in contract.minting_authority
+    ]
+    policy = (
+        deep_thaw(contract.sensitive_input_policy)
+        if contract.sensitive_input_policy is not None
+        else None
+    )
+    return hash_contract_v3(
+        name=contract.name,
+        description=contract.description,
+        inputs=contract.inputs,
+        outputs=contract.outputs,
+        activation=contract.activation,
+        budget=contract.budget,
+        tool_scope=contract.tool_scope,
+        labels=contract.labels,
+        origin=contract.origin,
+        parent_id=contract.parent_id,
+        worker_capabilities=contract.worker_capabilities,
+        worker_pools=contract.worker_pools,
+        minting_authority=normalized_authority,
+        sensitive_input_policy=policy,
+    )
+
+
+def validate_contract_identity(contract) -> None:
+    """Fail closed when a v3 ID does not bind its complete effective entity."""
+    if not contract.id.startswith("task:v3:"):
+        return
+    expected = contract_identity_v3(contract)
+    if contract.id != expected:
+        raise ValueError(
+            f"Contract '{contract.id}' does not match canonical v3 identity "
+            f"'{expected}'"
+        )
 
 
 def hash_asset_definition(name: str) -> str:

@@ -280,19 +280,21 @@ class TestInjectContract:
                     store, trace, name="bad", outputs=(output,), ingress=ingress
                 )
 
-    def test_protected_output_allowed_with_override(self):
+    def test_protected_output_override_cannot_grant_runtime_authority(self):
         store = MemoryStore()
         trace = MemoryTraceStore()
         ingress = _make_ingress(store, trace)
-        contract = inject_contract(
-            store,
-            trace,
-            name="admin",
-            outputs=("_sys_config",),
-            allow_protected_outputs=True,
-            ingress=ingress,
-        )
-        assert "_sys_config" in contract.outputs
+        with pytest.raises(
+            ValueError, match="cannot receive runtime minting authority"
+        ):
+            inject_contract(
+                store,
+                trace,
+                name="admin",
+                outputs=("_sys_config",),
+                allow_protected_outputs=True,
+                ingress=ingress,
+            )
 
     def test_trace_recorded(self):
         store = MemoryStore()

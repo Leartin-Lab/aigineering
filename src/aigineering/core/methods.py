@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import json
-import re
+from collections.abc import Mapping
 
+from aigineering.core.activation import activation_names
 from aigineering.core.authority import RESERVED_PREFIXES
 from aigineering.core.ids import (
+    CONTRACT_SELF_REFERENCE,
     hash_asset_content,
     hash_asset_definition,
-    hash_contract_v2,
+    hash_contract_v3,
 )
 from aigineering.core.plan_scaffold import (
     _scaffold_tasks_to_raw_dicts,
@@ -18,6 +20,7 @@ from aigineering.core.plan_scaffold import (
     validate_plan_scaffold,
 )
 from aigineering.protocol.actions import WorkerAction
+from aigineering.protocol.immutability import deep_thaw
 from aigineering.protocol.types import Asset, Contract
 
 _METHOD_OUTPUT_PREFIX: dict[str, str] = {
@@ -37,30 +40,6 @@ _PLAN_PROTECTED_FIELDS: frozenset[str] = frozenset(
     {"trust_tier", "created_by", "worker_capabilities", "worker_pools"}
 )
 
-_ACTIVATION_KEYWORDS: frozenset[str] = frozenset({"AND", "OR", "NOT"})
-
-
-def _extract_activation_names(expression: str) -> set[str]:
-    """Extract asset names from an activation expression.
-
-    Returns the set of non-keyword, non-punctuation tokens.
-    For complex/unparseable expressions returns an empty set (pass-through).
-    """
-    if not expression or not expression.strip():
-        return set()
-    # Split on whitespace and strip parentheses
-    names: set[str] = set()
-    for token in re.split(r"\s+", expression.strip()):
-        token = token.strip("()")
-        if not token:
-            continue
-        if token.upper() in _ACTIVATION_KEYWORDS:
-            continue
-        # Only accept tokens that look like simple identifiers
-        if re.fullmatch(r"[a-zA-Z_][a-zA-Z0-9_-]*", token):
-            names.add(token)
-    return names
-
 
 def method_contract(parent: Contract, action: WorkerAction) -> Contract:
     """Create a system-owned method sub-contract from a parsed action."""
@@ -71,7 +50,7 @@ def method_contract(parent: Contract, action: WorkerAction) -> Contract:
     output_prefix = _METHOD_OUTPUT_PREFIX[action.type]
     if (
         action.type == "tool"
-        and isinstance(action.payload, dict)
+        and isinstance(action.payload, Mapping)
         and isinstance(action.payload.get("name"), str)
         and action.payload["name"].startswith("mcp:")
     ):
@@ -93,8 +72,37 @@ def method_contract(parent: Contract, action: WorkerAction) -> Contract:
             inputs.append(descriptor_name)
     tool_scope = list(parent.tool_scope)
     labels = _append_method_label(parent.labels, action.type)
+    worker_capabilities = list(parent.worker_capabilities)
+    if action.type == "tool":
+        execution_capability = (
+            "mcp-execution"
+            if isinstance(action.payload.get("name"), str)
+            and action.payload["name"].startswith("mcp:")
+            else "tool-execution"
+        )
+        if execution_capability not in worker_capabilities:
+            worker_capabilities.append(execution_capability)
 
-    contract_id = hash_contract_v2(
+    context_name = f"_method_ctx_{parent.id}"
+    authority_templates: tuple[str, ...] = (
+        output_name,
+        context_name,
+        f"_fail_context_{CONTRACT_SELF_REFERENCE}",
+    )
+    if action.type == "fail":
+        authority_templates = (
+            output_name,
+            context_name,
+            f"_fail_report_{CONTRACT_SELF_REFERENCE}",
+        )
+    elif action.type == "tool":
+        call_prefix = "_mcp_call_" if output_prefix == "_mcp_obs_" else "_tool_call_"
+        authority_templates = (
+            output_name,
+            context_name,
+            f"{call_prefix}{CONTRACT_SELF_REFERENCE}",
+        )
+    contract_id = hash_contract_v3(
         name=contract_name,
         description=description,
         inputs=inputs,
@@ -103,10 +111,16 @@ def method_contract(parent: Contract, action: WorkerAction) -> Contract:
         budget=1,
         tool_scope=tool_scope,
         labels=labels,
-        worker_capabilities=parent.worker_capabilities,
+        worker_capabilities=worker_capabilities,
         worker_pools=parent.worker_pools,
         origin="system",
         parent_id=parent.id,
+        minting_authority=authority_templates,
+        sensitive_input_policy=(
+            dict(parent.sensitive_input_policy)
+            if parent.sensitive_input_policy is not None
+            else None
+        ),
     )
 
     # Expand minting_authority for method-type-specific system assets.
@@ -119,8 +133,6 @@ def method_contract(parent: Contract, action: WorkerAction) -> Contract:
         else:
             _extra_authority = (f"_tool_call_{contract_id}",)
 
-    context_name = f"_method_ctx_{parent.id}"
-
     return Contract(
         id=contract_id,
         parent_id=parent.id,
@@ -132,11 +144,112 @@ def method_contract(parent: Contract, action: WorkerAction) -> Contract:
         budget=1,
         tool_scope=tool_scope,
         labels=labels,
+        worker_capabilities=worker_capabilities,
+        worker_pools=parent.worker_pools,
         origin="system",
         # A method contract needs exact authority for both its declared
         # result and the context asset that activates it.  Do not rely on a
         # generic protected-name override when scheduling methods.
         minting_authority=(output_name, context_name) + _extra_authority,
+        sensitive_input_policy=parent.sensitive_input_policy,
+    )
+
+
+def retry_contract(parent: Contract) -> Contract:
+    """Create a security-equivalent replacement Contract for one failed attempt."""
+    name = f"{parent.name or parent.id}.retry"
+    authority = tuple(
+        output for output in parent.outputs if output in parent.minting_authority
+    )
+    policy = (
+        dict(parent.sensitive_input_policy)
+        if parent.sensitive_input_policy is not None
+        else None
+    )
+    contract_id = hash_contract_v3(
+        name=name,
+        description=parent.description,
+        inputs=parent.inputs,
+        outputs=parent.outputs,
+        activation=parent.activation,
+        budget=parent.budget,
+        tool_scope=parent.tool_scope,
+        labels=parent.labels,
+        worker_capabilities=parent.worker_capabilities,
+        worker_pools=parent.worker_pools,
+        origin="retry",
+        parent_id=parent.parent_id,
+        minting_authority=authority,
+        sensitive_input_policy=policy,
+    )
+    return Contract(
+        id=contract_id,
+        parent_id=parent.parent_id,
+        name=name,
+        description=parent.description,
+        inputs=parent.inputs,
+        outputs=parent.outputs,
+        activation=parent.activation,
+        budget=parent.budget,
+        tool_scope=parent.tool_scope,
+        labels=parent.labels,
+        worker_capabilities=parent.worker_capabilities,
+        worker_pools=parent.worker_pools,
+        origin="retry",
+        minting_authority=authority,
+        sensitive_input_policy=parent.sensitive_input_policy,
+    )
+
+
+def continuation_contract(
+    parent: Contract,
+    source_contract: Contract,
+    *,
+    method: str,
+    budget: int,
+) -> Contract:
+    """Create the immutable follow-up attempt after a completed method task."""
+    effective_budget = max(1, budget)
+    name = f"{parent.name or parent.id}.{method}.continue.{source_contract.id}"
+    authority = tuple(
+        output for output in parent.outputs if output in parent.minting_authority
+    )
+    policy = (
+        dict(parent.sensitive_input_policy)
+        if parent.sensitive_input_policy is not None
+        else None
+    )
+    contract_id = hash_contract_v3(
+        name=name,
+        description=parent.description,
+        inputs=[],
+        outputs=parent.outputs,
+        activation="",
+        budget=effective_budget,
+        tool_scope=parent.tool_scope,
+        labels=parent.labels,
+        worker_capabilities=parent.worker_capabilities,
+        worker_pools=parent.worker_pools,
+        origin="continuation",
+        parent_id=parent.id,
+        minting_authority=authority,
+        sensitive_input_policy=policy,
+    )
+    return Contract(
+        id=contract_id,
+        parent_id=parent.id,
+        name=name,
+        description=parent.description,
+        outputs=parent.outputs,
+        activation="",
+        budget=effective_budget,
+        tool_scope=parent.tool_scope,
+        labels=parent.labels,
+        worker_capabilities=parent.worker_capabilities,
+        worker_pools=parent.worker_pools,
+        origin="continuation",
+        minting_authority=authority,
+        sensitive_input_policy=parent.sensitive_input_policy,
     )
 
 
@@ -150,7 +263,7 @@ def _method_description(parent: Contract, action: WorkerAction) -> str:
             "parent_inputs": list(parent.inputs),
             "parent_outputs": list(parent.outputs),
             "parent_tool_scope": list(parent.tool_scope),
-            "payload": payload,
+            "payload": deep_thaw(payload),
         },
         sort_keys=True,
         ensure_ascii=False,
@@ -176,7 +289,7 @@ def method_context_content(
             "method": action.type,
             "parent_contract_id": parent.id,
             "child_contract_id": child.id,
-            "payload": action.payload,
+            "payload": deep_thaw(action.payload),
         },
         sort_keys=True,
         ensure_ascii=False,
@@ -382,7 +495,7 @@ def contracts_from_plan_asset(
 
         if parent_contract is None:
             # Backward-compatible path: no validation
-            cid = hash_contract_v2(
+            cid = hash_contract_v3(
                 name=name,
                 description=description,
                 inputs=inputs,
@@ -482,12 +595,12 @@ def contracts_from_plan_asset(
 
         # --- Activation containment: activation refs checked against reachable names ---
         if allowed_input_names is not None and activation:
-            activation_names = _extract_activation_names(activation)
+            activation_refs = activation_names(activation)
             child_output_set = set(outputs)
             reachable_activation_names = (
                 allowed_input_names | sibling_promises | child_output_set
             )
-            unknown_activation_names = activation_names - reachable_activation_names
+            unknown_activation_names = activation_refs - reachable_activation_names
             if unknown_activation_names:
                 # Names outside allowed inputs and child outputs are likely
                 # sibling-output scheduling references — benign for containment
@@ -568,7 +681,12 @@ def contracts_from_plan_asset(
                     )
             _cumulative_budget += budget
 
-        cid = hash_contract_v2(
+        policy = (
+            dict(parent_contract.sensitive_input_policy)
+            if parent_contract.sensitive_input_policy is not None
+            else None
+        )
+        cid = hash_contract_v3(
             name=name,
             description=description,
             inputs=inputs,
@@ -577,8 +695,11 @@ def contracts_from_plan_asset(
             budget=budget,
             tool_scope=tool_scope,
             labels=labels,
+            worker_capabilities=parent_contract.worker_capabilities,
+            worker_pools=parent_contract.worker_pools,
             origin=origin,
             parent_id=parent_id,
+            sensitive_input_policy=policy,
         )
         accepted.append(
             Contract(
@@ -644,9 +765,9 @@ def _accepted_sibling_output_promises(
             if outputs.issubset(promises):
                 continue
             inputs = set(_string_list(raw.get("inputs", [])))
-            activation_names = _extract_activation_names(str(raw.get("activation", "")))
+            activation_refs = activation_names(str(raw.get("activation", "")))
             reachable = allowed_input_names | promises | outputs
-            if inputs.issubset(reachable) and activation_names.issubset(reachable):
+            if inputs.issubset(reachable) and activation_refs.issubset(reachable):
                 promises.update(outputs)
                 changed = True
     return promises

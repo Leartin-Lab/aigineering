@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Optional
 
 _MAX_DEPTH = 50
@@ -110,6 +111,18 @@ def check_activation(expression: Optional[str], available_names: set[str]) -> bo
         return True
     parser = _Parser(tokens, available_names)
     return parser.evaluate()
+
+
+def activation_names(expression: Optional[str]) -> set[str]:
+    """Return the simple Asset identifiers referenced by an expression."""
+    if not expression or not expression.strip():
+        return set()
+    return {
+        token
+        for token in _tokenize(expression)
+        if token not in {"AND", "OR", "NOT", "(", ")"}
+        and re.fullmatch(r"[a-zA-Z_][a-zA-Z0-9_-]*", token)
+    }
 
 
 def validate_execution_activation(expression: Optional[str]) -> None:

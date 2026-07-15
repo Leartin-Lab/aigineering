@@ -16,22 +16,27 @@ from types import MappingProxyType
 from typing import Optional
 
 from aigineering.core.authority import (
-    RESERVED_PREFIXES,
     ReservedNamespaceError,
     _is_protected_name,
+    matched_reserved_prefix,
 )
+from aigineering.core.activation import activation_names
 from aigineering.core.crash import check_crash_point
-from aigineering.core.ids import compute_content_hash, now_iso
+from aigineering.core.ids import (
+    compute_content_hash,
+    now_iso,
+    validate_contract_identity,
+)
 from aigineering.core.provenance import verify_asset_seal
 from aigineering.core.record_conflict import ImmutableRecordConflict
-from aigineering.core.store import _projection_index_digest
+from aigineering.core.store import _projection_index_digest, _replacement_claim_payload
 from aigineering.core.trace import trace_effective_payload
 from aigineering.core.worker_routing import (
     WorkerRegistration,
     registration_from_record,
     worker_registration_record,
 )
-from aigineering.protocol.types import Asset, Contract, TraceEntry
+from aigineering.protocol.types import Asset, Contract, ReplacementClaim, TraceEntry
 from aigineering.protocol.runtime_record import (
     RuntimeRecord,
     create_runtime_record,
@@ -41,6 +46,7 @@ from aigineering.protocol.runtime_record import (
 from aigineering.protocol.wire import (
     asset_to_dict,
     contract_to_dict,
+    trace_entry_from_dict,
     trace_entry_to_dict,
 )
 
@@ -51,26 +57,6 @@ CURRENT_SCHEMA_VERSION = 7
 # ---------------------------------------------------------------------------
 # Activation name extraction (shared with store.py)
 # ---------------------------------------------------------------------------
-
-_ACTIVATION_KEYWORDS: frozenset[str] = frozenset({"AND", "OR", "NOT"})
-
-
-def _extract_activation_names(expression: str) -> set[str]:
-    import re
-
-    if not expression or not expression.strip():
-        return set()
-    names: set[str] = set()
-    for token in re.split(r"\s+", expression.strip()):
-        token = token.strip("()")
-        if not token:
-            continue
-        if token.upper() in _ACTIVATION_KEYWORDS:
-            continue
-        if re.fullmatch(r"[a-zA-Z_][a-zA-Z0-9_-]*", token):
-            names.add(token)
-    return names
-
 
 # ---------------------------------------------------------------------------
 # DDL
@@ -448,7 +434,7 @@ class SQLiteStore:
             activation: str = row["activation"] or ""
             outputs_raw: str = row["outputs"] or "[]"
 
-            for asset_name in _extract_activation_names(activation):
+            for asset_name in activation_names(activation):
                 self._conn.execute(
                     "INSERT OR IGNORE INTO contract_activation_refs "
                     "(contract_id, asset_name) VALUES (?, ?)",
@@ -474,10 +460,52 @@ class SQLiteStore:
             self._conn.execute(idx_ddl)
 
     def _migrate_to_v6(self) -> None:
-        """Add the versioned append-only runtime-record envelope."""
+        """Add and backfill the append-only runtime-record envelope."""
         self._conn.execute(_DDL_CREATE_RUNTIME_RECORDS)
         for idx_ddl in _DDL_INDEXES:
             self._conn.execute(idx_ddl)
+        for contract in self.get_all_contracts():
+            self._insert_runtime_record(
+                create_runtime_record(
+                    "contract.declared", {"contract": contract_to_dict(contract)}
+                )
+            )
+        for asset in self.get_all_assets():
+            self._insert_runtime_record(
+                create_runtime_record(
+                    "asset.committed",
+                    {"asset": asset_to_dict(asset), "contract_id": asset.created_by},
+                )
+            )
+        for entry in self.get_all():
+            self._insert_runtime_record(
+                create_runtime_record(
+                    "trace.recorded", {"trace": trace_entry_to_dict(entry)}
+                )
+            )
+        for row in self._conn.execute("SELECT * FROM claims ORDER BY id").fetchall():
+            claim = self._row_to_replacement_claim(row)
+            self._insert_runtime_record(
+                create_runtime_record(
+                    "replacement.claimed",
+                    {"claim": _replacement_claim_payload(claim)},
+                )
+            )
+        for row in self._conn.execute(
+            "SELECT contract_id, idempotency_key, result_json FROM idempotency_records"
+        ).fetchall():
+            self._insert_runtime_record(
+                create_runtime_record(
+                    "idempotency.bound",
+                    {
+                        "contract_id": row["contract_id"],
+                        "key": row["idempotency_key"],
+                        "result": json.loads(row["result_json"]),
+                    },
+                )
+            )
+        for registration in self.get_worker_registrations():
+            self._insert_runtime_record(worker_registration_record(registration))
 
     def _migrate_to_v7(self) -> None:
         """Add monotonic fencing epochs to the derived claim head."""
@@ -724,15 +752,7 @@ class SQLiteStore:
                 f"(signed_by={asset.signed_by!r})"
             )
         if _is_protected_name(asset.name):
-            prefix = next(
-                (
-                    p
-                    for p in RESERVED_PREFIXES
-                    if asset.name.startswith(p)
-                    or (p.endswith("_") and asset.name == p.rstrip("_"))
-                ),
-                "?",
-            )
+            prefix = matched_reserved_prefix(asset.name) or "?"
             raise ReservedNamespaceError(asset.name, prefix)
         with self._conn:
             self._insert_asset(asset)
@@ -841,6 +861,7 @@ class SQLiteStore:
 
     def _insert_contract(self, contract: Contract) -> None:
         """Insert an immutable contract row + derived index rows."""
+        validate_contract_identity(contract)
         existing = self.get_contract(contract.id)
         if existing is not None:
             if existing == contract:
@@ -891,7 +912,7 @@ class SQLiteStore:
             "DELETE FROM contract_activation_refs WHERE contract_id = ?",
             (contract.id,),
         )
-        for name in _extract_activation_names(contract.activation):
+        for name in activation_names(contract.activation):
             self._conn.execute(
                 "INSERT INTO contract_activation_refs (contract_id, asset_name) "
                 "VALUES (?, ?)",
@@ -1093,7 +1114,7 @@ class SQLiteStore:
             self._conn.execute("DELETE FROM contract_activation_refs")
             self._conn.execute("DELETE FROM contract_declared_outputs")
             for contract in self.get_all_contracts():
-                for name in _extract_activation_names(contract.activation):
+                for name in activation_names(contract.activation):
                     self._conn.execute(
                         "INSERT INTO contract_activation_refs "
                         "(contract_id, asset_name) VALUES (?, ?)",
@@ -1121,6 +1142,159 @@ class SQLiteStore:
         ]
         return _projection_index_digest(activation_rows, output_rows)
 
+    def runtime_materialization_digest(self) -> str:
+        """Hash semantic materialized views, excluding cache timestamps."""
+        registrations = [
+            {
+                "worker_id": registration.worker_id,
+                "capabilities": registration.capabilities,
+                "pools": registration.pools,
+                "profile_id": registration.profile_id,
+                "capacity": registration.capacity,
+                "enabled": registration.enabled,
+                "version": registration.version,
+            }
+            for registration in self.get_worker_registrations()
+        ]
+        claim_rows = self._conn.execute(
+            "SELECT claim_id, contract_id, worker_id, lease_until, status, "
+            "package_id, epoch FROM worker_claims ORDER BY contract_id, epoch"
+        ).fetchall()
+        idempotency_rows = self._conn.execute(
+            "SELECT contract_id, idempotency_key, result_json "
+            "FROM idempotency_records ORDER BY contract_id, idempotency_key"
+        ).fetchall()
+        replacement_claims = [
+            _replacement_claim_payload(self._row_to_replacement_claim(row))
+            for row in self._conn.execute("SELECT * FROM claims ORDER BY id").fetchall()
+        ]
+        payload = {
+            "assets": sorted(
+                (asset_to_dict(asset) for asset in self.get_all_assets()),
+                key=lambda row: row["id"],
+            ),
+            "claims": [dict(row) for row in claim_rows],
+            "contracts": sorted(
+                (contract_to_dict(contract) for contract in self.get_all_contracts()),
+                key=lambda row: row["id"],
+            ),
+            "idempotency": [
+                {
+                    "contract_id": row["contract_id"],
+                    "idempotency_key": row["idempotency_key"],
+                    "result": json.loads(row["result_json"]),
+                }
+                for row in idempotency_rows
+            ],
+            "projection_indexes": self.projection_index_digest(),
+            "registrations": registrations,
+            "replacement_claims": replacement_claims,
+            "trace": [
+                trace_entry_to_dict(entry)
+                for entry in sorted(self.get_all(), key=lambda item: item.id)
+            ],
+        }
+        return compute_content_hash(
+            json.dumps(payload, sort_keys=True, separators=(",", ":"))
+        )
+
+    def rebuild_runtime_materializations(self, *, strict: bool = True) -> str:
+        """Rebuild Contract/Asset/Trace and control heads from RuntimeRecords."""
+        records = self.scan_runtime_records()
+        contract_payloads = {
+            record.payload["contract"]["id"]: dict(record.payload["contract"])
+            for _, record in records
+            if record.record_type == "contract.declared"
+        }
+        asset_payloads = {
+            record.payload["asset"]["id"]: dict(record.payload["asset"])
+            for _, record in records
+            if record.record_type == "asset.committed"
+        }
+        trace_payloads = {
+            record.payload["trace"]["id"]: dict(record.payload["trace"])
+            for _, record in records
+            if record.record_type == "trace.recorded"
+        }
+        idempotency_payloads = {
+            (str(record.payload["contract_id"]), str(record.payload["key"])): (
+                runtime_record_effective_payload(record)["payload"]["result"]
+            )
+            for _, record in records
+            if record.record_type == "idempotency.bound"
+        }
+        replacement_payloads = {
+            str(record.payload["claim"]["id"]): runtime_record_effective_payload(
+                record
+            )["payload"]["claim"]
+            for _, record in records
+            if record.record_type == "replacement.claimed"
+        }
+        if strict:
+            current_idempotency = {
+                (row["contract_id"], row["idempotency_key"])
+                for row in self._conn.execute(
+                    "SELECT contract_id, idempotency_key FROM idempotency_records"
+                ).fetchall()
+            }
+            missing = {
+                "assets": sorted(
+                    {asset.id for asset in self.get_all_assets()}
+                    - asset_payloads.keys()
+                ),
+                "contracts": sorted(
+                    {contract.id for contract in self.get_all_contracts()}
+                    - contract_payloads.keys()
+                ),
+                "idempotency": sorted(
+                    current_idempotency - idempotency_payloads.keys()
+                ),
+                "replacement_claims": sorted(
+                    {
+                        row["id"]
+                        for row in self._conn.execute(
+                            "SELECT id FROM claims"
+                        ).fetchall()
+                    }
+                    - replacement_payloads.keys()
+                ),
+                "trace": sorted(
+                    {entry.id for entry in self.get_all()} - trace_payloads.keys()
+                ),
+            }
+            if any(missing.values()):
+                raise RuntimeError(
+                    "runtime materialization contains facts absent from immutable log: "
+                    + json.dumps(missing, sort_keys=True)
+                )
+
+        with self._conn:
+            self._conn.execute("DELETE FROM contract_activation_refs")
+            self._conn.execute("DELETE FROM contract_declared_outputs")
+            self._conn.execute("DELETE FROM trace_events")
+            self._conn.execute("DELETE FROM idempotency_records")
+            self._conn.execute("DELETE FROM claims")
+            self._conn.execute("DELETE FROM assets")
+            self._conn.execute("DELETE FROM contracts")
+            for payload in contract_payloads.values():
+                self._insert_contract(Contract(**payload))
+            for payload in asset_payloads.values():
+                asset = Asset(**payload)
+                if not asset.signed_by or not verify_asset_seal(asset):
+                    raise ValueError(
+                        f"runtime fact for Asset '{asset.id}' has an invalid seal"
+                    )
+                self._insert_asset(asset)
+            for payload in trace_payloads.values():
+                self._insert_trace_entry(trace_entry_from_dict(payload))
+            for (contract_id, key), result in idempotency_payloads.items():
+                self.set_idempotency(contract_id, key, result)
+            for payload in replacement_payloads.values():
+                self._insert_replacement_claim(ReplacementClaim(**payload))
+        self.rebuild_worker_registration_projection()
+        self.rebuild_claim_projection()
+        return self.runtime_materialization_digest()
+
     # ------------------------------------------------------------------
     # Trace operations (G3, 040 C3)
     # ------------------------------------------------------------------
@@ -1129,6 +1303,12 @@ class SQLiteStore:
         """Insert a TraceEntry into the trace_events table."""
         with self._conn:
             self._insert_trace_entry(entry)
+            self._insert_runtime_record(
+                create_runtime_record(
+                    "trace.recorded",
+                    {"trace": trace_entry_to_dict(entry)},
+                )
+            )
 
     def append(self, entry: TraceEntry) -> None:
         """TraceStoreProtocol-compatible append."""
@@ -1415,7 +1595,7 @@ class SQLiteStore:
             self._conn.execute("BEGIN IMMEDIATE")
             existing = self._conn.execute(
                 "SELECT claim_id, status FROM worker_claims "
-                "WHERE contract_id = ? AND status = 'active' "
+                "WHERE contract_id = ? "
                 "ORDER BY epoch DESC LIMIT 1",
                 (contract_id,),
             ).fetchone()
@@ -1609,7 +1789,11 @@ class SQLiteStore:
                             int(payload["epoch"]),
                         ),
                     )
-                elif record.record_type in {"claim.released", "claim.submitted"}:
+                elif record.record_type in {
+                    "claim.expired",
+                    "claim.released",
+                    "claim.submitted",
+                }:
                     status = record.record_type.removeprefix("claim.")
                     self._conn.execute(
                         "UPDATE worker_claims SET status = ?, updated_at = ? "
@@ -1701,6 +1885,21 @@ class SQLiteStore:
                 self.set_idempotency(
                     trace_entries[0].contract_id, idempotency_key, idempotency_result
                 )
+                self._insert_runtime_record(
+                    create_runtime_record(
+                        "idempotency.bound",
+                        {
+                            "contract_id": trace_entries[0].contract_id,
+                            "key": idempotency_key,
+                            "result": idempotency_result,
+                        },
+                        causal_parents=[
+                            record.id
+                            for record in runtime_records
+                            if record.record_type == "projection.decided"
+                        ],
+                    )
+                )
             if claim_id:
                 committed_at = now_iso()
                 cur = self._conn.execute(
@@ -1783,6 +1982,21 @@ class SQLiteStore:
                     idempotency_key,
                     idempotency_result,
                 )
+                self._insert_runtime_record(
+                    create_runtime_record(
+                        "idempotency.bound",
+                        {
+                            "contract_id": trace_entries[0].contract_id,
+                            "key": idempotency_key,
+                            "result": idempotency_result,
+                        },
+                        causal_parents=[
+                            record.id
+                            for record in runtime_records
+                            if record.record_type == "method.scheduled"
+                        ],
+                    )
+                )
             committed_at = now_iso()
             cursor = self._conn.execute(
                 "UPDATE worker_claims SET status = 'submitted', updated_at = ? "
@@ -1827,7 +2041,95 @@ class SQLiteStore:
             )
         return True
 
-    def commit_direct_execution(
+    def commit_worker_invocation_failure(
+        self,
+        *,
+        trace_entry: TraceEntry,
+        runtime_records: tuple[RuntimeRecord, ...],
+        claim_id: str,
+        worker_id: str,
+        package_id: str,
+        claim_epoch: int,
+    ) -> bool:
+        """Atomically record provider failure, terminal fact, and fenced release."""
+        with self._conn:
+            self._insert_trace_entry(trace_entry)
+            for record in runtime_records:
+                self._insert_runtime_record(record)
+            recorded_at = now_iso()
+            cursor = self._conn.execute(
+                "UPDATE worker_claims SET status = 'released', updated_at = ? "
+                "WHERE claim_id = ? AND status = 'active' AND worker_id = ? "
+                "AND package_id = ? AND epoch = ?",
+                (
+                    recorded_at,
+                    claim_id,
+                    worker_id,
+                    package_id,
+                    claim_epoch,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise sqlite3.IntegrityError(
+                    "active worker claim predicate failed during invocation failure"
+                )
+            claim_row = self._conn.execute(
+                "SELECT contract_id, worker_id, epoch, package_id "
+                "FROM worker_claims WHERE claim_id = ?",
+                (claim_id,),
+            ).fetchone()
+            failure_parents = [
+                record.id
+                for record in runtime_records
+                if record.record_type == "worker.invocation_failed"
+            ]
+            self._insert_runtime_record(
+                create_runtime_record(
+                    "claim.released",
+                    {
+                        "claim_id": claim_id,
+                        "contract_id": claim_row["contract_id"],
+                        "epoch": int(claim_row["epoch"]),
+                        "package_id": claim_row["package_id"],
+                        "worker_id": claim_row["worker_id"],
+                    },
+                    causal_parents=[self._claim_granted_record_id(claim_id)]
+                    + failure_parents,
+                    recorded_at=recorded_at,
+                )
+            )
+        return True
+
+    def commit_claim_expiration(
+        self,
+        *,
+        trace_entry: TraceEntry,
+        runtime_records: tuple[RuntimeRecord, ...],
+        claim_id: str,
+        claim_epoch: int,
+        expected_lease_until: str,
+        observed_at: str,
+    ) -> bool:
+        """Atomically turn an expired lease into durable failure facts."""
+        with self._conn:
+            cursor = self._conn.execute(
+                "UPDATE worker_claims SET status = 'expired', updated_at = ? "
+                "WHERE claim_id = ? AND epoch = ? AND status = 'active' "
+                "AND lease_until = ?",
+                (observed_at, claim_id, claim_epoch, expected_lease_until),
+            )
+            if cursor.rowcount != 1:
+                return False
+            self._insert_trace_entry(trace_entry)
+            for record in runtime_records:
+                self._insert_runtime_record(record)
+            if not any(
+                record.record_type == "claim.expired" for record in runtime_records
+            ):
+                raise ValueError("claim expiration commit requires claim.expired fact")
+        return True
+
+    def commit_ingress_batch(
         self,
         accepted_assets: list[Asset],
         trace_entries: list[TraceEntry],
@@ -1907,6 +2209,18 @@ class SQLiteStore:
             self._insert_replacement_claim(claim)
             check_crash_point("after_replacement_claim_before_trace")
             self._insert_trace_entry(trace_entry)
+            claim_record = create_runtime_record(
+                "replacement.claimed",
+                {"claim": _replacement_claim_payload(claim)},
+            )
+            self._insert_runtime_record(claim_record)
+            self._insert_runtime_record(
+                create_runtime_record(
+                    "trace.recorded",
+                    {"trace": trace_entry_to_dict(trace_entry)},
+                    causal_parents=[claim_record.id],
+                )
+            )
 
     def get_claims_by_definition(self, definition_hash: str) -> list:
         rows = self._conn.execute(

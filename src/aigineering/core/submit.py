@@ -8,19 +8,20 @@ standalone worker environments.
 from __future__ import annotations
 
 import json
+import sqlite3
 from typing import TYPE_CHECKING
 
 from aigineering.core.disclosure import compute_disclosure
-from aigineering.core.idempotency_store import IdempotencyStore
+from aigineering.core.record_conflict import ImmutableRecordConflict
 from aigineering.core.output_satisfaction import all_outputs_satisfied
 from aigineering.core.projection import project_candidate
 from aigineering.core.provenance import sign_asset
-from aigineering.core.store import StoreProtocol
+from aigineering.core.store import StoreProtocol, require_operational_store
 from aigineering.core.trace import TraceStoreProtocol, create_entry
 from aigineering.protocol.envelope import CandidateEnvelope
 from aigineering.protocol.runtime_record import RuntimeRecord, create_runtime_record
 from aigineering.protocol.types import Asset, Candidate, Contract, ProjectionResult
-from aigineering.protocol.wire import asset_to_dict
+from aigineering.protocol.wire import asset_to_dict, trace_entry_to_dict
 
 if TYPE_CHECKING:
     from aigineering.core.runtime_ingress import RuntimeIngress
@@ -38,12 +39,111 @@ class SubmitCommitError(Exception):
     """Raised when an atomic submission commit cannot be completed safely."""
 
 
+def replay_idempotent_submission(
+    store,
+    *,
+    contract_id: str,
+    idempotency_key: str,
+    candidate_hash: str,
+) -> dict | None:
+    """Return a safe duplicate response or reject conflicting reuse."""
+    if not idempotency_key:
+        return None
+    cached = store.get_idempotency(contract_id, idempotency_key)
+    if cached is not None:
+        response = dict(cached)
+        cached_candidate_hash = response.pop("_candidate_hash", "")
+        if cached_candidate_hash and cached_candidate_hash != candidate_hash:
+            raise SubmitConflictError(
+                f"Idempotency key for contract '{contract_id}' is already "
+                "bound to a different Candidate payload"
+            )
+        response["duplicate"] = True
+        return response
+    if store.has_any_idempotency(contract_id):
+        raise SubmitConflictError(
+            f"Contract '{contract_id}' already has a submission with a "
+            "different idempotency key"
+        )
+    return None
+
+
+def validate_submission_claim(store, contract: Contract, envelope: CandidateEnvelope):
+    """Validate identity, epoch, lease and package fencing for any action."""
+    claim = store.get_claim(contract.id)
+    if not envelope.claim_id:
+        raise SubmitClaimError(
+            f"Contract '{contract.id}' requires claim-bound submission; "
+            "use worker next before submitting"
+        )
+    if claim is None:
+        raise SubmitClaimError(
+            f"No active claim for contract '{contract.id}' — "
+            f"worker '{envelope.worker_id}' must claim before submitting"
+        )
+    if claim.get("claim_id") != envelope.claim_id:
+        raise SubmitClaimError(
+            f"claim_id mismatch: envelope='{envelope.claim_id}' "
+            f"vs store='{claim.get('claim_id')}'"
+        )
+    if envelope.claim_epoch < 1:
+        raise SubmitClaimError(
+            "claim-bound envelope.claim_epoch is required and must be positive"
+        )
+    if claim.get("epoch") != envelope.claim_epoch:
+        raise SubmitClaimError(
+            f"claim epoch mismatch: envelope={envelope.claim_epoch} "
+            f"vs store={claim.get('epoch')}"
+        )
+    if claim.get("worker_id") != envelope.worker_id:
+        raise SubmitClaimError(
+            f"claim owned by '{claim.get('worker_id')}', not '{envelope.worker_id}'"
+        )
+    if claim.get("status") != "active":
+        raise SubmitClaimError(
+            f"claim status is '{claim.get('status')}', not 'active' — "
+            "retry/recovery must create a new contract before submitting"
+        )
+    lease_until = claim.get("lease_until", "")
+    from datetime import datetime, timezone
+
+    if not lease_until:
+        raise SubmitClaimError(
+            "active claim has no lease_until — "
+            "refusing to accept claim with unbounded lease"
+        )
+    try:
+        lease_dt = datetime.fromisoformat(lease_until)
+    except ValueError as e:
+        raise SubmitClaimError(
+            f"claim lease_until is malformed ({lease_until!r}): {e} — "
+            "refusing to accept unparseable lease timestamp"
+        )
+    if lease_dt.tzinfo is None:
+        lease_dt = lease_dt.replace(tzinfo=timezone.utc)
+    if lease_dt < datetime.now(timezone.utc):
+        raise SubmitClaimError(
+            f"claim lease expired at {lease_until} — "
+            "retry/recovery must create a new contract before submitting"
+        )
+    if claim.get("package_id") and not envelope.package_id:
+        raise SubmitClaimError(
+            "active claim is bound to a package_id; envelope.package_id is required"
+        )
+    if claim.get("package_id") and claim.get("package_id") != envelope.package_id:
+        raise SubmitClaimError(
+            f"package_id mismatch: envelope='{envelope.package_id}' "
+            f"vs claim='{claim.get('package_id')}'"
+        )
+    return claim
+
+
 def submit_candidate(
     envelope: CandidateEnvelope,
     store: StoreProtocol,
     trace_store: TraceStoreProtocol,
     ingress: RuntimeIngress,
-    idempotency_store: IdempotencyStore | None = None,
+    idempotency_store: object | None = None,
     idempotency_key: str = "",
 ) -> dict:
     """Process a candidate envelope through the commitment boundary.
@@ -62,136 +162,31 @@ def submit_candidate(
     Raises *SubmitConflictError* when a different idempotency key was
     already used for the same contract.
     """
-    contract = store.get_contract(envelope.contract_id)
+    operational = require_operational_store(store)
+    if idempotency_store is not None:
+        raise TypeError(
+            "external idempotency stores are not supported; idempotency must "
+            "commit atomically with the Candidate"
+        )
+    contract = operational.get_contract(envelope.contract_id)
     if contract is None:
         raise ValueError(f"Contract '{envelope.contract_id}' not found in store")
 
-    idem = idempotency_store if idempotency_store is not None else IdempotencyStore()
     effective_idempotency_key = idempotency_key or envelope.idempotency_key
 
     # ── Idempotency ──────────────────────────────────────────────────
-    if effective_idempotency_key:
-        store_get_idem = getattr(store, "get_idempotency", None)
-        cached = (
-            store_get_idem(contract.id, effective_idempotency_key)
-            if store_get_idem is not None
-            else idem.get(contract.id, effective_idempotency_key)
-        )
-        if cached is not None:
-            cached_response = dict(cached)
-            cached_candidate_hash = cached_response.pop("_candidate_hash", "")
-            if (
-                cached_candidate_hash
-                and cached_candidate_hash != envelope.candidate_hash
-            ):
-                raise SubmitConflictError(
-                    f"Idempotency key for contract '{contract.id}' is already "
-                    "bound to a different Candidate payload"
-                )
-            cached_response["duplicate"] = True
-            return cached_response
-
-        store_has_any = getattr(store, "has_any_idempotency", None)
-        has_any = (
-            store_has_any(contract.id)
-            if store_has_any is not None
-            else idem.has_any(contract.id)
-        )
-        if has_any:
-            raise SubmitConflictError(
-                f"Contract '{contract.id}' already has a submission with a "
-                f"different idempotency key"
-            )
+    duplicate = replay_idempotent_submission(
+        operational,
+        contract_id=contract.id,
+        idempotency_key=effective_idempotency_key,
+        candidate_hash=envelope.candidate_hash,
+    )
+    if duplicate is not None:
+        return duplicate
 
     # ── Claim validation (G8) ────────────────────────────────────────
-    # If the envelope carries a claim_id, verify it matches an active
-    # claim for this contract owned by this worker, and that the lease
-    # has not expired. Stores that don't track claims (e.g. MemoryStore)
-    # skip this check — only SQLite-backed stores enforce it.
-    get_claim = getattr(store, "get_claim", None)
-    active_claim = get_claim(contract.id) if get_claim is not None else None
-    requires_claim = getattr(store, "commit_candidate_submission", None) is not None
-    if requires_claim and not envelope.claim_id:
-        raise SubmitClaimError(
-            f"Contract '{contract.id}' requires claim-bound submission; "
-            "use worker next before submitting"
-        )
-    if (
-        active_claim is not None
-        and active_claim.get("status") == "active"
-        and not envelope.claim_id
-    ):
-        raise SubmitClaimError(
-            f"Contract '{contract.id}' has an active claim; envelope.claim_id is required"
-        )
-
-    if envelope.claim_id:
-        if get_claim is not None:
-            claim = active_claim if active_claim is not None else get_claim(contract.id)
-            if claim is None:
-                raise SubmitClaimError(
-                    f"No active claim for contract '{contract.id}' — "
-                    f"worker '{envelope.worker_id}' must claim before submitting"
-                )
-            if claim.get("claim_id") != envelope.claim_id:
-                raise SubmitClaimError(
-                    f"claim_id mismatch: envelope='{envelope.claim_id}' "
-                    f"vs store='{claim.get('claim_id')}'"
-                )
-            if envelope.claim_epoch < 1:
-                raise SubmitClaimError(
-                    "claim-bound envelope.claim_epoch is required and must be positive"
-                )
-            if claim.get("epoch") != envelope.claim_epoch:
-                raise SubmitClaimError(
-                    f"claim epoch mismatch: envelope={envelope.claim_epoch} "
-                    f"vs store={claim.get('epoch')}"
-                )
-            if claim.get("worker_id") != envelope.worker_id:
-                raise SubmitClaimError(
-                    f"claim owned by '{claim.get('worker_id')}', "
-                    f"not '{envelope.worker_id}'"
-                )
-            if claim.get("status") != "active":
-                raise SubmitClaimError(
-                    f"claim status is '{claim.get('status')}', not 'active' — "
-                    "retry/recovery must create a new contract before submitting"
-                )
-            lease_until = claim.get("lease_until", "")
-            from datetime import datetime, timezone
-
-            if not lease_until:
-                raise SubmitClaimError(
-                    "active claim has no lease_until — "
-                    "refusing to accept claim with unbounded lease"
-                )
-            try:
-                lease_dt = datetime.fromisoformat(lease_until)
-            except ValueError as e:
-                raise SubmitClaimError(
-                    f"claim lease_until is malformed ({lease_until!r}): {e} — "
-                    f"refusing to accept unparseable lease timestamp"
-                )
-            now = datetime.now(timezone.utc)
-            if lease_dt.tzinfo is None:
-                lease_dt = lease_dt.replace(tzinfo=timezone.utc)
-            if lease_dt < now:
-                raise SubmitClaimError(
-                    f"claim lease expired at {lease_until} — "
-                    "retry/recovery must create a new contract before submitting"
-                )
-            if claim.get("package_id") and not envelope.package_id:
-                raise SubmitClaimError(
-                    "active claim is bound to a package_id; envelope.package_id is required"
-                )
-            if (
-                claim.get("package_id")
-                and claim.get("package_id") != envelope.package_id
-            ):
-                raise SubmitClaimError(
-                    f"package_id mismatch: envelope='{envelope.package_id}' "
-                    f"vs claim='{claim.get('package_id')}'"
-                )
+    # Every operational submission is fenced by a durable claim.
+    validate_submission_claim(operational, contract, envelope)
 
     # ── Disclosure scope ─────────────────────────────────────────────
     scope = compute_disclosure(contract, store)
@@ -202,6 +197,7 @@ def submit_candidate(
         worker_id=envelope.worker_id,
         raw_output=envelope.raw_output,
         parsed_action=envelope.parsed_action,
+        metadata=envelope.usage_metadata,
     )
 
     # ── Projection (commitment boundary) ─────────────────────────────
@@ -245,6 +241,7 @@ def submit_candidate(
             else None
         ),
         budget_remaining=contract.budget,
+        usage_metadata=envelope.usage_metadata,
     )
     # ── Build response ───────────────────────────────────────────────
     response: dict = {
@@ -271,16 +268,19 @@ def submit_candidate(
         budget_remaining=max(0, contract.budget - 1),
     )
 
-    trace_entries = [entry, budget_entry]
+    reducer_traces, reducer_records = ingress.reduce_assets(signed_assets)
+    trace_entries = [entry, budget_entry, *reducer_traces]
     if response.get("complete") is True:
-        complete_entry = create_entry(
-            contract_id=contract.id,
-            event_type="complete",
-            sequence=seq + 2,
-            budget_remaining=max(0, contract.budget - 1),
+        complete_entry = next(
+            (
+                item
+                for item in reducer_traces
+                if item.contract_id == contract.id and item.event_type == "complete"
+            ),
+            None,
         )
-        response["complete_trace_id"] = complete_entry.id
-        trace_entries.append(complete_entry)
+        if complete_entry is not None:
+            response["complete_trace_id"] = complete_entry.id
 
     runtime_records = _submission_runtime_records(
         envelope=envelope,
@@ -288,42 +288,41 @@ def submit_candidate(
         signed_assets=signed_assets,
         rejected_dicts=rejected_dicts,
         budget_remaining=max(0, contract.budget - 1),
-        complete=response.get("complete") is True,
+    )
+    runtime_records = (
+        *runtime_records,
+        *reducer_records,
+        *(
+            create_runtime_record(
+                "trace.recorded",
+                {"trace": trace_entry_to_dict(trace_entry)},
+            )
+            for trace_entry in trace_entries
+        ),
     )
 
     cached_result = {k: v for k, v in response.items() if k != "duplicate"}
     cached_result["_candidate_hash"] = envelope.candidate_hash
-    commit_submission = getattr(store, "commit_candidate_submission", None)
-    if commit_submission is not None:
-        try:
-            committed = commit_submission(
-                signed_assets,
-                trace_entries,
-                effective_idempotency_key,
-                cached_result,
-                envelope.claim_id,
-                envelope.worker_id,
-                envelope.package_id,
-                envelope.claim_epoch,
-                runtime_records=runtime_records,
-            )
-        except Exception as e:
-            raise SubmitCommitError(
-                f"submission could not be atomically committed: {e}"
-            ) from e
-        if committed is False:
-            raise SubmitCommitError(
-                f"claim '{envelope.claim_id}' could not be atomically submitted"
-            )
-    else:
-        for asset in signed_assets:
-            ingress.accept_asset(asset, source="candidate")
-        for trace_entry in trace_entries:
-            trace_store.append(trace_entry)
-        for record in runtime_records:
-            store.append_runtime_record(record)
-        if effective_idempotency_key:
-            idem.set(contract.id, effective_idempotency_key, cached_result)
+    try:
+        committed = operational.commit_candidate_submission(
+            signed_assets,
+            trace_entries,
+            effective_idempotency_key,
+            cached_result,
+            envelope.claim_id,
+            envelope.worker_id,
+            envelope.package_id,
+            envelope.claim_epoch,
+            runtime_records=runtime_records,
+        )
+    except (sqlite3.Error, ImmutableRecordConflict, ValueError) as e:
+        raise SubmitCommitError(
+            f"submission could not be atomically committed: {e}"
+        ) from e
+    if committed is False:
+        raise SubmitCommitError(
+            f"claim '{envelope.claim_id}' could not be atomically submitted"
+        )
 
     return response
 
@@ -335,7 +334,6 @@ def _submission_runtime_records(
     signed_assets: list[Asset],
     rejected_dicts: list[dict],
     budget_remaining: int,
-    complete: bool,
 ) -> tuple[RuntimeRecord, ...]:
     """Build the immutable causal facts for one candidate commitment."""
     candidate = create_runtime_record(
@@ -351,6 +349,7 @@ def _submission_runtime_records(
             "protocol_version": envelope.protocol_version,
             "raw_output": envelope.raw_output,
             "worker_id": envelope.worker_id,
+            "usage_metadata": envelope.usage_metadata,
         },
     )
     projection = create_runtime_record(
@@ -388,14 +387,6 @@ def _submission_runtime_records(
         causal_parents=[projection.id],
     )
     records.append(budget)
-    if complete:
-        records.append(
-            create_runtime_record(
-                "lifecycle.terminal",
-                {"contract_id": envelope.contract_id, "terminal": "complete"},
-                causal_parents=[projection.id, budget.id],
-            )
-        )
     return tuple(records)
 
 

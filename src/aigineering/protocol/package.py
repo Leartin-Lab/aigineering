@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
 from aigineering.core.ids import compute_content_hash
+from aigineering.protocol.immutability import deep_freeze, deep_thaw
 
 # Version 2 binds the selected WorkerProfile and registration revision into
 # package identity. Older packages fail closed rather than silently losing
@@ -22,9 +24,9 @@ class WorkerPackage:
     """
 
     contract_id: str
-    contract: dict[str, Any]
-    disclosed_assets: tuple[dict[str, Any], ...]
-    method_context_assets: tuple[dict[str, Any], ...]
+    contract: Mapping[str, Any]
+    disclosed_assets: tuple[Mapping[str, Any], ...]
+    method_context_assets: tuple[Mapping[str, Any], ...]
     tool_scope: tuple[str, ...]
     budget_remaining: int
     protocol_version: int = CURRENT_PROTOCOL_VERSION
@@ -37,9 +39,16 @@ class WorkerPackage:
     worker_registration_version: str = ""
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "disclosed_assets", tuple(self.disclosed_assets))
+        object.__setattr__(self, "contract", deep_freeze(self.contract))
         object.__setattr__(
-            self, "method_context_assets", tuple(self.method_context_assets)
+            self,
+            "disclosed_assets",
+            tuple(deep_freeze(asset) for asset in self.disclosed_assets),
+        )
+        object.__setattr__(
+            self,
+            "method_context_assets",
+            tuple(deep_freeze(asset) for asset in self.method_context_assets),
         )
         if self.claim_epoch < 0:
             raise ValueError("claim_epoch must not be negative")
@@ -72,12 +81,14 @@ class WorkerPackage:
         dependency: the store binds an active claim to this package_id, and the
         candidate envelope carries both package_id and claim_id.
         """
-        contract_hash = compute_content_hash(json.dumps(self.contract, sort_keys=True))
+        contract_hash = compute_content_hash(
+            json.dumps(deep_thaw(self.contract), sort_keys=True)
+        )
         disclosure_hash = compute_content_hash(
-            json.dumps(list(self.disclosed_assets), sort_keys=True)
+            json.dumps(deep_thaw(self.disclosed_assets), sort_keys=True)
         )
         method_hash = compute_content_hash(
-            json.dumps(list(self.method_context_assets), sort_keys=True)
+            json.dumps(deep_thaw(self.method_context_assets), sort_keys=True)
         )
         tool_scope_hash = compute_content_hash(json.dumps(sorted(self.tool_scope)))
         payload = (
@@ -99,9 +110,9 @@ class WorkerPackage:
             "claim_epoch": self.claim_epoch,
             "lease_until": self.lease_until,
             "contract_id": self.contract_id,
-            "contract": self.contract,
-            "disclosed_assets": list(self.disclosed_assets),
-            "method_context_assets": list(self.method_context_assets),
+            "contract": deep_thaw(self.contract),
+            "disclosed_assets": deep_thaw(self.disclosed_assets),
+            "method_context_assets": deep_thaw(self.method_context_assets),
             "tool_scope": list(self.tool_scope),
             "budget_remaining": self.budget_remaining,
             "capability_requirements": list(self.capability_requirements),
@@ -114,6 +125,8 @@ class WorkerPackage:
     def from_json(cls, data: str) -> WorkerPackage:
         """Deserialize from a JSON string. Fails closed on unknown version."""
         d = json.loads(data)
+        if not isinstance(d, dict):
+            raise ValueError("worker package must be a JSON object")
         version = d.get("protocol_version")
         if version is None:
             version = CURRENT_PROTOCOL_VERSION
@@ -124,8 +137,8 @@ class WorkerPackage:
         return cls(
             contract_id=d["contract_id"],
             contract=d["contract"],
-            disclosed_assets=tuple(dict(a) for a in d["disclosed_assets"]),
-            method_context_assets=tuple(dict(a) for a in d["method_context_assets"]),
+            disclosed_assets=tuple(d["disclosed_assets"]),
+            method_context_assets=tuple(d["method_context_assets"]),
             tool_scope=tuple(d["tool_scope"]),
             budget_remaining=int(d["budget_remaining"]),
             protocol_version=version,

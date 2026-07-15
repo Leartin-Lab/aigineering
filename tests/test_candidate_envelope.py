@@ -57,6 +57,24 @@ def test_candidate_envelope_round_trip_with_parsed_action():
     assert restored.parsed_action == {"type": "exec", "outputs": {"report": "ok"}}
 
 
+def test_candidate_envelope_round_trip_binds_usage_metadata():
+    envelope = CandidateEnvelope(
+        contract_id="c1",
+        worker_id="llm:test",
+        raw_output='/exec {"outputs":{"report":"ok"}}',
+        usage_metadata={"model": "test", "total_tokens": 42},
+    )
+
+    restored = CandidateEnvelope.from_json(envelope.to_json())
+
+    assert restored == envelope
+    assert dict(restored.usage_metadata or {}) == {
+        "model": "test",
+        "total_tokens": 42,
+    }
+    assert restored.candidate_hash == envelope.candidate_hash
+
+
 def test_candidate_envelope_constructor_rejects_empty_contract_id():
     """Empty contract_id raises ValueError in constructor."""
     with pytest.raises(ValueError, match="contract_id"):

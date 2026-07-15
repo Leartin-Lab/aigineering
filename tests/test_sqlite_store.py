@@ -650,35 +650,27 @@ def test_released_claim_rebuilds_from_lifecycle_facts(store):
     claim = store.get_claim("c1")
     assert claim is not None
     assert claim["status"] == "released"
+    assert store.claim_contract("c1", "worker-2") is None
 
 
-def test_claim_epoch_increments_and_fences_renewal(store):
+def test_submitted_contract_cannot_be_reclaimed_and_old_lease_is_fenced(store):
     first = store.claim_contract("c1", "worker", lease_seconds=30)
     assert first is not None
     assert first["epoch"] == 1
     store.mark_claim_submitted(first["claim_id"])
 
     second = store.claim_contract("c1", "worker", lease_seconds=30)
-    assert second is not None
-    assert second["epoch"] == 2
+    assert second is None
     assert store.renew_claim(first["claim_id"], 1, "worker") is None
-    assert store.renew_claim(second["claim_id"], 1, "worker") is None
-
-    renewed = store.renew_claim(second["claim_id"], 2, "worker", lease_seconds=90)
-    assert renewed is not None
-    assert renewed["epoch"] == 2
     record_types = [record.record_type for _, record in store.scan_runtime_records()]
-    assert record_types.count("claim.granted") == 2
+    assert record_types.count("claim.granted") == 1
     assert record_types.count("claim.submitted") == 1
-    assert record_types.count("claim.renewed") == 1
     records = [record for _, record in store.scan_runtime_records()]
     granted_ids = {
         record.id for record in records if record.record_type == "claim.granted"
     }
     lifecycle = [
-        record
-        for record in records
-        if record.record_type in {"claim.renewed", "claim.submitted"}
+        record for record in records if record.record_type == "claim.submitted"
     ]
     assert lifecycle
     assert all(record.causal_parents[0] in granted_ids for record in lifecycle)
@@ -688,9 +680,9 @@ def test_claim_epoch_increments_and_fences_renewal(store):
     store.rebuild_claim_projection()
     rebuilt = store.get_claim("c1")
     assert rebuilt is not None
-    assert rebuilt["claim_id"] == second["claim_id"]
-    assert rebuilt["epoch"] == 2
-    assert rebuilt["lease_until"] == renewed["lease_until"]
+    assert rebuilt["claim_id"] == first["claim_id"]
+    assert rebuilt["epoch"] == 1
+    assert rebuilt["status"] == "submitted"
 
 
 def test_expired_claim_cannot_be_renewed(store):

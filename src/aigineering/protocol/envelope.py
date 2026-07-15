@@ -6,10 +6,12 @@ Versioned protocol object — unknown versions fail closed.
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Optional
 
 from aigineering.core.ids import compute_content_hash
+from aigineering.protocol.immutability import deep_freeze, deep_thaw
 
 CURRENT_ENVELOPE_VERSION = 2
 
@@ -26,7 +28,8 @@ class CandidateEnvelope:
     claim_id: str = ""
     claim_epoch: int = 0
     idempotency_key: str = ""
-    parsed_action: Optional[dict[str, Any]] = None
+    parsed_action: Optional[Mapping[str, Any]] = None
+    usage_metadata: Optional[Mapping[str, Any]] = None
 
     def __post_init__(self) -> None:
         if not self.contract_id:
@@ -51,6 +54,14 @@ class CandidateEnvelope:
             raise ValueError("idempotency_key exceeds maximum length (256)")
         if self.package_id and not self.package_id.startswith("pkg:"):
             raise ValueError("package_id must start with 'pkg:'")
+        if self.parsed_action is not None:
+            if not isinstance(self.parsed_action, Mapping):
+                raise ValueError("parsed_action must be a JSON object")
+            object.__setattr__(self, "parsed_action", deep_freeze(self.parsed_action))
+        if self.usage_metadata is not None:
+            if not isinstance(self.usage_metadata, Mapping):
+                raise ValueError("usage_metadata must be a JSON object")
+            object.__setattr__(self, "usage_metadata", deep_freeze(self.usage_metadata))
 
     @property
     def candidate_hash(self) -> str:
@@ -65,7 +76,16 @@ class CandidateEnvelope:
                 "claim_epoch": self.claim_epoch,
                 "idempotency_key": self.idempotency_key,
                 "package_id": self.package_id,
-                "parsed_action": self.parsed_action,
+                "parsed_action": (
+                    deep_thaw(self.parsed_action)
+                    if self.parsed_action is not None
+                    else None
+                ),
+                "usage_metadata": (
+                    deep_thaw(self.usage_metadata)
+                    if self.usage_metadata is not None
+                    else None
+                ),
             },
             sort_keys=True,
         )
@@ -82,7 +102,16 @@ class CandidateEnvelope:
             "claim_epoch": self.claim_epoch,
             "idempotency_key": self.idempotency_key,
             "raw_output": self.raw_output,
-            "parsed_action": self.parsed_action,
+            "parsed_action": (
+                deep_thaw(self.parsed_action)
+                if self.parsed_action is not None
+                else None
+            ),
+            "usage_metadata": (
+                deep_thaw(self.usage_metadata)
+                if self.usage_metadata is not None
+                else None
+            ),
         }
         return json.dumps(d, sort_keys=True, ensure_ascii=False)
 
@@ -90,6 +119,8 @@ class CandidateEnvelope:
     def from_json(cls, data: str) -> CandidateEnvelope:
         """Deserialize from a JSON string. Fails closed on unknown version."""
         d = json.loads(data)
+        if not isinstance(d, dict):
+            raise ValueError("candidate envelope must be a JSON object")
 
         version = d.get("protocol_version")
         if version is None:
@@ -111,6 +142,16 @@ class CandidateEnvelope:
         if not raw_output:
             raise ValueError("raw_output is required")
 
+        claim_epoch = d.get("claim_epoch", 0)
+        if not isinstance(claim_epoch, int) or isinstance(claim_epoch, bool):
+            raise ValueError("claim_epoch must be an integer")
+        parsed_action = d.get("parsed_action")
+        if parsed_action is not None and not isinstance(parsed_action, dict):
+            raise ValueError("parsed_action must be a JSON object")
+        usage_metadata = d.get("usage_metadata")
+        if usage_metadata is not None and not isinstance(usage_metadata, dict):
+            raise ValueError("usage_metadata must be a JSON object")
+
         return cls(
             contract_id=contract_id,
             worker_id=worker_id,
@@ -118,7 +159,8 @@ class CandidateEnvelope:
             protocol_version=version,
             package_id=d.get("package_id", ""),
             claim_id=d.get("claim_id", ""),
-            claim_epoch=int(d.get("claim_epoch", 0)),
+            claim_epoch=claim_epoch,
             idempotency_key=d.get("idempotency_key", ""),
-            parsed_action=d.get("parsed_action"),
+            parsed_action=parsed_action,
+            usage_metadata=usage_metadata,
         )

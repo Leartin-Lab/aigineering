@@ -3,11 +3,12 @@
 import json
 
 from aigineering.core.engine import Engine
-from aigineering.core.ids import hash_asset_content, hash_contract, hash_retry
+from aigineering.core.ids import hash_asset_content, hash_contract
 from aigineering.core.method_registry import MethodRegistry
 from aigineering.core.method_handlers.replan import ReplanMethodHandler
 from aigineering.core.method_handlers.retry import RetryMethodHandler
 from aigineering.core.method_runtime import MethodRuntime
+from aigineering.core.methods import retry_contract
 from aigineering.core.store import MemoryStore
 from aigineering.core.trace import TraceStore
 from aigineering.protocol.types import Asset, Contract
@@ -241,17 +242,17 @@ def test_retry_creates_deterministic_contract():
     engine.run()
 
     # Verify deterministic ID
-    expected_retry_id = hash_retry(contract_id)
-    retry_contract = store.get_contract(expected_retry_id)
-    assert retry_contract is not None, f"Retry contract {expected_retry_id} not found"
-    assert retry_contract.name == contract.name
-    assert retry_contract.inputs == contract.inputs
-    assert retry_contract.outputs == contract.outputs
-    assert retry_contract.budget == contract.budget
-    assert retry_contract.tool_scope == contract.tool_scope
-    assert retry_contract.labels == contract.labels
-    assert retry_contract.origin == contract.origin
-    assert retry_contract.parent_id == contract.parent_id
+    expected_retry_id = retry_contract(contract).id
+    replacement = store.get_contract(expected_retry_id)
+    assert replacement is not None, f"Retry contract {expected_retry_id} not found"
+    assert replacement.name == f"{contract.name}.retry"
+    assert replacement.inputs == contract.inputs
+    assert replacement.outputs == contract.outputs
+    assert replacement.budget == contract.budget
+    assert replacement.tool_scope == contract.tool_scope
+    assert replacement.labels == contract.labels
+    assert replacement.origin == "retry"
+    assert replacement.parent_id == contract.parent_id
 
     # Verify trace event
     retry_events = trace_store.get_by_event_type("retry_created")
@@ -291,7 +292,7 @@ def test_retry_handler_idempotent():
     # First call — creates retry contract
     result1 = handler.handle_method(runtime, contract, "retry", candidate)
     assert result1 is True
-    expected_retry_id = hash_retry(contract_id)
+    expected_retry_id = retry_contract(contract).id
     assert store.get_contract(expected_retry_id) is not None
 
     # Second call — idempotent, already exists

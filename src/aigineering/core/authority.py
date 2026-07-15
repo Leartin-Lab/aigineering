@@ -35,14 +35,20 @@ RESERVED_PREFIXES: frozenset[str] = frozenset(
 )
 
 
-def _is_protected_name(name: str) -> bool:
-    """Return True when *name* starts with a protected prefix."""
-    for prefix in RESERVED_PREFIXES:
+def matched_reserved_prefix(
+    name: str, prefixes: frozenset[str] = RESERVED_PREFIXES
+) -> str | None:
+    """Return the canonical reserved prefix matched by *name*, if any."""
+    for prefix in prefixes:
         if name.startswith(prefix):
-            return True
+            return prefix
         if prefix.endswith("_") and name == prefix.rstrip("_"):
-            return True
-    return False
+            return prefix
+    return None
+
+
+def _is_protected_name(name: str) -> bool:
+    return matched_reserved_prefix(name) is not None
 
 
 class ReservedNamespaceError(ValueError):

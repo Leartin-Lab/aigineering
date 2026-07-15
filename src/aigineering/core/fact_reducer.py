@@ -25,11 +25,12 @@ from aigineering.core.output_satisfaction import (
     all_outputs_satisfied,
     is_business_output,
 )
+from aigineering.protocol.immutability import deep_freeze
 
 if TYPE_CHECKING:
-    from aigineering.protocol.types import Asset, Contract
     from aigineering.core.store import StoreProtocol
     from aigineering.core.trace import TraceStoreProtocol
+    from aigineering.protocol.types import Asset, Contract
 
 # ---------------------------------------------------------------------------
 # Method-result asset name prefixes that trigger method completion handling.
@@ -82,6 +83,9 @@ class FactReducerEvent:
     details: MappingProxyType = field(default_factory=lambda: MappingProxyType({}))
     """Additional event-specific metadata."""
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "details", deep_freeze(self.details))
+
 
 # ---------------------------------------------------------------------------
 # FactReducer
@@ -116,16 +120,31 @@ class FactReducer:
 
         Returns a deterministic list of events.  The caller applies them.
         """
+        return self.on_assets_created((asset,))
+
+    def on_assets_created(self, assets: tuple[Asset, ...]) -> list[FactReducerEvent]:
+        """Project one atomic batch without depending on insertion order."""
         events: list[FactReducerEvent] = []
+        pending_names = {asset.name for asset in assets}
 
         # 1. Method result detection
-        events.extend(self._detect_method_result(asset))
+        for asset in assets:
+            events.extend(self._detect_method_result(asset))
 
         # 2. Activation satisfaction
-        events.extend(self._detect_activation(asset))
+        activated: set[str] = set()
+        for asset in assets:
+            for event in self._detect_activation(asset, pending_names):
+                if event.contract_id not in activated:
+                    events.append(event)
+                    activated.add(event.contract_id)
 
         # 3. Output satisfaction + contract completion + child cancel
-        events.extend(self._detect_output_satisfaction(asset))
+        completed: set[str] = set()
+        for asset in assets:
+            events.extend(
+                self._detect_output_satisfaction(asset, pending_names, completed)
+            )
 
         return events
 
@@ -149,7 +168,9 @@ class FactReducer:
 
     # -- Activation detection -----------------------------------------------
 
-    def _detect_activation(self, asset: Asset) -> list[FactReducerEvent]:
+    def _detect_activation(
+        self, asset: Asset, pending_names: set[str]
+    ) -> list[FactReducerEvent]:
         """Find contracts whose activation expression references *asset.name*
         and is now satisfied."""
         events: list[FactReducerEvent] = []
@@ -159,7 +180,7 @@ class FactReducer:
         # SQLite computes reducer consequences inside the transaction before
         # physically inserting the new fact; MemoryStore computes after. Make
         # the reducer's transaction view explicit so both adapters agree.
-        available_names.add(asset.name)
+        available_names.update(pending_names)
 
         # The new asset is already in the store, so its name is included.
         for contract in self._store.get_all_contracts():
@@ -182,7 +203,12 @@ class FactReducer:
 
     # -- Output satisfaction ------------------------------------------------
 
-    def _detect_output_satisfaction(self, asset: Asset) -> list[FactReducerEvent]:
+    def _detect_output_satisfaction(
+        self,
+        asset: Asset,
+        pending_names: set[str],
+        completed: set[str],
+    ) -> list[FactReducerEvent]:
         """Find contracts that declare *asset.name* as an output and are
         now fully satisfied."""
         events: list[FactReducerEvent] = []
@@ -205,9 +231,13 @@ class FactReducer:
             )
 
             # Check full output satisfaction.
-            if all_outputs_satisfied(
-                contract, self._store, extra_output_names={asset.name}
+            if (
+                all_outputs_satisfied(
+                    contract, self._store, extra_output_names=pending_names
+                )
+                and contract.id not in completed
             ):
+                completed.add(contract.id)
                 events.append(
                     FactReducerEvent(
                         type="contract_complete",

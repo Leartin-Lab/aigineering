@@ -21,7 +21,9 @@ def test_worker_package_round_trip_basic():
 
     assert restored == wp
     assert restored.contract_id == "c1"
-    assert restored.contract == {"name": "root", "budget": 10, "outputs": ["report"]}
+    assert restored.contract["name"] == "root"
+    assert restored.contract["budget"] == 10
+    assert restored.contract["outputs"] == ("report",)
     assert restored.budget_remaining == 5
     assert restored.tool_scope == ("lookup", "search")
     assert isinstance(restored.disclosed_assets, tuple)

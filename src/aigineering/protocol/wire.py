@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from types import MappingProxyType
 from typing import Any
 
+from aigineering.protocol.immutability import deep_thaw
 from aigineering.protocol.types import Asset, Candidate, Contract, Session, TraceEntry
 
 
@@ -71,6 +73,12 @@ def contract_to_canonical(contract: Contract) -> str:
         "worker_capabilities": sorted(contract.worker_capabilities),
         "worker_pools": sorted(contract.worker_pools),
         "origin": contract.origin,
+        "minting_authority": sorted(contract.minting_authority),
+        "sensitive_input_policy": (
+            deep_thaw(contract.sensitive_input_policy)
+            if contract.sensitive_input_policy is not None
+            else None
+        ),
     }
     return json.dumps(d, sort_keys=True, ensure_ascii=False)
 
@@ -92,7 +100,7 @@ def contract_to_dict(contract: Contract) -> dict[str, Any]:
         "origin": contract.origin,
         "minting_authority": contract.minting_authority,
         "sensitive_input_policy": (
-            dict(contract.sensitive_input_policy)
+            deep_thaw(contract.sensitive_input_policy)
             if contract.sensitive_input_policy is not None
             else None
         ),
@@ -118,7 +126,9 @@ def trace_entry_to_dict(entry: TraceEntry) -> dict[str, Any]:
         "relation_target": entry.relation_target,
         "timestamp": entry.timestamp,
         "usage_metadata": (
-            dict(entry.usage_metadata) if entry.usage_metadata is not None else None
+            deep_thaw(entry.usage_metadata)
+            if entry.usage_metadata is not None
+            else None
         ),
     }
 
@@ -143,7 +153,9 @@ def trace_entry_from_dict(data: dict[str, Any]) -> TraceEntry:
         relation_type=data.get("relation_type"),
         relation_target=data.get("relation_target"),
         timestamp=data.get("timestamp", ""),
-        usage_metadata=MappingProxyType(usage) if isinstance(usage, dict) else None,
+        usage_metadata=(
+            MappingProxyType(dict(usage)) if isinstance(usage, Mapping) else None
+        ),
     )
 
 
@@ -152,7 +164,7 @@ def candidate_to_dict(candidate: Candidate) -> dict[str, Any]:
     return {
         "worker_id": candidate.worker_id,
         "raw_output": candidate.raw_output,
-        "parsed_action": dict(parsed) if parsed is not None else None,
+        "parsed_action": deep_thaw(parsed) if parsed is not None else None,
     }
 
 
@@ -163,8 +175,8 @@ def session_to_dict(session: Session) -> dict[str, Any]:
         "contract_ids": session.contract_ids,
         "asset_ids": session.asset_ids,
         "trace_ids": session.trace_ids,
-        "config_snapshot": dict(session.config_snapshot),
-        "worker_snapshot": dict(session.worker_snapshot),
+        "config_snapshot": deep_thaw(session.config_snapshot),
+        "worker_snapshot": deep_thaw(session.worker_snapshot),
         "created_at": session.created_at,
     }
 

@@ -15,11 +15,12 @@ from __future__ import annotations
 import json
 import logging
 import os
+from collections.abc import Mapping
 from pathlib import Path
-from types import MappingProxyType
-from typing import Optional, Protocol, runtime_checkable
+from typing import Any, Optional, Protocol, runtime_checkable
 
 from aigineering.core.ids import now_iso, hash_event
+from aigineering.protocol.immutability import deep_thaw
 from aigineering.protocol.types import TraceEntry
 from aigineering.protocol.wire import trace_entry_from_dict, trace_entry_to_dict
 
@@ -43,7 +44,7 @@ def create_entry(
     budget_remaining: int = 0,
     relation_type: Optional[str] = None,
     relation_target: Optional[str] = None,
-    usage_metadata: Optional[MappingProxyType] = None,
+    usage_metadata: Optional[Mapping[str, Any]] = None,
 ) -> TraceEntry:
     effective_payload = {
         "disclosed_assets": list(disclosed_assets or ()),
@@ -57,7 +58,9 @@ def create_entry(
         "budget_remaining": budget_remaining,
         "relation_type": relation_type,
         "relation_target": relation_target,
-        "usage_metadata": dict(usage_metadata) if usage_metadata is not None else None,
+        "usage_metadata": deep_thaw(usage_metadata)
+        if usage_metadata is not None
+        else None,
     }
     entry_id = hash_event(
         contract_id=contract_id,
@@ -290,6 +293,8 @@ def trace_effective_payload(entry: TraceEntry) -> dict[str, object]:
         "relation_type": entry.relation_type,
         "relation_target": entry.relation_target,
         "usage_metadata": (
-            dict(entry.usage_metadata) if entry.usage_metadata is not None else None
+            deep_thaw(entry.usage_metadata)
+            if entry.usage_metadata is not None
+            else None
         ),
     }

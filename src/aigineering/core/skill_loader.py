@@ -95,7 +95,7 @@ class SkillLoader:
         try:
             raw = manifest_path.read_bytes()
             data = tomllib.loads(raw.decode("utf-8"))
-        except Exception as e:
+        except (OSError, UnicodeError, tomllib.TOMLDecodeError) as e:
             raise ValueError(f"Failed to parse {manifest_path}: {e}") from e
 
         if not isinstance(data, dict):

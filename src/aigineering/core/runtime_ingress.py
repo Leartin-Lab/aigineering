@@ -1,9 +1,9 @@
 """RuntimeIngress — unified ingress for all runtime facts.
 
-All production paths (Engine, CLI, server, method runtime, skill loader,
-labels) must route assets, contracts, candidate submissions, and
-replacement claims through this single ingress.  Direct store writes are
-reserved for store implementations, transaction helpers, and explicit test
+All production paths (CLI, server, method runtime, skill loader, labels) route
+assets, contracts, and replacement claims through this ingress. Candidate
+submissions use the separate claim-bound ``submit_candidate`` operation.
+Direct store writes are reserved for store implementations and explicit test
 fixtures only.
 
 Every accepted fact is signed, authority-checked, traced, and reduced.
@@ -22,7 +22,11 @@ from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 from aigineering.core.activation import validate_execution_activation
-from aigineering.core.authority import RESERVED_PREFIXES, ReservedNamespaceError
+from aigineering.core.authority import (
+    ReservedNamespaceError,
+    matched_reserved_prefix,
+)
+from aigineering.core.ids import validate_contract_identity
 from aigineering.core.provenance import sign_asset
 from aigineering.core.trace import create_entry
 from aigineering.protocol.runtime_record import RuntimeRecord, create_runtime_record
@@ -36,9 +40,7 @@ if TYPE_CHECKING:
     from aigineering.core.fact_reducer import FactReducer
     from aigineering.protocol.types import (
         Asset,
-        Candidate,
         Contract,
-        ProjectionResult,
         ReplacementClaim,
     )
     from aigineering.core.store import StoreProtocol
@@ -48,19 +50,11 @@ _logger = logging.getLogger(__name__)
 
 
 def _is_protected_name(name: str) -> bool:
-    """Return True when *name* starts with a protected prefix."""
-    return _get_matched_prefix(name) is not None
+    return matched_reserved_prefix(name) is not None
 
 
 def _get_matched_prefix(name: str) -> str | None:
-    """Return the first matching protected prefix, or None."""
-    for prefix in RESERVED_PREFIXES:
-        if name.startswith(prefix):
-            return prefix
-        # Also match the bare prefix form: "_sys_" should match "_sys"
-        if prefix.endswith("_") and name == prefix.rstrip("_"):
-            return prefix
-    return None
+    return matched_reserved_prefix(name)
 
 
 def _asset_committed_record(asset: Asset) -> RuntimeRecord:
@@ -78,6 +72,74 @@ def _trace_records(entries: Sequence[object]) -> tuple[RuntimeRecord, ...]:
         )
         for entry in entries
     )
+
+
+def materialize_fact_reduction(
+    events: Sequence[object], assets: Sequence[Asset]
+) -> tuple[list[object], tuple[RuntimeRecord, ...]]:
+    """Convert pure reducer events into shared trace and lifecycle facts."""
+    from aigineering.core.fact_reducer import FactReducerEvent
+
+    assets_by_name = {asset.name: asset for asset in assets}
+    traces: list[object] = []
+    lifecycle: list[RuntimeRecord] = []
+    for event in events:
+        if not isinstance(event, FactReducerEvent) or not event.contract_id:
+            continue
+        asset = assets_by_name.get(event.asset_name)
+        parent_id = asset.id if asset is not None else None
+        trace_event_type: str | None = None
+        trace_kwargs: dict[str, object] = {"relation_target": event.asset_name}
+
+        if event.type == "contract_complete":
+            trace_event_type = "complete"
+            trace_kwargs["budget_remaining"] = 0
+            lifecycle.append(
+                create_runtime_record(
+                    "lifecycle.terminal",
+                    {"contract_id": event.contract_id, "terminal": "complete"},
+                    causal_parents=(
+                        (_asset_committed_record(asset).id,)
+                        if asset is not None
+                        else ()
+                    ),
+                )
+            )
+        elif event.type == "child_cancelled":
+            trace_event_type = "cancelled"
+            trace_kwargs["relation_type"] = "unreachable"
+            trace_kwargs["rejected_fragments"] = [
+                "[unreachable] parent_complete: "
+                f"parent {event.details.get('parent_id', '?')} completed"
+            ]
+            lifecycle.append(
+                create_runtime_record(
+                    "lifecycle.terminal",
+                    {"contract_id": event.contract_id, "terminal": "cancelled"},
+                    causal_parents=(
+                        (_asset_committed_record(asset).id,)
+                        if asset is not None
+                        else ()
+                    ),
+                )
+            )
+        elif event.type == "output_satisfied":
+            trace_event_type = "output_satisfied"
+        elif event.type == "activation_active":
+            trace_event_type = "activation"
+        elif event.type == "method_result_detected":
+            trace_event_type = "method_result_detected"
+
+        if trace_event_type is not None:
+            traces.append(
+                create_entry(
+                    contract_id=event.contract_id,
+                    event_type=trace_event_type,
+                    parent_id=parent_id,
+                    **trace_kwargs,
+                )
+            )
+    return traces, tuple(lifecycle)
 
 
 class RuntimeIngress:
@@ -104,9 +166,19 @@ class RuntimeIngress:
         trace: TraceStoreProtocol,
         fact_reducer: FactReducer | None = None,
     ) -> None:
-        self._store = store
+        from aigineering.core.store import require_runtime_store
+        from aigineering.core.fact_reducer import FactReducer
+
+        self._store = require_runtime_store(store)
         self._trace = trace
-        self._reducer = fact_reducer
+        self._reducer = fact_reducer or FactReducer(self._store, trace)
+
+    def reduce_assets(
+        self, assets: Sequence[Asset]
+    ) -> tuple[list[object], tuple[RuntimeRecord, ...]]:
+        """Return the canonical consequences of one atomic Asset batch."""
+        events = self._reducer.on_assets_created(tuple(assets))
+        return materialize_fact_reduction(events, assets)
 
     # -- Asset acceptance ---------------------------------------------------
 
@@ -180,120 +252,28 @@ class RuntimeIngress:
                 relation_target=signed.name,
             )
 
-        from collections.abc import Callable
-
-        commit_fn: Callable | None = getattr(
-            self._store, "commit_direct_execution", None
+        trace_entries: list[object] = [main_entry]
+        if protected_entry is not None:
+            trace_entries.append(protected_entry)
+        reducer_traces, reducer_records = self.reduce_assets((signed,))
+        _logger.debug(
+            "FactReducer produced %d trace consequences for asset %r",
+            len(reducer_traces),
+            signed.name,
         )
-        if commit_fn is not None:
-            trace_entries: list[object] = [main_entry]
-            if protected_entry is not None:
-                trace_entries.append(protected_entry)
 
-            # Collect reducer traces with mirror_to_trace=False — they'll
-            # be mirrored to runtime memory only after the transaction
-            # succeeds, matching the pattern in commit_execution_batch.
-            reducer_traces: list[object] = []
-            if self._reducer is not None:
-                events = self._reducer.on_asset_created(signed)
-                _logger.debug(
-                    "FactReducer produced %d events for asset %r",
-                    len(events),
-                    signed.name,
-                )
-                reducer_traces.extend(
-                    self._apply_reducer_events(events, signed, mirror_to_trace=False)
-                )
-
-            commit_fn(
-                accepted_assets=[signed],
-                trace_entries=list(trace_entries) + reducer_traces,
-                runtime_records=(asset_record,)
-                + _trace_records(list(trace_entries) + reducer_traces),
-            )
-            for entry in reducer_traces:
-                self._trace.append(entry)
-        else:
-            if allow_protected:
-                add_fn = getattr(
-                    self._store, "_add_system_asset", self._store.add_asset
-                )
-                add_fn(signed)
-            else:
-                self._store.add_asset(signed)
-            self._trace.append(main_entry)
-            if protected_entry is not None:
-                self._trace.append(protected_entry)
-            reducer_traces: list[object] = []
-            if self._reducer is not None:
-                events = self._reducer.on_asset_created(signed)
-                _logger.debug(
-                    "FactReducer produced %d events for asset %r",
-                    len(events),
-                    signed.name,
-                )
-                reducer_traces = self._apply_reducer_events(events, signed)
-            self._store.append_runtime_record(asset_record)
-            for record in _trace_records(
-                [main_entry]
-                + ([protected_entry] if protected_entry is not None else [])
-                + reducer_traces
-            ):
-                self._store.append_runtime_record(record)
+        all_traces = trace_entries + reducer_traces
+        self._store.commit_ingress_batch(
+            accepted_assets=[signed],
+            trace_entries=all_traces,
+            runtime_records=(asset_record,)
+            + reducer_records
+            + _trace_records(all_traces),
+        )
+        for entry in all_traces:
+            self._trace.append(entry)
 
         return signed
-
-    def _apply_reducer_events(
-        self, events: list[object], asset: Asset, *, mirror_to_trace: bool = True
-    ) -> list[object]:
-        """Apply FactReducer events: append trace entries for every
-        detected consequence of the new asset.  Returns the created
-        :class:`TraceEntry` objects for optional SQLite batch collection.
-
-        When *mirror_to_trace* is False (used inside batch commit),
-        the entries are only returned, not appended to the runtime trace
-        store — the caller is responsible for mirroring after durable
-        commit succeeds.
-        """
-        from aigineering.core.fact_reducer import FactReducerEvent
-
-        created: list[object] = []
-        for event in events:
-            if not isinstance(event, FactReducerEvent):
-                continue
-
-            trace_event_type: str | None = None
-            trace_kwargs: dict[str, object] = {"relation_target": event.asset_name}
-
-            if event.type == "contract_complete":
-                trace_event_type = "complete"
-                if event.contract_id:
-                    trace_kwargs["budget_remaining"] = 0
-            elif event.type == "child_cancelled":
-                trace_event_type = "cancelled"
-                trace_kwargs["relation_type"] = "unreachable"
-                trace_kwargs["rejected_fragments"] = [
-                    "[unreachable] parent_complete: "
-                    f"parent {event.details.get('parent_id', '?')} completed"
-                ]
-            elif event.type == "output_satisfied":
-                trace_event_type = "output_satisfied"
-            elif event.type == "activation_active":
-                trace_event_type = "activation"
-            elif event.type == "method_result_detected":
-                trace_event_type = "method_result_detected"
-
-            if trace_event_type is not None and event.contract_id:
-                entry = create_entry(
-                    contract_id=event.contract_id,
-                    event_type=trace_event_type,
-                    parent_id=asset.id,
-                    **trace_kwargs,
-                )
-                if mirror_to_trace:
-                    self._trace.append(entry)
-                created.append(entry)
-        return created
 
     def commit_execution_batch(
         self,
@@ -335,64 +315,17 @@ class RuntimeIngress:
             )
             ingress_traces.append(entry)
 
-        from collections.abc import Callable
-
-        commit_fn: Callable | None = getattr(
-            self._store, "commit_direct_execution", None
+        reducer_traces, reducer_records = self.reduce_assets(signed)
+        all_traces = list(engine_trace_entries) + ingress_traces + reducer_traces
+        self._store.commit_ingress_batch(
+            accepted_assets=signed,
+            trace_entries=all_traces,
+            runtime_records=tuple(_asset_committed_record(asset) for asset in signed)
+            + reducer_records
+            + _trace_records(all_traces),
         )
-        if commit_fn is not None:
-
-            def _reducer_cb() -> list[object]:
-                reducer_traces: list[object] = []
-                if self._reducer is not None:
-                    for s_asset in signed:
-                        events = self._reducer.on_asset_created(s_asset)
-                        created = self._apply_reducer_events(
-                            events, s_asset, mirror_to_trace=False
-                        )
-                        reducer_traces.extend(created)
-                return reducer_traces
-
-            # Collect reducer traces once — used both for durable commit
-            # and for runtime mirroring after the transaction succeeds.
-            reducer_traces = _reducer_cb()
-            all_traces = list(engine_trace_entries) + ingress_traces + reducer_traces
-            commit_fn(
-                accepted_assets=signed,
-                trace_entries=all_traces,
-                runtime_records=tuple(
-                    _asset_committed_record(asset) for asset in signed
-                )
-                + _trace_records(all_traces),
-            )
-            for entry in ingress_traces:
-                self._trace.append(entry)
-            for entry in reducer_traces:
-                self._trace.append(entry)
-        else:
-            add_fn = (
-                getattr(self._store, "_add_system_asset", None)
-                if allow_protected
-                else None
-            )
-            for s_asset in signed:
-                if add_fn is not None:
-                    add_fn(s_asset)
-                else:
-                    self._store.add_asset(s_asset)
-            reducer_traces: list[object] = []
-            if self._reducer is not None:
-                for s_asset in signed:
-                    events = self._reducer.on_asset_created(s_asset)
-                    reducer_traces.extend(self._apply_reducer_events(events, s_asset))
-            for entry in ingress_traces:
-                self._trace.append(entry)
-            for s_asset in signed:
-                self._store.append_runtime_record(_asset_committed_record(s_asset))
-            for record in _trace_records(
-                list(engine_trace_entries) + ingress_traces + reducer_traces
-            ):
-                self._store.append_runtime_record(record)
+        for entry in ingress_traces + reducer_traces:
+            self._trace.append(entry)
 
         return signed
 
@@ -413,6 +346,7 @@ class RuntimeIngress:
             If an output uses a protected prefix and the contract does not
             have minting authority for that name.
         """
+        validate_contract_identity(contract)
         validate_execution_activation(contract.activation)
 
         for output_name in contract.outputs:
@@ -443,32 +377,18 @@ class RuntimeIngress:
             ],
         )
 
-        from collections.abc import Callable
-
-        commit_fn: Callable | None = getattr(
-            self._store, "commit_direct_execution", None
-        )
-        if commit_fn is not None:
-            commit_fn(
-                accepted_assets=[],
-                trace_entries=[entry],
-                contract=contract,
-                runtime_records=(
-                    create_runtime_record(
-                        "contract.declared", {"contract": contract_to_dict(contract)}
-                    ),
-                    *_trace_records([entry]),
-                ),
-            )
-        else:
-            self._store.add_contract(contract)
-            self._trace.append(entry)
-            self._store.append_runtime_record(
+        self._store.commit_ingress_batch(
+            accepted_assets=[],
+            trace_entries=[entry],
+            contract=contract,
+            runtime_records=(
                 create_runtime_record(
                     "contract.declared", {"contract": contract_to_dict(contract)}
-                )
-            )
-            self._store.append_runtime_record(_trace_records([entry])[0])
+                ),
+                *_trace_records([entry]),
+            ),
+        )
+        self._trace.append(entry)
 
         return contract
 
@@ -506,31 +426,6 @@ class RuntimeIngress:
                 )
             ],
         )
-        commit_fn = getattr(self._store, "commit_replacement_claim", None)
-        if commit_fn is not None:
-            commit_fn(claim, entry)
-        else:
-            self._store.add_replacement_claim(claim)
-            self._trace.append(entry)
+        self._store.commit_replacement_claim(claim, entry)
+        self._trace.append(entry)
         return claim
-
-    # -- Candidate submission -----------------------------------------------
-
-    def accept_candidate_submission(
-        self,
-        contract: Contract,
-        candidate: Candidate,
-        claim_id: str | None = None,
-    ) -> ProjectionResult:
-        """Reject the legacy claimless candidate-ingress API.
-
-        Candidate commitment must use :func:`core.submit.submit_candidate`,
-        irrespective of the backing store.  Keeping a permissive test-store
-        branch here would make boundary guarantees depend on deployment
-        configuration.
-        """
-        del contract, candidate, claim_id
-        raise RuntimeError(
-            "candidate submission is claim-bound; use "
-            "aig worker submit / core.submit.submit_candidate"
-        )
