@@ -10,7 +10,6 @@ from aigineering.agent.mock import MockWorker
 from aigineering.core.method_handlers.fail import FailMethodHandler
 from aigineering.core.method_handlers.plan import PlanMethodHandler
 from aigineering.core.method_handlers.replan import ReplanMethodHandler
-from aigineering.core.method_handlers.retry import RetryMethodHandler
 from aigineering.core.method_handlers.tool import ToolMethodHandler
 from aigineering.core.method_registry import MethodRegistry
 from aigineering.core.session import SessionStore
@@ -24,12 +23,11 @@ def persistent_store(db_path: str = ".aig/store.db") -> SQLiteStore:
     return SQLiteStore(db_path=db_path)
 
 
-def default_method_registry() -> MethodRegistry:
-    """Build the standard application-level method handler registry."""
+def default_completion_registry() -> MethodRegistry:
+    """Build the transitional application-level completion registry."""
     registry = MethodRegistry()
     registry.register("plan", PlanMethodHandler())
     registry.register("replan", ReplanMethodHandler())
-    registry.register("retry", RetryMethodHandler())
     registry.register("tool", ToolMethodHandler())
     registry.register("fail", FailMethodHandler())
     return registry

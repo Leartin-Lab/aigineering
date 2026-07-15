@@ -9,7 +9,7 @@ import click
 
 from aigineering.cli._common import (
     _asset_names_for,
-    _default_method_registry,
+    _default_completion_registry,
     _get_trace_dir,
     _output_json,
     _persistent_store,
@@ -369,7 +369,7 @@ def _run_task_pool(
         )
         while True:
             before_trace_count = len(store.get_all())
-            registry = _default_method_registry()
+            registry = _default_completion_registry()
             recovered = process_rejected_submissions(store)
             processed_before = process_method_completions(
                 store, registry, candidate_publishers=candidate_publishers

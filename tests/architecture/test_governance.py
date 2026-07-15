@@ -325,3 +325,12 @@ def test_claim_bound_delegation_semantics_live_in_plugin_not_runtime_service():
     assert "RuntimeIngress" not in plugin
     assert "self._store" not in plugin
     assert "accept_contract" not in plugin
+
+
+def test_retry_delegation_does_not_ship_as_completion_registry_semantics():
+    application = (ROOT / "src/aigineering/application.py").read_text(encoding="utf-8")
+
+    assert "RetryMethodHandler" not in application
+    assert 'registry.register("retry"' not in application
+    assert "default_method_registry" not in application
+    assert "default_completion_registry" in application

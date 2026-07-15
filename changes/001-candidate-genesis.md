@@ -219,6 +219,9 @@ Implementation progress:
 - Complete: method-registry parameters were removed from worker execution and
   both submission ingress surfaces. The registry is now confined to legacy
   completion projection instead of being threaded through every worker call.
+- Complete: application composition exposes a completion registry, not a
+  method-publication registry. Retry was removed from it because retry is fully
+  projected by TaskDelegationPlugin and has no completion behavior.
 - Complete: recovery replayers fail loudly when durable rejection, expiration,
   or provider-failure facts lack the Contract/raw Candidate evidence required
   to derive their consequence. These broken causal chains can no longer be

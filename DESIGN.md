@@ -227,6 +227,9 @@ MethodRegistry remains only in the completion compatibility layer while those
 handlers move behind completion plugins. Worker execution, CLI submission, and
 HTTP submission no longer accept or construct a method registry; task
 publication is protocol behavior, not application handler configuration.
+Application composition now names this residual surface
+`default_completion_registry` and excludes retry: retry delegation creates its
+ordinary replacement task immediately and has no system-task completion phase.
 Authentication, claim, policy, and binding failures append Candidate rejection
 records and Trace evidence before returning an error; an invalid worker result
 cannot disappear as an API-only failure.

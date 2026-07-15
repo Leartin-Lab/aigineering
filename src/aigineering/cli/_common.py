@@ -16,7 +16,7 @@ from aigineering.core.ids import (
 )
 from aigineering.application import (
     build_worker,
-    default_method_registry,
+    default_completion_registry,
     find_trace_for_session,
     latest_session_file,
     persistent_store,
@@ -54,9 +54,9 @@ def _persistent_store() -> SQLiteStore:
     return persistent_store()
 
 
-def _default_method_registry() -> MethodRegistry:
-    """Return the standard method-first runtime registry for CLI execution."""
-    return default_method_registry()
+def _default_completion_registry() -> MethodRegistry:
+    """Return the transitional completion registry for CLI execution."""
+    return default_completion_registry()
 
 
 def _session_id() -> str:

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 
 from aigineering.agent.mock import MockWorker
-from aigineering.application import default_method_registry
+from aigineering.application import default_completion_registry
 from aigineering.core.candidate_publisher import (
     CandidatePublisher,
     CandidatePublisherRegistry,
@@ -48,7 +48,8 @@ def test_plan_method_and_independent_child_complete_root_from_assets():
             budget=5,
         )
     )
-    registry = default_method_registry()
+    registry = default_completion_registry()
+    assert registry.list_types() == ["fail", "plan", "replan", "tool"]
     worker = MockWorker()
 
     worker.set_output("research_report", '/plan {"reason":"decompose"}')
