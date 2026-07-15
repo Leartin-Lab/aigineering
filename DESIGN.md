@@ -85,6 +85,12 @@ effect projectors and Contract admission policy are separate pure modules. An
 architecture gate keeps effect names and payload semantics out of the
 coordinator and caps it below 300 source lines.
 
+Candidate correctness does not depend on a process-local idempotency lock.
+Candidate and derived consequence records have deterministic identities;
+SQLite uniqueness and transactions arbitrate concurrent replicas. The
+pre-commit Candidate lookup is an optimization only. FactReducer trace timing is
+record metadata, not part of the derived semantic payload.
+
 A domain may persist exactly one `domain.genesis` RuntimeRecord. Initialization
 is idempotent, replacement fails closed, SQLite enforces uniqueness, and a
 CandidateCommitter can reconstruct the trust root from the Store instead of

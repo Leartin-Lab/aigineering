@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 import hashlib
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
@@ -261,3 +262,61 @@ def test_commitment_kernel_has_no_concrete_store_dependency():
     ).read_text(encoding="utf-8")
 
     assert "sqlite_store" not in source
+
+
+def test_concurrent_candidate_commit_is_database_idempotent(tmp_path):
+    path = tmp_path / "shared.db"
+    setup = SQLiteStore(str(path))
+    genesis, contract_candidate = _proposal()
+    initialize_genesis(setup, genesis)
+    CandidateCommitter(setup, setup).commit(
+        contract_candidate, verifier_factory=_verifier_factory
+    )
+    signer = _Signer()
+    candidate = create_candidate_proposal(
+        domain_id=genesis.id,
+        actor_id="human:owner",
+        key_id="root",
+        effects=[
+            CandidateEffect(
+                "asset.propose",
+                {"asset": {"name": "report", "content": "one fact"}},
+            )
+        ],
+        signer=signer,
+    )
+    setup.close()
+
+    def commit_once():
+        store = SQLiteStore(str(path))
+        try:
+            return CandidateCommitter(store, store).commit(
+                candidate, verifier_factory=_verifier_factory
+            )
+        finally:
+            store.close()
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        decisions = list(pool.map(lambda _: commit_once(), range(2)))
+
+    reopened = SQLiteStore(str(path))
+    assert all(decision.accepted for decision in decisions)
+    assert len(reopened.get_assets_by_name("report")) == 1
+    candidate_records = [
+        record
+        for _, record in reopened.scan_runtime_records()
+        if record.payload.get("candidate_id") == candidate.id
+    ]
+    assert [record.record_type for record in candidate_records].count(
+        "candidate.received"
+    ) == 1
+    assert [record.record_type for record in candidate_records].count(
+        "candidate.committed"
+    ) == 1
+    terminals = [
+        record
+        for _, record in reopened.scan_runtime_records(record_type="lifecycle.terminal")
+        if record.payload["contract_id"] == _contract().id
+    ]
+    assert len(terminals) == 1
+    reopened.close()

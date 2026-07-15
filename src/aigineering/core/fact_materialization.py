@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import replace
 
 from aigineering.core.trace import create_entry
 from aigineering.protocol.runtime_record import RuntimeRecord, create_runtime_record
@@ -80,11 +81,14 @@ def materialize_fact_reduction(
 
         if trace_event_type is not None:
             traces.append(
-                create_entry(
-                    contract_id=event.contract_id,
-                    event_type=trace_event_type,
-                    parent_id=parent_id,
-                    **trace_kwargs,
+                replace(
+                    create_entry(
+                        contract_id=event.contract_id,
+                        event_type=trace_event_type,
+                        parent_id=parent_id,
+                        **trace_kwargs,
+                    ),
+                    timestamp="",
                 )
             )
     return traces, tuple(lifecycle)
