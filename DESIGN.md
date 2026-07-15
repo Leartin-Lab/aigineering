@@ -87,6 +87,11 @@ input Assets, and the demo Contract are then published through the same signed
 Candidate commitment path. A separate audit export deduplicates durable Trace
 entries by identity instead of becoming a second execution store.
 
+Skill discovery is also separated from commitment: `SkillLoader` only parses
+files and builds proposed Assets. The CLI publishes its protected descriptor
+and prompt content through `asset.propose`, so filesystem parsing has no Store
+or ingress dependency.
+
 The optional HTTP API accepts full signed CandidateProposal bodies at
 `POST /candidates`, `POST /contracts`, and `POST /assets`. Resource endpoints
 validate the effect type before commitment. Unsigned legacy request bodies fail

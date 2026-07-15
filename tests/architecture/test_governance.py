@@ -137,6 +137,18 @@ def test_effect_payload_builders_are_protocol_helpers_not_cli_semantics():
     assert "asset.propose" in source
 
 
+def test_skill_loader_builds_assets_and_cli_owns_candidate_publication():
+    loader = (ROOT / "src/aigineering/core/skill_loader.py").read_text(encoding="utf-8")
+    cli = (ROOT / "src/aigineering/cli/skill.py").read_text(encoding="utf-8")
+
+    assert "RuntimeIngress" not in loader
+    assert "accept_asset" not in loader
+    assert "build_assets" in loader
+    assert "commit_local_effect" in cli
+    assert "asset_proposal_effect" in cli
+    assert "RuntimeIngress" not in cli
+
+
 def test_commitment_coordinator_does_not_own_effect_semantics():
     path = ROOT / "src/aigineering/core/commitment.py"
     source = path.read_text(encoding="utf-8")

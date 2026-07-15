@@ -117,6 +117,9 @@ Implementation progress:
   duplicates traces already written by commitment.
 - Complete: standard effect payload builders live in the protocol layer, so
   runtime composition can publish Candidates without importing CLI semantics.
+- Complete: SkillLoader is a pure filesystem-to-Asset builder. The skill CLI
+  owns publication and commits both protected descriptor and content Assets as
+  signed Candidates without feature-specific injection Trace records.
 - Complete: cryptography is a base dependency; the runtime does not silently
   substitute a non-authenticating deterministic seal.
 - Pending: migrate remaining control-plane and worker submission effects.

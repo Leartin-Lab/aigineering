@@ -23,6 +23,8 @@ def test_skill_load_and_list_json(tmp_path: Path):
     skill_dir = _write_skill(tmp_path, "reviewer")
     runner = CliRunner()
     with runner.isolated_filesystem():
+        initialized = runner.invoke(cli, ["domain", "init"])
+        assert initialized.exit_code == 0, initialized.output
         loaded = runner.invoke(cli, ["skill", "load", str(skill_dir), "--json"])
         assert loaded.exit_code == 0, loaded.output
         data = json.loads(loaded.output)
@@ -38,10 +40,12 @@ def test_skill_load_and_list_json(tmp_path: Path):
         assert rows[0]["trust_tier"] == "configured"
 
         store = SQLiteStore(".aig/store.db")
-        injected = store.get_by_event_type("asset_injected")
-        injected_names = {e.relation_target for e in injected}
-        assert "_skill_capability_reviewer" in injected_names
-        assert "_skill_content_reviewer" in injected_names
+        committed = store.get_by_event_type("candidate_committed")
+        committed_names = {
+            name for entry in committed for name in entry.accepted_asset_names
+        }
+        assert "_skill_capability_reviewer" in committed_names
+        assert "_skill_content_reviewer" in committed_names
 
 
 def test_skill_load_invalid_manifest_fails(tmp_path: Path):

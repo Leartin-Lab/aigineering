@@ -7,9 +7,9 @@ import json
 import click
 
 from aigineering.cli._common import _output_json, _persistent_store
-from aigineering.core.runtime_ingress import RuntimeIngress
+from aigineering.cli._candidate import commit_local_effect, require_accepted
 from aigineering.core.skill_loader import SkillLoader
-from aigineering.core.trace import create_entry
+from aigineering.protocol.effect_builders import asset_proposal_effect
 
 
 @click.group("skill")
@@ -23,33 +23,22 @@ def skill_group() -> None:
 def skill_load(directory: str, as_json: bool) -> None:
     """Load skills from DIRECTORY into the local store."""
     store = _persistent_store()
-    ingress = RuntimeIngress(store, store)
     loader = SkillLoader()
     try:
         manifests = loader.scan([directory])
-        assets = loader.load(store, ingress=ingress)
-    except ValueError as e:
-        raise click.ClickException(str(e))
-    for asset in assets:
-        store.append(
-            create_entry(
-                contract_id="control_plane",
-                event_type="asset_injected",
-                parent_id=asset.id,
-                relation_type="skill_asset",
-                relation_target=asset.name,
-                accepted_fragments=[
-                    json.dumps(
-                        {
-                            "asset_id": asset.id,
-                            "origin": asset.origin,
-                            "trust_tier": asset.trust_tier,
-                        },
-                        sort_keys=True,
-                    )
-                ],
+        proposed_assets = loader.build_assets()
+        assets = []
+        for asset in proposed_assets:
+            decision = require_accepted(
+                commit_local_effect(
+                    store,
+                    asset_proposal_effect(asset),
+                    idempotency_key=f"skill:{asset.id}",
+                )
             )
-        )
+            assets.extend(decision.assets)
+    except ValueError as e:
+        raise click.ClickException(str(e)) from e
 
     result = {
         "loaded_manifests": [m.name for m in manifests],

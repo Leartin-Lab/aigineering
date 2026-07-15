@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol
 
 if sys.version_info >= (3, 11):
     import tomllib
@@ -21,19 +20,11 @@ from aigineering.core.capability_descriptors import create_skill_descriptor
 from aigineering.core.ids import hash_asset_content, hash_asset_definition
 from aigineering.protocol.types import Asset, TrustTier
 
-if TYPE_CHECKING:
-    from aigineering.core.runtime_ingress import RuntimeIngress
-
 _REQUIRED_MANIFEST_FIELDS = frozenset({"name", "version"})
 _OPTIONAL_MANIFEST_FIELDS = frozenset(
     {"capabilities", "labels", "trust_tier", "description", "content_file"}
 )
 _VALID_FIELDS = _REQUIRED_MANIFEST_FIELDS | _OPTIONAL_MANIFEST_FIELDS
-
-
-class StoreLike(Protocol):
-    def add_asset(self, asset: Asset) -> None: ...
-    def get_assets_by_name(self, name: str) -> list[Asset]: ...
 
 
 class SkillManifest:
@@ -80,15 +71,12 @@ class SkillLoader:
         self._manifests = manifests
         return manifests
 
-    def load(self, store: StoreLike, *, ingress: RuntimeIngress) -> list[Asset]:
-        """Load all scanned skills into *store*.
-
-        Returns the list of descriptor Assets created.
-        """
-        descriptors: list[Asset] = []
+    def build_assets(self) -> list[Asset]:
+        """Build immutable skill Assets without mutating runtime state."""
+        assets: list[Asset] = []
         for manifest in self._manifests:
-            descriptors.extend(self._load_one(store, manifest, ingress=ingress))
-        return descriptors
+            assets.extend(self._build_one(manifest))
+        return assets
 
     def _parse_manifest(self, manifest_path: Path) -> SkillManifest:
         """Parse and validate a single skill.toml manifest."""
@@ -135,15 +123,9 @@ class SkillLoader:
 
         return SkillManifest(data, manifest_path.parent)
 
-    def _load_one(
-        self,
-        store: StoreLike,
-        manifest: SkillManifest,
-        *,
-        ingress: RuntimeIngress,
-    ) -> list[Asset]:
-        """Load a single skill into the store.  Returns descriptor Assets."""
-        descriptors: list[Asset] = []
+    def _build_one(self, manifest: SkillManifest) -> list[Asset]:
+        """Build one skill's descriptor and promptable content Assets."""
+        assets: list[Asset] = []
 
         # ── Read skill body content ──────────────────────────────────────
         content = ""
@@ -156,11 +138,7 @@ class SkillLoader:
             content=content,
             trust_tier=manifest.trust_tier,
         )
-        descriptors.append(
-            ingress.accept_asset(
-                descriptor, source="skill_loader", allow_protected=True
-            )
-        )
+        assets.append(descriptor)
 
         # ── Create content Asset (promptable) ────────────────────────────
         content_asset_name = f"_skill_content_{manifest.name}"
@@ -177,29 +155,17 @@ class SkillLoader:
             source_uri=str(manifest.content_path.resolve()),
             promptable=True,
         )
-        signed_content = ingress.accept_asset(
-            content_asset, source="skill_loader", allow_protected=True
-        )
-        descriptors.append(signed_content)
+        assets.append(content_asset)
 
-        return descriptors
+        return assets
 
 
 def _is_string_list(value: object) -> bool:
     return isinstance(value, list) and all(isinstance(item, str) for item in value)
 
 
-def load_skills(
-    store: StoreLike,
-    skill_dirs: list[str],
-    *,
-    ingress: RuntimeIngress,
-) -> list[Asset]:
-    """Discover and load all skills from *skill_dirs* into *store*.
-
-    Convenience entry point that scans and loads in one call.  Returns
-    the list of descriptor Assets created.
-    """
+def build_skill_assets(skill_dirs: list[str]) -> list[Asset]:
+    """Discover skills and build their Assets without committing them."""
     loader = SkillLoader()
     loader.scan(skill_dirs)
-    return loader.load(store, ingress=ingress)
+    return loader.build_assets()

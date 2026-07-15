@@ -3,10 +3,7 @@
 from pathlib import Path
 import json
 
-from aigineering.core.runtime_ingress import RuntimeIngress
-from aigineering.core.skill_loader import SkillLoader, load_skills
-from aigineering.core.store import MemoryStore
-from aigineering.core.trace import MemoryTraceStore
+from aigineering.core.skill_loader import SkillLoader, build_skill_assets
 
 
 def _toml_value(value):
@@ -137,11 +134,11 @@ class TestSkillLoaderScan:
             assert "content_file must be relative" in str(e)
 
 
-class TestSkillLoaderLoad:
-    """Tests for SkillLoader.load()."""
+class TestSkillLoaderBuild:
+    """Tests for pure SkillLoader Asset construction."""
 
     def test_load_creates_descriptor_and_content_assets(self, tmp_path: Path):
-        """SkillLoader.load creates both descriptor and content assets."""
+        """SkillLoader builds both descriptor and content assets."""
         skill_dir = tmp_path / "test_skill"
         skill_dir.mkdir()
         _write_skill_toml(
@@ -152,35 +149,35 @@ class TestSkillLoaderLoad:
         )
         (skill_dir / "skill.md").write_text("# Test Skill\n\nDo testing.")
 
-        store = MemoryStore()
-        ingress = RuntimeIngress(store, MemoryTraceStore())
         loader = SkillLoader()
         loader.scan([str(tmp_path)])
-        descriptors = loader.load(store, ingress=ingress)
+        descriptors = loader.build_assets()
 
         assert len(descriptors) == 2
 
-        cap_asset = store.get_assets_by_name("_skill_capability_test_skill")
-        assert len(cap_asset) == 1
-        assert cap_asset[0].trust_tier == "configured"
+        cap_asset = next(
+            asset
+            for asset in descriptors
+            if asset.name == "_skill_capability_test_skill"
+        )
+        assert cap_asset.trust_tier == "configured"
 
-        content_asset = store.get_assets_by_name("_skill_content_test_skill")
-        assert len(content_asset) == 1
-        assert "Test Skill" in content_asset[0].content
-        assert content_asset[0].promptable is True
+        content_asset = next(
+            asset for asset in descriptors if asset.name == "_skill_content_test_skill"
+        )
+        assert "Test Skill" in content_asset.content
+        assert content_asset.promptable is True
 
     def test_load_skill_without_content_file(self, tmp_path: Path):
-        """SkillLoader.load handles missing skill.md gracefully."""
+        """SkillLoader handles missing skill.md gracefully."""
         skill_dir = tmp_path / "empty_skill"
         skill_dir.mkdir()
         _write_skill_toml(skill_dir, "empty_skill", version="0.1.0")
         # No skill.md — should create descriptor with empty content hash
 
-        store = MemoryStore()
-        ingress = RuntimeIngress(store, MemoryTraceStore())
         loader = SkillLoader()
         loader.scan([str(tmp_path)])
-        descriptors = loader.load(store, ingress=ingress)
+        descriptors = loader.build_assets()
         assert len(descriptors) == 2
 
     def test_load_default_skill_is_configured_and_preserves_lists(self, tmp_path: Path):
@@ -201,16 +198,14 @@ class TestSkillLoaderLoad:
         assert manifests[0].capabilities == ["tool", "memory"]
         assert manifests[0].labels == ["local", "safe"]
 
-    def test_load_skills_entry_point(self, tmp_path: Path):
-        """load_skills convenience function works."""
+    def test_build_skill_assets_entry_point(self, tmp_path: Path):
+        """build_skill_assets convenience function works."""
         skill_dir = tmp_path / "convenience"
         skill_dir.mkdir()
         _write_skill_toml(skill_dir, "convenience", version="0.1.0")
         (skill_dir / "skill.md").write_text("Convenience test.")
 
-        store = MemoryStore()
-        ingress = RuntimeIngress(store, MemoryTraceStore())
-        descriptors = load_skills(store, [str(tmp_path)], ingress=ingress)
+        descriptors = build_skill_assets([str(tmp_path)])
         assert len(descriptors) == 2
 
     def test_nested_skill_loaded_once(self, tmp_path: Path):
@@ -222,12 +217,13 @@ class TestSkillLoaderLoad:
         (parent / "skill.md").write_text("Parent skill.")
         (child / "skill.md").write_text("Child skill.")
 
-        store = MemoryStore()
-        ingress = RuntimeIngress(store, MemoryTraceStore())
-        descriptors = load_skills(store, [str(tmp_path)], ingress=ingress)
+        descriptors = build_skill_assets([str(tmp_path)])
 
         assert len(descriptors) == 4
-        assert len(store.get_assets_by_name("_skill_capability_parent")) == 1
-        assert len(store.get_assets_by_name("_skill_content_parent")) == 1
-        assert len(store.get_assets_by_name("_skill_capability_child")) == 1
-        assert len(store.get_assets_by_name("_skill_content_child")) == 1
+        names = {asset.name for asset in descriptors}
+        assert names == {
+            "_skill_capability_parent",
+            "_skill_content_parent",
+            "_skill_capability_child",
+            "_skill_content_child",
+        }
