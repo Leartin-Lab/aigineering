@@ -42,7 +42,8 @@ runtime facts.
 class RuntimeIngress:
     def accept_asset(asset, *, source, allow_protected=False) -> Asset
     def accept_contract(contract) -> Contract
-    def accept_candidate_submission(contract, candidate, claim_id=None) -> ProjectionResult
+    # Candidate output is not a generic ingress fact. It must use the
+    # claim-bound submit_candidate(envelope, ...) operation.
     # future: accept_replacement_claim(...), accept_control_fact(...)
 ```
 
@@ -62,9 +63,13 @@ Every accepted fact passes through the same pipeline:
 The following may call `store.add_asset` / `store.add_contract` directly:
 
 - Store implementations (`store.py`, `sqlite_store.py`)
-- Transaction helpers (`runtime_transaction.py`, `idempotency_store.py`)
 - The `RuntimeIngress` itself
 - Test fixtures (under `tests/`)
+
+There is no store-agnostic transaction helper. Operational commits require a
+store implementation that provides the complete atomic ingress operation;
+buffering several direct writes in Python is not transactionality and is not a
+supported fallback.
 
 All other production code must route through `RuntimeIngress`.
 
@@ -91,8 +96,8 @@ mutation semantics become identical across all surfaces.
 
 ### Negative
 
-- CLI and server code now depend on `RuntimeIngress` (or Engine, which
-  auto-creates one)
+- CLI and server code depend on `RuntimeIngress` and a StorePort with explicit
+  transactional ingress operations
 - Adding a new asset/contract surface requires explicitly threading the
   ingress through
 

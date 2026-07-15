@@ -18,22 +18,22 @@ hidden mutation paths and makes worker substitutability false.
 
 ## Decision
 
-The runtime supports three communication modes.  v0.5.0 implements modes
-1 and 2.  Mode 3 is documented and boundary-protected now, but
-intentionally deferred.
+The runtime supports three communication modes. v0.5.0 implements modes 1 and
+2 and a same-machine SQLite reference proof for mode 3. Cross-machine Store
+sharing, discovery, and consensus remain deferred.
 
 ### Mode 1: CLI Worker Mode
 
-`aig` acts as a worker/client of Engine's unified ingress and worker
+`aig` acts as a worker/client of the runtime's unified ingress and worker
 protocol.
 
 ```
-aig command → Engine unified ingress / worker protocol
+aig command → RuntimeIngress / worker protocol
 → task/asset declarations accepted into shared pools
 → CLI worker polls/claims next eligible package
 → CLI worker invokes execution or creates ordinary child tasks
 → CLI worker submits candidate envelope
-→ Engine projects, authorizes, traces, reduces, commits
+→ the commitment boundary projects, authorizes, traces, reduces, commits
 → run exits when wait condition satisfied/failed/timed out
 → serve keeps claiming until stopped
 ```
@@ -56,7 +56,7 @@ concurrent/distributed operation.
 ```
 task package + disclosed facts
 → local/nested/remote Engine claims it like any worker
-→ Engine may execute directly or publish ordinary subtasks/assets
+→ EngineWorker executes in an invocation-scoped inner fact domain
 → Engine submits candidate envelope / declared facts
 → shared RuntimeIngress projects, authorizes, traces, reduces
 ```
@@ -72,7 +72,7 @@ and cross-domain consistency are not implemented in v0.5.0.  The
 black-box proof demonstrates the architectural viability, not a
 production distributed runtime.
 
-### Mode 3: Shared-Domain Mode (Deferred)
+### Mode 3: Shared-Domain Mode (Local Reference Proof)
 
 Multiple engines/workers attach to the same asset/task domain so
 subtasks, assets, and trace are ordinary shared facts, observable
@@ -83,8 +83,10 @@ Engine A + Engine B + workers → same asset/task domain
 → visible to domain clients: all ordinary facts under normal policies
 ```
 
-**Deferred beyond v0.5.0**.  Shared-domain mode requires stronger domain
-identity, visibility controls, and multi-engine consistency work.
+v0.5.0 proves same-machine active-active arbitration with independent
+processes/connections over one SQLite fact domain, including fencing and
+cross-replica claim/renew/submit. Cross-machine operation requires a different
+Store implementation and distributed consistency design and is deferred.
 
 ### Visibility Summary
 
@@ -92,7 +94,7 @@ identity, visibility controls, and multi-engine consistency work.
 |------|-------------------------------|----------------|
 | CLI worker | N/A (CLI is a single worker) | Command result, accepted facts, trace authorized by connected domain |
 | Engine-to-Engine (different domains) | Hidden; only authorized effects/summaries exported | Candidate/effects, authorized outputs |
-| Shared-domain | Visible (same domain) | All ordinary facts under normal disclosure/authority policies (deferred) |
+| Shared-domain | Visible (same domain) | Same-machine SQLite reference; cross-machine distribution deferred |
 
 ## Consequences
 

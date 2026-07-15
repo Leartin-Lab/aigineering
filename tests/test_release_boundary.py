@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from aigineering.core.asset_versions import create_replacement_claim
 from aigineering.core.ids import hash_asset_content, hash_contract_v2
 from aigineering.core.runtime_ingress import RuntimeIngress
 from aigineering.core.sqlite_store import SQLiteStore
-from aigineering.core.store import MemoryStore
-from aigineering.protocol.types import Asset, Candidate, Contract
+from aigineering.protocol.types import Asset, Contract
 
 
 def _asset(name: str, content: str) -> Asset:
@@ -41,8 +42,8 @@ def test_sqlite_ingress_replacement_claim_rolls_back_with_trace_failure(
     assert store.get_by_event_type("replacement_claim_created") == []
 
 
-def test_sqlite_rejects_claimless_programmatic_candidate_submission() -> None:
-    """Operational SQLite candidates cannot bypass worker-package binding."""
+def test_candidate_ingress_has_no_claimless_programmatic_api() -> None:
+    """Candidate commitment exposes only the claim-bound submit operation."""
     store = SQLiteStore(":memory:")
     ingress = RuntimeIngress(store, store)
     contract = Contract(
@@ -63,21 +64,11 @@ def test_sqlite_rejects_claimless_programmatic_candidate_submission() -> None:
     )
     ingress.accept_contract(contract)
 
-    with pytest.raises(RuntimeError, match="claim-bound"):
-        ingress.accept_candidate_submission(
-            contract,
-            Candidate(worker_id="bypass", raw_output="result: no"),
-        )
+    assert not hasattr(ingress, "accept_candidate_submission")
 
 
-def test_memory_store_rejects_claimless_programmatic_candidate_submission() -> None:
-    """Test stores cannot weaken the operational commitment boundary."""
-    store = MemoryStore()
-    ingress = RuntimeIngress(store, store)
-    contract = Contract(id="contract:memory", outputs=("result",), budget=1)
+def test_server_runtime_composition_does_not_import_cli_private_modules() -> None:
+    source = Path("src/aigineering/server/app.py").read_text()
 
-    with pytest.raises(RuntimeError, match="claim-bound"):
-        ingress.accept_candidate_submission(
-            contract,
-            Candidate(worker_id="bypass", raw_output="result: no"),
-        )
+    assert "aigineering.cli" not in source
+    assert "aigineering.application" in source

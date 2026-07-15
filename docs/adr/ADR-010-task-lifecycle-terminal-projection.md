@@ -16,7 +16,8 @@ it impossible to reconstruct the same lifecycle view after a restart.
 The plan requires that control state be **reducible** — every lifecycle
 state is a projection over durable facts (task declarations, worker
 claims, candidate submissions, accepted assets, trace records, and
-control facts).  Private Engine fields become caches only.
+control facts). Production execution has no Engine-owned lifecycle fields;
+legacy snapshot code is excluded from both release wheel and sdist.
 
 ## Decision
 
@@ -32,7 +33,7 @@ A task transitions through these projected states:
 | **declared** | A contract exists in the store. Not yet eligible for execution. |
 | **claimable** | Contract activation is satisfied. Not yet claimed by a worker. |
 | **claimed** | An active claim (`Claim.status=active`) exists for the contract. Worker holds exclusive lease. |
-| **waiting / decomposed** | The contract has been dispatched to a method (plan/replan/tool) and has outstanding outputs that are promised by other active producers. |
+| **blocked** | Required Asset facts, capability, budget, or method-produced facts are absent; the boolean enabled predicate remains false. |
 | **satisfied** | All declared outputs exist in the store. The contract is terminal. |
 | **failed** | The contract encountered an unrecoverable error. Terminal. |
 | **cancelled** | The contract was explicitly terminated or its parent completed while it was still unfinished. Terminal. |
@@ -40,21 +41,22 @@ A task transitions through these projected states:
 
 ### Monotonicity Rules
 
-- **Claimed → satisfied/failed/cancelled, never back to unclaimed.**
-  Once a contract is claimed, it stays claimed until terminal.  Retry or
-  recovery creates a **new** contract with linked context.
+- **A claimed Contract is never reclaimed after failure.** A successful
+  submission closes the claim; invocation failure or lease expiry appends a
+  terminal fact. Retry or recovery creates a **new** Contract with linked
+  context.
 
 - **Output satisfaction completes a contract.** A parent contract is
   complete when its declared output asset names exist in the store.  It
   does NOT wait for all children to finish.
 
-- **Waiting requires output re-commitment.** If a plan/replan/method
-  causes a task to wait, at least one newly created active task must
+- **Blocked work requires output re-commitment.** If a plan/replan/method
+  causes a task to be data-blocked, at least one newly created active task must
   explicitly promise every still-required output.  A task must never
-  enter a waiting state where its declared outputs have no active
+  remain blocked where its declared outputs have no active
   promised producer.
 
-- **Waiting requires input reachability.** A task must not wait on an
+- **Blocking requires input reachability.** A task must not depend on an
   input/activation dependency that is neither already satisfied, nor
   promised by an active producer, nor explicitly guarded by a condition
   that can exclude it.  Missing unguarded inputs trigger
@@ -84,8 +86,8 @@ All terminal states (satisfied, failed, cancelled, unreachable) are:
 - **Projected from durable records** — contracts, claims, assets, trace
 - **Appended exactly once** — terminal trace events are idempotent and
   never duplicated or dropped
-- **Replayable** — restoring from store/trace derives the same completed/
-  waiting/cancelled/unreachable view
+- **Replayable** — rebuilding from RuntimeRecords derives the same blockers,
+  budget, claim head, and terminal view
 
 ## Consequences
 

@@ -35,8 +35,8 @@ pip install -e ".[dev]"
 # Quick demo — run the hallucination containment scenario in memory
 aig demo "build report with citations"
 
-# Or run with persistence (creates replayable session)
-aig run "build report with citations"
+# Or run with persistence through the worker protocol
+aig run "build report with citations" --worker mock
 
 # Use an OpenAI-compatible LLM worker
 export AIGINEERING_API_KEY="..."
@@ -68,10 +68,10 @@ experiments, research prototypes, and early integration work where auditable
 runtime boundaries matter.
 
 The transactional worker candidate submission guarantees apply to the
-`aig worker next` / `aig worker submit` protocol path: worker packages are
+`aig run` and `aig worker next` / `aig worker submit` protocol paths: worker packages are
 claim-bound, submitted candidates are idempotency-bound, and accepted assets
 plus trace records commit through the SQLite runtime store. The `aig run`
-command remains a local direct execution path for demos and smoke tests.
+command uses the same claim/package/invoke/submit boundary as external workers.
 
 **Kernel Boundaries**
 - Worker output is a candidate until projected through the commitment boundary.
@@ -80,7 +80,9 @@ command remains a local direct execution path for demos and smoke tests.
 - Completed parent contracts are satisfied by declared asset names, including assets produced by child/continuation contracts.
 - A claimed contract is never returned to "unclaimed" state; retry/recovery creates a new contract.
 - Tool observations continue work by creating continuation contracts, not by reactivating the same parent task.
-- Runtime recovery derives completed, suspended, budget, method scheduling, continuation context, and trace state from durable records.
+- Runtime projection derives blockers, budget, terminal outcome, claims, and continuation progress from immutable records.
+- Expired or failed worker invocations terminate visibly and create a new recovery contract; an old claimed contract is never silently reclaimed.
+- Materialized Contract/Asset/Trace/claim/registration/idempotency/replacement views can be rebuilt from the append-only runtime log.
 - SQLite trace records persist LLM usage metadata for token/cost accounting.
 
 **Productivity Surface**
@@ -96,7 +98,7 @@ command remains a local direct execution path for demos and smoke tests.
 - Experimental `aig repl` and optional FastAPI surface via `aig serve` with the `api` extra.
 
 **Still Explicitly Out of Scope**
-- Distributed runtime across shared stores.
+- Cross-machine distributed runtime, consensus, and remote discovery.
 - External security audit and deployment hardening.
 - Full self-modifying control plane where every policy/config item is an authorized asset update.
 - Multi-node lease recovery, queueing, and scheduler fairness guarantees.

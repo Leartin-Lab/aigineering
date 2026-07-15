@@ -13,8 +13,8 @@ v0.4 single-node kernel, with runtime ingress as the production mutation gate,
 reactive declared-output completion, and output satisfaction that filters out
 observation/context assets.
 
-The v0.4 kernel provides SQLite-backed transactional submission, recoverable
-runtime state, capability containment, and a worker pull/submit protocol. The
+The v0.4 kernel provides SQLite-backed transactional submission, reconstructable
+runtime projections, capability containment, and a worker pull/submit protocol. The
 transactional candidate submission guarantees apply through the `aig worker
 next` / `aig worker submit` protocol path: worker packages are claim-bound,
 submitted candidates are idempotency-bound, and accepted assets plus trace
@@ -24,7 +24,9 @@ records commit atomically through the SQLite runtime store.
 - Candidate-to-fact boundary with declared-output authority checks
 - SQLite-backed durable store with schema versioning and migration
 - Worker claim/idempotency tables with single-active-claim enforcement
-- Resumable engine state from persisted assets, contracts, traces
+- Append-only runtime records with deterministic materialized-view rebuild
+- Same-machine active-active claim arbitration with epoch fencing and renewal
+- Engine-as-Worker isolation through the ordinary Candidate protocol
 - OpenAI-compatible LLM worker with retry, usage metadata, multi-tool-call
 - Control-plane asset/contract/behavior injection via CLI
 - Additive asset slicing, replacement claims, version lists, lineage views
@@ -40,7 +42,8 @@ records commit atomically through the SQLite runtime store.
 - Universal trust-policy enforcement over signer, origin, trust tier, labels
 - Distributed runtime across shared stores
 - External security audit and deployment hardening
-- Crash-injection and concurrent-worker stress tests
+- Cross-machine distributed Store implementation and consensus
+- External real-LLM release evidence in unrestricted CI
 
 ```text
 Contract -> Worker/Sub-agent -> Candidate -> Projection/Method -> Asset/Trace
@@ -113,11 +116,11 @@ Focus: make the single-node runtime durable, resumable, protocolized, and safer.
 - [x] 040 gate test suite for boundary, persistence, recovery, claim, and public-claim checks
 - [x] Release packaging and distribution checks
 
-### Deferred to v0.4.x
+### Deferred beyond the local reference runtime
 
 - [ ] Real cryptographic signer/verifier interface
 - [ ] Trust policy over signer, origin, trust tier, labels, tool scope, and reserved prefixes
-- [ ] Broader crash-injection and concurrent-worker stress tests
+- [x] Crash-injection and concurrent-worker stress tests for local SQLite
 
 ## v0.5 - Local Productivity Formal Release
 
@@ -136,6 +139,10 @@ candidate/fact boundary.
 - [x] Stable skill loading as assets (`aig skill load/list`)
 - [x] Stable label-injected skill assets
 - [x] Capability assets for tools, MCP, memory, and persona modules
+- [x] Immutable RuntimeRecord log and deterministic projection reconstruction
+- [x] Transactional claim/renew/package/submit protocol with fencing epochs
+- [x] Same-machine active-active worker processes over one SQLite domain
+- [x] Engine-as-Worker adapter with isolated inner fact domain
 - [ ] PyPI publish after API stabilizes
 
 ## v0.6 - Asset Management and Evaluation
@@ -148,12 +155,13 @@ candidate/fact boundary.
 - [ ] Real-world LLM benchmarks
 - [ ] Reproducible benchmark suite for output quality evaluation
 
-## v0.7+ - Distributed and Production Hardening
+## v0.7+ - Cross-Machine Distribution and Production Hardening
 
-- [ ] Full-hash distributed identity
-- [ ] Worker registry and heartbeat
-- [ ] Worker leases and stale-worker detection
-- [ ] Concurrent execution and transactional store guarantees
+- [x] Full-hash v3 Contract identity for current runtime security fields
+- [x] Versioned local worker registry
+- [x] Local worker leases, renewal, fencing, and stale-claim recovery
+- [x] Same-machine concurrent execution and SQLite transaction guarantees
+- [ ] Remote Store adapter, discovery, consensus, and cross-machine leases
 - [ ] Fuzz tests for protocol, authority, and replay
 - [ ] Deployment docs and security model
 

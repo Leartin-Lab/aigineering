@@ -43,18 +43,34 @@ authority rejection, or protected-name collision — is recorded with a
 ## 6. Methods are explicit subtasks
 
 Planning, replanning, retry, and tool execution enter the system as method
-contracts. The parent task is suspended while the method contract produces a
-method asset. Method handlers operate through `MethodRuntime`, not direct
-Engine private state.
+contracts. Method results and follow-up work are Assets and new Contracts; no
+production scheduler depends on an Engine-owned waiting/suspended state.
+Method handlers operate through `MethodRuntime`, not Engine private state.
 
 ## 7. Worker pull submission is claim-bound
 
 Operational worker execution uses a `WorkerPackage` and `CandidateEnvelope`.
 SQLite enforces one active worker claim per contract. Submission validates the
-claim, worker identity, lease, and package binding before projection.
+claim, worker identity, fencing epoch, lease, and package binding before
+projection. A failed invocation or expired lease becomes a durable terminal
+fact and schedules a new recovery Contract.
 
 ## 8. Commit is transactional on the SQLite path
 
-For SQLite-backed worker submission, accepted assets, trace events, idempotency,
-and claim transition commit in one database transaction. A mid-commit failure
-rolls the whole submission back.
+For SQLite-backed worker submission, Candidate, projection, accepted assets,
+trace events, idempotency, terminal facts, and claim transition commit in one
+database transaction. A mid-commit failure rolls the whole submission back.
+
+## 9. Runtime progress is reconstructable
+
+Contract, Asset, Trace, claim, worker-registration, idempotency, and replacement
+materializations are projections of immutable runtime records. Deleting and
+rebuilding those views must preserve the semantic digest. Process snapshots and
+runtime heartbeat rows are not execution authority.
+
+## 10. No unfinished work ends silently
+
+No enabled work is not equivalent to success. Missing inputs, capability gaps,
+budget exhaustion, provider failure, malformed provider output, expired claims,
+and terminal conflicts are explicit blockers or failure facts. CLI/API outcomes
+must remain non-success until declared outputs are satisfied.
