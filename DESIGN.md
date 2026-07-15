@@ -132,6 +132,9 @@ Candidates, a Genesis trust root, one commitment reducer, and plugin-produced
 ordinary tasks. Until that change closes, this file remains authoritative about
 what is actually supported.
 
+ADR-011 records the stable Candidate-native and plugin direction. It does not
+make unfinished migration items part of current runtime truth.
+
 ## Verification evidence
 
 Architecture constraints live in `tests/architecture/`. Release-grade evidence

@@ -21,6 +21,11 @@ def test_design_truth_and_active_change_are_present():
         "## Exit criteria",
     ):
         assert section in change
+    adr = (
+        ROOT / "docs/adr/ADR-011-candidate-native-plugin-runtime.md"
+    ).read_text(encoding="utf-8")
+    assert "Status: Accepted; migration in progress" in adr
+    assert "current implemented truth" in adr
 
 
 def test_legacy_runtime_files_stay_out_of_release_artifacts():

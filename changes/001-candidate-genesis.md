@@ -2,6 +2,7 @@
 
 Status: Implementing
 Target: 0.5.0 stable
+Public decision: `docs/adr/ADR-011-candidate-native-plugin-runtime.md`
 
 ## Problem
 
