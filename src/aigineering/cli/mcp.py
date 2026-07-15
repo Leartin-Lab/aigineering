@@ -9,12 +9,15 @@ from typing import Any
 import click
 
 from aigineering.cli._common import _output_json, _persistent_store
+from aigineering.cli._candidate import (
+    asset_proposal_effect,
+    commit_local_effect,
+    require_accepted,
+)
 from aigineering.core.capability_descriptors import (
     create_mcp_descriptor,
     verify_descriptor,
 )
-from aigineering.core.runtime_ingress import RuntimeIngress
-from aigineering.core.trace import create_entry
 
 MCP_PREFIX = "_mcp_"
 
@@ -90,27 +93,16 @@ def mcp_add(
         )
 
     store = _persistent_store()
-    ingress = RuntimeIngress(store, store)
-    ingress.accept_asset(descriptor, source="mcp_capability", allow_protected=True)
-    store.append(
-        create_entry(
-            contract_id="control_plane",
-            event_type="asset_injected",
-            parent_id=descriptor.id,
-            relation_type="mcp_capability",
-            relation_target=descriptor.name,
-            accepted_fragments=[
-                json.dumps(
-                    {
-                        "asset_id": descriptor.id,
-                        "origin": descriptor.origin,
-                        "trust_tier": descriptor.trust_tier,
-                    },
-                    sort_keys=True,
-                )
-            ],
+    try:
+        require_accepted(
+            commit_local_effect(
+                store,
+                asset_proposal_effect(descriptor),
+                idempotency_key=f"mcp:{descriptor.id}",
+            )
         )
-    )
+    except (LookupError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
 
     if as_json:
         _output_json(

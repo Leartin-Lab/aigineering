@@ -3,10 +3,33 @@
 import json
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 
 from aigineering.cli.main import cli
 from aigineering.core.sqlite_store import SQLiteStore
+
+
+@pytest.fixture(autouse=True)
+def initialize_candidate_domain_before_capability_publication(monkeypatch):
+    original = CliRunner.invoke
+
+    def invoke(runner, command, args=None, *positional, **kwargs):
+        effective = list(args or ())
+        if (
+            effective[:2]
+            in (
+                ["capability", "add-tool"],
+                ["capability", "add-memory"],
+                ["capability", "add-persona"],
+            )
+            and not Path(".aig/identity/root.ed25519").exists()
+        ):
+            initialized = original(runner, command, ["domain", "init"])
+            assert initialized.exit_code == 0, initialized.output
+        return original(runner, command, args, *positional, **kwargs)
+
+    monkeypatch.setattr(CliRunner, "invoke", invoke)
 
 
 def test_capability_add_tool_list_show(tmp_path: Path):
@@ -48,11 +71,9 @@ def test_capability_add_tool_list_show(tmp_path: Path):
         assert content["sealed_config_ref"] == ""
 
         store = SQLiteStore(".aig/store.db")
-        injected = store.get_by_event_type("asset_injected")
+        injected = store.get_by_event_type("candidate_committed")
         assert any(
-            e.relation_type == "tool_capability"
-            and e.relation_target == "_tool_capability_lookup"
-            for e in injected
+            "_tool_capability_lookup" in e.accepted_asset_names for e in injected
         )
 
 

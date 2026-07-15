@@ -94,6 +94,11 @@ Administrative `aig recover --recreate` publishes its replacement Contract via
 the same signed `contract.declare` path. Recovery cancellation still uses the
 legacy Method terminal transition and remains an active migration item.
 
+Protected capability and MCP descriptor Assets reuse `asset.propose`. A
+protected name derives an additional `asset.publish.protected` requirement;
+ordinary asset publishers cannot acquire it from payload fields. The local
+Genesis owner is explicitly granted this administrative capability.
+
 The commitment coordinator authenticates, dispatches, records decisions, and
 commits atomically; it does not parse individual effect payloads. Built-in
 effect projectors and Contract admission policy are separate pure modules. An

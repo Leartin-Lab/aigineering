@@ -103,6 +103,18 @@ def test_recovery_recreate_publishes_contract_candidate():
     assert "RuntimeIngress" not in recreate
 
 
+def test_capability_and_mcp_descriptors_use_protected_asset_candidates():
+    for relative in (
+        "src/aigineering/cli/capability.py",
+        "src/aigineering/cli/mcp.py",
+    ):
+        source = (ROOT / relative).read_text(encoding="utf-8")
+        assert "commit_local_effect" in source
+        assert "asset_proposal_effect" in source
+        assert "accept_asset" not in source
+        assert "RuntimeIngress" not in source
+
+
 def test_commitment_coordinator_does_not_own_effect_semantics():
     path = ROOT / "src/aigineering/core/commitment.py"
     source = path.read_text(encoding="utf-8")

@@ -249,11 +249,24 @@ def test_asset_effect_rejects_protected_namespace():
     decision = reduce_candidate(candidate, genesis, verifier_factory=_verifier_factory)
 
     assert decision.accepted is False
-    assert "protected prefix" in next(
+    assert "asset.publish.protected" in next(
         record.payload["reason"]
         for record in decision.runtime_records
         if record.record_type == "candidate.rejected"
     )
+
+    privileged_genesis, privileged_candidate = _proposal(
+        capabilities=("asset.publish", "asset.publish.protected"),
+        effect=CandidateEffect(
+            "asset.propose", {"asset": {"name": "_sys_allowed", "content": "x"}}
+        ),
+    )
+    privileged = reduce_candidate(
+        privileged_candidate,
+        privileged_genesis,
+        verifier_factory=_verifier_factory,
+    )
+    assert privileged.accepted is True
 
 
 def test_contract_publisher_cannot_self_grant_protected_minting_authority():

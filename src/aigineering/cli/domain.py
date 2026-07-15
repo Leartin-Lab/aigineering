@@ -69,7 +69,11 @@ def domain_init(domain_name: str, actor_id: str, key_id: str, as_json: bool) -> 
                     key_id,
                     signer.kind,
                     signer.signer_id,
-                    ("asset.publish", "contract.publish"),
+                    (
+                        "asset.publish",
+                        "asset.publish.protected",
+                        "contract.publish",
+                    ),
                 )
             ],
             "policy:bootstrap-v1",

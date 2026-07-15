@@ -84,8 +84,6 @@ def project_asset_proposal(
     if not name:
         raise ValueError("asset.propose asset.name must not be empty")
     prefix = matched_reserved_prefix(name)
-    if prefix is not None:
-        raise ValueError(f"Asset name {name!r} uses protected prefix {prefix!r}")
     content_hash = hash_asset_content(name, content)
     asset = sign_asset(
         Asset(
@@ -112,6 +110,9 @@ def project_asset_proposal(
         relation_target=asset.id,
         assets=(asset,),
         accepted_asset_names=(asset.name,),
+        additional_capabilities=(
+            ("asset.publish.protected",) if prefix is not None else ()
+        ),
     )
 
 

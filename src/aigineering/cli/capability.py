@@ -9,14 +9,17 @@ from typing import Any
 import click
 
 from aigineering.cli._common import _output_json, _persistent_store
+from aigineering.cli._candidate import (
+    asset_proposal_effect,
+    commit_local_effect,
+    require_accepted,
+)
 from aigineering.core.capability_descriptors import (
     create_memory_descriptor,
     create_persona_descriptor,
     create_tool_descriptor,
     verify_descriptor,
 )
-from aigineering.core.runtime_ingress import RuntimeIngress
-from aigineering.core.trace import create_entry
 
 _PREFIXES = (
     "_tool_capability_",
@@ -47,27 +50,16 @@ def _store_descriptor(descriptor, kind: str) -> None:
             "Capability descriptor failed trust gate; use trust_tier >= configured."
         )
     store = _persistent_store()
-    ingress = RuntimeIngress(store, store)
-    ingress.accept_asset(descriptor, source=f"{kind}_capability", allow_protected=True)
-    store.append(
-        create_entry(
-            contract_id="control_plane",
-            event_type="asset_injected",
-            parent_id=descriptor.id,
-            relation_type=f"{kind}_capability",
-            relation_target=descriptor.name,
-            accepted_fragments=[
-                json.dumps(
-                    {
-                        "asset_id": descriptor.id,
-                        "origin": descriptor.origin,
-                        "trust_tier": descriptor.trust_tier,
-                    },
-                    sort_keys=True,
-                )
-            ],
+    try:
+        require_accepted(
+            commit_local_effect(
+                store,
+                asset_proposal_effect(descriptor),
+                idempotency_key=f"capability:{kind}:{descriptor.id}",
+            )
         )
-    )
+    except (LookupError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
 
 
 def _descriptor_json(asset) -> dict[str, object]:
