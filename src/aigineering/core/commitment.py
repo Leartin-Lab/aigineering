@@ -224,19 +224,6 @@ class CandidateCommitter:
         decision = reduce_candidate(
             candidate, genesis, verifier_factory=verifier_factory
         )
-        already_recorded = any(
-            (
-                record.record_type == "candidate.received"
-                and record.payload["candidate_id"] == candidate.id
-            )
-            or (
-                record.record_type == "candidate.authentication_rejected"
-                and record.payload["claimed_candidate_id"] == candidate.id
-            )
-            for _, record in self._store.scan_runtime_records()
-        )
-        if already_recorded:
-            return decision
         if decision.assets:
             from aigineering.core.fact_reducer import FactReducer
 

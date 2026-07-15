@@ -60,9 +60,9 @@ This is a migration milestone, not 0.5 release acceptance.
   several demo/setup paths still use compatibility RuntimeIngress.
 - Method runtime/registry/handlers are still shipped; plan/replan/recovery/tool
   have not yet become ordinary plugins.
-- Candidate idempotency lookup currently scans RuntimeRecords and needs a
-  Store-level indexed projection before load testing.
+- The milestone report predates commit `cc384d5`; that follow-up proved
+  concurrent SQLite idempotency and removed the linear Candidate preflight
+  scan. Dedicated throughput/load characterization is still pending.
 - Cross-process concurrent Candidate commitment has not yet received a dedicated
   race/crash-injection acceptance test.
 - No live-LLM productivity claim is renewed by this milestone.
-

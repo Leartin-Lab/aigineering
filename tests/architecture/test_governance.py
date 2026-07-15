@@ -79,4 +79,5 @@ def test_commitment_coordinator_does_not_own_effect_semantics():
 
     assert "asset.propose" not in source
     assert "contract.declare" not in source
+    assert "scan_runtime_records" not in source
     assert len(source.splitlines()) < 300

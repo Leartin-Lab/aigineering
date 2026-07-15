@@ -92,7 +92,8 @@ Implementation progress:
 - Complete: two independent SQLite connections can commit the same Asset
   Candidate concurrently while producing one Asset, one Candidate receipt/head,
   and one terminal consequence. Deterministic reducer consequences make the
-  database transaction—not the preflight scan—the correctness boundary.
+  database transaction the correctness boundary; the former linear preflight
+  RuntimeRecord scan has been deleted and is prohibited by architecture test.
 - Complete: cryptography is a base dependency; the runtime does not silently
   substitute a non-authenticating deterministic seal.
 - Pending: migrate remaining control-plane and worker submission effects.
