@@ -319,34 +319,6 @@ def _run_task_pool(
                     set_output(name, output)
         host = ensure_local_worker_host(store, worker)
         deadline = time.monotonic() + wait_timeout
-        if target_task_id is None:
-            claimed = claim_next_package(store, worker_id=host.worker_id)
-            if claimed is None:
-                _emit_run_result(
-                    {
-                        "ok": False,
-                        "status": "idle",
-                        "error": "No enabled unclaimed contract is available.",
-                        "cycles": [],
-                    },
-                    json_output,
-                )
-                raise click.exceptions.Exit(1)
-            result = execute_claimed_package(claimed, host, store)
-            status = project_task_status(claimed.contract, store)
-            status["ok"] = status["status"] == "completed"
-            status["submission_status"] = result["status"]
-            status["cycles"] = [
-                {
-                    "contracts": [claimed.contract.id],
-                    "trace_events": len(store.get_by_contract(claimed.contract.id)),
-                }
-            ]
-            _emit_run_result(status, json_output)
-            if not status["ok"]:
-                raise click.exceptions.Exit(1)
-            return
-
         from aigineering.core.candidate_publisher import CandidatePublisherRegistry
 
         candidate_publishers = CandidatePublisherRegistry(
@@ -373,22 +345,79 @@ def _run_task_pool(
                         ("asset.publish", "asset.publish.protected"),
                     ),
                 ),
+                (
+                    "recovery.publish.v1",
+                    ensure_local_plugin_publisher(
+                        store,
+                        "recovery.publish.v1",
+                        (
+                            "asset.publish",
+                            "asset.publish.protected",
+                            "contract.publish",
+                            "contract.publish.protected",
+                        ),
+                    ),
+                ),
             )
         )
+        if target_task_id is None:
+            claimed = claim_next_package(
+                store,
+                worker_id=host.worker_id,
+                candidate_publishers=candidate_publishers,
+            )
+            if claimed is None:
+                _emit_run_result(
+                    {
+                        "ok": False,
+                        "status": "idle",
+                        "error": "No enabled unclaimed contract is available.",
+                        "cycles": [],
+                    },
+                    json_output,
+                )
+                raise click.exceptions.Exit(1)
+            result = execute_claimed_package(
+                claimed,
+                host,
+                store,
+                candidate_publishers=candidate_publishers,
+            )
+            status = project_task_status(claimed.contract, store)
+            status["ok"] = status["status"] == "completed"
+            status["submission_status"] = result["status"]
+            status["cycles"] = [
+                {
+                    "contracts": [claimed.contract.id],
+                    "trace_events": len(store.get_by_contract(claimed.contract.id)),
+                }
+            ]
+            _emit_run_result(status, json_output)
+            if not status["ok"]:
+                raise click.exceptions.Exit(1)
+            return
+
         while True:
             before_trace_count = len(store.get_all())
             registry = _default_completion_registry()
-            recovered = process_rejected_submissions(store)
+            recovered = process_rejected_submissions(
+                store, candidate_publishers=candidate_publishers
+            )
             processed_before = process_method_completions(
                 store, registry, candidate_publishers=candidate_publishers
             )
-            claimed = claim_next_package(store, worker_id=host.worker_id)
+            claimed = claim_next_package(
+                store,
+                worker_id=host.worker_id,
+                candidate_publishers=candidate_publishers,
+            )
             submission: dict | None = None
             if claimed is not None:
                 submission = execute_claimed_package(
                     claimed,
                     host,
                     store,
+                    candidate_publishers=candidate_publishers,
                 )
             processed_after = process_method_completions(
                 store, registry, candidate_publishers=candidate_publishers

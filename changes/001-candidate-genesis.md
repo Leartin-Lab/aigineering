@@ -243,6 +243,10 @@ Implementation progress:
   dependency. Direct compatibility mutation now requires explicit ingress;
   Candidate-native completion cannot silently manufacture one when a publisher
   is missing.
+- Complete: local recovery replay publishes its recovery Contract and protected
+  failure-context Asset atomically through a dedicated recovery plugin actor.
+  Rejected projection, expired claim, provider failure, and malformed planning
+  result paths all accept the same explicit publisher registry.
 - Complete: recovery replayers fail loudly when durable rejection, expiration,
   or provider-failure facts lack the Contract/raw Candidate evidence required
   to derive their consequence. These broken causal chains can no longer be

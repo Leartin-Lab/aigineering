@@ -19,6 +19,12 @@ from aigineering.runtime import (
     process_worker_failures,
 )
 from aigineering.core.sqlite_store import SQLiteStore
+from aigineering.core.candidate_publisher import (
+    CandidatePublisher,
+    CandidatePublisherRegistry,
+)
+from aigineering.core.domain import initialize_genesis
+from aigineering.core.signing import Ed25519Signer
 from aigineering.core.submit import submit_candidate
 from aigineering.core.trace import create_entry
 from aigineering.core.record_conflict import ImmutableRecordConflict
@@ -29,6 +35,7 @@ from aigineering.core.worker_routing import (
     select_worker,
 )
 from aigineering.protocol.envelope import CandidateEnvelope
+from aigineering.protocol.candidate import ActorKey, create_genesis_manifest
 from aigineering.protocol.runtime_record import create_runtime_record
 from aigineering.protocol.types import Candidate, Contract
 from aigineering.protocol.wire import trace_entry_to_dict
@@ -264,8 +271,36 @@ def test_rejected_submission_recovery_replays_after_crash_gap():
     assert result["status"] == "rejected"
     assert not store.scan_runtime_records(record_type="lifecycle.terminal")
 
-    assert process_rejected_submissions(store) == [contract.id]
-    assert process_rejected_submissions(store) == []
+    signer = Ed25519Signer()
+    actor = ActorKey(
+        "plugin:recovery.publish.v1",
+        "recovery-1",
+        signer.kind,
+        signer.signer_id,
+        (
+            "asset.publish",
+            "asset.publish.protected",
+            "contract.publish",
+            "contract.publish.protected",
+        ),
+    )
+    genesis = create_genesis_manifest(
+        "recovery-replay", (actor,), "policy:recovery-replay"
+    )
+    initialize_genesis(store, genesis)
+    publishers = CandidatePublisherRegistry(
+        (
+            (
+                "recovery.publish.v1",
+                CandidatePublisher(store, store, genesis, actor, signer),
+            ),
+        )
+    )
+
+    assert process_rejected_submissions(store, candidate_publishers=publishers) == [
+        contract.id
+    ]
+    assert process_rejected_submissions(store, candidate_publishers=publishers) == []
     terminal_records = store.scan_runtime_records(record_type="lifecycle.terminal")
     assert terminal_records[-1][1].payload["terminal"] == "failed"
     contracts = store.get_all_contracts()
@@ -274,6 +309,12 @@ def test_rejected_submission_recovery_replays_after_crash_gap():
         and child.origin == "recovery"
         for child in contracts
     ), contracts
+    recovery_receipts = [
+        record
+        for _, record in store.scan_runtime_records(record_type="candidate.received")
+        if record.payload.get("actor_id") == actor.actor_id
+    ]
+    assert len(recovery_receipts) == 1
     store.close()
 
 

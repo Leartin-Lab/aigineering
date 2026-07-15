@@ -6,6 +6,11 @@ import json
 from typing import TYPE_CHECKING
 
 from aigineering.core.ids import hash_contract_v3
+from aigineering.core.methods import system_asset
+from aigineering.protocol.effect_builders import (
+    asset_proposal_effect,
+    contract_declaration_effect,
+)
 from aigineering.protocol.types import Candidate, Contract
 
 if TYPE_CHECKING:
@@ -120,14 +125,42 @@ def schedule_method_result_recovery(
         minting_authority=authority,
         sensitive_input_policy=failed_contract.sensitive_input_policy,
     )
-    runtime.add_contract(recovery)
-    context_asset = runtime.mint_authorized_system_asset(
-        recovery,
+    context_template = system_asset(
         name=context_name,
         content=json.dumps(context, sort_keys=True, ensure_ascii=False),
         created_by=failed_contract.id,
         promptable=True,
     )
+    if runtime.can_publish_candidates("recovery.publish.v1"):
+        decision = runtime.publish_task_effects(
+            "recovery.publish.v1",
+            (
+                contract_declaration_effect(recovery),
+                asset_proposal_effect(context_template),
+            ),
+            idempotency_key=f"method-recovery:{failed_contract.id}:{result_asset.id}",
+            causal_parents=(result_asset.id,),
+        )
+        if decision is None or not decision.accepted:
+            runtime.record_rejection(
+                parent_id,
+                "method recovery Candidate publication was rejected",
+                relation_type=method_type,
+                relation_target=recovery.id,
+                authority_result="rejected",
+            )
+            return None
+        recovery = decision.contracts[0]
+        context_asset = decision.assets[0]
+    else:
+        runtime.add_contract(recovery)
+        context_asset = runtime.mint_authorized_system_asset(
+            recovery,
+            name=context_name,
+            content=context_template.content,
+            created_by=failed_contract.id,
+            promptable=True,
+        )
     runtime.append_trace(
         parent_id,
         "method_recovery_scheduled",
@@ -233,14 +266,42 @@ def schedule_projection_recovery(
         minting_authority=authority,
         sensitive_input_policy=failed_contract.sensitive_input_policy,
     )
-    runtime.add_contract(recovery)
-    context_asset = runtime.mint_authorized_system_asset(
-        recovery,
+    context_template = system_asset(
         name=context_name,
         content=json.dumps(context, sort_keys=True, ensure_ascii=False),
         created_by=failed_contract.id,
         promptable=True,
     )
+    if runtime.can_publish_candidates("recovery.publish.v1"):
+        decision = runtime.publish_task_effects(
+            "recovery.publish.v1",
+            (
+                contract_declaration_effect(recovery),
+                asset_proposal_effect(context_template),
+            ),
+            idempotency_key=f"projection-recovery:{failed_contract.id}",
+            causal_parents=(failed_contract.id,),
+        )
+        if decision is None or not decision.accepted:
+            runtime.record_rejection(
+                failed_contract.id,
+                "projection recovery Candidate publication was rejected",
+                relation_type="projection",
+                relation_target=recovery.id,
+                authority_result="rejected",
+            )
+            return None
+        recovery = decision.contracts[0]
+        context_asset = decision.assets[0]
+    else:
+        runtime.add_contract(recovery)
+        context_asset = runtime.mint_authorized_system_asset(
+            recovery,
+            name=context_name,
+            content=context_template.content,
+            created_by=failed_contract.id,
+            promptable=True,
+        )
     runtime.append_trace(
         failed_contract.id,
         "recovery_scheduled",

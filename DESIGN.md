@@ -252,6 +252,10 @@ FactReducer. MethodRuntime receives direct ingress only from the excluded legacy
 Engine or explicit compatibility tests; without one, direct Contract/Asset
 mutation fails and completion plugins must use their registered Candidate
 publisher.
+Local projection-, expiration-, provider-, and malformed-plan recovery now
+receives the same plugin publisher registry. Recovery Contract plus protected
+failure-context Asset commit as one signed `recovery.publish.v1` Candidate;
+publication rejection remains visible and the failed source is still terminal.
 Authentication, claim, policy, and binding failures append Candidate rejection
 records and Trace evidence before returning an error; an invalid worker result
 cannot disappear as an API-only failure.

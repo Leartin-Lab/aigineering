@@ -123,10 +123,11 @@ def claim_next_package(
     worker_id: str,
     lease_seconds: int = 60,
     contract_id: str | None = None,
+    candidate_publishers=None,
 ) -> ClaimedPackage | None:
     """Claim the next ready contract and return its worker package."""
     store = require_operational_store(store)
-    process_expired_claims(store)
+    process_expired_claims(store, candidate_publishers=candidate_publishers)
     available_names = {a.name for a in store.get_all_assets()}
     registered_worker = store.get_worker_registration(worker_id)
     policy_blockers: list[DisclosurePolicyError] = []
@@ -228,6 +229,7 @@ def execute_claimed_package(
     worker: MockWorker | LLMWorker | WorkerHost,
     store,
     trace_store=None,
+    candidate_publishers=None,
 ) -> dict:
     """Invoke a worker and submit its candidate envelope."""
     trace = trace_store if trace_store is not None else store
@@ -254,7 +256,7 @@ def execute_claimed_package(
                 retryable=retryable,
                 category=category,
             )
-            process_worker_failures(store)
+            process_worker_failures(store, candidate_publishers=candidate_publishers)
             raise WorkerInvocationError(
                 f"worker invocation failed with status {status_code}; "
                 "claim was released and recovery was scheduled"
@@ -286,11 +288,13 @@ def execute_claimed_package(
             worker.sign_envelope(envelope),
             store,
             trace_store=trace,
+            candidate_publishers=candidate_publishers,
         )
     return submit_candidate_envelope(
         envelope,
         store,
         trace_store=trace,
+        candidate_publishers=candidate_publishers,
     )
 
 
@@ -299,6 +303,7 @@ def submit_worker_proposal(
     store,
     *,
     trace_store=None,
+    candidate_publishers=None,
 ) -> dict:
     """Submit one WorkerHost-signed proposal, including transitional methods."""
     trace = trace_store if trace_store is not None else store
@@ -318,7 +323,9 @@ def submit_worker_proposal(
             envelope, authentication, store, trace
         )
         if result["status"] == "rejected":
-            process_rejected_submissions(store)
+            process_rejected_submissions(
+                store, candidate_publishers=candidate_publishers
+            )
         return result
     try:
         budget_consumed = sum(
@@ -359,6 +366,7 @@ def submit_candidate_envelope(
     store,
     *,
     trace_store=None,
+    candidate_publishers=None,
 ) -> dict:
     """Submit one already-produced Candidate through the shared protocol."""
     trace = trace_store if trace_store is not None else store
@@ -394,7 +402,7 @@ def submit_candidate_envelope(
         idempotency_key=envelope.idempotency_key,
     )
     if result["status"] == "rejected":
-        process_rejected_submissions(store)
+        process_rejected_submissions(store, candidate_publishers=candidate_publishers)
     return result
 
 
@@ -406,6 +414,7 @@ def _schedule_rejected_recovery(
     trace,
     *,
     record_terminal: bool = True,
+    candidate_publishers=None,
 ) -> None:
     budget = BudgetManager()
     for current in store.get_all_contracts():
@@ -416,6 +425,7 @@ def _schedule_rejected_recovery(
         trace=trace_manager,
         budget=budget,
         ingress=RuntimeIngress(store, trace, FactReducer(store, trace)),
+        candidate_publishers=candidate_publishers,
     )
     recovery = schedule_projection_recovery(
         runtime,
@@ -440,7 +450,7 @@ def _schedule_rejected_recovery(
         )
 
 
-def process_rejected_submissions(store) -> list[str]:
+def process_rejected_submissions(store, *, candidate_publishers=None) -> list[str]:
     """Replay missing recovery effects from immutable rejected projections."""
     processed: list[str] = []
     records = [record for _, record in store.scan_runtime_records()]
@@ -481,13 +491,14 @@ def process_rejected_submissions(store) -> list[str]:
             [dict(rejection) for rejection in payload["rejections"]],
             store,
             store,
+            candidate_publishers=candidate_publishers,
         )
         terminal_contracts.add(contract_id)
         processed.append(contract_id)
     return processed
 
 
-def process_expired_claims(store) -> list[str]:
+def process_expired_claims(store, *, candidate_publishers=None) -> list[str]:
     """Materialize expired leases and replay their recovery subtasks.
 
     Claim leases are sufficient evidence; runtime heartbeat ownership is not
@@ -605,6 +616,7 @@ def process_expired_claims(store) -> list[str]:
             store,
             store,
             record_terminal=False,
+            candidate_publishers=candidate_publishers,
         )
         marker = create_runtime_record(
             "claim_expiration.recovery_scheduled",
@@ -668,7 +680,7 @@ def _record_worker_invocation_failure(
     )
 
 
-def process_worker_failures(store) -> list[str]:
+def process_worker_failures(store, *, candidate_publishers=None) -> list[str]:
     """Replay recovery scheduling for durably failed provider invocations."""
     records = [record for _, record in store.scan_runtime_records()]
     processed_failure_ids = {
@@ -706,6 +718,7 @@ def process_worker_failures(store) -> list[str]:
             store,
             store,
             record_terminal=False,
+            candidate_publishers=candidate_publishers,
         )
         marker = create_runtime_record(
             "worker_failure.recovery_scheduled",

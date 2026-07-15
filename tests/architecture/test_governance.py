@@ -335,6 +335,20 @@ def test_production_completion_projection_has_no_direct_ingress():
     assert "FactReducer" not in completion
 
 
+def test_local_recovery_replay_publishes_contract_and_context_as_candidate():
+    recovery = (ROOT / "src/aigineering/core/method_handlers/recovery.py").read_text(
+        encoding="utf-8"
+    )
+    run = (ROOT / "src/aigineering/cli/run.py").read_text(encoding="utf-8")
+
+    assert 'can_publish_candidates("recovery.publish.v1")' in recovery
+    assert "contract_declaration_effect(recovery)" in recovery
+    assert "asset_proposal_effect(context_template)" in recovery
+    assert '"recovery.publish.v1"' in run
+    assert '"contract.publish.protected"' in run
+    assert '"asset.publish.protected"' in run
+
+
 def test_retry_delegation_does_not_ship_as_completion_registry_semantics():
     application = (ROOT / "src/aigineering/application.py").read_text(encoding="utf-8")
 
