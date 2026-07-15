@@ -126,7 +126,6 @@ class EngineWorker:
                         claimed,
                         worker,
                         inner,
-                        method_registry=registry,
                     )
                 except (ValueError, WorkerInvocationError):
                     return self._failure("inner worker produced an invalid submission")

@@ -9,7 +9,6 @@ from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from aigineering.application import (
-    default_method_registry as _default_method_registry,
     find_trace_for_session as _find_trace_for_session,
     latest_session_file as _latest_session_file,
     persistent_store as _persistent_store,
@@ -462,7 +461,6 @@ def submit_worker_candidate(body: CandidateProposalRequest):
         return submit_worker_proposal(
             proposal,
             store,
-            method_registry=_default_method_registry(),
         )
     except (ValueError, SubmitClaimError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

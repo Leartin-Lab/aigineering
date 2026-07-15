@@ -381,7 +381,6 @@ def _run_task_pool(
                     claimed,
                     host,
                     store,
-                    method_registry=registry,
                 )
             processed_after = process_method_completions(
                 store, registry, candidate_publishers=candidate_publishers

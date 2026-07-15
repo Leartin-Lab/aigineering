@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from aigineering.agent.mock import MockWorker
 from aigineering.agent.worker import WorkerHost
-from aigineering.application import default_method_registry
 from aigineering.core.candidate_publisher import publish_effect
 from aigineering.core.domain import initialize_genesis
 from aigineering.core.ids import hash_contract_v3
@@ -142,7 +141,6 @@ def test_signed_output_effect_cannot_be_reinterpreted_as_task_delegation():
         submit_worker_proposal(
             proposal,
             store,
-            method_registry=default_method_registry(),
         )
     except ValueError as exc:
         assert "requires a 'task.delegate' effect" in str(exc)

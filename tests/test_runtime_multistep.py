@@ -54,9 +54,7 @@ def test_plan_method_and_independent_child_complete_root_from_assets():
     worker.set_output("research_report", '/plan {"reason":"decompose"}')
     root_claim = claim_next_package(store, worker_id="worker", contract_id=root.id)
     assert root_claim is not None
-    scheduled = execute_claimed_package(
-        root_claim, worker, store, method_registry=registry
-    )
+    scheduled = execute_claimed_package(root_claim, worker, store)
     assert scheduled["status"] == "method_scheduled"
 
     plan_contract = store.get_contract(scheduled["child_contract_id"])
@@ -86,9 +84,7 @@ def test_plan_method_and_independent_child_complete_root_from_assets():
         store, worker_id="worker", contract_id=plan_contract.id
     )
     assert plan_claim is not None
-    plan_result = execute_claimed_package(
-        plan_claim, worker, store, method_registry=registry
-    )
+    plan_result = execute_claimed_package(plan_claim, worker, store)
     assert plan_result["status"] == "accepted"
 
     assert process_method_completions(
@@ -115,9 +111,7 @@ def test_plan_method_and_independent_child_complete_root_from_assets():
     worker.set_output(child.name, '/exec {"final_report":"complete report"}')
     child_claim = claim_next_package(store, worker_id="worker", contract_id=child.id)
     assert child_claim is not None
-    child_result = execute_claimed_package(
-        child_claim, worker, store, method_registry=registry
-    )
+    child_result = execute_claimed_package(child_claim, worker, store)
     assert child_result["status"] == "accepted"
 
     assert store.has_asset_named("final_report")

@@ -228,7 +228,6 @@ def execute_claimed_package(
     worker: MockWorker | LLMWorker | WorkerHost,
     store,
     trace_store=None,
-    method_registry=None,
 ) -> dict:
     """Invoke a worker and submit its candidate envelope."""
     trace = trace_store if trace_store is not None else store
@@ -287,13 +286,11 @@ def execute_claimed_package(
             worker.sign_envelope(envelope),
             store,
             trace_store=trace,
-            method_registry=method_registry,
         )
     return submit_candidate_envelope(
         envelope,
         store,
         trace_store=trace,
-        method_registry=method_registry,
     )
 
 
@@ -302,7 +299,6 @@ def submit_worker_proposal(
     store,
     *,
     trace_store=None,
-    method_registry=None,
 ) -> dict:
     """Submit one WorkerHost-signed proposal, including transitional methods."""
     trace = trace_store if trace_store is not None else store
@@ -363,7 +359,6 @@ def submit_candidate_envelope(
     store,
     *,
     trace_store=None,
-    method_registry=None,
 ) -> dict:
     """Submit one already-produced Candidate through the shared protocol."""
     trace = trace_store if trace_store is not None else store

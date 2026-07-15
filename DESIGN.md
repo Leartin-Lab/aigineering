@@ -224,7 +224,9 @@ transaction only commits that projection with the source claim transition.
 The submission path no longer queries MethodRegistry to authorize delegation;
 the plugin owns the closed supported-action set and rejects unknown actions.
 MethodRegistry remains only in the completion compatibility layer while those
-handlers move behind completion plugins.
+handlers move behind completion plugins. Worker execution, CLI submission, and
+HTTP submission no longer accept or construct a method registry; task
+publication is protocol behavior, not application handler configuration.
 Authentication, claim, policy, and binding failures append Candidate rejection
 records and Trace evidence before returning an error; an invalid worker result
 cannot disappear as an API-only failure.

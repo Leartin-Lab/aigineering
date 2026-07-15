@@ -256,7 +256,6 @@ def _run_demo(
         host,
         store,
         trace_store,
-        method_registry=default_method_registry(),
     )
 
     # Session JSONL is an audit export of the durable runtime trace, not an
