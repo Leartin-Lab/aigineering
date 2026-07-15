@@ -261,6 +261,10 @@ Durable local key provisioning now lives in application-level
 publisher registry. The HTTP submission endpoint never reads local private keys
 or performs direct recovery. A rejected HTTP Candidate remains a replayable
 fact for an independently configured recovery worker/runtime.
+EngineWorker constructs the same publisher registry from its isolated inner
+domain actor (without filesystem keys) and passes it through recovery,
+completion, claim, and execution. Nested execution therefore does not regain a
+direct recovery write path.
 Authentication, claim, policy, and binding failures append Candidate rejection
 records and Trace evidence before returning an error; an invalid worker result
 cannot disappear as an API-only failure.

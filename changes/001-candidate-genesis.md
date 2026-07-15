@@ -252,6 +252,9 @@ Implementation progress:
   provisions server-local private keys nor falls back to direct recovery; its
   rejected Candidate fact is available for an independently configured replay
   runtime.
+- Complete: EngineWorker derives an in-memory publisher registry from its
+  isolated domain actor and threads it through recovery, completion, claim, and
+  execution. Nested runtimes no longer fall back to direct recovery mutation.
 - Complete: recovery replayers fail loudly when durable rejection, expiration,
   or provider-failure facts lack the Contract/raw Candidate evidence required
   to derive their consequence. These broken causal chains can no longer be

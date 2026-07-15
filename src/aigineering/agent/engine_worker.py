@@ -13,7 +13,11 @@ from aigineering.runtime import (
     process_method_completions,
     process_rejected_submissions,
 )
-from aigineering.core.candidate_publisher import publish_effect
+from aigineering.core.candidate_publisher import (
+    CandidatePublisher,
+    CandidatePublisherRegistry,
+    publish_effect,
+)
 from aigineering.core.domain import initialize_genesis
 from aigineering.core.ids import hash_contract_v3
 from aigineering.core.method_handlers.fail import FailMethodHandler
@@ -70,6 +74,7 @@ class EngineWorker:
                     "asset.publish",
                     "asset.publish.protected",
                     "contract.publish",
+                    "contract.publish.protected",
                 ),
             )
             genesis = create_genesis_manifest(
@@ -78,6 +83,18 @@ class EngineWorker:
                 "policy:engine-worker-inner-v1",
             )
             initialize_genesis(inner, genesis)
+            publisher = CandidatePublisher(inner, inner, genesis, actor_key, signer)
+            candidate_publishers = CandidatePublisherRegistry(
+                tuple(
+                    (plugin_id, publisher)
+                    for plugin_id in (
+                        "continuation.publish.v1",
+                        "fail.report.v1",
+                        "planning.expand.v1",
+                        "recovery.publish.v1",
+                    )
+                )
+            )
             for asset in disclosed_assets:
                 if not verify_asset_seal(asset):
                     return self._failure(
@@ -108,11 +125,16 @@ class EngineWorker:
                 return self._failure("inner domain rejected root contract")
             registry = _method_registry()
             for _ in range(self._max_steps):
-                process_rejected_submissions(inner)
-                process_method_completions(inner, registry)
+                process_rejected_submissions(
+                    inner, candidate_publishers=candidate_publishers
+                )
+                process_method_completions(
+                    inner, registry, candidate_publishers=candidate_publishers
+                )
                 claimed = claim_next_package(
                     inner,
                     worker_id=f"{self.worker_id}:delegate",
+                    candidate_publishers=candidate_publishers,
                 )
                 if claimed is None:
                     break
@@ -126,10 +148,13 @@ class EngineWorker:
                         claimed,
                         worker,
                         inner,
+                        candidate_publishers=candidate_publishers,
                     )
                 except (ValueError, WorkerInvocationError):
                     return self._failure("inner worker produced an invalid submission")
-                process_method_completions(inner, registry)
+                process_method_completions(
+                    inner, registry, candidate_publishers=candidate_publishers
+                )
 
             outputs: dict[str, str] = {}
             for name in contract.outputs:

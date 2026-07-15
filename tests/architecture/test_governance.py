@@ -275,6 +275,8 @@ def test_engine_worker_bootstraps_inner_domain_through_candidate_publication():
     assert "RuntimeIngress" not in source
     assert "accept_asset" not in source
     assert "accept_contract" not in source
+    assert "CandidatePublisherRegistry" in source
+    assert "candidate_publishers=candidate_publishers" in source
 
 
 def test_commitment_coordinator_does_not_own_effect_semantics():
