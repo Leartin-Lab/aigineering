@@ -95,7 +95,7 @@ def test_continuation_manager_publishes_through_registered_plugin_candidate():
         store=store,
         budget_mgr=budget,
         trace_mgr=TraceManager(trace),
-        method_registry=None,
+        completion_registry=None,
         completed=set(),
         suspended={parent.id},
         method_scheduled=set(),

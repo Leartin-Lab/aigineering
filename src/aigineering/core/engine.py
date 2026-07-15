@@ -149,7 +149,7 @@ class Engine:
             store=self._store,
             budget_mgr=self._budget_mgr,
             trace_mgr=self._trace_mgr,
-            method_registry=self._method_registry,
+            completion_registry=self._method_registry,
             completed=self._completed,
             suspended=self._suspended,
             method_scheduled=self._method_scheduled,

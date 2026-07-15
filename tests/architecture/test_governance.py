@@ -334,3 +334,5 @@ def test_retry_delegation_does_not_ship_as_completion_registry_semantics():
     assert 'registry.register("retry"' not in application
     assert "default_method_registry" not in application
     assert "default_completion_registry" in application
+    assert "MethodRegistry" not in application
+    assert "CompletionRegistry" in application

@@ -894,7 +894,7 @@ def _submit_claimed_method(
 
 
 def process_method_completions(
-    store, method_registry, *, candidate_publishers=None
+    store, completion_registry, *, candidate_publishers=None
 ) -> list[str]:
     """Project completed method Contracts into their deterministic effects."""
     processed: list[str] = []
@@ -906,7 +906,7 @@ def process_method_completions(
         store=store,
         budget_mgr=budget,
         trace_mgr=trace_manager,
-        method_registry=method_registry,
+        completion_registry=completion_registry,
         completed=set(),
         suspended=set(),
         method_scheduled=set(),

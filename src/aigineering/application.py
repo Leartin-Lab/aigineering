@@ -11,7 +11,7 @@ from aigineering.core.method_handlers.fail import FailMethodHandler
 from aigineering.core.method_handlers.plan import PlanMethodHandler
 from aigineering.core.method_handlers.replan import ReplanMethodHandler
 from aigineering.core.method_handlers.tool import ToolMethodHandler
-from aigineering.core.method_registry import MethodRegistry
+from aigineering.plugins import CompletionRegistry
 from aigineering.core.session import SessionStore
 from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.core.trace import JsonLTraceStore
@@ -23,9 +23,9 @@ def persistent_store(db_path: str = ".aig/store.db") -> SQLiteStore:
     return SQLiteStore(db_path=db_path)
 
 
-def default_completion_registry() -> MethodRegistry:
+def default_completion_registry() -> CompletionRegistry:
     """Build the transitional application-level completion registry."""
-    registry = MethodRegistry()
+    registry = CompletionRegistry()
     registry.register("plan", PlanMethodHandler())
     registry.register("replan", ReplanMethodHandler())
     registry.register("tool", ToolMethodHandler())

@@ -230,6 +230,9 @@ publication is protocol behavior, not application handler configuration.
 Application composition now names this residual surface
 `default_completion_registry` and excludes retry: retry delegation creates its
 ordinary replacement task immediately and has no system-task completion phase.
+The application uses the minimal public `CompletionPlugin`/
+`CompletionRegistry` protocol, which exposes only `handle_completion`; the old
+MethodRegistry is confined to the source-only legacy Engine compatibility path.
 Authentication, claim, policy, and binding failures append Candidate rejection
 records and Trace evidence before returning an error; an invalid worker result
 cannot disappear as an API-only failure.

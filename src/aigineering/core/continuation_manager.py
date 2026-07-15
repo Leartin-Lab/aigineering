@@ -21,7 +21,7 @@ from aigineering.protocol.types import Contract
 if TYPE_CHECKING:
     from aigineering.core.budget_manager import BudgetManager
     from aigineering.core.labels import Label
-    from aigineering.core.method_registry import MethodRegistry
+    from aigineering.plugins import CompletionRegistry
     from aigineering.core.runtime_ingress import RuntimeIngress
     from aigineering.core.store import StoreProtocol
     from aigineering.core.tools import ToolRegistry
@@ -45,7 +45,7 @@ class ContinuationManager:
         store: StoreProtocol,
         budget_mgr: BudgetManager,
         trace_mgr: TraceManager,
-        method_registry: MethodRegistry | None,
+        completion_registry: CompletionRegistry | None,
         completed: set[str],
         suspended: set[str],
         method_scheduled: set[str],
@@ -62,7 +62,7 @@ class ContinuationManager:
         self._store = store
         self._budget_mgr = budget_mgr
         self._trace_mgr = trace_mgr
-        self._method_registry = method_registry
+        self._completion_registry = completion_registry
         self._completed = completed
         self._suspended = suspended
         self._method_scheduled = method_scheduled
@@ -99,10 +99,10 @@ class ContinuationManager:
             if asset.promptable
         ]
         method_type = method_payload(contract).get("method")
-        if self._method_registry is not None and isinstance(method_type, str):
-            handler = self._method_registry.get(method_type)
-            if handler is not None and handler.can_handle(method_type):
-                completion = getattr(handler, "handle_completion", None)
+        if self._completion_registry is not None and isinstance(method_type, str):
+            plugin = self._completion_registry.get(method_type)
+            if plugin is not None and plugin.can_handle(method_type):
+                completion = getattr(plugin, "handle_completion", None)
                 if callable(completion):
                     runtime = MethodRuntime(
                         store=self._store,

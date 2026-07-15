@@ -23,7 +23,7 @@ from aigineering.application import (
 )
 from aigineering.cli._candidate import commit_local_effect, require_accepted
 from aigineering.cli.identity import ensure_local_domain
-from aigineering.core.method_registry import MethodRegistry
+from aigineering.plugins import CompletionRegistry
 from aigineering.core.store import StoreProtocol
 from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.core.store import require_operational_store
@@ -54,7 +54,7 @@ def _persistent_store() -> SQLiteStore:
     return persistent_store()
 
 
-def _default_completion_registry() -> MethodRegistry:
+def _default_completion_registry() -> CompletionRegistry:
     """Return the transitional completion registry for CLI execution."""
     return default_completion_registry()
 

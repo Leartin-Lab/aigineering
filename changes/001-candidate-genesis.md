@@ -222,6 +222,10 @@ Implementation progress:
 - Complete: application composition exposes a completion registry, not a
   method-publication registry. Retry was removed from it because retry is fully
   projected by TaskDelegationPlugin and has no completion behavior.
+- Complete: application/runtime completion projection uses a minimal
+  CompletionPlugin/CompletionRegistry protocol with no task-publication API.
+  The old MethodRegistry is now referenced only by the source-only legacy
+  Engine compatibility path.
 - Complete: recovery replayers fail loudly when durable rejection, expiration,
   or provider-failure facts lack the Contract/raw Candidate evidence required
   to derive their consequence. These broken causal chains can no longer be
