@@ -464,6 +464,10 @@ def test_submit_rejects_tampered_signed_worker_candidate():
         persisted = SQLiteStore(".aig/store.db")
         assert persisted.get_assets_by_name("final_report") == []
         assert persisted.get_claim(contract.id)["status"] == "active"
+        assert persisted.scan_runtime_records(
+            record_type="candidate.authentication_rejected"
+        )
+        assert persisted.get_by_event_type("candidate_authentication_rejected")
 
 
 def test_submit_without_claim_rejected_for_sqlite_store():

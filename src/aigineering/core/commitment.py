@@ -70,7 +70,7 @@ def _candidate_trace(**kwargs) -> TraceEntry:
     return replace(create_entry(**kwargs), timestamp="")
 
 
-def _rejection_decision(
+def candidate_rejection_decision(
     candidate: CandidateProposal,
     receipt: RuntimeRecord,
     reason: str,
@@ -100,7 +100,7 @@ def _rejection_decision(
     )
 
 
-def _authentication_rejection_decision(
+def authentication_rejection_decision(
     candidate: CandidateProposal, reason: str
 ) -> CommitmentDecision:
     rejection = create_runtime_record(
@@ -146,7 +146,7 @@ def reduce_candidate(
             actor_keys=effective_actor_keys,
         )
     except ValueError as exc:
-        return _authentication_rejection_decision(candidate, str(exc))
+        return authentication_rejection_decision(candidate, str(exc))
     try:
         projection = project_effect_batch(
             candidate,
@@ -154,7 +154,7 @@ def reduce_candidate(
             _actor_capabilities(candidate, effective_actor_keys),
         )
     except (TypeError, ValueError) as exc:
-        return _rejection_decision(candidate, receipt, str(exc))
+        return candidate_rejection_decision(candidate, receipt, str(exc))
     committed = create_runtime_record(
         "candidate.committed",
         {
@@ -240,3 +240,31 @@ class CandidateCommitter:
             for entry in decision.trace_entries:
                 self._trace.append(entry)
         return decision
+
+
+def record_candidate_rejection(
+    candidate: CandidateProposal,
+    reason: str,
+    store: StoreProtocol,
+    trace: TraceStoreProtocol,
+    *,
+    receipt: RuntimeRecord | None = None,
+) -> CommitmentDecision:
+    """Durably record a failed Candidate without interpreting its effects."""
+    from aigineering.core.store import require_runtime_store
+
+    decision = (
+        candidate_rejection_decision(candidate, receipt, reason)
+        if receipt is not None
+        else authentication_rejection_decision(candidate, reason)
+    )
+    runtime_store = require_runtime_store(store)
+    runtime_store.commit_ingress_batch(
+        accepted_assets=[],
+        trace_entries=list(decision.trace_entries),
+        runtime_records=decision.runtime_records,
+    )
+    if trace is not store:
+        for entry in decision.trace_entries:
+            trace.append(entry)
+    return decision

@@ -185,7 +185,9 @@ Implementation progress:
   rechecks key binding with the claim predicate in the commitment transaction;
   authenticated receipt, output evidence, and projection form one causal chain.
   The generic Candidate committer intentionally rejects `worker.output` so it
-  cannot become a claim-bypass path.
+  cannot become a claim-bypass path. Authentication and post-authentication
+  submission failures use the same durable Candidate rejection vocabulary and
+  Trace evidence rather than ending as caller-only errors.
 - Pending: move signing into the internal WorkerHost execution adapter, then
   migrate Method task publication to plugins.
 

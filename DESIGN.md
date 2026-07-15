@@ -195,6 +195,9 @@ rechecks routing-key and claim predicates while atomically committing receipt,
 output evidence, projection, lifecycle consequences, trace, idempotency, and
 claim transition. `worker.output` is deliberately unsupported by the generic
 effect committer, so `/candidates` cannot bypass claim/package fencing.
+Authentication, claim, policy, and binding failures append Candidate rejection
+records and Trace evidence before returning an error; an invalid worker result
+cannot disappear as an API-only failure.
 
 A domain may persist exactly one `domain.genesis` RuntimeRecord. Initialization
 is idempotent, replacement fails closed, SQLite enforces uniqueness, and a

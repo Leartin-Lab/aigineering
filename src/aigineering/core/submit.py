@@ -13,7 +13,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 
 from aigineering.core.actor_facts import load_effective_actor_keys
-from aigineering.core.disclosure import compute_disclosure
+from aigineering.core.commitment import record_candidate_rejection
+from aigineering.core.disclosure import DisclosurePolicyError, compute_disclosure
 from aigineering.core.domain import load_genesis
 from aigineering.core.fact_materialization import reduce_asset_facts
 from aigineering.core.record_conflict import ImmutableRecordConflict
@@ -355,11 +356,49 @@ def submit_worker_candidate(
     operational = require_operational_store(store)
     genesis = load_genesis(operational)
     actor_keys = load_effective_actor_keys(operational, genesis)
-    receipt = candidate_received_record(
-        candidate,
-        genesis,
-        actor_keys=actor_keys,
-    )
+    try:
+        receipt = candidate_received_record(
+            candidate,
+            genesis,
+            actor_keys=actor_keys,
+        )
+    except ValueError as exc:
+        record_candidate_rejection(candidate, str(exc), operational, trace_store)
+        raise
+    try:
+        return _submit_authenticated_worker_candidate(
+            candidate,
+            receipt,
+            actor_keys,
+            operational,
+            trace_store,
+        )
+    except (
+        DisclosurePolicyError,
+        SubmitClaimError,
+        SubmitCommitError,
+        SubmitConflictError,
+        TypeError,
+        ValueError,
+    ) as exc:
+        record_candidate_rejection(
+            candidate,
+            str(exc),
+            operational,
+            trace_store,
+            receipt=receipt,
+        )
+        raise
+
+
+def _submit_authenticated_worker_candidate(
+    candidate: CandidateProposal,
+    receipt: RuntimeRecord,
+    actor_keys,
+    store,
+    trace_store,
+) -> dict:
+    """Validate worker semantics after Candidate authentication."""
     if (
         len(candidate.effects) != 1
         or candidate.effects[0].effect_type != "worker.output"
@@ -387,7 +426,7 @@ def submit_worker_candidate(
         raise ValueError(
             "Candidate and worker envelope idempotency keys must be identical"
         )
-    registration = operational.get_worker_registration(envelope.worker_id)
+    registration = store.get_worker_registration(envelope.worker_id)
     if registration is None or not registration.enabled:
         raise ValueError(f"worker '{envelope.worker_id}' is not enabled and registered")
     if (registration.actor_id, registration.key_id) != (
@@ -397,7 +436,7 @@ def submit_worker_candidate(
         raise ValueError("Candidate actor key does not match worker registration")
     return submit_candidate(
         envelope,
-        operational,
+        store,
         trace_store,
         idempotency_key=candidate.idempotency_key,
         authentication=WorkerCandidateAuthentication(
