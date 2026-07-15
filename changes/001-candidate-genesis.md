@@ -205,6 +205,11 @@ Implementation progress:
 - Complete: the HTTP worker submission endpoint accepts signed Candidates only;
   server claims require an enabled actor-key binding. The server-side mock run
   endpoint no longer impersonates a worker or mutates runtime state.
+- Complete: the production task loop injects a durable planning-plugin actor
+  through CandidatePublisher. Plan and replan completion publish contained
+  child fan-out as one signed Candidate; their duplicated handlers collapse to
+  one parameterized implementation. Direct Contract insertion is now an
+  explicit no-publisher compatibility branch rather than the production path.
 - Pending: replace Method scheduling/completion call sites with TaskPlugin
   publication, delete the raw execution compatibility surface and handlers,
   and migrate engine-backed inner execution to WorkerHost.

@@ -17,7 +17,10 @@ from aigineering.cli._common import (
     _session_id,
 )
 from aigineering.cli.task_state import project_task_status
-from aigineering.cli.identity import ensure_local_worker_host
+from aigineering.cli.identity import (
+    ensure_local_plugin_publisher,
+    ensure_local_worker_host,
+)
 from aigineering.application import build_worker
 from aigineering.runtime import (
     WorkerInvocationError,
@@ -344,11 +347,16 @@ def _run_task_pool(
                 raise click.exceptions.Exit(1)
             return
 
+        planning_publisher = ensure_local_plugin_publisher(
+            store, "planning.expand.v1", ("contract.publish",)
+        )
         while True:
             before_trace_count = len(store.get_all())
             registry = _default_method_registry()
             recovered = process_rejected_submissions(store)
-            processed_before = process_method_completions(store, registry)
+            processed_before = process_method_completions(
+                store, registry, candidate_publisher=planning_publisher
+            )
             claimed = claim_next_package(store, worker_id=host.worker_id)
             submission: dict | None = None
             if claimed is not None:
@@ -358,7 +366,9 @@ def _run_task_pool(
                     store,
                     method_registry=registry,
                 )
-            processed_after = process_method_completions(store, registry)
+            processed_after = process_method_completions(
+                store, registry, candidate_publisher=planning_publisher
+            )
             after_entries = store.get_all()
             new_entries = after_entries[before_trace_count:]
             touched_contracts = sorted({entry.contract_id for entry in new_entries})

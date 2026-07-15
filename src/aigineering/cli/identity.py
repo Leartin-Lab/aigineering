@@ -8,7 +8,7 @@ from pathlib import Path
 
 from aigineering.agent.worker import WorkerHost
 from aigineering.core.actor_facts import load_effective_actor_keys
-from aigineering.core.candidate_publisher import publish_effects
+from aigineering.core.candidate_publisher import CandidatePublisher, publish_effects
 from aigineering.core.domain import initialize_genesis, load_genesis
 from aigineering.core.ids import canonical_json, compute_content_hash
 from aigineering.core.signing import Ed25519Signer
@@ -177,3 +177,57 @@ def ensure_local_worker_host(store, worker) -> WorkerHost:
             )
             raise ValueError(str(rejection.payload["reason"]))
     return WorkerHost(worker, genesis, actor_key, worker_signer)
+
+
+def ensure_local_plugin_publisher(
+    store,
+    plugin_id: str,
+    capabilities: tuple[str, ...],
+) -> CandidatePublisher:
+    """Provision one durable plugin actor and return its explicit publisher."""
+    genesis = ensure_local_domain(store)
+    root_signer = load_actor_signer()
+    root_key = next(
+        key
+        for key in genesis.root_keys
+        if key.public_key == root_signer.signer_id and not key.revoked
+    )
+    actor_id = f"plugin:{plugin_id}"
+    key_suffix = compute_content_hash(actor_id)[:16]
+    key_id = f"plugin-{key_suffix}"
+    path = actor_key_path().parent / f"{key_id}.ed25519"
+    if path.exists():
+        signer = load_actor_signer(path)
+    else:
+        signer = Ed25519Signer()
+        write_actor_key(path, signer)
+    actor_key = ActorKey(
+        actor_id,
+        key_id,
+        signer.kind,
+        signer.signer_id,
+        capabilities,
+    )
+    current = next(
+        (
+            key
+            for key in load_effective_actor_keys(store, genesis)
+            if key.actor_id == actor_id and key.key_id == key_id
+        ),
+        None,
+    )
+    if current is None:
+        decision = publish_effects(
+            store,
+            store,
+            genesis,
+            root_key,
+            root_signer,
+            (actor_authorization_effect(actor_key),),
+            idempotency_key=f"plugin-key:{actor_id}:{key_id}",
+        )
+        if not decision.accepted:
+            raise ValueError(f"plugin actor {actor_id!r} could not be authorized")
+    elif current != actor_key:
+        raise ValueError(f"plugin key {actor_id}/{key_id} cannot be rebound")
+    return CandidatePublisher(store, store, genesis, actor_key, signer)

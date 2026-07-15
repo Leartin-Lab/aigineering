@@ -6,9 +6,13 @@ import json
 
 from aigineering.agent.mock import MockWorker
 from aigineering.application import default_method_registry
+from aigineering.core.candidate_publisher import CandidatePublisher
 from aigineering.core.control_plane import build_control_plane_contract
+from aigineering.core.domain import initialize_genesis
 from aigineering.core.runtime_ingress import RuntimeIngress
+from aigineering.core.signing import Ed25519Signer
 from aigineering.core.sqlite_store import SQLiteStore
+from aigineering.protocol.candidate import ActorKey, create_genesis_manifest
 from aigineering.runtime import (
     claim_next_package,
     execute_claimed_package,
@@ -18,6 +22,21 @@ from aigineering.runtime import (
 
 def test_plan_method_and_independent_child_complete_root_from_assets():
     store = SQLiteStore(":memory:")
+    plugin_signer = Ed25519Signer()
+    plugin_key = ActorKey(
+        "plugin:planning.expand.v1",
+        "planning-1",
+        plugin_signer.kind,
+        plugin_signer.signer_id,
+        ("contract.publish",),
+    )
+    genesis = create_genesis_manifest(
+        "runtime-multistep", (plugin_key,), "policy:runtime-multistep"
+    )
+    initialize_genesis(store, genesis)
+    plugin_publisher = CandidatePublisher(
+        store, store, genesis, plugin_key, plugin_signer
+    )
     ingress = RuntimeIngress(store, store)
     root = ingress.accept_contract(
         build_control_plane_contract(
@@ -69,7 +88,15 @@ def test_plan_method_and_independent_child_complete_root_from_assets():
     )
     assert plan_result["status"] == "accepted"
 
-    assert process_method_completions(store, registry) == [plan_contract.id]
+    assert process_method_completions(
+        store, registry, candidate_publisher=plugin_publisher
+    ) == [plan_contract.id]
+    planning_receipts = [
+        record
+        for _, record in store.scan_runtime_records(record_type="candidate.received")
+        if record.payload.get("actor_id") == plugin_key.actor_id
+    ]
+    assert len(planning_receipts) == 1
     planned_children = [
         contract
         for contract in store.get_all_contracts()

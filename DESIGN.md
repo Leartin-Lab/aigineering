@@ -267,6 +267,13 @@ containment compiler until that code is physically moved out of `core.methods`.
 LLM, human, script, plugin, and engine-backed executors do not yet share one
 authenticated actor protocol.
 
+The local production task loop injects an explicit actor-bound
+`CandidatePublisher` into completion projection. Plan and replan results then
+use the same PlanningExpansionPlugin and publish their entire child-task fan-out
+as one signed Candidate. The two former near-copy handlers now share one
+implementation; direct `runtime.add_contract` remains only when compatibility
+tests deliberately omit a publisher.
+
 ## Active change
 
 `changes/001-candidate-genesis.md` migrates the runtime toward signed typed

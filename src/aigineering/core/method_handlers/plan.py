@@ -25,8 +25,11 @@ class PlanMethodHandler:
     (child-contract creation with containment checks).
     """
 
+    action_type = "plan"
+    result_prefix = "_plan_result_"
+
     def can_handle(self, action_type: str) -> bool:
-        return action_type == "plan"
+        return action_type == self.action_type
 
     def handle_method(
         self,
@@ -55,7 +58,7 @@ class PlanMethodHandler:
         and expansion was attempted (even if all children were rejected by
         containment checks).
         """
-        if method_payload(contract).get("method") != "plan":
+        if method_payload(contract).get("method") != self.action_type:
             return False
 
         parent_id = contract.parent_id
@@ -69,12 +72,12 @@ class PlanMethodHandler:
                 runtime.append_trace(
                     parent_id,
                     "containment_rejected",
-                    relation_type="plan",
+                    relation_type=self.action_type,
                     relation_target="parent_not_found",
                     rejected_fragments=[
                         "[rejected] parent_not_found: "
                         f"parent contract {parent_id} not in store — "
-                        "plan expansion abort (fail-closed)"
+                        f"{self.action_type} expansion abort (fail-closed)"
                     ],
                     authority_result="rejected",
                     budget_remaining=0,
@@ -93,25 +96,71 @@ class PlanMethodHandler:
         created: list[str] = []
         recovery_scheduled = False
         for asset in method_assets:
-            if not asset.name.startswith("_plan_result_"):
+            if not asset.name.startswith(self.result_prefix):
                 continue
             expanded = True
-            children, rejections = contracts_from_plan_asset(
-                asset,
-                parent_id,
-                parent_contract=parent_contract,
-                allowed_input_names=allowed_input_names,
-                parent_budget_remaining=parent_budget_remaining,
-            )
-            for child in children:
-                if runtime.get_contract(child.id) is None:
-                    runtime.add_contract(child)
-                    created.append(child.id)
+            decision = None
+            published = False
+            rejections: list[dict] = []
+            if parent_contract is not None:
+                from aigineering.plugins import PlanningExpansionPlugin, PluginRequest
+
+                plugin_proposal = PlanningExpansionPlugin().propose(
+                    PluginRequest(
+                        parent=parent_contract,
+                        assets=(asset,),
+                        allowed_input_names=frozenset(allowed_input_names or ()),
+                        allowance=parent_budget_remaining or 0,
+                    )
+                )
+                rejections = [dict(item) for item in plugin_proposal.rejections]
+                if runtime.can_publish_candidates:
+                    published = True
+                    if plugin_proposal.effects:
+                        decision = runtime.publish_task_effects(
+                            plugin_proposal.effects,
+                            idempotency_key=(
+                                f"planning:{self.action_type}:{contract.id}:{asset.id}"
+                            ),
+                            causal_parents=(asset.id,),
+                        )
+            if not published:
+                children, rejections = contracts_from_plan_asset(
+                    asset,
+                    parent_id,
+                    parent_contract=parent_contract,
+                    allowed_input_names=allowed_input_names,
+                    parent_budget_remaining=parent_budget_remaining,
+                )
+                for child in children:
+                    if runtime.get_contract(child.id) is None:
+                        runtime.add_contract(child)
+                        created.append(child.id)
+            elif decision is None:
+                children = []
+            elif decision.accepted:
+                children = list(decision.contracts)
+                created.extend(child.id for child in children)
+            else:
+                children = []
+                rejection = next(
+                    record
+                    for record in decision.runtime_records
+                    if record.record_type.endswith("rejected")
+                )
+                rejections.append(
+                    {
+                        "child_name": "(candidate)",
+                        "field": "publication",
+                        "reason": str(rejection.payload["reason"]),
+                        "action": "rejected",
+                    }
+                )
             for entry in rejections:
                 runtime.append_trace(
                     parent_id,
                     "containment_rejected",
-                    relation_type="plan",
+                    relation_type=self.action_type,
                     relation_target=(
                         f"{entry.get('child_name', '?')}:{entry.get('field', '?')}"
                     ),
@@ -129,7 +178,7 @@ class PlanMethodHandler:
             ):
                 recovery = schedule_method_result_recovery(
                     runtime,
-                    method_type="plan",
+                    method_type=self.action_type,
                     parent_id=parent_id,
                     failed_contract=contract,
                     result_asset=asset,
@@ -141,7 +190,7 @@ class PlanMethodHandler:
             runtime.append_trace(
                 parent_id,
                 "contracts_expanded",
-                relation_type="plan",
+                relation_type=self.action_type,
                 relation_target=",".join(created),
                 budget_remaining=runtime.resolve_budget(parent_id),
             )

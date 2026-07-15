@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from aigineering.core.commitment import CandidateCommitter, CommitmentDecision
 from aigineering.core.signing import Signer
 from aigineering.protocol.candidate import (
@@ -60,3 +62,32 @@ def publish_effects(
         idempotency_key=idempotency_key,
     )
     return CandidateCommitter(store, trace).commit(candidate, genesis)
+
+
+@dataclass(frozen=True)
+class CandidatePublisher:
+    """Explicit actor-bound publisher injectable into plugins and adapters."""
+
+    store: object
+    trace: object
+    genesis: GenesisManifest
+    actor_key: ActorKey
+    signer: Signer
+
+    def publish(
+        self,
+        effects: tuple[CandidateEffect, ...],
+        *,
+        idempotency_key: str,
+        causal_parents: tuple[str, ...] = (),
+    ) -> CommitmentDecision:
+        return publish_effects(
+            self.store,
+            self.trace,
+            self.genesis,
+            self.actor_key,
+            self.signer,
+            effects,
+            idempotency_key=idempotency_key,
+            causal_parents=causal_parents,
+        )

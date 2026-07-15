@@ -25,6 +25,9 @@ if TYPE_CHECKING:
     from aigineering.core.trace import TraceStoreProtocol
     from aigineering.core.trace_manager import TraceManager
     from aigineering.core.runtime_ingress import RuntimeIngress
+    from aigineering.core.candidate_publisher import CandidatePublisher
+    from aigineering.protocol.candidate import CandidateEffect
+    from aigineering.core.commitment import CommitmentDecision
 
 
 class MethodRuntime:
@@ -47,6 +50,7 @@ class MethodRuntime:
         method_scheduled: set[str] | None = None,
         mcp_servers: dict[str, object] | None = None,
         ingress: RuntimeIngress | None = None,
+        candidate_publisher: CandidatePublisher | None = None,
     ) -> None:
         self._store = store
         self._trace = _coerce_trace_manager(trace)
@@ -57,6 +61,7 @@ class MethodRuntime:
         self._method_scheduled: set[str] = (
             method_scheduled if method_scheduled is not None else set()
         )
+        self._candidate_publisher = candidate_publisher
         if ingress is not None:
             self._ingress = ingress
         else:
@@ -78,6 +83,31 @@ class MethodRuntime:
         """
         self._ingress.accept_contract(contract)
         self._budget.initialize(contract.id, contract.budget)
+
+    def publish_task_effects(
+        self,
+        effects: tuple[CandidateEffect, ...],
+        *,
+        idempotency_key: str,
+        causal_parents: tuple[str, ...] = (),
+    ) -> CommitmentDecision | None:
+        """Publish task effects when an authenticated plugin actor is configured."""
+        if self._candidate_publisher is None:
+            return None
+        decision = self._candidate_publisher.publish(
+            effects,
+            idempotency_key=idempotency_key,
+            causal_parents=causal_parents,
+        )
+        if decision.accepted:
+            for contract in decision.contracts:
+                self._budget.initialize(contract.id, contract.budget)
+        return decision
+
+    @property
+    def can_publish_candidates(self) -> bool:
+        """Whether this transitional runtime has an authenticated publisher."""
+        return self._candidate_publisher is not None
 
     def get_contract(self, contract_id: str) -> Contract | None:
         """Return the contract with *contract_id*, or ``None``."""

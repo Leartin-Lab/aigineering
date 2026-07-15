@@ -908,7 +908,9 @@ def _submit_claimed_method(
     return response
 
 
-def process_method_completions(store, method_registry) -> list[str]:
+def process_method_completions(
+    store, method_registry, *, candidate_publisher=None
+) -> list[str]:
     """Project completed method Contracts into their deterministic effects."""
     processed: list[str] = []
     trace_manager = TraceManager(store)
@@ -925,6 +927,7 @@ def process_method_completions(store, method_registry) -> list[str]:
         method_scheduled=set(),
         method_context={},
         ingress=RuntimeIngress(store, store, FactReducer(store, store)),
+        candidate_publisher=candidate_publisher,
     )
     for contract in store.get_all_contracts():
         if contract.origin != "system" or contract.parent_id is None:

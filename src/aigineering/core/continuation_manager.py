@@ -27,6 +27,7 @@ if TYPE_CHECKING:
     from aigineering.core.tools import ToolRegistry
     from aigineering.core.trace_manager import TraceManager
     from aigineering.protocol.types import Asset, TraceEntry
+    from aigineering.core.candidate_publisher import CandidatePublisher
 
 
 class ContinuationManager:
@@ -56,6 +57,7 @@ class ContinuationManager:
         labels: dict[str, Label] | None = None,
         label_mode: str = "debug",
         label_context: dict[str, list[Asset]] | None = None,
+        candidate_publisher: CandidatePublisher | None = None,
     ) -> None:
         self._store = store
         self._budget_mgr = budget_mgr
@@ -76,6 +78,7 @@ class ContinuationManager:
         self._label_context: dict[str, list[Asset]] = (
             label_context if label_context is not None else {}
         )
+        self._candidate_publisher = candidate_publisher
 
     # ── Public API ──────────────────────────────────────────────────────
 
@@ -109,6 +112,7 @@ class ContinuationManager:
                         mcp_servers=self._mcp_servers,
                         suspended=self._suspended,
                         method_scheduled=self._method_scheduled,
+                        candidate_publisher=self._candidate_publisher,
                     )
                     if completion(runtime, contract, method_assets):
                         if method_type == "tool":
