@@ -9,17 +9,95 @@ pytest.importorskip("httpx")
 
 from fastapi.testclient import TestClient
 
+from aigineering.core.control_plane import build_control_plane_contract
+from aigineering.core.domain import initialize_genesis
+from aigineering.core.signing import Ed25519Signer
 from aigineering.core.sqlite_store import SQLiteStore
+from aigineering.protocol.candidate import (
+    ActorKey,
+    CandidateEffect,
+    candidate_proposal_to_dict,
+    create_candidate_proposal,
+    create_genesis_manifest,
+)
+from aigineering.protocol.wire import contract_to_dict
 from aigineering.server.app import app
+
+
+def _signed_client():
+    signer = Ed25519Signer()
+    genesis = create_genesis_manifest(
+        "server-test",
+        [
+            ActorKey(
+                "test:client",
+                "root",
+                signer.kind,
+                signer.signer_id,
+                ("asset.publish", "contract.publish"),
+            )
+        ],
+        "policy:test",
+    )
+    store = SQLiteStore(".aig/store.db")
+    initialize_genesis(store, genesis)
+    store.close()
+    return TestClient(app), (signer, genesis)
+
+
+def _candidate_body(actor, effect: CandidateEffect):
+    signer, genesis = actor
+    return candidate_proposal_to_dict(
+        create_candidate_proposal(
+            domain_id=genesis.id,
+            actor_id="test:client",
+            key_id="root",
+            effects=[effect],
+            signer=signer,
+        )
+    )
+
+
+def _post_asset(client, actor, **fields):
+    payload = {
+        "content": fields.pop("content"),
+        "name": fields.pop("name"),
+        **fields,
+    }
+    return client.post(
+        "/assets",
+        json=_candidate_body(
+            actor, CandidateEffect("asset.propose", {"asset": payload})
+        ),
+    )
+
+
+def _post_contract(client, actor, **fields):
+    contract = build_control_plane_contract(
+        name=fields.pop("name"),
+        inputs=tuple(fields.pop("inputs", ())),
+        outputs=tuple(fields.pop("outputs", ())),
+        labels=tuple(fields.pop("labels", ())),
+        tool_scope=tuple(fields.pop("tool_scope", ())),
+        **fields,
+    )
+    return client.post(
+        "/contracts",
+        json=_candidate_body(
+            actor,
+            CandidateEffect(
+                "contract.declare", {"contract": contract_to_dict(contract)}
+            ),
+        ),
+    )
 
 
 def test_create_and_get_asset(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    client = TestClient(app)
+    client, actor = _signed_client()
 
-    created = client.post(
-        "/assets",
-        json={"name": "api_doc", "content": "hello", "trust_tier": "human"},
+    created = _post_asset(
+        client, actor, name="api_doc", content="hello", trust_tier="human"
     )
     assert created.status_code == 201, created.text
     body = created.json()
@@ -35,20 +113,74 @@ def test_create_and_get_asset(tmp_path, monkeypatch):
 
 def test_create_protected_asset_rejected(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    client = TestClient(app)
+    client, actor = _signed_client()
 
-    result = client.post("/assets", json={"name": "_sys_secret", "content": "x"})
-    assert result.status_code == 400
+    result = _post_asset(client, actor, name="_sys_secret", content="x")
+    assert result.status_code == 422
     assert "protected" in result.json()["detail"].lower()
+
+
+def test_unsigned_resource_write_is_rejected_without_mutation(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    client, _ = _signed_client()
+
+    result = client.post("/assets", json={"name": "unsigned", "content": "x"})
+
+    assert result.status_code == 422
+    store = SQLiteStore(".aig/store.db")
+    assert store.get_all_assets() == []
+    store.close()
+
+
+def test_resource_endpoint_rejects_wrong_effect_before_commit(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    client, actor = _signed_client()
+    asset_candidate = _candidate_body(
+        actor,
+        CandidateEffect(
+            "asset.propose", {"asset": {"name": "wrong-route", "content": "x"}}
+        ),
+    )
+
+    result = client.post("/contracts", json=asset_candidate)
+
+    assert result.status_code == 422
+    store = SQLiteStore(".aig/store.db")
+    assert store.get_assets_by_name("wrong-route") == []
+    assert store.scan_runtime_records(record_type="candidate.received") == []
+    store.close()
+
+
+def test_generic_candidate_endpoint_returns_decision_evidence(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    client, actor = _signed_client()
+    body = _candidate_body(
+        actor,
+        CandidateEffect(
+            "asset.propose", {"asset": {"name": "generic", "content": "value"}}
+        ),
+    )
+
+    result = client.post("/candidates", json=body)
+
+    assert result.status_code == 200, result.text
+    decision = result.json()
+    assert decision["accepted"] is True
+    assert decision["candidate_id"] == body["id"]
+    assert decision["assets"][0]["name"] == "generic"
+    assert "candidate.received" in decision["record_types"]
 
 
 def test_create_and_get_contract(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    client = TestClient(app)
+    client, actor = _signed_client()
 
-    created = client.post(
-        "/contracts",
-        json={"name": "api_task", "inputs": ["api_doc"], "outputs": ["out"]},
+    created = _post_contract(
+        client,
+        actor,
+        name="api_task",
+        inputs=["api_doc"],
+        outputs=["out"],
     )
     assert created.status_code == 201, created.text
     body = created.json()
@@ -62,16 +194,18 @@ def test_create_and_get_contract(tmp_path, monkeypatch):
 
 def test_list_assets_and_contracts(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    client = TestClient(app)
+    client, actor = _signed_client()
 
-    asset = client.post(
-        "/assets",
-        json={"name": "api_doc", "content": "hello", "trust_tier": "human"},
+    asset = _post_asset(
+        client, actor, name="api_doc", content="hello", trust_tier="human"
     )
     assert asset.status_code == 201, asset.text
-    contract = client.post(
-        "/contracts",
-        json={"name": "api_task", "inputs": ["api_doc"], "outputs": ["out"]},
+    contract = _post_contract(
+        client,
+        actor,
+        name="api_task",
+        inputs=["api_doc"],
+        outputs=["out"],
     )
     assert contract.status_code == 201, contract.text
 
@@ -86,12 +220,9 @@ def test_list_assets_and_contracts(tmp_path, monkeypatch):
 
 def test_run_contract_persists_outputs_and_trace(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    client = TestClient(app)
+    client, actor = _signed_client()
 
-    created = client.post(
-        "/contracts",
-        json={"name": "api_task", "outputs": ["out"], "budget": 1},
-    )
+    created = _post_contract(client, actor, name="api_task", outputs=["out"], budget=1)
     assert created.status_code == 201, created.text
     contract_id = created.json()["id"]
 
@@ -123,12 +254,9 @@ def test_run_contract_persists_outputs_and_trace(tmp_path, monkeypatch):
 
 def test_run_contract_rejects_non_mock_worker(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    client = TestClient(app)
+    client, actor = _signed_client()
 
-    created = client.post(
-        "/contracts",
-        json={"name": "api_task", "outputs": ["out"], "budget": 1},
-    )
+    created = _post_contract(client, actor, name="api_task", outputs=["out"], budget=1)
     assert created.status_code == 201, created.text
 
     run = client.post(
@@ -141,12 +269,11 @@ def test_run_contract_rejects_non_mock_worker(tmp_path, monkeypatch):
 
 def test_worker_protocol_cross_replica_claim_renew_submit(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    replica_a = TestClient(app)
+    replica_a, actor = _signed_client()
     replica_b = TestClient(app)
     replica_c = TestClient(app)
-    created = replica_a.post(
-        "/contracts",
-        json={"name": "replicated", "outputs": ["out"], "budget": 1},
+    created = _post_contract(
+        replica_a, actor, name="replicated", outputs=["out"], budget=1
     )
     contract_id = created.json()["id"]
 
@@ -202,10 +329,9 @@ def test_worker_protocol_cross_replica_claim_renew_submit(tmp_path, monkeypatch)
 
 def test_worker_protocol_method_submission_uses_same_fenced_path(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    client = TestClient(app)
-    created = client.post(
-        "/contracts",
-        json={"name": "remote_plan", "outputs": ["report"], "budget": 2},
+    client, actor = _signed_client()
+    created = _post_contract(
+        client, actor, name="remote_plan", outputs=["report"], budget=2
     )
     contract_id = created.json()["id"]
     claimed = client.post(
@@ -243,15 +369,14 @@ def test_worker_protocol_method_submission_uses_same_fenced_path(tmp_path, monke
 
 def test_asset_slice_versions_and_replacement_claims(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    client = TestClient(app)
+    client, actor = _signed_client()
 
-    created = client.post(
-        "/assets",
-        json={
-            "name": "doc",
-            "content": "line one\nline two\nline three\n",
-            "trust_tier": "human",
-        },
+    created = _post_asset(
+        client,
+        actor,
+        name="doc",
+        content="line one\nline two\nline three\n",
+        trust_tier="human",
     )
     assert created.status_code == 201, created.text
     source = created.json()
@@ -300,16 +425,10 @@ def test_asset_slice_versions_and_replacement_claims(tmp_path, monkeypatch):
 
 def test_replacement_claim_rejects_invalid_claim_type(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    client = TestClient(app)
+    client, actor = _signed_client()
 
-    first = client.post(
-        "/assets",
-        json={"name": "first", "content": "a", "trust_tier": "human"},
-    )
-    second = client.post(
-        "/assets",
-        json={"name": "second", "content": "b", "trust_tier": "human"},
-    )
+    first = _post_asset(client, actor, name="first", content="a", trust_tier="human")
+    second = _post_asset(client, actor, name="second", content="b", trust_tier="human")
     assert first.status_code == 201, first.text
     assert second.status_code == 201, second.text
 

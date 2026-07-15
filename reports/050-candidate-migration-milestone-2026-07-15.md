@@ -57,7 +57,9 @@ This is a migration milestone, not 0.5 release acceptance.
 - Worker raw-output CandidateEnvelope submission has not yet converged with
   CandidateProposal and actor-key registration.
 - Asset slice, capability, MCP, provider configuration, recovery, server, and
-  several demo/setup paths still use compatibility RuntimeIngress.
+  several demo/setup paths still use compatibility RuntimeIngress. Follow-up
+  HTTP work migrated Contract/Asset creation and added `/candidates`; slice and
+  replacement-claim mutation remain compatibility endpoints.
 - Method runtime/registry/handlers are still shipped; plan/replan/recovery/tool
   have not yet become ordinary plugins.
 - The milestone report predates commit `cc384d5`; that follow-up proved

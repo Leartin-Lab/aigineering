@@ -98,6 +98,9 @@ Implementation progress:
 - Complete: process-level crash injection at
   `after_asset_before_trace` proves Candidate Asset, receipt, trace, and terminal
   consequences roll back as one SQLite transaction.
+- Complete: HTTP Contract/Asset creation and the generic `/candidates` endpoint
+  require full actor-signed CandidateProposal bodies. Resource/effect mismatch
+  and unsigned legacy bodies are rejected before Store mutation.
 - Complete: cryptography is a base dependency; the runtime does not silently
   substitute a non-authenticating deterministic seal.
 - Pending: migrate remaining control-plane and worker submission effects.

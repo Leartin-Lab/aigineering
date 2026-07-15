@@ -79,6 +79,12 @@ is therefore prompt/disclosure metadata on an Asset, not a separate commitment
 primitive. Contract, Task, Asset, and Behavior commands share effect builders
 and local identity selection.
 
+The optional HTTP API accepts full signed CandidateProposal bodies at
+`POST /candidates`, `POST /contracts`, and `POST /assets`. Resource endpoints
+validate the effect type before commitment. Unsigned legacy request bodies fail
+schema validation and cannot mutate the Store. Slice and replacement-claim HTTP
+operations remain compatibility surfaces pending additional effect types.
+
 The commitment coordinator authenticates, dispatches, records decisions, and
 commits atomically; it does not parse individual effect payloads. Built-in
 effect projectors and Contract admission policy are separate pure modules. An

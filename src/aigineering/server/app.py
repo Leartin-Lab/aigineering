@@ -20,6 +20,7 @@ from aigineering.runtime import (
     submit_candidate_envelope,
 )
 
+from aigineering.core.commitment import CandidateCommitter
 from aigineering.core.runtime_ingress import RuntimeIngress
 from aigineering.core.submit import (
     SubmitClaimError,
@@ -27,6 +28,7 @@ from aigineering.core.submit import (
     SubmitConflictError,
 )
 from aigineering.protocol.envelope import CandidateEnvelope
+from aigineering.protocol.candidate import candidate_proposal_from_dict
 
 app = FastAPI(title="Aigineering API", version="0.5.0")
 
@@ -34,15 +36,23 @@ app = FastAPI(title="Aigineering API", version="0.5.0")
 # ── Request / response models ────────────────────────────────────────────────
 
 
-class ContractCreateRequest(BaseModel):
-    name: str
-    inputs: list[str] = Field(default_factory=list)
-    outputs: list[str] = Field(default_factory=list)
-    activation: str = ""
-    budget: int = 5
-    labels: list[str] = Field(default_factory=list)
-    tool_scope: list[str] = Field(default_factory=list)
-    description: str = ""
+class CandidateEffectRequest(BaseModel):
+    effect_type: str
+    payload: dict
+    atomic_group: str = ""
+
+
+class CandidateProposalRequest(BaseModel):
+    id: str
+    domain_id: str
+    actor_id: str
+    key_id: str
+    signature_kind: str
+    signature: str
+    effects: list[CandidateEffectRequest]
+    causal_parents: list[str] = Field(default_factory=list)
+    idempotency_key: str = ""
+    protocol_version: int = 1
 
 
 class ContractRunRequest(BaseModel):
@@ -72,16 +82,6 @@ class WorkerSubmitRequest(BaseModel):
     idempotency_key: str = ""
     parsed_action: dict | None = None
     usage_metadata: dict | None = None
-
-
-class AssetCreateRequest(BaseModel):
-    name: str
-    content: str
-    origin: str = "human"
-    trust_tier: str = "human"
-    source_uri: str = ""
-    promptable: bool = True
-    content_type: str = "text"
 
 
 class AssetSliceRequest(BaseModel):
@@ -205,57 +205,81 @@ def _replacement_claim_response(claim) -> ReplacementClaimResponse:
     )
 
 
-@app.post("/contracts", response_model=ContractResponse, status_code=201)
-def create_contract(body: ContractCreateRequest):
-    """Inject a new contract into the runtime store."""
-    from aigineering.core.control_plane import inject_contract
-
+def _commit_candidate_request(body: CandidateProposalRequest):
     store = _persistent_store()
-    ingress = RuntimeIngress(store, store)
     try:
-        contract = inject_contract(
-            store,
-            store,
-            name=body.name,
-            inputs=tuple(body.inputs),
-            outputs=tuple(body.outputs),
-            activation=body.activation,
-            budget=body.budget,
-            labels=tuple(body.labels),
-            tool_scope=tuple(body.tool_scope),
-            description=body.description,
-            ingress=ingress,
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        candidate = candidate_proposal_from_dict(body.model_dump())
+        return CandidateCommitter(store, store).commit(candidate)
+    except LookupError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    return _contract_response(contract)
+
+def _rejection_reason(decision) -> str:
+    for record in decision.runtime_records:
+        if record.record_type.endswith("rejected"):
+            return str(record.payload["reason"])
+    return "Candidate rejected"
+
+
+def _require_single_effect(body: CandidateProposalRequest, effect_type: str) -> None:
+    if len(body.effects) != 1 or body.effects[0].effect_type != effect_type:
+        raise HTTPException(
+            status_code=422,
+            detail=f"resource endpoint requires one {effect_type} effect",
+        )
+
+
+@app.post("/candidates")
+def commit_candidate(body: CandidateProposalRequest):
+    """Authenticate and commit one typed Candidate through the common boundary."""
+    decision = _commit_candidate_request(body)
+    return {
+        "accepted": decision.accepted,
+        "assets": [_asset_response(asset).model_dump() for asset in decision.assets],
+        "candidate_id": decision.candidate_id,
+        "contract": (
+            _contract_response(decision.contract).model_dump()
+            if decision.contract is not None
+            else None
+        ),
+        "record_ids": [record.id for record in decision.runtime_records],
+        "record_types": [record.record_type for record in decision.runtime_records],
+        "rejection_reason": None if decision.accepted else _rejection_reason(decision),
+    }
+
+
+@app.post("/contracts", response_model=ContractResponse, status_code=201)
+def create_contract(body: CandidateProposalRequest):
+    """Commit exactly one signed ``contract.declare`` Candidate."""
+    _require_single_effect(body, "contract.declare")
+    decision = _commit_candidate_request(body)
+    if not decision.accepted:
+        raise HTTPException(status_code=422, detail=_rejection_reason(decision))
+    if decision.contract is None or decision.assets:
+        raise HTTPException(
+            status_code=422,
+            detail="POST /contracts requires one contract.declare effect",
+        )
+
+    return _contract_response(decision.contract)
 
 
 @app.post("/assets", response_model=AssetResponse, status_code=201)
-def create_asset(body: AssetCreateRequest):
-    """Inject a new asset through the control-plane API."""
-    from aigineering.core.control_plane import inject_asset
-
-    store = _persistent_store()
-    ingress = RuntimeIngress(store, store)
-    try:
-        asset = inject_asset(
-            store,
-            store,
-            name=body.name,
-            content=body.content,
-            origin=body.origin,
-            trust_tier=body.trust_tier,
-            source_uri=body.source_uri,
-            promptable=body.promptable,
-            content_type=body.content_type,
-            ingress=ingress,
+def create_asset(body: CandidateProposalRequest):
+    """Commit exactly one signed ``asset.propose`` Candidate."""
+    _require_single_effect(body, "asset.propose")
+    decision = _commit_candidate_request(body)
+    if not decision.accepted:
+        raise HTTPException(status_code=422, detail=_rejection_reason(decision))
+    if len(decision.assets) != 1 or decision.contract is not None:
+        raise HTTPException(
+            status_code=422,
+            detail="POST /assets requires one asset.propose effect",
         )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
 
-    return _asset_response(asset)
+    return _asset_response(decision.assets[0])
 
 
 @app.get("/contracts", response_model=list[ContractResponse])

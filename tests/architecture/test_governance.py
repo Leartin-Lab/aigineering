@@ -21,9 +21,9 @@ def test_design_truth_and_active_change_are_present():
         "## Exit criteria",
     ):
         assert section in change
-    adr = (
-        ROOT / "docs/adr/ADR-011-candidate-native-plugin-runtime.md"
-    ).read_text(encoding="utf-8")
+    adr = (ROOT / "docs/adr/ADR-011-candidate-native-plugin-runtime.md").read_text(
+        encoding="utf-8"
+    )
     assert "Status: Accepted; migration in progress" in adr
     assert "current implemented truth" in adr
 
@@ -76,6 +76,19 @@ def test_behavior_add_uses_asset_candidate_path():
     assert "asset_proposal_effect" in add_body
     assert "inject_asset" not in add_body
     assert "RuntimeIngress(" not in add_body
+
+
+def test_http_asset_and_contract_creation_require_signed_candidates():
+    source = (ROOT / "src/aigineering/server/app.py").read_text(encoding="utf-8")
+    creation_surface = source.split('@app.get("/contracts"', 1)[0]
+
+    assert 'app.post("/candidates")' in creation_surface
+    assert "CandidateProposalRequest" in creation_surface
+    assert "CandidateCommitter" in creation_surface
+    assert "ContractCreateRequest" not in source
+    assert "AssetCreateRequest" not in source
+    assert "inject_contract" not in creation_surface
+    assert "inject_asset" not in creation_surface
 
 
 def test_commitment_coordinator_does_not_own_effect_semantics():
