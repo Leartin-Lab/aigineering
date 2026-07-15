@@ -166,6 +166,11 @@ Implementation progress:
   key and revoke itself. Rotation is self-only, requires a new key ID, and the
   replacement capabilities must be a subset of the signing key's capabilities;
   a mid-commit failure rolls both facts back.
+- Complete: Candidate commitment accepts a Candidate-wide atomic effect batch.
+  Effect dispatch, capability checks, and batch composition stay outside the
+  coordinator. Mixed atomic-group IDs, multiple Contract declarations, and
+  Contract-plus-Asset batches fail closed until their causal projection is
+  implemented; any invalid effect rejects the complete batch.
 - Complete: cryptography is a base dependency; the runtime does not silently
   substitute a non-authenticating deterministic seal.
 - Pending: bind worker routing registration to authorized keys, authenticate

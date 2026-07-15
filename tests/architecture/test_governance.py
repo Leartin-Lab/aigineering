@@ -284,6 +284,7 @@ def test_commitment_coordinator_does_not_own_effect_semantics():
     assert "contract.declare" not in source
     assert "worker_registration" not in source
     assert "scan_runtime_records" not in source
+    assert "project_effect_batch" in source
     assert len(source.splitlines()) < 300
 
 

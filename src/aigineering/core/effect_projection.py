@@ -34,6 +34,16 @@ class EffectProjection:
     additional_capabilities: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True)
+class EffectBatchProjection:
+    records: tuple[RuntimeRecord, ...]
+    relation_target: str
+    projected_effects: tuple[tuple[str, str], ...]
+    contract: Contract | None = None
+    assets: tuple[Asset, ...] = ()
+    accepted_asset_names: tuple[str, ...] = ()
+
+
 def _contract_from_payload(payload: Mapping[str, Any]) -> Contract:
     value = payload.get("contract")
     if not isinstance(value, Mapping):
@@ -309,3 +319,64 @@ BUILTIN_EFFECTS: Mapping[str, tuple[str, EffectProjector]] = MappingProxyType(
         "actor.rotate": ("actor.rotate", project_actor_rotation),
     }
 )
+
+
+def project_effect_batch(
+    candidate: CandidateProposal,
+    receipt_id: str,
+    actor_capabilities: tuple[str, ...],
+) -> EffectBatchProjection:
+    """Project one Candidate-wide atomic effect group without Store access."""
+    groups = {effect.atomic_group for effect in candidate.effects}
+    if len(groups) > 1:
+        raise ValueError("one Candidate cannot mix different atomic_group values")
+    projections: list[tuple[CandidateEffect, EffectProjection]] = []
+    for effect in candidate.effects:
+        handler = BUILTIN_EFFECTS.get(effect.effect_type)
+        if handler is None:
+            raise ValueError(f"unsupported effect type {effect.effect_type!r}")
+        required_capability, projector = handler
+        if required_capability not in actor_capabilities:
+            raise ValueError(f"actor lacks required capability {required_capability!r}")
+        projection = projector(effect, candidate, receipt_id)
+        missing = tuple(
+            capability
+            for capability in projection.additional_capabilities
+            if capability not in actor_capabilities
+        )
+        if missing:
+            raise ValueError(f"actor lacks required capabilities {missing!r}")
+        projections.append((effect, projection))
+
+    contracts = tuple(
+        projection.contract
+        for _, projection in projections
+        if projection.contract is not None
+    )
+    assets = tuple(
+        asset for _, projection in projections for asset in projection.assets
+    )
+    if len(contracts) > 1:
+        raise ValueError("the current atomic slice supports at most one Contract")
+    if contracts and assets:
+        raise ValueError(
+            "the current atomic slice cannot declare a Contract and Assets together"
+        )
+    targets = tuple(
+        (effect.effect_type, projection.relation_target)
+        for effect, projection in projections
+    )
+    return EffectBatchProjection(
+        records=tuple(
+            record for _, projection in projections for record in projection.records
+        ),
+        relation_target=(targets[0][1] if len(targets) == 1 else candidate.id),
+        projected_effects=targets,
+        contract=contracts[0] if contracts else None,
+        assets=assets,
+        accepted_asset_names=tuple(
+            name
+            for _, projection in projections
+            for name in projection.accepted_asset_names
+        ),
+    )

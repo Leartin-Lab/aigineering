@@ -29,6 +29,7 @@ from aigineering.protocol.effect_builders import (
     actor_authorization_effect,
     actor_revocation_effect,
     actor_rotation_effect,
+    worker_registration_effect,
 )
 from aigineering.protocol.types import Contract
 from aigineering.protocol.wire import contract_to_dict
@@ -163,6 +164,125 @@ def test_worker_registration_requires_dedicated_actor_capability():
 
     assert decision.accepted is False
     assert "worker.register" in str(decision.runtime_records[1].payload["reason"])
+
+
+def test_multi_effect_candidate_commits_actor_and_worker_registration_atomically(store):
+    root_signer = Ed25519Signer()
+    worker_signer = Ed25519Signer()
+    genesis = create_genesis_manifest(
+        "atomic-worker-registration",
+        [
+            ActorKey(
+                "human:owner",
+                "root",
+                root_signer.kind,
+                root_signer.signer_id,
+                ("actor.authorize", "worker.register"),
+            )
+        ],
+        "policy:atomic-effects",
+    )
+    initialize_genesis(store, genesis)
+    worker_key = ActorKey(
+        "worker:atomic",
+        "key-1",
+        worker_signer.kind,
+        worker_signer.signer_id,
+        ("asset.publish",),
+    )
+    registration = WorkerRegistration("worker:atomic", version="1")
+    candidate = create_candidate_proposal(
+        domain_id=genesis.id,
+        actor_id="human:owner",
+        key_id="root",
+        effects=[
+            actor_authorization_effect(worker_key),
+            worker_registration_effect(registration),
+        ],
+        signer=root_signer,
+    )
+    trace = store if isinstance(store, SQLiteStore) else MemoryTraceStore()
+
+    decision = CandidateCommitter(store, trace).commit(candidate, genesis)
+
+    assert decision.accepted is True
+    assert load_authorized_actor_keys(store) == (worker_key,)
+    assert store.get_worker_registration(registration.worker_id) == registration
+
+
+def test_invalid_effect_rejects_entire_candidate_batch(store):
+    root_signer = Ed25519Signer()
+    worker_signer = Ed25519Signer()
+    genesis = create_genesis_manifest(
+        "atomic-rejection",
+        [
+            ActorKey(
+                "human:owner",
+                "root",
+                root_signer.kind,
+                root_signer.signer_id,
+                ("actor.authorize", "worker.register"),
+            )
+        ],
+        "policy:atomic-effects",
+    )
+    initialize_genesis(store, genesis)
+    worker_key = ActorKey(
+        "worker:rejected",
+        "key-1",
+        worker_signer.kind,
+        worker_signer.signer_id,
+        ("asset.publish",),
+    )
+    candidate = create_candidate_proposal(
+        domain_id=genesis.id,
+        actor_id="human:owner",
+        key_id="root",
+        effects=[
+            actor_authorization_effect(worker_key),
+            CandidateEffect(
+                "worker.register",
+                {"registration": {"worker_id": "worker:rejected", "capacity": 0}},
+            ),
+        ],
+        signer=root_signer,
+    )
+    trace = store if isinstance(store, SQLiteStore) else MemoryTraceStore()
+
+    decision = CandidateCommitter(store, trace).commit(candidate, genesis)
+
+    assert decision.accepted is False
+    assert load_authorized_actor_keys(store) == ()
+    assert store.get_worker_registration("worker:rejected") is None
+
+
+def test_candidate_cannot_mix_atomic_group_values():
+    genesis, candidate = _proposal(
+        capabilities=("asset.publish",),
+        effect=CandidateEffect(
+            "asset.propose",
+            {"asset": {"name": "first", "content": "one"}},
+            atomic_group="one",
+        ),
+    )
+    second = CandidateEffect(
+        "asset.propose",
+        {"asset": {"name": "second", "content": "two"}},
+        atomic_group="two",
+    )
+    signer = _Signer()
+    mixed = create_candidate_proposal(
+        domain_id=genesis.id,
+        actor_id=candidate.actor_id,
+        key_id=candidate.key_id,
+        effects=[candidate.effects[0], second],
+        signer=signer,
+    )
+
+    decision = reduce_candidate(mixed, genesis, verifier_factory=_verifier_factory)
+
+    assert decision.accepted is False
+    assert "atomic_group" in str(decision.runtime_records[1].payload["reason"])
 
 
 def _authorize_worker(store, *, worker_capabilities=("asset.publish",)):

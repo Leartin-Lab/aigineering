@@ -12,7 +12,7 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 from aigineering.core.actor_facts import load_effective_actor_keys
-from aigineering.core.effect_projection import BUILTIN_EFFECTS
+from aigineering.core.effect_projection import project_effect_batch
 from aigineering.core.fact_materialization import (
     reduce_asset_facts,
     trace_records,
@@ -147,42 +147,14 @@ def reduce_candidate(
         )
     except ValueError as exc:
         return _authentication_rejection_decision(candidate, str(exc))
-    if len(candidate.effects) != 1:
-        return _rejection_decision(
-            candidate,
-            receipt,
-            "the current commitment slice requires exactly one effect",
-        )
-
-    effect = candidate.effects[0]
-    handler = BUILTIN_EFFECTS.get(effect.effect_type)
-    if handler is None:
-        return _rejection_decision(
-            candidate, receipt, f"unsupported effect type {effect.effect_type!r}"
-        )
-    required_capability, projector = handler
-    if required_capability not in _actor_capabilities(candidate, effective_actor_keys):
-        return _rejection_decision(
-            candidate,
-            receipt,
-            f"actor lacks required capability {required_capability!r}",
-        )
     try:
-        projection = projector(effect, candidate, receipt.id)
+        projection = project_effect_batch(
+            candidate,
+            receipt.id,
+            _actor_capabilities(candidate, effective_actor_keys),
+        )
     except (TypeError, ValueError) as exc:
         return _rejection_decision(candidate, receipt, str(exc))
-    capabilities = _actor_capabilities(candidate, effective_actor_keys)
-    missing_capabilities = tuple(
-        capability
-        for capability in projection.additional_capabilities
-        if capability not in capabilities
-    )
-    if missing_capabilities:
-        return _rejection_decision(
-            candidate,
-            receipt,
-            f"actor lacks required capabilities {missing_capabilities!r}",
-        )
     committed = create_runtime_record(
         "candidate.committed",
         {
@@ -203,11 +175,12 @@ def reduce_candidate(
             json.dumps(
                 {
                     "candidate_id": candidate.id,
-                    "effect_type": effect.effect_type,
-                    "relation_target": projection.relation_target,
+                    "effect_type": effect_type,
+                    "relation_target": relation_target,
                 },
                 sort_keys=True,
             )
+            for effect_type, relation_target in projection.projected_effects
         ],
     )
     return CommitmentDecision(

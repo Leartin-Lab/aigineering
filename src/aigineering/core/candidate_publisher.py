@@ -24,13 +24,37 @@ def publish_effect(
     causal_parents: tuple[str, ...] = (),
 ) -> CommitmentDecision:
     """Sign and commit one effect for an explicitly selected actor key."""
+    return publish_effects(
+        store,
+        trace,
+        genesis,
+        actor_key,
+        signer,
+        (effect,),
+        idempotency_key=idempotency_key,
+        causal_parents=causal_parents,
+    )
+
+
+def publish_effects(
+    store,
+    trace,
+    genesis: GenesisManifest,
+    actor_key: ActorKey,
+    signer: Signer,
+    effects: tuple[CandidateEffect, ...],
+    *,
+    idempotency_key: str,
+    causal_parents: tuple[str, ...] = (),
+) -> CommitmentDecision:
+    """Sign and atomically commit one Candidate effect batch."""
     if actor_key.public_key != signer.signer_id or actor_key.kind != signer.kind:
         raise ValueError("publisher signer does not match the selected actor key")
     candidate = create_candidate_proposal(
         domain_id=genesis.id,
         actor_id=actor_key.actor_id,
         key_id=actor_key.key_id,
-        effects=[effect],
+        effects=effects,
         signer=signer,
         causal_parents=causal_parents,
         idempotency_key=idempotency_key,
