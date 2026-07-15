@@ -18,6 +18,7 @@ LOCAL_ROOT_CAPABILITIES = (
     "asset.publish",
     "asset.publish.protected",
     "contract.publish",
+    "worker.register",
 )
 
 

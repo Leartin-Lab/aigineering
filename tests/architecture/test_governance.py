@@ -149,6 +149,17 @@ def test_skill_loader_builds_assets_and_cli_owns_candidate_publication():
     assert "RuntimeIngress" not in cli
 
 
+def test_worker_registration_cli_uses_typed_candidate_effect():
+    source = (ROOT / "src/aigineering/cli/worker.py").read_text(encoding="utf-8")
+    register = source.split("def worker_register", 1)[1].split(
+        '@worker.command("submit")', 1
+    )[0]
+
+    assert "worker_registration_effect" in register
+    assert "commit_local_effect" in register
+    assert "store.register_worker" not in register
+
+
 def test_commitment_coordinator_does_not_own_effect_semantics():
     path = ROOT / "src/aigineering/core/commitment.py"
     source = path.read_text(encoding="utf-8")

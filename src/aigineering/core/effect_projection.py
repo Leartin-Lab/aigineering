@@ -11,6 +11,10 @@ from aigineering.core.contract_admission import validate_contract_commitment
 from aigineering.core.fact_materialization import asset_committed_record
 from aigineering.core.ids import hash_asset_content, hash_asset_definition
 from aigineering.core.provenance import sign_asset
+from aigineering.core.worker_routing import (
+    WorkerRegistration,
+    worker_registration_payload,
+)
 from aigineering.protocol.candidate import CandidateEffect, CandidateProposal
 from aigineering.protocol.immutability import deep_thaw
 from aigineering.protocol.runtime_record import RuntimeRecord, create_runtime_record
@@ -26,6 +30,7 @@ class EffectProjection:
     assets: tuple[Asset, ...] = ()
     accepted_asset_names: tuple[str, ...] = ()
     additional_capabilities: tuple[str, ...] = ()
+    worker_registration: WorkerRegistration | None = None
 
 
 def _contract_from_payload(payload: Mapping[str, Any]) -> Contract:
@@ -116,10 +121,40 @@ def project_asset_proposal(
     )
 
 
+def project_worker_registration(
+    effect: CandidateEffect, candidate: CandidateProposal, receipt_id: str
+) -> EffectProjection:
+    del candidate
+    value = effect.payload.get("registration")
+    if not isinstance(value, Mapping):
+        raise ValueError("worker.register requires an object payload.registration")
+    data = deep_thaw(value)
+    registration = WorkerRegistration(
+        worker_id=str(data.get("worker_id", "")),
+        capabilities=tuple(data.get("capabilities", ())),
+        pools=tuple(data.get("pools", ())),
+        profile_id=str(data.get("profile_id", "")),
+        capacity=int(data.get("capacity", 1)),
+        enabled=bool(data.get("enabled", True)),
+        version=str(data.get("version", "1")),
+    )
+    record = create_runtime_record(
+        "worker.registered",
+        worker_registration_payload(registration),
+        causal_parents=(receipt_id,),
+    )
+    return EffectProjection(
+        records=(record,),
+        relation_target=registration.worker_id,
+        worker_registration=registration,
+    )
+
+
 EffectProjector = Callable[[CandidateEffect, CandidateProposal, str], EffectProjection]
 BUILTIN_EFFECTS: Mapping[str, tuple[str, EffectProjector]] = MappingProxyType(
     {
         "asset.propose": ("asset.publish", project_asset_proposal),
         "contract.declare": ("contract.publish", project_contract_declaration),
+        "worker.register": ("worker.register", project_worker_registration),
     }
 )

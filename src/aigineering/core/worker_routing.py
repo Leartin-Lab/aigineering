@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 
 from aigineering.protocol.types import Contract
 from aigineering.protocol.runtime_record import RuntimeRecord, create_runtime_record
+from aigineering.core.record_conflict import ImmutableRecordConflict
 
 
 @dataclass(frozen=True)
@@ -41,19 +42,22 @@ class WorkerRegistration:
         object.__setattr__(self, "pools", tuple(sorted(set(self.pools))))
 
 
+def worker_registration_payload(registration: WorkerRegistration) -> dict:
+    return {
+        "capabilities": list(registration.capabilities),
+        "capacity": registration.capacity,
+        "enabled": registration.enabled,
+        "pools": list(registration.pools),
+        "profile_id": registration.profile_id,
+        "version": registration.version,
+        "worker_id": registration.worker_id,
+    }
+
+
 def worker_registration_record(registration: WorkerRegistration) -> RuntimeRecord:
     """Return the immutable control-plane fact for a registration version."""
     return create_runtime_record(
-        "worker.registered",
-        {
-            "capabilities": list(registration.capabilities),
-            "capacity": registration.capacity,
-            "enabled": registration.enabled,
-            "pools": list(registration.pools),
-            "profile_id": registration.profile_id,
-            "version": registration.version,
-            "worker_id": registration.worker_id,
-        },
+        "worker.registered", worker_registration_payload(registration)
     )
 
 
@@ -74,6 +78,25 @@ def registration_from_record(
         enabled=bool(payload["enabled"]),
         version=str(payload["version"]),
     )
+
+
+def registration_is_replay(
+    records: list[tuple[int, RuntimeRecord]], registration: WorkerRegistration
+) -> bool:
+    """Validate immutable worker/version identity and report exact replay."""
+    for _, record in records:
+        existing = registration_from_record(record)
+        if (
+            existing.worker_id == registration.worker_id
+            and existing.version == registration.version
+        ):
+            if existing == registration:
+                return True
+            raise ImmutableRecordConflict(
+                "worker registration version",
+                f"{registration.worker_id}:{registration.version}",
+            )
+    return False
 
 
 def is_eligible(contract: Contract, worker: WorkerRegistration) -> bool:

@@ -16,6 +16,7 @@ from aigineering.core.signing import Signer, Verifier
 from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.core.store import MemoryStore
 from aigineering.core.trace import MemoryTraceStore
+from aigineering.core.worker_routing import WorkerRegistration
 from aigineering.protocol.candidate import (
     ActorKey,
     CandidateEffect,
@@ -98,6 +99,59 @@ def test_reducer_is_pure_and_accepts_authorized_contract():
         "candidate.committed",
         "contract.declared",
     }
+
+
+def test_worker_registration_candidate_updates_rebuildable_routing_view(store):
+    registration = WorkerRegistration(
+        "llm:vision",
+        capabilities=("text", "vision"),
+        pools=("advanced",),
+        profile_id="deepseek:v4",
+        capacity=2,
+        version="3",
+    )
+    genesis, candidate = _proposal(
+        capabilities=("worker.register",),
+        effect=CandidateEffect(
+            "worker.register",
+            {
+                "registration": {
+                    "worker_id": registration.worker_id,
+                    "capabilities": list(registration.capabilities),
+                    "pools": list(registration.pools),
+                    "profile_id": registration.profile_id,
+                    "capacity": registration.capacity,
+                    "enabled": registration.enabled,
+                    "version": registration.version,
+                }
+            },
+        ),
+    )
+
+    trace = store if isinstance(store, SQLiteStore) else MemoryTraceStore()
+    decision = CandidateCommitter(store, trace).commit(
+        candidate, genesis, verifier_factory=_verifier_factory
+    )
+
+    assert decision.accepted is True
+    assert decision.worker_registration == registration
+    assert store.get_worker_registration(registration.worker_id) == registration
+    store.rebuild_worker_registration_projection()
+    assert store.get_worker_registration(registration.worker_id) == registration
+
+
+def test_worker_registration_requires_dedicated_actor_capability():
+    genesis, candidate = _proposal(
+        capabilities=("contract.publish",),
+        effect=CandidateEffect(
+            "worker.register", {"registration": {"worker_id": "unauthorized"}}
+        ),
+    )
+
+    decision = reduce_candidate(candidate, genesis, verifier_factory=_verifier_factory)
+
+    assert decision.accepted is False
+    assert "worker.register" in str(decision.runtime_records[1].payload["reason"])
 
 
 @pytest.fixture(params=["memory", "sqlite"])

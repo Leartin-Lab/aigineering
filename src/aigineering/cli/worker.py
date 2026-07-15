@@ -12,6 +12,7 @@ from aigineering.cli._common import (
     _persistent_store,
     _redact_sealed,
 )
+from aigineering.cli._candidate import commit_local_effect, require_accepted
 from aigineering.runtime import (
     _method_context_assets_for,
     claim_next_package,
@@ -26,6 +27,7 @@ from aigineering.core.submit import (
     submit_candidate,
 )
 from aigineering.protocol.envelope import CandidateEnvelope
+from aigineering.protocol.effect_builders import worker_registration_effect
 from aigineering.protocol.wire import contract_to_dict
 
 
@@ -202,6 +204,7 @@ def worker_next(worker_id: str, lease_seconds: int, json_output: bool) -> None:
     help="Versioned provider compatibility profile.",
 )
 @click.option("--capacity", default=1, show_default=True, type=click.IntRange(min=1))
+@click.option("--version", default="1", show_default=True)
 @click.option(
     "--disabled", is_flag=True, default=False, help="Register as unavailable."
 )
@@ -212,6 +215,7 @@ def worker_register(
     pools: tuple[str, ...],
     profile_id: str,
     capacity: int,
+    version: str,
     disabled: bool,
     json_output: bool,
 ) -> None:
@@ -224,8 +228,18 @@ def worker_register(
         profile_id=profile_id,
         capacity=capacity,
         enabled=not disabled,
+        version=version,
     )
-    store.register_worker(registration)
+    try:
+        require_accepted(
+            commit_local_effect(
+                store,
+                worker_registration_effect(registration),
+                idempotency_key=f"worker:{worker_id}:{version}",
+            )
+        )
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
     payload = {
         "worker_id": registration.worker_id,
         "capabilities": list(registration.capabilities),
@@ -233,6 +247,7 @@ def worker_register(
         "profile_id": registration.profile_id,
         "capacity": registration.capacity,
         "enabled": registration.enabled,
+        "version": registration.version,
     }
     if json_output:
         _output_json(payload)

@@ -18,6 +18,7 @@ from aigineering.core.provenance import verify_asset_seal
 from aigineering.core.record_conflict import ImmutableRecordConflict
 from aigineering.core.ids import compute_content_hash, validate_contract_identity
 from aigineering.core.worker_routing import (
+    registration_is_replay,
     registration_from_record,
     worker_registration_record,
 )
@@ -234,19 +235,11 @@ class MemoryStore(_ProjectionIndexMixin):
 
     def register_worker(self, registration) -> None:
         record = worker_registration_record(registration)
-        for _, existing in self.scan_runtime_records(record_type="worker.registered"):
-            payload = existing.payload
-            if (
-                payload["worker_id"] == registration.worker_id
-                and payload["version"] == registration.version
-            ):
-                if existing.id == record.id:
-                    self._worker_registrations[registration.worker_id] = registration
-                    return
-                raise ImmutableRecordConflict(
-                    "worker registration version",
-                    f"{registration.worker_id}:{registration.version}",
-                )
+        if registration_is_replay(
+            self.scan_runtime_records(record_type="worker.registered"), registration
+        ):
+            self._worker_registrations[registration.worker_id] = registration
+            return
         self.append_runtime_record(record)
         self._worker_registrations[registration.worker_id] = registration
 
@@ -301,6 +294,7 @@ class MemoryStore(_ProjectionIndexMixin):
         contract: Contract | None = None,
         reducer_callback=None,
         runtime_records: tuple[RuntimeRecord, ...] = (),
+        worker_registration=None,
     ) -> None:
         """Apply one ingress batch with rollback-equivalent memory semantics."""
         del trace_entries
@@ -317,6 +311,7 @@ class MemoryStore(_ProjectionIndexMixin):
             {key: value.copy() for key, value in self._declared_outputs_index.items()},
             self._runtime_records.copy(),
             self._runtime_revision,
+            self._worker_registrations.copy(),
         )
         committed = False
         try:
@@ -328,8 +323,17 @@ class MemoryStore(_ProjectionIndexMixin):
                 self._persist_asset(asset)
             if reducer_callback is not None:
                 reducer_callback()
+            if worker_registration is not None:
+                registration_is_replay(
+                    self.scan_runtime_records(record_type="worker.registered"),
+                    worker_registration,
+                )
             for record in runtime_records:
                 self.append_runtime_record(record)
+            if worker_registration is not None:
+                self._worker_registrations[worker_registration.worker_id] = (
+                    worker_registration
+                )
             committed = True
         finally:
             if not committed:
@@ -341,6 +345,7 @@ class MemoryStore(_ProjectionIndexMixin):
                     self._declared_outputs_index,
                     self._runtime_records,
                     self._runtime_revision,
+                    self._worker_registrations,
                 ) = snapshot
 
     def add_asset(self, asset: Asset) -> None:

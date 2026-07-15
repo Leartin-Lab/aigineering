@@ -43,6 +43,44 @@ def _seed_contract(store: SQLiteStore) -> Contract:
     return contract
 
 
+def test_worker_register_publishes_signed_candidate():
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        assert runner.invoke(cli, ["domain", "init"]).exit_code == 0
+        result = runner.invoke(
+            cli,
+            [
+                "worker",
+                "register",
+                "--worker-id",
+                "llm:vision",
+                "--capability",
+                "vision",
+                "--pool",
+                "advanced",
+                "--version",
+                "2",
+                "--json",
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+        payload = json.loads(result.output)
+        assert payload["version"] == "2"
+        store = SQLiteStore(".aig/store.db")
+        registration = store.get_worker_registration("llm:vision")
+        assert registration is not None
+        assert registration.capabilities == ("vision",)
+        assert registration.pools == ("advanced",)
+        record_types = {
+            record.record_type for _, record in store.scan_runtime_records()
+        }
+        assert {"candidate.received", "candidate.committed", "worker.registered"} <= (
+            record_types
+        )
+        store.close()
+
+
 def _seed_contract_with_asset(store: SQLiteStore) -> tuple[Contract, Asset]:
     """Add a test contract and an input asset, return both."""
     contract = _seed_contract(store)

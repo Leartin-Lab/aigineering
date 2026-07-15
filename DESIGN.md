@@ -112,6 +112,11 @@ protected name derives an additional `asset.publish.protected` requirement;
 ordinary asset publishers cannot acquire it from payload fields. The local
 Genesis owner is explicitly granted this administrative capability.
 
+Worker routing registration uses a dedicated `worker.register` effect and
+capability. Commitment atomically appends the immutable registration fact and
+updates the rebuildable routing projection; the CLI no longer writes routing
+state directly to a Store. Registration version is explicit at publication.
+
 The commitment coordinator authenticates, dispatches, records decisions, and
 commits atomically; it does not parse individual effect payloads. Built-in
 effect projectors and Contract admission policy are separate pure modules. An

@@ -32,6 +32,7 @@ from aigineering.core.record_conflict import ImmutableRecordConflict
 from aigineering.core.store import _projection_index_digest, _replacement_claim_payload
 from aigineering.core.trace import trace_effective_payload
 from aigineering.core.worker_routing import (
+    registration_is_replay,
     WorkerRegistration,
     registration_from_record,
     worker_registration_record,
@@ -961,45 +962,39 @@ class SQLiteStore:
         """Append one registration version and update its derived current view."""
         with self._conn:
             record = worker_registration_record(registration)
-            for _, existing in self.scan_runtime_records(
-                record_type="worker.registered"
+            if registration_is_replay(
+                self.scan_runtime_records(record_type="worker.registered"),
+                registration,
             ):
-                payload = existing.payload
-                if (
-                    payload["worker_id"] == registration.worker_id
-                    and payload["version"] == registration.version
-                ):
-                    if existing.id == record.id:
-                        return
-                    raise ImmutableRecordConflict(
-                        "worker registration version",
-                        f"{registration.worker_id}:{registration.version}",
-                    )
+                return
             self.append_runtime_record(record)
-            self._conn.execute(
-                """INSERT INTO worker_registrations (
-                    worker_id, capabilities, pools, profile_id, capacity,
-                    enabled, version, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(worker_id) DO UPDATE SET
-                    capabilities = excluded.capabilities,
-                    pools = excluded.pools,
-                    profile_id = excluded.profile_id,
-                    capacity = excluded.capacity,
-                    enabled = excluded.enabled,
-                    version = excluded.version,
-                    updated_at = excluded.updated_at""",
-                (
-                    registration.worker_id,
-                    json.dumps(list(registration.capabilities)),
-                    json.dumps(list(registration.pools)),
-                    registration.profile_id,
-                    registration.capacity,
-                    int(registration.enabled),
-                    registration.version,
-                    now_iso(),
-                ),
-            )
+            self._upsert_worker_registration(registration)
+
+    def _upsert_worker_registration(self, registration: WorkerRegistration) -> None:
+        self._conn.execute(
+            """INSERT INTO worker_registrations (
+                worker_id, capabilities, pools, profile_id, capacity,
+                enabled, version, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(worker_id) DO UPDATE SET
+                capabilities = excluded.capabilities,
+                pools = excluded.pools,
+                profile_id = excluded.profile_id,
+                capacity = excluded.capacity,
+                enabled = excluded.enabled,
+                version = excluded.version,
+                updated_at = excluded.updated_at""",
+            (
+                registration.worker_id,
+                json.dumps(list(registration.capabilities)),
+                json.dumps(list(registration.pools)),
+                registration.profile_id,
+                registration.capacity,
+                int(registration.enabled),
+                registration.version,
+                now_iso(),
+            ),
+        )
 
     def rebuild_worker_registration_projection(self) -> None:
         """Rebuild the mutable routing view from immutable registration facts."""
@@ -2148,8 +2143,14 @@ class SQLiteStore:
         contract: Contract | None = None,
         reducer_callback: Callable[[], list[TraceEntry]] | None = None,
         runtime_records: tuple[RuntimeRecord, ...] = (),
+        worker_registration: WorkerRegistration | None = None,
     ) -> None:
         with self._conn:
+            if worker_registration is not None:
+                registration_is_replay(
+                    self.scan_runtime_records(record_type="worker.registered"),
+                    worker_registration,
+                )
             if contract is not None:
                 self._insert_contract(contract)
             for asset in accepted_assets:
@@ -2168,6 +2169,8 @@ class SQLiteStore:
                 self._insert_trace_entry(entry)
             for record in runtime_records:
                 self._insert_runtime_record(record)
+            if worker_registration is not None:
+                self._upsert_worker_registration(worker_registration)
             check_crash_point("after_trace_before_budget")
             check_crash_point("after_budget_before_complete")
 
