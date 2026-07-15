@@ -56,6 +56,18 @@ It proves the authentication boundary without prematurely adding a second
 commit path. Projection and persistence integration follows only after reducer
 tests exist.
 
+Implementation progress:
+
+- Complete: canonical Genesis, signed Candidate, wire round trip, fail-closed
+  authentication, and non-committing receipt record.
+- Complete: pure and store-independent `contract.declare` reducer with atomic
+  Memory/SQLite commitment, idempotent replay, and visible rejection records.
+- Complete: legacy Contract ingress delegates to the same admission policy, so
+  the compatibility path no longer owns a divergent copy of those rules.
+- Pending: durable Genesis/key configuration and migration of the CLI default
+  publication path; the base install does not silently substitute a
+  non-authenticating deterministic seal.
+
 ## Required architecture tests
 
 - Effective Genesis and Candidate payloads have deterministic IDs.
@@ -86,4 +98,3 @@ tests exist.
 - Unit, architecture, conformance, restart, active-active, live-worker, lint,
   format, build, and artifact tests pass.
 - `DESIGN.md` is updated and this change is marked Complete.
-

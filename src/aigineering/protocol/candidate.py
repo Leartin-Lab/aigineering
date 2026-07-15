@@ -117,6 +117,34 @@ def validate_genesis_manifest(manifest: GenesisManifest) -> None:
         )
 
 
+def genesis_manifest_to_dict(manifest: GenesisManifest) -> dict[str, Any]:
+    """Serialize a Genesis manifest without weakening its canonical fields."""
+    return {"id": manifest.id, **genesis_effective_payload(manifest)}
+
+
+def genesis_manifest_from_dict(data: Mapping[str, Any]) -> GenesisManifest:
+    keys = tuple(
+        ActorKey(
+            actor_id=str(item.get("actor_id", "")),
+            key_id=str(item.get("key_id", "")),
+            kind=str(item.get("kind", "")),
+            public_key=str(item.get("public_key", "")),
+            capabilities=tuple(item.get("capabilities", ())),
+            revoked=bool(item.get("revoked", False)),
+        )
+        for item in data.get("root_keys", ())
+    )
+    manifest = GenesisManifest(
+        id=str(data.get("id", "")),
+        domain=str(data.get("domain", "")),
+        root_keys=keys,
+        policy_hash=str(data.get("policy_hash", "")),
+        schema_version=int(data.get("schema_version", 1)),
+    )
+    validate_genesis_manifest(manifest)
+    return manifest
+
+
 @dataclass(frozen=True)
 class CandidateEffect:
     """One proposed typed effect; its payload is recursively immutable."""
@@ -181,6 +209,37 @@ def candidate_effective_payload(candidate: CandidateProposal) -> dict[str, Any]:
 
 def candidate_signing_bytes(candidate: CandidateProposal) -> bytes:
     return canonical_json(candidate_effective_payload(candidate)).encode("utf-8")
+
+
+def candidate_proposal_to_dict(candidate: CandidateProposal) -> dict[str, Any]:
+    return {
+        "id": candidate.id,
+        "signature": candidate.signature,
+        **candidate_effective_payload(candidate),
+    }
+
+
+def candidate_proposal_from_dict(data: Mapping[str, Any]) -> CandidateProposal:
+    effects = tuple(
+        CandidateEffect(
+            effect_type=str(item.get("effect_type", "")),
+            payload=item.get("payload", {}),
+            atomic_group=str(item.get("atomic_group", "")),
+        )
+        for item in data.get("effects", ())
+    )
+    return CandidateProposal(
+        id=str(data.get("id", "")),
+        domain_id=str(data.get("domain_id", "")),
+        actor_id=str(data.get("actor_id", "")),
+        key_id=str(data.get("key_id", "")),
+        signature_kind=str(data.get("signature_kind", "")),
+        signature=str(data.get("signature", "")),
+        effects=effects,
+        causal_parents=tuple(data.get("causal_parents", ())),
+        idempotency_key=str(data.get("idempotency_key", "")),
+        protocol_version=int(data.get("protocol_version", CANDIDATE_PROTOCOL_VERSION)),
+    )
 
 
 def create_candidate_proposal(

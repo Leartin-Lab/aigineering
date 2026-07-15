@@ -12,8 +12,12 @@ from aigineering.protocol.candidate import (
     ActorKey,
     CandidateEffect,
     candidate_received_record,
+    candidate_proposal_from_dict,
+    candidate_proposal_to_dict,
     create_candidate_proposal,
     create_genesis_manifest,
+    genesis_manifest_from_dict,
+    genesis_manifest_to_dict,
     validate_genesis_manifest,
     verify_candidate_proposal,
 )
@@ -161,3 +165,20 @@ def test_deterministic_seal_is_not_actor_authentication():
 
     with pytest.raises(ValueError, match="cannot authenticate"):
         verify_candidate_proposal(candidate, genesis)
+
+
+def test_wire_round_trip_preserves_authenticated_bytes():
+    genesis, candidate = _genesis_and_candidate()
+
+    decoded_genesis = genesis_manifest_from_dict(genesis_manifest_to_dict(genesis))
+    decoded_candidate = candidate_proposal_from_dict(
+        candidate_proposal_to_dict(candidate)
+    )
+
+    assert decoded_genesis == genesis
+    assert decoded_candidate == candidate
+    verify_candidate_proposal(
+        decoded_candidate,
+        decoded_genesis,
+        verifier_factory=_verifier_factory,
+    )

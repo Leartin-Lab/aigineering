@@ -57,6 +57,14 @@ Candidates. Deterministic Asset seals provide replay integrity, not actor
 authentication. These are known transition boundaries, not properties hidden
 by the design documentation.
 
+The transition API now also implements GenesisManifest, actor keys,
+CandidateProposal, typed CandidateEffect values, canonical wire serialization,
+and signature verification. `CandidateCommitter` supports one complete
+`contract.declare` slice: it verifies the actor, applies the shared Contract
+admission policy, and transactionally records receipt, acceptance or rejection,
+audit evidence, and the Contract. It deliberately does not yet replace the CLI
+or support other effect types.
+
 ## Scheduling and reconstruction
 
 Eligibility is derived from facts: input availability, activation expression,
@@ -87,4 +95,3 @@ what is actually supported.
 
 Architecture constraints live in `tests/architecture/`. Release-grade evidence
 is retained in `reports/`; ordinary test output and exploratory notes are not.
-
