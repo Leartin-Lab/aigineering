@@ -27,6 +27,7 @@ from aigineering.plugins import (
     PluginRequest,
     TaskDelegationPlugin,
     TaskPlugin,
+    ToolCompletionPlugin,
 )
 from aigineering.protocol.actions import WorkerAction
 from aigineering.protocol.candidate import ActorKey, create_genesis_manifest
@@ -242,3 +243,20 @@ def test_delegation_plugin_rejects_unknown_action_without_handler_fallback():
             _parent(),
             WorkerAction(type="unknown", payload={}),
         )
+
+
+def test_tool_completion_plugin_requires_declared_worker_observation():
+    parent = replace(_parent(), tool_scope=("lookup",))
+    contract = method_contract(
+        parent,
+        WorkerAction(type="tool", payload={"name": "lookup", "args": {}}),
+    )
+    observation = Asset(
+        id="tool-observation",
+        name=contract.outputs[0],
+        content='{"ok":true,"result":"value"}',
+    )
+    plugin = ToolCompletionPlugin()
+
+    assert plugin.handle_completion(None, contract, [observation]) is True
+    assert plugin.handle_completion(None, contract, []) is False

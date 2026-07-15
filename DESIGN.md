@@ -237,6 +237,11 @@ Plan and replan completion now live in `plugins/planning_completion.py` and are
 registered directly by application composition. Their old core handlers are
 thin Engine scheduling adapters; the former replan copy remains only a
 parameterized compatibility subclass.
+Worker-produced tool observations use the small ToolCompletionPlugin;
+application composition no longer imports the legacy ToolMethodHandler or its
+in-process MCP/tool execution machinery. A multistep runtime test proves that
+observation completion publishes its continuation as a separate signed
+Candidate.
 Authentication, claim, policy, and binding failures append Candidate rejection
 records and Trace evidence before returning an error; an invalid worker result
 cannot disappear as an API-only failure.

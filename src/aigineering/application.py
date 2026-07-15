@@ -8,11 +8,11 @@ from typing import Optional
 from aigineering.agent.llm import LLMWorker
 from aigineering.agent.mock import MockWorker
 from aigineering.core.method_handlers.fail import FailMethodHandler
-from aigineering.core.method_handlers.tool import ToolMethodHandler
 from aigineering.plugins import (
     CompletionRegistry,
     PlanningCompletionPlugin,
     ReplanningCompletionPlugin,
+    ToolCompletionPlugin,
 )
 from aigineering.core.session import SessionStore
 from aigineering.core.sqlite_store import SQLiteStore
@@ -30,7 +30,7 @@ def default_completion_registry() -> CompletionRegistry:
     registry = CompletionRegistry()
     registry.register("plan", PlanningCompletionPlugin())
     registry.register("replan", ReplanningCompletionPlugin())
-    registry.register("tool", ToolMethodHandler())
+    registry.register("tool", ToolCompletionPlugin())
     registry.register("fail", FailMethodHandler())
     return registry
 

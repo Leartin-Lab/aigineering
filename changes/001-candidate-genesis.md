@@ -230,6 +230,10 @@ Implementation progress:
   into application-registered completion plugins. The legacy plan handler is a
   small source-only Engine scheduling adapter, and replan remains a parameter
   specialization rather than duplicated logic.
+- Complete: supported runtime tool completion uses ToolCompletionPlugin to
+  acknowledge a worker-produced declared observation and publish a signed
+  continuation Candidate. Application composition no longer imports the legacy
+  in-process ToolMethodHandler execution stack.
 - Complete: recovery replayers fail loudly when durable rejection, expiration,
   or provider-failure facts lack the Contract/raw Candidate evidence required
   to derive their consequence. These broken causal chains can no longer be

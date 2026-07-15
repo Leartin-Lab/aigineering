@@ -9,6 +9,7 @@ from aigineering.plugins.planning_completion import (
     PlanningCompletionPlugin,
     ReplanningCompletionPlugin,
 )
+from aigineering.plugins.tool_completion import ToolCompletionPlugin
 
 __all__ = (
     "PlanningExpansionPlugin",
@@ -21,5 +22,6 @@ __all__ = (
     "PluginRequest",
     "ReplanningCompletionPlugin",
     "TaskPlugin",
+    "ToolCompletionPlugin",
     "TaskDelegationPlugin",
 )
