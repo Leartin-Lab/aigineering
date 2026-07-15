@@ -24,7 +24,10 @@ from aigineering.protocol.candidate import (
     create_candidate_proposal,
     create_genesis_manifest,
 )
-from aigineering.protocol.effect_builders import actor_authorization_effect
+from aigineering.protocol.effect_builders import (
+    actor_authorization_effect,
+    actor_revocation_effect,
+)
 from aigineering.protocol.types import Contract
 from aigineering.protocol.wire import contract_to_dict
 
@@ -160,7 +163,7 @@ def test_worker_registration_requires_dedicated_actor_capability():
     assert "worker.register" in str(decision.runtime_records[1].payload["reason"])
 
 
-def test_authorized_actor_key_can_publish_its_own_candidate(store):
+def _authorize_worker(store, *, worker_capabilities=("asset.publish",)):
     root_signer = Ed25519Signer()
     worker_signer = Ed25519Signer()
     genesis = create_genesis_manifest(
@@ -171,7 +174,7 @@ def test_authorized_actor_key_can_publish_its_own_candidate(store):
                 "root",
                 root_signer.kind,
                 root_signer.signer_id,
-                ("actor.authorize",),
+                ("actor.authorize", "actor.revoke"),
             )
         ],
         "policy:delegation",
@@ -182,7 +185,7 @@ def test_authorized_actor_key_can_publish_its_own_candidate(store):
         "worker-1",
         worker_signer.kind,
         worker_signer.signer_id,
-        ("asset.publish",),
+        worker_capabilities,
     )
     authorization = create_candidate_proposal(
         domain_id=genesis.id,
@@ -193,6 +196,11 @@ def test_authorized_actor_key_can_publish_its_own_candidate(store):
     )
     trace = store if isinstance(store, SQLiteStore) else MemoryTraceStore()
     assert CandidateCommitter(store, trace).commit(authorization, genesis).accepted
+    return genesis, root_signer, worker_signer, worker_key, trace
+
+
+def test_authorized_actor_key_can_publish_its_own_candidate(store):
+    genesis, _, worker_signer, worker_key, trace = _authorize_worker(store)
 
     proposal = create_candidate_proposal(
         domain_id=genesis.id,
@@ -212,6 +220,114 @@ def test_authorized_actor_key_can_publish_its_own_candidate(store):
     assert (
         store.get_assets_by_name("worker_result")[0].created_by == worker_key.actor_id
     )
+
+
+def test_revoked_actor_key_cannot_publish_another_candidate(store):
+    genesis, root_signer, worker_signer, worker_key, trace = _authorize_worker(store)
+    revocation = create_candidate_proposal(
+        domain_id=genesis.id,
+        actor_id="human:owner",
+        key_id="root",
+        effects=[
+            actor_revocation_effect(
+                worker_key.actor_id, worker_key.key_id, "worker retired"
+            )
+        ],
+        signer=root_signer,
+    )
+    assert CandidateCommitter(store, trace).commit(revocation, genesis).accepted
+    stale = create_candidate_proposal(
+        domain_id=genesis.id,
+        actor_id=worker_key.actor_id,
+        key_id=worker_key.key_id,
+        effects=[
+            CandidateEffect(
+                "asset.propose",
+                {"asset": {"name": "late_result", "content": "too late"}},
+            )
+        ],
+        signer=worker_signer,
+    )
+
+    decision = CandidateCommitter(store, trace).commit(stale, genesis)
+
+    assert decision.accepted is False
+    assert not store.get_assets_by_name("late_result")
+    rejection = next(
+        record
+        for record in decision.runtime_records
+        if record.record_type == "candidate.authentication_rejected"
+    )
+    assert "revoked" in str(rejection.payload["reason"])
+
+
+def test_sqlite_revocation_race_fences_late_actor_candidate(tmp_path):
+    path = str(tmp_path / "revocation-race.db")
+    setup = SQLiteStore(path)
+    genesis, root_signer, worker_signer, worker_key, _ = _authorize_worker(setup)
+    setup.close()
+    worker_candidate = create_candidate_proposal(
+        domain_id=genesis.id,
+        actor_id=worker_key.actor_id,
+        key_id=worker_key.key_id,
+        effects=[
+            CandidateEffect(
+                "asset.propose",
+                {"asset": {"name": "racing_result", "content": "candidate"}},
+            )
+        ],
+        signer=worker_signer,
+    )
+    revoke_candidate = create_candidate_proposal(
+        domain_id=genesis.id,
+        actor_id="human:owner",
+        key_id="root",
+        effects=[
+            actor_revocation_effect(
+                worker_key.actor_id, worker_key.key_id, "concurrent retirement"
+            )
+        ],
+        signer=root_signer,
+    )
+
+    def commit(candidate):
+        connection = SQLiteStore(path)
+        try:
+            return (
+                CandidateCommitter(connection, connection)
+                .commit(candidate, genesis)
+                .accepted
+            )
+        except ValueError:
+            return False
+        finally:
+            connection.close()
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        worker_accepted, revocation_accepted = pool.map(
+            commit, (worker_candidate, revoke_candidate)
+        )
+
+    assert revocation_accepted is True
+    reopened = SQLiteStore(path)
+    records = reopened.scan_runtime_records()
+    revocation_revision = next(
+        revision
+        for revision, record in records
+        if record.record_type == "actor.revoked"
+    )
+    asset_revisions = [
+        revision
+        for revision, record in records
+        if record.record_type == "asset.committed"
+        and record.payload["asset"]["name"] == "racing_result"
+    ]
+    if worker_accepted:
+        assert len(asset_revisions) == 1
+        assert asset_revisions[0] < revocation_revision
+    else:
+        assert asset_revisions == []
+    reopened.close()
 
 
 def test_actor_identity_cannot_be_rebound_to_another_public_key(store):

@@ -87,3 +87,10 @@ def actor_authorization_effect(actor_key: ActorKey) -> CandidateEffect:
             }
         },
     )
+
+
+def actor_revocation_effect(actor_id: str, key_id: str, reason: str) -> CandidateEffect:
+    return CandidateEffect(
+        "actor.revoke",
+        {"actor_id": actor_id, "key_id": key_id, "reason": reason},
+    )

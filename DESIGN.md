@@ -186,8 +186,11 @@ Genesis root actors may delegate Candidate capabilities with the
 `actor.authorize` effect. Accepted public keys are immutable
 `actor.authorized` facts; Candidate authentication derives its effective key
 set from Genesis plus those facts. SQLite schema v10 and the in-memory adapter
-forbid rebinding one actor/key identity to different key material. Rotation and
-revocation are still active-change work and are not implied by authorization.
+forbid rebinding one actor/key identity to different key material.
+`actor.revoke` adds a single-assignment revocation fact; SQLite schema v11 and
+Store commit-time validation fence Candidates from revoked keys under
+active-active races. Explicit rotation remains active-change work and is not
+implied by authorization or revocation.
 
 `cryptography` is a required runtime dependency because actor authentication is
 a base security property. Deterministic content seals remain available for

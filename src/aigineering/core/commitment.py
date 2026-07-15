@@ -11,7 +11,7 @@ import json
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
-from aigineering.core.actor_facts import load_authorized_actor_keys
+from aigineering.core.actor_facts import load_effective_actor_keys
 from aigineering.core.effect_projection import BUILTIN_EFFECTS
 from aigineering.core.fact_materialization import (
     reduce_asset_facts,
@@ -244,7 +244,7 @@ class CandidateCommitter:
             candidate,
             genesis,
             verifier_factory=verifier_factory,
-            actor_keys=genesis.root_keys + load_authorized_actor_keys(self._store),
+            actor_keys=load_effective_actor_keys(self._store, genesis),
         )
         if decision.assets:
             reducer_traces, reducer_records = reduce_asset_facts(

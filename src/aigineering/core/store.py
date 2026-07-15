@@ -13,10 +13,7 @@ from aigineering.core.authority import (
     _is_protected_name,
     matched_reserved_prefix,
 )
-from aigineering.core.actor_facts import (
-    genesis_actor_identities,
-    validate_actor_authorization_record,
-)
+from aigineering.core.actor_facts import validate_actor_runtime_record
 from aigineering.core.activation import activation_names
 from aigineering.core.asset_versions import (
     replacement_claim_from_record,
@@ -258,11 +255,7 @@ class MemoryStore(_ProjectionIndexMixin):
             self._worker_registrations[registration.worker_id] = registration
 
     def append_runtime_record(self, record: RuntimeRecord) -> int:
-        validate_actor_authorization_record(
-            record,
-            self.scan_runtime_records(record_type="actor.authorized"),
-            reserved_identities=genesis_actor_identities(self),
-        )
+        validate_actor_runtime_record(record, self)
         validate_terminal_record(
             record,
             self.scan_runtime_records(record_type="lifecycle.terminal"),

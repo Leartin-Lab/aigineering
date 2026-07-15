@@ -157,9 +157,14 @@ Implementation progress:
   `actor.authorized` key fact, after which that actor can authenticate its own
   Candidates. MemoryStore and SQLite schema v10 reject actor/key rebinding;
   deterministic content seals cannot be authorized as actor keys.
+- Complete: `actor.revoke` is a capability-gated, single-assignment key fact.
+  Candidate authentication projects revoked keys explicitly, and Store commit
+  rechecks each authenticated receipt against revocation inside the transaction.
+  A repeated active-active race proves a result either precedes revocation or
+  is fenced; it cannot commit after revocation.
 - Complete: cryptography is a base dependency; the runtime does not silently
   substitute a non-authenticating deterministic seal.
-- Pending: add key revocation/rotation, bind worker routing registration to
+- Pending: add explicit key rotation, bind worker routing registration to
   authorized keys, authenticate claim-bound worker submissions as
   CandidateProposal effects, and migrate Method task publication to plugins.
 

@@ -227,6 +227,27 @@ def project_actor_authorization(
     )
 
 
+def project_actor_revocation(
+    effect: CandidateEffect, candidate: CandidateProposal, receipt_id: str
+) -> EffectProjection:
+    actor_id = str(effect.payload.get("actor_id", ""))
+    key_id = str(effect.payload.get("key_id", ""))
+    reason = str(effect.payload.get("reason", ""))
+    if not actor_id or not key_id or not reason:
+        raise ValueError("actor.revoke requires actor_id, key_id, and reason")
+    record = create_runtime_record(
+        "actor.revoked",
+        {
+            "actor_id": actor_id,
+            "key_id": key_id,
+            "reason": reason,
+            "revoked_by": candidate.actor_id,
+        },
+        causal_parents=(receipt_id,),
+    )
+    return EffectProjection(records=(record,), relation_target=f"{actor_id}/{key_id}")
+
+
 EffectProjector = Callable[[CandidateEffect, CandidateProposal, str], EffectProjection]
 BUILTIN_EFFECTS: Mapping[str, tuple[str, EffectProjector]] = MappingProxyType(
     {
@@ -236,5 +257,6 @@ BUILTIN_EFFECTS: Mapping[str, tuple[str, EffectProjector]] = MappingProxyType(
         "asset.relate": ("asset.relate", project_replacement_claim),
         "contract.cancel": ("contract.cancel", project_contract_cancellation),
         "actor.authorize": ("actor.authorize", project_actor_authorization),
+        "actor.revoke": ("actor.revoke", project_actor_revocation),
     }
 )
