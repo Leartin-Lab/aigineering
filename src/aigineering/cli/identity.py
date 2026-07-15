@@ -20,6 +20,7 @@ LOCAL_ROOT_CAPABILITIES = (
     "asset.relate",
     "actor.authorize",
     "actor.revoke",
+    "actor.rotate",
     "contract.publish",
     "contract.cancel",
     "worker.register",

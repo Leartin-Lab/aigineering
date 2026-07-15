@@ -10,6 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 
 from aigineering.core.commitment import CandidateCommitter, reduce_candidate
+from aigineering.core.actor_facts import load_authorized_actor_keys
 from aigineering.core.domain import initialize_genesis
 from aigineering.core.ids import hash_contract_v3
 from aigineering.core.record_conflict import ImmutableRecordConflict
@@ -27,6 +28,7 @@ from aigineering.protocol.candidate import (
 from aigineering.protocol.effect_builders import (
     actor_authorization_effect,
     actor_revocation_effect,
+    actor_rotation_effect,
 )
 from aigineering.protocol.types import Contract
 from aigineering.protocol.wire import contract_to_dict
@@ -259,6 +261,120 @@ def test_revoked_actor_key_cannot_publish_another_candidate(store):
         if record.record_type == "candidate.authentication_rejected"
     )
     assert "revoked" in str(rejection.payload["reason"])
+
+
+def test_actor_rotation_atomically_replaces_key_without_capability_escalation(store):
+    genesis, _, old_signer, old_key, trace = _authorize_worker(
+        store, worker_capabilities=("actor.rotate", "asset.publish")
+    )
+    new_signer = Ed25519Signer()
+    new_key = ActorKey(
+        old_key.actor_id,
+        "worker-2",
+        new_signer.kind,
+        new_signer.signer_id,
+        old_key.capabilities,
+    )
+    rotation = create_candidate_proposal(
+        domain_id=genesis.id,
+        actor_id=old_key.actor_id,
+        key_id=old_key.key_id,
+        effects=[actor_rotation_effect(old_key.key_id, new_key, "scheduled rotation")],
+        signer=old_signer,
+    )
+
+    assert CandidateCommitter(store, trace).commit(rotation, genesis).accepted
+    replacement = create_candidate_proposal(
+        domain_id=genesis.id,
+        actor_id=new_key.actor_id,
+        key_id=new_key.key_id,
+        effects=[
+            CandidateEffect(
+                "asset.propose",
+                {"asset": {"name": "rotated_result", "content": "new key"}},
+            )
+        ],
+        signer=new_signer,
+    )
+    assert CandidateCommitter(store, trace).commit(replacement, genesis).accepted
+    assert store.get_assets_by_name("rotated_result")
+
+    stale = create_candidate_proposal(
+        domain_id=genesis.id,
+        actor_id=old_key.actor_id,
+        key_id=old_key.key_id,
+        effects=list(replacement.effects),
+        signer=old_signer,
+    )
+    assert not CandidateCommitter(store, trace).commit(stale, genesis).accepted
+
+
+def test_actor_rotation_rejects_capability_escalation_atomically(store):
+    genesis, _, old_signer, old_key, trace = _authorize_worker(
+        store, worker_capabilities=("actor.rotate", "asset.publish")
+    )
+    new_signer = Ed25519Signer()
+    escalated = ActorKey(
+        old_key.actor_id,
+        "worker-admin",
+        new_signer.kind,
+        new_signer.signer_id,
+        old_key.capabilities + ("contract.cancel",),
+    )
+    rotation = create_candidate_proposal(
+        domain_id=genesis.id,
+        actor_id=old_key.actor_id,
+        key_id=old_key.key_id,
+        effects=[actor_rotation_effect(old_key.key_id, escalated, "escalate")],
+        signer=old_signer,
+    )
+
+    decision = CandidateCommitter(store, trace).commit(rotation, genesis)
+
+    assert decision.accepted is False
+    assert not any(
+        key.key_id == escalated.key_id for key in load_authorized_actor_keys(store)
+    )
+    assert not store.scan_runtime_records(record_type="actor.revoked")
+
+
+def test_sqlite_actor_rotation_rolls_back_both_key_facts_on_mid_commit_failure(
+    tmp_path, monkeypatch
+):
+    store = SQLiteStore(str(tmp_path / "rotation-crash.db"))
+    genesis, _, old_signer, old_key, _ = _authorize_worker(
+        store, worker_capabilities=("actor.rotate", "asset.publish")
+    )
+    new_signer = Ed25519Signer()
+    new_key = ActorKey(
+        old_key.actor_id,
+        "worker-2",
+        new_signer.kind,
+        new_signer.signer_id,
+        old_key.capabilities,
+    )
+    rotation = create_candidate_proposal(
+        domain_id=genesis.id,
+        actor_id=old_key.actor_id,
+        key_id=old_key.key_id,
+        effects=[actor_rotation_effect(old_key.key_id, new_key, "rotate")],
+        signer=old_signer,
+    )
+    original_insert = store._insert_runtime_record
+
+    def fail_on_revocation(record):
+        if record.record_type == "actor.revoked":
+            raise RuntimeError("injected rotation failure")
+        return original_insert(record)
+
+    monkeypatch.setattr(store, "_insert_runtime_record", fail_on_revocation)
+    with pytest.raises(RuntimeError, match="injected rotation failure"):
+        CandidateCommitter(store, store).commit(rotation, genesis)
+
+    keys = load_authorized_actor_keys(store)
+    assert [key.key_id for key in keys] == [old_key.key_id]
+    assert not store.scan_runtime_records(record_type="actor.revoked")
+    store.close()
 
 
 def test_sqlite_revocation_race_fences_late_actor_candidate(tmp_path):

@@ -255,6 +255,7 @@ def test_actor_authorization_is_a_capability_gated_candidate_effect():
 
     assert '"actor.authorize": ("actor.authorize"' in projection
     assert '"actor.revoke": ("actor.revoke"' in projection
+    assert '"actor.rotate": ("actor.rotate"' in projection
     assert "actor.authorized" in actor_facts
     assert "actor.revoked" in actor_facts
     assert "validate_actor_authorization_record" in actor_facts

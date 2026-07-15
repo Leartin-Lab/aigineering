@@ -248,6 +248,54 @@ def project_actor_revocation(
     return EffectProjection(records=(record,), relation_target=f"{actor_id}/{key_id}")
 
 
+def project_actor_rotation(
+    effect: CandidateEffect, candidate: CandidateProposal, receipt_id: str
+) -> EffectProjection:
+    current_key_id = str(effect.payload.get("current_key_id", ""))
+    reason = str(effect.payload.get("reason", ""))
+    value = effect.payload.get("replacement_key")
+    if not current_key_id or not reason or not isinstance(value, Mapping):
+        raise ValueError(
+            "actor.rotate requires current_key_id, replacement_key, and reason"
+        )
+    data = deep_thaw(value)
+    replacement = ActorKey(
+        actor_id=str(data.get("actor_id", "")),
+        key_id=str(data.get("key_id", "")),
+        kind=str(data.get("kind", "")),
+        public_key=str(data.get("public_key", "")),
+        capabilities=tuple(data.get("capabilities", ())),
+    )
+    if replacement.actor_id != candidate.actor_id:
+        raise ValueError("actor.rotate can only rotate the signing actor's own key")
+    if current_key_id != candidate.key_id:
+        raise ValueError("actor.rotate current_key_id must match the signing key")
+    if replacement.key_id == current_key_id:
+        raise ValueError("actor.rotate replacement_key must use a new key_id")
+    if replacement.kind in {"deterministic", "asig_"}:
+        raise ValueError("actor rotation requires an authenticating key kind")
+    authorized = create_runtime_record(
+        "actor.authorized",
+        {**actor_key_payload(replacement), "authorized_by": candidate.actor_id},
+        causal_parents=(receipt_id,),
+    )
+    revoked = create_runtime_record(
+        "actor.revoked",
+        {
+            "actor_id": candidate.actor_id,
+            "key_id": current_key_id,
+            "reason": reason,
+            "revoked_by": candidate.actor_id,
+        },
+        causal_parents=(receipt_id, authorized.id),
+    )
+    return EffectProjection(
+        records=(authorized, revoked),
+        relation_target=f"{replacement.actor_id}/{replacement.key_id}",
+        additional_capabilities=replacement.capabilities,
+    )
+
+
 EffectProjector = Callable[[CandidateEffect, CandidateProposal, str], EffectProjection]
 BUILTIN_EFFECTS: Mapping[str, tuple[str, EffectProjector]] = MappingProxyType(
     {
@@ -258,5 +306,6 @@ BUILTIN_EFFECTS: Mapping[str, tuple[str, EffectProjector]] = MappingProxyType(
         "contract.cancel": ("contract.cancel", project_contract_cancellation),
         "actor.authorize": ("actor.authorize", project_actor_authorization),
         "actor.revoke": ("actor.revoke", project_actor_revocation),
+        "actor.rotate": ("actor.rotate", project_actor_rotation),
     }
 )

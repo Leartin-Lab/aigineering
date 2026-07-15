@@ -162,10 +162,14 @@ Implementation progress:
   rechecks each authenticated receipt against revocation inside the transaction.
   A repeated active-active race proves a result either precedes revocation or
   is fenced; it cannot commit after revocation.
+- Complete: a key with `actor.rotate` can atomically authorize a replacement
+  key and revoke itself. Rotation is self-only, requires a new key ID, and the
+  replacement capabilities must be a subset of the signing key's capabilities;
+  a mid-commit failure rolls both facts back.
 - Complete: cryptography is a base dependency; the runtime does not silently
   substitute a non-authenticating deterministic seal.
-- Pending: add explicit key rotation, bind worker routing registration to
-  authorized keys, authenticate claim-bound worker submissions as
+- Pending: bind worker routing registration to authorized keys, authenticate
+  claim-bound worker submissions as
   CandidateProposal effects, and migrate Method task publication to plugins.
 
 ## Required architecture tests

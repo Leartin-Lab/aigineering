@@ -94,3 +94,22 @@ def actor_revocation_effect(actor_id: str, key_id: str, reason: str) -> Candidat
         "actor.revoke",
         {"actor_id": actor_id, "key_id": key_id, "reason": reason},
     )
+
+
+def actor_rotation_effect(
+    current_key_id: str, replacement_key: ActorKey, reason: str
+) -> CandidateEffect:
+    return CandidateEffect(
+        "actor.rotate",
+        {
+            "current_key_id": current_key_id,
+            "reason": reason,
+            "replacement_key": {
+                "actor_id": replacement_key.actor_id,
+                "capabilities": list(replacement_key.capabilities),
+                "key_id": replacement_key.key_id,
+                "kind": replacement_key.kind,
+                "public_key": replacement_key.public_key,
+            },
+        },
+    )
