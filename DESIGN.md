@@ -65,6 +65,12 @@ admission policy, and transactionally records receipt, acceptance or rejection,
 audit evidence, and the Contract. It deliberately does not yet replace the CLI
 or support other effect types.
 
+A domain may persist exactly one `domain.genesis` RuntimeRecord. Initialization
+is idempotent, replacement fails closed, SQLite enforces uniqueness, and a
+CandidateCommitter can reconstruct the trust root from the Store instead of
+receiving ambient process configuration. Genesis bootstrap is the sole direct
+append exception in the candidate-native transition.
+
 ## Scheduling and reconstruction
 
 Eligibility is derived from facts: input availability, activation expression,

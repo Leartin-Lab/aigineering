@@ -52,7 +52,7 @@ from aigineering.protocol.wire import (
 
 _logger = logging.getLogger(__name__)
 
-CURRENT_SCHEMA_VERSION = 7
+CURRENT_SCHEMA_VERSION = 8
 
 # ---------------------------------------------------------------------------
 # Activation name extraction (shared with store.py)
@@ -265,6 +265,7 @@ _DDL_INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_declared_outputs_name ON contract_declared_outputs(output_name)",
     "CREATE INDEX IF NOT EXISTS idx_worker_registrations_enabled ON worker_registrations(enabled)",
     "CREATE INDEX IF NOT EXISTS idx_runtime_records_type_revision ON runtime_records(record_type, revision)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_runtime_records_one_genesis ON runtime_records(record_type) WHERE record_type = 'domain.genesis'",
 ]
 
 # ---------------------------------------------------------------------------
@@ -392,6 +393,9 @@ class SQLiteStore:
             if current < 7:
                 self._migrate_to_v7()
                 self._record_schema_version(7)
+            if current < 8:
+                self._migrate_to_v8()
+                self._record_schema_version(8)
 
     def _migrate_to_v2(self) -> None:
         """Add 040 transactional worker state and contract authority metadata."""
@@ -549,6 +553,13 @@ class SQLiteStore:
                         recorded_at=row["updated_at"],
                     )
                 )
+
+    def _migrate_to_v8(self) -> None:
+        """Enforce exactly one immutable Genesis record per Store."""
+        self._conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_runtime_records_one_genesis "
+            "ON runtime_records(record_type) WHERE record_type = 'domain.genesis'"
+        )
 
     # ── Immutable runtime-record envelope ────────────────────────────────
 

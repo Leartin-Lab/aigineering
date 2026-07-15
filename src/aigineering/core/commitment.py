@@ -15,6 +15,7 @@ from aigineering.core.activation import validate_execution_activation
 from aigineering.core.authority import matched_reserved_prefix
 from aigineering.core.ids import validate_contract_identity
 from aigineering.core.trace import create_entry, trace_effective_payload
+from aigineering.core.signing import create_verifier
 from aigineering.protocol.candidate import (
     CandidateProposal,
     GenesisManifest,
@@ -258,10 +259,14 @@ class CandidateCommitter:
     def commit(
         self,
         candidate: CandidateProposal,
-        genesis: GenesisManifest,
+        genesis: GenesisManifest | None = None,
         *,
-        verifier_factory: VerifierFactory,
+        verifier_factory: VerifierFactory = create_verifier,
     ) -> CommitmentDecision:
+        if genesis is None:
+            from aigineering.core.domain import load_genesis
+
+            genesis = load_genesis(self._store)
         decision = reduce_candidate(
             candidate, genesis, verifier_factory=verifier_factory
         )

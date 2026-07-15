@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from aigineering.core.commitment import CandidateCommitter, reduce_candidate
+from aigineering.core.domain import initialize_genesis
 from aigineering.core.ids import hash_contract_v3
 from aigineering.core.signing import Signer, Verifier
 from aigineering.core.sqlite_store import SQLiteStore
@@ -171,6 +172,19 @@ def test_authentication_failure_is_persisted_but_never_committed(store):
         for _, record in store.scan_runtime_records()
     )
     assert decision.trace_entries[0].event_type == "candidate_authentication_rejected"
+
+
+def test_committer_reconstructs_genesis_from_store(store):
+    genesis, candidate = _proposal()
+    initialize_genesis(store, genesis)
+    trace = store if isinstance(store, SQLiteStore) else MemoryTraceStore()
+
+    decision = CandidateCommitter(store, trace).commit(
+        candidate, verifier_factory=_verifier_factory
+    )
+
+    assert decision.accepted is True
+    assert store.get_contract(_contract().id) == _contract()
 
 
 def test_commitment_kernel_has_no_concrete_store_dependency():

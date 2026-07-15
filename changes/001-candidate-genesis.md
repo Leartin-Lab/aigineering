@@ -64,6 +64,9 @@ Implementation progress:
   Memory/SQLite commitment, idempotent replay, and visible rejection records.
 - Complete: legacy Contract ingress delegates to the same admission policy, so
   the compatibility path no longer owns a divergent copy of those rules.
+- Complete: Genesis is an immutable, reconstructable Store record; SQLite
+  schema v8 enforces one Genesis per domain Store and the committer loads it
+  without process-local trust state.
 - Pending: durable Genesis/key configuration and migration of the CLI default
   publication path; the base install does not silently substitute a
   non-authenticating deterministic seal.
