@@ -20,6 +20,7 @@ from aigineering.protocol.candidate import (
 )
 from aigineering.protocol.envelope import CandidateEnvelope
 from aigineering.protocol.effect_builders import worker_output_effect
+from aigineering.plugins import TaskDelegationPlugin
 from aigineering.protocol.package import WorkerPackage
 from aigineering.protocol.types import Asset, Contract, TraceEntry
 from aigineering.protocol.types import Candidate
@@ -238,11 +239,18 @@ def _ensure_cli_worker_identity(runner: CliRunner) -> None:
 def _signed_worker_candidate_json(envelope: CandidateEnvelope) -> str:
     store = SQLiteStore(".aig/store.db")
     genesis = load_genesis(store)
+    effect = (
+        TaskDelegationPlugin().propose(envelope)
+        if envelope.raw_output.lstrip().startswith(
+            ("/plan", "/replan", "/retry", "/tool", "/fail")
+        )
+        else worker_output_effect(envelope)
+    )
     candidate = create_candidate_proposal(
         domain_id=genesis.id,
         actor_id=envelope.worker_id,
         key_id="cli-worker-1",
-        effects=(worker_output_effect(envelope),),
+        effects=(effect,),
         signer=_CLI_WORKER_SIGNER,
         idempotency_key=envelope.idempotency_key,
     )

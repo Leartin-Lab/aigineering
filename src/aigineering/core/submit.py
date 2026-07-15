@@ -437,12 +437,13 @@ def authenticate_worker_candidate(
 
 def _worker_candidate_envelope(candidate, actor_keys, store) -> CandidateEnvelope:
     """Parse an authenticated worker effect and enforce routing identity."""
-    if (
-        len(candidate.effects) != 1
-        or candidate.effects[0].effect_type != "worker.output"
-    ):
+    if len(candidate.effects) != 1 or candidate.effects[0].effect_type not in {
+        "task.delegate",
+        "worker.output",
+    }:
         raise ValueError(
-            "worker submission requires exactly one 'worker.output' effect"
+            "worker submission requires exactly one 'worker.output' or "
+            "'task.delegate' effect"
         )
     actor_key = next(
         key
@@ -454,7 +455,9 @@ def _worker_candidate_envelope(candidate, actor_keys, store) -> CandidateEnvelop
     payload = deep_thaw(candidate.effects[0].payload)
     envelope_data = payload.get("envelope")
     if not isinstance(envelope_data, Mapping):
-        raise ValueError("worker.output effect requires an envelope object")
+        raise ValueError(
+            f"{candidate.effects[0].effect_type} effect requires an envelope object"
+        )
     envelope = CandidateEnvelope.from_dict(envelope_data)
     if candidate.actor_id != envelope.worker_id:
         raise ValueError("Candidate actor_id must equal envelope.worker_id")

@@ -33,6 +33,7 @@ from aigineering.protocol.effect_builders import (
     worker_output_effect,
     worker_registration_effect,
 )
+from aigineering.plugins import TaskDelegationPlugin
 from aigineering.protocol.envelope import CandidateEnvelope
 from aigineering.server.app import app
 
@@ -121,12 +122,19 @@ def _worker_submission(actor, worker_key, package, raw_output: str):
         claim_epoch=package["claim_epoch"],
         idempotency_key=idempotency_key,
     )
+    effect = (
+        TaskDelegationPlugin().propose(envelope)
+        if raw_output.lstrip().startswith(
+            ("/plan", "/replan", "/retry", "/tool", "/fail")
+        )
+        else worker_output_effect(envelope)
+    )
     return candidate_proposal_to_dict(
         create_candidate_proposal(
             domain_id=genesis.id,
             actor_id=key.actor_id,
             key_id=key.key_id,
-            effects=[worker_output_effect(envelope)],
+            effects=[effect],
             signer=signer,
             idempotency_key=idempotency_key,
         )

@@ -11,8 +11,9 @@ Aigineering is a zero-trust runtime for turning untrusted worker output into
 auditable facts. The runtime is asset-driven and append-oriented. A worker does
 not mutate shared state: it claims a Contract, receives a disclosure-bounded
 WorkerPackage, and submits a signed CandidateProposal containing one claim-bound
-`worker.output` envelope. Projection and authority checks decide which declared
-outputs may become Assets.
+`worker.output` or `task.delegate` envelope. Projection and authority checks
+decide which declared outputs may become Assets; delegation can only publish a
+contained follow-up task while the source claim is valid.
 
 The 0.5 reference implementation is single-domain and SQLite-first. SQLite WAL,
 transactions, leases, and unique constraints provide the concurrency control;
@@ -23,7 +24,8 @@ the protocol does not rely on a process-local task lock.
 1. An external root Contract is published as a signed `contract.declare`
    Candidate; legacy Method children remain a documented transition path.
 2. An eligible worker atomically claims it and receives a WorkerPackage.
-3. The worker signs raw output and claim metadata as one `worker.output` effect.
+3. The worker signs raw output and claim metadata as one `worker.output` effect,
+   or signs an explicit method action as `task.delegate`.
 4. `submit_worker_candidate` authenticates the actor, capability, routing-key,
    package, worker, claim, lease, epoch, and idempotency bindings.
 5. Pure projection parses the candidate and applies declared-output and
@@ -118,8 +120,9 @@ validate the effect type before commitment. Unsigned legacy request bodies fail
 schema validation and cannot mutate the Store. Slice and replacement-claim HTTP
 operations remain compatibility surfaces pending additional effect types.
 
-`POST /worker/submissions` likewise accepts only a signed `worker.output`
-CandidateProposal. Server claims require an enabled actor/key-bound worker, so
+`POST /worker/submissions` likewise accepts only one signed claim-bound
+`worker.output` or `task.delegate` CandidateProposal. Server claims require an
+enabled actor/key-bound worker, so
 an anonymous claimant cannot lock work it is unable to submit. The former
 server-side mock `/contracts/{id}/run` mutation endpoint returns 410 and directs
 clients to the claim/submission protocol; the server never impersonates a
@@ -199,13 +202,16 @@ insertion rolls back the entire Candidate; restart observes neither a partial
 fact nor a false receipt/terminal record.
 
 Claim-bound external worker submission does not depend on RuntimeIngress. The
-dedicated `worker.output` interpreter verifies the Candidate signature,
+dedicated worker interpreter verifies the Candidate signature,
 `worker.submit` capability, worker-to-key registration, and signed idempotency
 binding before calling the same pure projection and Asset-fact reducer. SQLite
 rechecks routing-key and claim predicates while atomically committing receipt,
 output evidence, projection, lifecycle consequences, trace, idempotency, and
-claim transition. `worker.output` is deliberately unsupported by the generic
-effect committer, so `/candidates` cannot bypass claim/package fencing.
+claim transition. `worker.output` and `task.delegate` are deliberately
+unsupported by the generic effect committer, so `/candidates` cannot bypass
+claim/package fencing. A WorkerHost uses the TaskDelegationPlugin to select the
+delegation effect; signed method submissions cannot be reinterpreted from an
+ordinary output effect.
 Authentication, claim, policy, and binding failures append Candidate rejection
 records and Trace evidence before returning an error; an invalid worker result
 cannot disappear as an API-only failure.
@@ -214,7 +220,8 @@ Local CLI execution now uses `WorkerHost`. Each concrete worker adapter has a
 durable delegated Ed25519 key and Candidate registration; the local root key
 only authorizes that actor. Claims use the worker actor ID, ordinary output and
 the transitional Method path both retain authenticated Candidate receipt and
-output evidence, and SQLite applies the same key/claim fencing to both. The raw
+typed output/delegation evidence, and SQLite applies the same key/claim fencing
+to both. The raw
 `execute_claimed_package(worker, ...)` form remains only as an internal test and
 Method migration compatibility surface.
 

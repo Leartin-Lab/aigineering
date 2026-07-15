@@ -12,6 +12,7 @@ from aigineering.protocol.candidate import (
     GenesisManifest,
     create_candidate_proposal,
 )
+from aigineering.protocol.actions import parse_method_action
 from aigineering.protocol.effect_builders import worker_output_effect
 from aigineering.protocol.envelope import CandidateEnvelope
 from aigineering.protocol.types import Asset, Candidate, Contract
@@ -74,11 +75,23 @@ class WorkerHost:
     def sign_envelope(self, envelope: CandidateEnvelope) -> CandidateProposal:
         if envelope.worker_id != self.worker_id:
             raise ValueError("WorkerHost can sign only its own worker envelope")
+        envelope_candidate = Candidate(
+            worker_id=envelope.worker_id,
+            raw_output=envelope.raw_output,
+            parsed_action=envelope.parsed_action,
+            metadata=envelope.usage_metadata,
+        )
+        if parse_method_action(envelope_candidate) is not None:
+            from aigineering.plugins import TaskDelegationPlugin
+
+            effect = TaskDelegationPlugin().propose(envelope)
+        else:
+            effect = worker_output_effect(envelope)
         return create_candidate_proposal(
             domain_id=self.genesis.id,
             actor_id=self.actor_key.actor_id,
             key_id=self.actor_key.key_id,
-            effects=(worker_output_effect(envelope),),
+            effects=(effect,),
             signer=self.signer,
             idempotency_key=envelope.idempotency_key,
         )

@@ -322,7 +322,8 @@ def worker_register(
 def worker_submit(candidate_json: str, idempotency_key: Optional[str]) -> None:
     """Submit a signed worker Candidate for projection and commitment.
 
-    CANDIDATE_JSON must contain exactly one ``worker.output`` effect.
+    CANDIDATE_JSON must contain exactly one ``worker.output`` or
+    ``task.delegate`` effect.
     Output is always JSON.
     """
     try:

@@ -121,3 +121,8 @@ def actor_rotation_effect(
 def worker_output_effect(envelope: CandidateEnvelope) -> CandidateEffect:
     """Wrap one claim-bound worker result in an authenticated Candidate effect."""
     return CandidateEffect("worker.output", {"envelope": envelope.to_dict()})
+
+
+def task_delegation_effect(envelope: CandidateEnvelope) -> CandidateEffect:
+    """Propose claim-bound task delegation instead of a runtime fact output."""
+    return CandidateEffect("task.delegate", {"envelope": envelope.to_dict()})

@@ -741,6 +741,11 @@ def _submit_claimed_method(
     candidate_id = (
         authentication.candidate_id if authentication else envelope.candidate_hash
     )
+    if (
+        authentication is not None
+        and authentication.candidate.effects[0].effect_type != "task.delegate"
+    ):
+        raise ValueError("signed method submission requires a 'task.delegate' effect")
     duplicate = replay_idempotent_submission(
         store,
         contract_id=contract.id,
@@ -814,7 +819,7 @@ def _submit_claimed_method(
     method_parent_id = candidate_record.id
     if authentication is not None:
         output_record = create_runtime_record(
-            "worker.output.received",
+            "worker.delegation.received",
             {
                 "candidate_id": candidate_id,
                 "claim_epoch": envelope.claim_epoch,

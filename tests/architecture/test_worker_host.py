@@ -11,10 +11,22 @@ from aigineering.core.ids import hash_contract_v3
 from aigineering.core.signing import Ed25519Signer
 from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.core.worker_routing import WorkerRegistration
-from aigineering.protocol.candidate import ActorKey, create_genesis_manifest
-from aigineering.protocol.effect_builders import worker_registration_effect
+from aigineering.protocol.candidate import (
+    ActorKey,
+    create_candidate_proposal,
+    create_genesis_manifest,
+)
+from aigineering.protocol.effect_builders import (
+    worker_output_effect,
+    worker_registration_effect,
+)
+from aigineering.protocol.envelope import CandidateEnvelope
 from aigineering.protocol.types import Contract
-from aigineering.runtime import claim_next_package, execute_claimed_package
+from aigineering.runtime import (
+    claim_next_package,
+    execute_claimed_package,
+    submit_worker_proposal,
+)
 
 
 def _runtime(output: str):
@@ -95,7 +107,53 @@ def test_worker_host_authenticates_transitional_method_submission():
     )
 
     assert result["status"] == "method_scheduled"
+    receipt = next(
+        record
+        for _, record in store.scan_runtime_records(record_type="candidate.received")
+        if record.payload.get("effect_types") == ("task.delegate",)
+    )
     method = store.scan_runtime_records(record_type="method.scheduled")[-1][1]
-    output = store.scan_runtime_records(record_type="worker.output.received")[-1][1]
-    assert method.causal_parents == (output.id,)
+    delegation = store.scan_runtime_records(record_type="worker.delegation.received")[
+        -1
+    ][1]
+    assert delegation.causal_parents == (receipt.id,)
+    assert method.causal_parents == (delegation.id,)
     assert store.get_claim(contract.id)["status"] == "submitted"
+
+
+def test_signed_output_effect_cannot_be_reinterpreted_as_task_delegation():
+    store, _contract, host = _runtime('/retry {"reason":"try again"}')
+    claimed = claim_next_package(store, worker_id=host.worker_id)
+    assert claimed is not None
+    envelope = CandidateEnvelope(
+        contract_id=claimed.contract.id,
+        worker_id=host.worker_id,
+        raw_output='/retry {"reason":"try again"}',
+        package_id=claimed.package.package_id,
+        claim_id=claimed.package.claim_id,
+        claim_epoch=claimed.package.claim_epoch,
+        idempotency_key=f"run-{claimed.package.package_id}",
+    )
+    proposal = create_candidate_proposal(
+        domain_id=host.genesis.id,
+        actor_id=host.actor_key.actor_id,
+        key_id=host.actor_key.key_id,
+        effects=(worker_output_effect(envelope),),
+        signer=host.signer,
+        idempotency_key=envelope.idempotency_key,
+    )
+
+    try:
+        submit_worker_proposal(
+            proposal,
+            store,
+            method_registry=default_method_registry(),
+        )
+    except ValueError as exc:
+        assert "requires a 'task.delegate' effect" in str(exc)
+    else:
+        raise AssertionError("ordinary output effect was accepted as delegation")
+
+    assert store.get_claim(claimed.contract.id)["status"] == "active"
+    assert store.get_contract(claimed.contract.id) is not None
+    assert len(store.get_all_contracts()) == 1

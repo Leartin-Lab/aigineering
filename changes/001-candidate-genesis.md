@@ -182,13 +182,14 @@ Implementation progress:
 - Complete: cryptography is a base dependency; the runtime does not silently
   substitute a non-authenticating deterministic seal.
 - Complete: external claim-bound worker submission accepts only an
-  actor-signed CandidateProposal containing one `worker.output` effect. The
+  actor-signed CandidateProposal containing one `worker.output` or
+  `task.delegate` effect. The
   actor must have `worker.submit`, match the registered worker/key binding, and
   sign the same non-empty idempotency key as the embedded envelope. SQLite
   rechecks key binding with the claim predicate in the commitment transaction;
   authenticated receipt, output evidence, and projection form one causal chain.
-  The generic Candidate committer intentionally rejects `worker.output` so it
-  cannot become a claim-bypass path. Authentication and post-authentication
+  The generic Candidate committer intentionally rejects both claim-bound effect
+  types so they cannot become a claim-bypass path. Authentication and post-authentication
   submission failures use the same durable Candidate rejection vocabulary and
   Trace evidence rather than ending as caller-only errors.
 - Complete: a Store-free public TaskPlugin protocol separates pure proposal
@@ -202,6 +203,10 @@ Implementation progress:
   register by Candidate, claim as that actor, and use the signed path for both
   ordinary output and transitional Method actions. SQLite key fencing is shared
   by ordinary and Method submission transactions.
+- Complete: WorkerHost selects `task.delegate` through a pure adapter plugin for
+  explicit method actions; the claim-bound runtime rejects attempts to
+  reinterpret a signed ordinary `worker.output` as delegation. Delegation
+  receipt and method scheduling are a typed causal chain.
 - Complete: the HTTP worker submission endpoint accepts signed Candidates only;
   server claims require an enabled actor-key binding. The server-side mock run
   endpoint no longer impersonates a worker or mutates runtime state.
