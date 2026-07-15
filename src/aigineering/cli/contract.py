@@ -7,11 +7,9 @@ import json
 import click
 
 from aigineering.cli._common import _persistent_store, _output_json
-from aigineering.cli.domain import load_actor_signer
-from aigineering.core.commitment import CandidateCommitter
+from aigineering.cli._candidate import commit_local_effect, require_accepted
 from aigineering.core.control_plane import build_control_plane_contract
-from aigineering.core.domain import load_genesis
-from aigineering.protocol.candidate import CandidateEffect, create_candidate_proposal
+from aigineering.protocol.candidate import CandidateEffect
 from aigineering.protocol.wire import contract_to_dict
 
 
@@ -61,13 +59,6 @@ def contract_add(
         except json.JSONDecodeError as e:
             raise click.UsageError(f"--sensitive-input-policy is not valid JSON: {e}")
     try:
-        genesis = load_genesis(store)
-        signer = load_actor_signer()
-        actor_key = next(
-            key
-            for key in genesis.root_keys
-            if key.public_key == signer.signer_id and not key.revoked
-        )
         contract = build_control_plane_contract(
             name=name,
             inputs=inputs,
@@ -78,32 +69,17 @@ def contract_add(
             tool_scope=tool_scope,
             sensitive_input_policy=policy,
         )
-        candidate = create_candidate_proposal(
-            domain_id=genesis.id,
-            actor_id=actor_key.actor_id,
-            key_id=actor_key.key_id,
-            effects=[
+        require_accepted(
+            commit_local_effect(
+                store,
                 CandidateEffect(
                     "contract.declare", {"contract": contract_to_dict(contract)}
-                )
-            ],
-            signer=signer,
-            idempotency_key=f"contract:{contract.id}",
-        )
-        decision = CandidateCommitter(store, store).commit(candidate)
-        if not decision.accepted:
-            rejection = next(
-                record
-                for record in decision.runtime_records
-                if record.record_type.endswith("rejected")
+                ),
+                idempotency_key=f"contract:{contract.id}",
             )
-            raise ValueError(str(rejection.payload["reason"]))
-    except (LookupError, StopIteration, ValueError) as e:
-        if isinstance(e, StopIteration):
-            message = "local actor key is not authorized by domain Genesis"
-        else:
-            message = str(e)
-        raise click.ClickException(message) from e
+        )
+    except (LookupError, ValueError) as e:
+        raise click.ClickException(str(e)) from e
 
     if as_json:
         _output_json({"id": contract.id, "name": contract.name})

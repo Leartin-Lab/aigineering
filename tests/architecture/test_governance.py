@@ -37,7 +37,27 @@ def test_legacy_runtime_files_stay_out_of_release_artifacts():
 def test_contract_cli_uses_candidate_commitment_not_legacy_ingress():
     source = (ROOT / "src/aigineering/cli/contract.py").read_text(encoding="utf-8")
 
-    assert "CandidateCommitter" in source
-    assert "create_candidate_proposal" in source
+    assert "commit_local_effect" in source
+    assert "CandidateEffect" in source
     assert "RuntimeIngress" not in source
     assert "inject_contract" not in source
+
+
+def test_asset_add_uses_candidate_commitment_not_legacy_ingress():
+    source = (ROOT / "src/aigineering/cli/asset.py").read_text(encoding="utf-8")
+    add_body = source.split('@asset_group.command("ls")', 1)[0]
+
+    assert "commit_local_effect" in add_body
+    assert "CandidateEffect" in add_body
+    assert "inject_asset" not in add_body
+    assert "RuntimeIngress(" not in add_body
+
+
+def test_task_create_uses_candidate_commitment_not_legacy_ingress():
+    source = (ROOT / "src/aigineering/cli/task.py").read_text(encoding="utf-8")
+    create_body = source.split('@task_group.command("status")', 1)[0]
+
+    assert "commit_local_effect" in create_body
+    assert "CandidateEffect" in create_body
+    assert "inject_contract" not in create_body
+    assert "RuntimeIngress(" not in create_body

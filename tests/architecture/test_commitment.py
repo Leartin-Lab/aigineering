@@ -61,7 +61,7 @@ def _contract() -> Contract:
     return Contract(id=hash_contract_v3(**fields), **fields)
 
 
-def _proposal(*, capabilities=("contract.publish",), effect=None):
+def _proposal(*, capabilities=("asset.publish", "contract.publish"), effect=None):
     signer = _Signer()
     genesis = create_genesis_manifest(
         "commitment-test",
@@ -129,7 +129,7 @@ def test_committer_is_conformant_and_idempotent(store):
         (
             ("contract.publish",),
             CandidateEffect("asset.propose", {"name": "report"}),
-            "unsupported effect type",
+            "lacks required capability",
         ),
         (
             ("contract.publish",),
@@ -185,6 +185,74 @@ def test_committer_reconstructs_genesis_from_store(store):
 
     assert decision.accepted is True
     assert store.get_contract(_contract().id) == _contract()
+
+
+def test_asset_effect_commits_fact_and_reduces_contract_completion(store):
+    genesis, contract_candidate = _proposal()
+    trace = store if isinstance(store, SQLiteStore) else MemoryTraceStore()
+    committer = CandidateCommitter(store, trace)
+    committer.commit(contract_candidate, genesis, verifier_factory=_verifier_factory)
+    signer = _Signer()
+    asset_candidate = create_candidate_proposal(
+        domain_id=genesis.id,
+        actor_id="human:owner",
+        key_id="root",
+        effects=[
+            CandidateEffect(
+                "asset.propose",
+                {
+                    "asset": {
+                        "name": "report",
+                        "content": "reviewed",
+                        "origin": "human",
+                        "trust_tier": "human",
+                    }
+                },
+            )
+        ],
+        signer=signer,
+    )
+
+    first = committer.commit(
+        asset_candidate,
+        genesis,
+        verifier_factory=_verifier_factory,
+    )
+    revision = store.get_runtime_revision()
+    second = committer.commit(
+        asset_candidate,
+        genesis,
+        verifier_factory=_verifier_factory,
+    )
+
+    assert first.accepted is True
+    assert second.accepted is True
+    assert store.has_asset_named("report")
+    assert store.get_runtime_revision() == revision
+    assert any(
+        record.record_type == "lifecycle.terminal"
+        and record.payload["contract_id"] == _contract().id
+        and record.payload["terminal"] == "complete"
+        for _, record in store.scan_runtime_records()
+    )
+
+
+def test_asset_effect_rejects_protected_namespace():
+    genesis, candidate = _proposal(
+        capabilities=("asset.publish",),
+        effect=CandidateEffect(
+            "asset.propose", {"asset": {"name": "_sys_forged", "content": "x"}}
+        ),
+    )
+
+    decision = reduce_candidate(candidate, genesis, verifier_factory=_verifier_factory)
+
+    assert decision.accepted is False
+    assert "protected prefix" in next(
+        record.payload["reason"]
+        for record in decision.runtime_records
+        if record.record_type == "candidate.rejected"
+    )
 
 
 def test_commitment_kernel_has_no_concrete_store_dependency():

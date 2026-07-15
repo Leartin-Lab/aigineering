@@ -29,9 +29,7 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 
 
-def inject_asset(
-    store,
-    trace_store,
+def build_control_plane_asset(
     *,
     name: str,
     content: str,
@@ -41,16 +39,11 @@ def inject_asset(
     promptable: bool = True,
     content_type: str = "text",
     allow_protected: bool = False,
-    ingress: RuntimeIngress,
 ) -> Asset:
-    """Inject an asset through the control plane.
+    """Build a human-origin Asset proposal without committing it.
 
     Parameters
     ----------
-    store : StoreProtocol
-        Asset store for persistence (passed through to ingress).
-    trace_store : TraceStoreProtocol
-        Trace store for the injection audit record (passed through to ingress).
     name : str
         Asset name (must not start with a protected prefix unless
         *allow_protected* is ``True``).
@@ -69,19 +62,8 @@ def inject_asset(
     allow_protected : bool
         Explicit override for protected-prefix names.  When ``True``
         the injection trace records that the override was used.
-    ingress : RuntimeIngress
-        Required ingress for asset persistence and tracing.
-
-    Returns
-    -------
-    Asset
-        The signed, persisted asset.
-
-    Raises
-    ------
-    ValueError
-        If *name* uses a protected prefix and *allow_protected* is
-        ``False``.
+    This compatibility builder retains legacy metadata options while the
+    Candidate reducer owns identity, provenance, and protected-name checks.
     """
     if _is_protected_name(name) and not allow_protected:
         raise ValueError(
@@ -107,6 +89,34 @@ def inject_asset(
         content_hash=content_hash,
     )
 
+    return asset
+
+
+def inject_asset(
+    store,
+    trace_store,
+    *,
+    name: str,
+    content: str,
+    origin: str = "human",
+    trust_tier: str = "human",
+    source_uri: str = "",
+    promptable: bool = True,
+    content_type: str = "text",
+    allow_protected: bool = False,
+    ingress: RuntimeIngress,
+) -> Asset:
+    """Compatibility ingress; new callers publish the built Asset as Candidate."""
+    asset = build_control_plane_asset(
+        name=name,
+        content=content,
+        origin=origin,
+        trust_tier=trust_tier,
+        source_uri=source_uri,
+        promptable=promptable,
+        content_type=content_type,
+        allow_protected=allow_protected,
+    )
     return ingress.accept_asset(
         asset, source="control_plane", allow_protected=allow_protected
     )

@@ -28,12 +28,13 @@ from aigineering.core.authority import (
 from aigineering.core.commitment import validate_contract_commitment
 from aigineering.core.provenance import sign_asset
 from aigineering.core.trace import create_entry
-from aigineering.protocol.runtime_record import RuntimeRecord, create_runtime_record
-from aigineering.protocol.wire import (
-    asset_to_dict,
-    contract_to_dict,
-    trace_entry_to_dict,
+from aigineering.core.fact_materialization import (
+    asset_committed_record,
+    materialize_fact_reduction,
+    trace_records,
 )
+from aigineering.protocol.runtime_record import RuntimeRecord, create_runtime_record
+from aigineering.protocol.wire import contract_to_dict
 
 if TYPE_CHECKING:
     from aigineering.core.fact_reducer import FactReducer
@@ -54,91 +55,6 @@ def _is_protected_name(name: str) -> bool:
 
 def _get_matched_prefix(name: str) -> str | None:
     return matched_reserved_prefix(name)
-
-
-def _asset_committed_record(asset: Asset) -> RuntimeRecord:
-    return create_runtime_record(
-        "asset.committed",
-        {"asset": asset_to_dict(asset), "contract_id": asset.created_by},
-    )
-
-
-def _trace_records(entries: Sequence[object]) -> tuple[RuntimeRecord, ...]:
-    return tuple(
-        create_runtime_record(
-            "trace.recorded",
-            {"trace": trace_entry_to_dict(entry)},
-        )
-        for entry in entries
-    )
-
-
-def materialize_fact_reduction(
-    events: Sequence[object], assets: Sequence[Asset]
-) -> tuple[list[object], tuple[RuntimeRecord, ...]]:
-    """Convert pure reducer events into shared trace and lifecycle facts."""
-    from aigineering.core.fact_reducer import FactReducerEvent
-
-    assets_by_name = {asset.name: asset for asset in assets}
-    traces: list[object] = []
-    lifecycle: list[RuntimeRecord] = []
-    for event in events:
-        if not isinstance(event, FactReducerEvent) or not event.contract_id:
-            continue
-        asset = assets_by_name.get(event.asset_name)
-        parent_id = asset.id if asset is not None else None
-        trace_event_type: str | None = None
-        trace_kwargs: dict[str, object] = {"relation_target": event.asset_name}
-
-        if event.type == "contract_complete":
-            trace_event_type = "complete"
-            trace_kwargs["budget_remaining"] = 0
-            lifecycle.append(
-                create_runtime_record(
-                    "lifecycle.terminal",
-                    {"contract_id": event.contract_id, "terminal": "complete"},
-                    causal_parents=(
-                        (_asset_committed_record(asset).id,)
-                        if asset is not None
-                        else ()
-                    ),
-                )
-            )
-        elif event.type == "child_cancelled":
-            trace_event_type = "cancelled"
-            trace_kwargs["relation_type"] = "unreachable"
-            trace_kwargs["rejected_fragments"] = [
-                "[unreachable] parent_complete: "
-                f"parent {event.details.get('parent_id', '?')} completed"
-            ]
-            lifecycle.append(
-                create_runtime_record(
-                    "lifecycle.terminal",
-                    {"contract_id": event.contract_id, "terminal": "cancelled"},
-                    causal_parents=(
-                        (_asset_committed_record(asset).id,)
-                        if asset is not None
-                        else ()
-                    ),
-                )
-            )
-        elif event.type == "output_satisfied":
-            trace_event_type = "output_satisfied"
-        elif event.type == "activation_active":
-            trace_event_type = "activation"
-        elif event.type == "method_result_detected":
-            trace_event_type = "method_result_detected"
-
-        if trace_event_type is not None:
-            traces.append(
-                create_entry(
-                    contract_id=event.contract_id,
-                    event_type=trace_event_type,
-                    parent_id=parent_id,
-                    **trace_kwargs,
-                )
-            )
-    return traces, tuple(lifecycle)
 
 
 class RuntimeIngress:
@@ -222,7 +138,7 @@ class RuntimeIngress:
         signed = sign_asset(asset)
         if not signed.signed_by:
             signed = sign_asset(asset, signed_by="engine")
-        asset_record = _asset_committed_record(signed)
+        asset_record = asset_committed_record(signed)
 
         main_entry = create_entry(
             contract_id="runtime_ingress",
@@ -267,10 +183,11 @@ class RuntimeIngress:
             trace_entries=all_traces,
             runtime_records=(asset_record,)
             + reducer_records
-            + _trace_records(all_traces),
+            + trace_records(all_traces),
         )
-        for entry in all_traces:
-            self._trace.append(entry)
+        if self._trace is not self._store:
+            for entry in all_traces:
+                self._trace.append(entry)
 
         return signed
 
@@ -319,12 +236,13 @@ class RuntimeIngress:
         self._store.commit_ingress_batch(
             accepted_assets=signed,
             trace_entries=all_traces,
-            runtime_records=tuple(_asset_committed_record(asset) for asset in signed)
+            runtime_records=tuple(asset_committed_record(asset) for asset in signed)
             + reducer_records
-            + _trace_records(all_traces),
+            + trace_records(all_traces),
         )
-        for entry in ingress_traces + reducer_traces:
-            self._trace.append(entry)
+        if self._trace is not self._store:
+            for entry in ingress_traces + reducer_traces:
+                self._trace.append(entry)
 
         return signed
 
@@ -372,10 +290,11 @@ class RuntimeIngress:
                 create_runtime_record(
                     "contract.declared", {"contract": contract_to_dict(contract)}
                 ),
-                *_trace_records([entry]),
+                *trace_records([entry]),
             ),
         )
-        self._trace.append(entry)
+        if self._trace is not self._store:
+            self._trace.append(entry)
 
         return contract
 

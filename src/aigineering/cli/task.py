@@ -9,9 +9,11 @@ from pathlib import Path
 import click
 
 from aigineering.cli._common import _output_json, _persistent_store
+from aigineering.cli._candidate import commit_local_effect, require_accepted
 from aigineering.cli.task_state import project_task_status
-from aigineering.core.control_plane import inject_contract
-from aigineering.core.runtime_ingress import RuntimeIngress
+from aigineering.core.control_plane import build_control_plane_contract
+from aigineering.protocol.candidate import CandidateEffect
+from aigineering.protocol.wire import contract_to_dict
 from aigineering.protocol.wire import trace_entry_to_dict
 
 
@@ -65,11 +67,8 @@ def task_create(
             raise click.UsageError(f"--sensitive-input-policy is not valid JSON: {e}")
 
     store = _persistent_store()
-    ingress = RuntimeIngress(store, store)
     try:
-        contract = inject_contract(
-            store,
-            store,
+        contract = build_control_plane_contract(
             name=name,
             description=description,
             inputs=inputs,
@@ -79,10 +78,18 @@ def task_create(
             labels=labels,
             tool_scope=tool_scope,
             sensitive_input_policy=policy,
-            ingress=ingress,
         )
-    except ValueError as e:
-        raise click.ClickException(str(e))
+        require_accepted(
+            commit_local_effect(
+                store,
+                CandidateEffect(
+                    "contract.declare", {"contract": contract_to_dict(contract)}
+                ),
+                idempotency_key=f"contract:{contract.id}",
+            )
+        )
+    except (LookupError, ValueError) as e:
+        raise click.ClickException(str(e)) from e
 
     payload = {
         "ok": True,

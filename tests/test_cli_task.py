@@ -1,13 +1,32 @@
 """Tests for agent-facing task CLI commands."""
 
 import json
+from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 
 from aigineering.agent.llm import LLMWorker, ProviderError
 from aigineering.cli.main import cli
 from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.core.trace import create_entry
+
+
+@pytest.fixture(autouse=True)
+def initialize_candidate_domain_before_task_publication(monkeypatch):
+    original = CliRunner.invoke
+
+    def invoke(runner, command, args=None, *positional, **kwargs):
+        effective = list(args or ())
+        if (
+            effective[:2] in (["asset", "add"], ["task", "create"])
+            and not Path(".aig/identity/root.ed25519").exists()
+        ):
+            initialized = original(runner, command, ["domain", "init"])
+            assert initialized.exit_code == 0, initialized.output
+        return original(runner, command, args, *positional, **kwargs)
+
+    monkeypatch.setattr(CliRunner, "invoke", invoke)
 
 
 def _seed_build_report_task(runner: CliRunner) -> str:

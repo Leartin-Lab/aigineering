@@ -8,13 +8,20 @@ there is no fallback to direct RuntimeIngress writes.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Mapping, TYPE_CHECKING
 
 from aigineering.core.activation import validate_execution_activation
 from aigineering.core.authority import matched_reserved_prefix
 from aigineering.core.ids import validate_contract_identity
-from aigineering.core.trace import create_entry, trace_effective_payload
+from aigineering.core.ids import hash_asset_content, hash_asset_definition
+from aigineering.core.fact_materialization import (
+    asset_committed_record,
+    materialize_fact_reduction,
+    trace_records,
+)
+from aigineering.core.provenance import sign_asset
+from aigineering.core.trace import create_entry
 from aigineering.core.signing import create_verifier
 from aigineering.protocol.candidate import (
     CandidateProposal,
@@ -25,8 +32,8 @@ from aigineering.protocol.candidate import (
 )
 from aigineering.protocol.immutability import deep_thaw
 from aigineering.protocol.runtime_record import RuntimeRecord, create_runtime_record
-from aigineering.protocol.types import Contract, TraceEntry
-from aigineering.protocol.wire import contract_to_dict
+from aigineering.protocol.types import Asset, Contract, TraceEntry
+from aigineering.protocol.wire import contract_to_dict, trace_entry_to_dict
 
 if TYPE_CHECKING:
     from aigineering.core.store import StoreProtocol
@@ -34,6 +41,7 @@ if TYPE_CHECKING:
 
 
 CONTRACT_DECLARE_CAPABILITY = "contract.publish"
+ASSET_PROPOSE_CAPABILITY = "asset.publish"
 
 
 @dataclass(frozen=True)
@@ -45,6 +53,7 @@ class CommitmentDecision:
     runtime_records: tuple[RuntimeRecord, ...]
     trace_entries: tuple[TraceEntry, ...]
     contract: Contract | None = None
+    assets: tuple[Asset, ...] = ()
 
 
 def _contract_from_payload(payload: Mapping[str, Any]) -> Contract:
@@ -69,6 +78,40 @@ def _contract_from_payload(payload: Mapping[str, Any]) -> Contract:
         minting_authority=tuple(data.get("minting_authority", ())),
         sensitive_input_policy=data.get("sensitive_input_policy"),
     )
+
+
+def _asset_from_payload(
+    payload: Mapping[str, Any], candidate: CandidateProposal
+) -> Asset:
+    asset_value = payload.get("asset")
+    if not isinstance(asset_value, Mapping):
+        raise ValueError("asset.propose requires an object payload.asset")
+    data = deep_thaw(asset_value)
+    name = str(data.get("name", ""))
+    content = str(data.get("content", ""))
+    if not name:
+        raise ValueError("asset.propose asset.name must not be empty")
+    prefix = matched_reserved_prefix(name)
+    if prefix is not None:
+        raise ValueError(f"Asset name {name!r} uses protected prefix {prefix!r}")
+    content_hash = hash_asset_content(name, content)
+    asset = Asset(
+        id=content_hash,
+        name=name,
+        content=content,
+        content_type=str(data.get("content_type", "text")),
+        created_by=candidate.actor_id,
+        origin=str(data.get("origin", "human")),
+        trust_tier=str(data.get("trust_tier", "human")),
+        source_uri=str(data.get("source_uri", "")),
+        signed_by=candidate.actor_id,
+        signer_kind=f"candidate:{candidate.signature_kind}",
+        promptable=bool(data.get("promptable", True)),
+        disclosure_view=str(data.get("disclosure_view", "original")),
+        definition_hash=hash_asset_definition(name),
+        content_hash=content_hash,
+    )
+    return sign_asset(asset, signed_by=candidate.actor_id)
 
 
 def validate_contract_commitment(
@@ -100,11 +143,14 @@ def _actor_capabilities(
 
 
 def _trace_record(entry: TraceEntry) -> RuntimeRecord:
-    trace_payload = {"id": entry.id, **trace_effective_payload(entry)}
     return create_runtime_record(
-        "trace.recorded",
-        {"trace": trace_payload},
+        "trace.recorded", {"trace": trace_entry_to_dict(entry)}
     )
+
+
+def _candidate_trace(**kwargs) -> TraceEntry:
+    """Candidate decisions are pure; commit time lives on RuntimeRecord."""
+    return replace(create_entry(**kwargs), timestamp="")
 
 
 def _rejection_decision(
@@ -121,7 +167,7 @@ def _rejection_decision(
         },
         causal_parents=(receipt.id,),
     )
-    trace = create_entry(
+    trace = _candidate_trace(
         contract_id="commitment",
         event_type="candidate_rejected",
         parent_id=candidate.id,
@@ -149,7 +195,7 @@ def _authentication_rejection_decision(
             "signature_kind": candidate.signature_kind,
         },
     )
-    trace = create_entry(
+    trace = _candidate_trace(
         contract_id="commitment",
         event_type="candidate_authentication_rejected",
         parent_id=candidate.id,
@@ -187,11 +233,64 @@ def reduce_candidate(
         )
 
     effect = candidate.effects[0]
+    capabilities = _actor_capabilities(candidate, genesis)
+    if effect.effect_type == "asset.propose":
+        if ASSET_PROPOSE_CAPABILITY not in capabilities:
+            return _rejection_decision(
+                candidate,
+                receipt,
+                f"actor lacks required capability {ASSET_PROPOSE_CAPABILITY!r}",
+            )
+        try:
+            asset = _asset_from_payload(effect.payload, candidate)
+        except (TypeError, ValueError) as exc:
+            return _rejection_decision(candidate, receipt, str(exc))
+        committed_asset = asset_committed_record(asset, causal_parents=(receipt.id,))
+        committed = create_runtime_record(
+            "candidate.committed",
+            {
+                "candidate_id": candidate.id,
+                "committed_record_ids": [committed_asset.id],
+            },
+            causal_parents=(receipt.id, committed_asset.id),
+        )
+        trace = _candidate_trace(
+            contract_id="commitment",
+            event_type="candidate_committed",
+            parent_id=candidate.id,
+            worker_id=candidate.actor_id,
+            relation_target=asset.id,
+            authority_result="accepted",
+            accepted_asset_names=[asset.name],
+            accepted_fragments=[
+                json.dumps(
+                    {
+                        "asset_id": asset.id,
+                        "candidate_id": candidate.id,
+                        "effect_type": effect.effect_type,
+                    },
+                    sort_keys=True,
+                )
+            ],
+        )
+        return CommitmentDecision(
+            candidate_id=candidate.id,
+            accepted=True,
+            runtime_records=(
+                receipt,
+                committed_asset,
+                committed,
+                _trace_record(trace),
+            ),
+            trace_entries=(trace,),
+            assets=(asset,),
+        )
+
     if effect.effect_type != "contract.declare":
         return _rejection_decision(
             candidate, receipt, f"unsupported effect type {effect.effect_type!r}"
         )
-    if CONTRACT_DECLARE_CAPABILITY not in _actor_capabilities(candidate, genesis):
+    if CONTRACT_DECLARE_CAPABILITY not in capabilities:
         return _rejection_decision(
             candidate,
             receipt,
@@ -220,7 +319,7 @@ def reduce_candidate(
         },
         causal_parents=(receipt.id, declared.id),
     )
-    trace = create_entry(
+    trace = _candidate_trace(
         contract_id="commitment",
         event_type="candidate_committed",
         parent_id=candidate.id,
@@ -270,8 +369,37 @@ class CandidateCommitter:
         decision = reduce_candidate(
             candidate, genesis, verifier_factory=verifier_factory
         )
+        already_recorded = any(
+            (
+                record.record_type == "candidate.received"
+                and record.payload["candidate_id"] == candidate.id
+            )
+            or (
+                record.record_type == "candidate.authentication_rejected"
+                and record.payload["claimed_candidate_id"] == candidate.id
+            )
+            for _, record in self._store.scan_runtime_records()
+        )
+        if already_recorded:
+            return decision
+        if decision.assets:
+            from aigineering.core.fact_reducer import FactReducer
+
+            events = FactReducer(self._store, self._trace).on_assets_created(
+                decision.assets
+            )
+            reducer_traces, reducer_records = materialize_fact_reduction(
+                events, decision.assets
+            )
+            decision = replace(
+                decision,
+                trace_entries=decision.trace_entries + tuple(reducer_traces),
+                runtime_records=decision.runtime_records
+                + reducer_records
+                + trace_records(reducer_traces),
+            )
         self._store.commit_ingress_batch(
-            accepted_assets=[],
+            accepted_assets=list(decision.assets),
             trace_entries=list(decision.trace_entries),
             contract=decision.contract,
             runtime_records=decision.runtime_records,

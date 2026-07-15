@@ -70,6 +70,18 @@ Implementation progress:
 - Complete: `aig domain init` persists an Ed25519 root identity and mode-0600
   private key; `aig contract add` uses the signed Candidate path and refuses to
   run without initialization or with an unauthorized local key.
+- Complete: `asset.propose` uses the same reducer, transaction, rejection, and
+  FactReducer materialization path; `aig asset add` no longer uses direct
+  RuntimeIngress acceptance.
+- Complete: shared FactReducer materialization was extracted from
+  RuntimeIngress, and same-Store trace writes no longer create duplicate
+  `trace.recorded` records.
+- Complete: `aig task create` shares `contract.declare`; local CLI actor/key
+  selection and rejection handling are centralized rather than copied across
+  Contract, Task, and Asset commands.
+- Complete: Candidate-level idempotency preserves full Trace payloads needed
+  for byte-equivalent projection reconstruction instead of discarding recording
+  metadata to force hash equality.
 - Complete: cryptography is a base dependency; the runtime does not silently
   substitute a non-authenticating deterministic seal.
 - Pending: migrate remaining control-plane and worker submission effects.

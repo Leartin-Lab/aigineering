@@ -8,15 +8,17 @@ from pathlib import Path
 import click
 
 from aigineering.cli._common import _output_json, _persistent_store
+from aigineering.cli._candidate import commit_local_effect, require_accepted
 from aigineering.core.asset_versions import (
     create_replacement_claim,
     create_slice_asset,
     list_versions,
     resolve_latest,
 )
-from aigineering.core.control_plane import inject_asset
+from aigineering.core.control_plane import build_control_plane_asset
 from aigineering.core.runtime_ingress import RuntimeIngress
 from aigineering.core.trace import create_entry
+from aigineering.protocol.candidate import CandidateEffect
 
 
 @click.group("asset")
@@ -92,12 +94,8 @@ def asset_add(
         )
 
     store = _persistent_store()
-    trace_store = store  # SQLiteStore implements TraceStoreProtocol
-    ingress = RuntimeIngress(store, trace_store)
     try:
-        asset = inject_asset(
-            store,
-            trace_store,
+        proposal = build_control_plane_asset(
             name=name,
             content=content,
             origin=origin,
@@ -105,10 +103,31 @@ def asset_add(
             source_uri=source_uri,
             promptable=promptable,
             content_type="application/json" if content_json else "text",
-            ingress=ingress,
         )
-    except ValueError as e:
-        raise click.ClickException(str(e))
+        decision = require_accepted(
+            commit_local_effect(
+                store,
+                CandidateEffect(
+                    "asset.propose",
+                    {
+                        "asset": {
+                            "content": proposal.content,
+                            "content_type": proposal.content_type,
+                            "disclosure_view": proposal.disclosure_view,
+                            "name": proposal.name,
+                            "origin": proposal.origin,
+                            "promptable": proposal.promptable,
+                            "source_uri": proposal.source_uri,
+                            "trust_tier": proposal.trust_tier,
+                        }
+                    },
+                ),
+                idempotency_key=f"asset:{proposal.id}",
+            )
+        )
+        asset = decision.assets[0]
+    except (LookupError, ValueError) as e:
+        raise click.ClickException(str(e)) from e
 
     if as_json:
         _output_json(

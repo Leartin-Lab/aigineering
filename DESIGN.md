@@ -63,9 +63,16 @@ and signature verification. `CandidateCommitter` supports one complete
 `contract.declare` slice: it verifies the actor, applies the shared Contract
 admission policy, and transactionally records receipt, acceptance or rejection,
 audit evidence, and the Contract. `aig domain init` creates a local Ed25519 root
-identity with a mode-0600 private key, and `aig contract add` now publishes only
-through that signed Candidate path. Other control-plane commands have not yet
-migrated and no other typed effect is accepted.
+identity with a mode-0600 private key. `aig contract add` and `aig asset add`
+publish only through signed `contract.declare` and `asset.propose` Candidates.
+Asset commitment runs the same FactReducer consequences as compatibility
+ingress, including activation and terminal records. Other control-plane
+commands have not yet migrated.
+
+`aig task create` is an aliasing user surface over the same
+`contract.declare` publication path. CLI identity assembly is centralized in
+one local Candidate publisher; the three commands do not each own signature or
+Genesis-selection logic.
 
 A domain may persist exactly one `domain.genesis` RuntimeRecord. Initialization
 is idempotent, replacement fails closed, SQLite enforces uniqueness, and a
