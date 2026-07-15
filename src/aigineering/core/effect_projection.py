@@ -366,10 +366,6 @@ def project_effect_batch(
     )
     if len(contracts) > 1:
         raise ValueError("the current atomic slice supports at most one Contract")
-    if contracts and assets:
-        raise ValueError(
-            "the current atomic slice cannot declare a Contract and Assets together"
-        )
     targets = tuple(
         (effect.effect_type, projection.relation_target)
         for effect, projection in projections

@@ -221,7 +221,10 @@ class CandidateCommitter:
         )
         if decision.assets:
             reducer_traces, reducer_records = reduce_asset_facts(
-                self._store, self._trace, decision.assets
+                self._store,
+                self._trace,
+                decision.assets,
+                pending_contracts=((decision.contract,) if decision.contract else ()),
             )
             decision = replace(
                 decision,

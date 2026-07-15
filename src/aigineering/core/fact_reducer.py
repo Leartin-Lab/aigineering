@@ -122,10 +122,16 @@ class FactReducer:
         """
         return self.on_assets_created((asset,))
 
-    def on_assets_created(self, assets: tuple[Asset, ...]) -> list[FactReducerEvent]:
+    def on_assets_created(
+        self,
+        assets: tuple[Asset, ...],
+        *,
+        pending_contracts: tuple[Contract, ...] = (),
+    ) -> list[FactReducerEvent]:
         """Project one atomic batch without depending on insertion order."""
         events: list[FactReducerEvent] = []
         pending_names = {asset.name for asset in assets}
+        contracts = self._contracts_with(pending_contracts)
         terminal_contract_ids = {
             str(record.payload.get("contract_id", ""))
             for _, record in self._store.scan_runtime_records(
@@ -140,7 +146,7 @@ class FactReducer:
         # 2. Activation satisfaction
         activated: set[str] = set()
         for asset in assets:
-            for event in self._detect_activation(asset, pending_names):
+            for event in self._detect_activation(asset, pending_names, contracts):
                 if event.contract_id not in activated:
                     events.append(event)
                     activated.add(event.contract_id)
@@ -150,7 +156,7 @@ class FactReducer:
         for asset in assets:
             events.extend(
                 self._detect_output_satisfaction(
-                    asset, pending_names, completed, terminal_contract_ids
+                    asset, pending_names, completed, terminal_contract_ids, contracts
                 )
             )
 
@@ -177,7 +183,10 @@ class FactReducer:
     # -- Activation detection -----------------------------------------------
 
     def _detect_activation(
-        self, asset: Asset, pending_names: set[str]
+        self,
+        asset: Asset,
+        pending_names: set[str],
+        contracts: tuple[Contract, ...],
     ) -> list[FactReducerEvent]:
         """Find contracts whose activation expression references *asset.name*
         and is now satisfied."""
@@ -191,7 +200,7 @@ class FactReducer:
         available_names.update(pending_names)
 
         # The new asset is already in the store, so its name is included.
-        for contract in self._store.get_all_contracts():
+        for contract in contracts:
             if not contract.activation or not contract.activation.strip():
                 continue
             # Only report activation if the expression references this asset.
@@ -217,12 +226,13 @@ class FactReducer:
         pending_names: set[str],
         completed: set[str],
         terminal_contract_ids: set[str],
+        contracts: tuple[Contract, ...],
     ) -> list[FactReducerEvent]:
         """Find contracts that declare *asset.name* as an output and are
         now fully satisfied."""
         events: list[FactReducerEvent] = []
 
-        for contract in self._store.get_all_contracts():
+        for contract in contracts:
             if contract.id in terminal_contract_ids:
                 continue
             if asset.name not in contract.outputs:
@@ -260,7 +270,10 @@ class FactReducer:
                 # For newly-completed contracts, identify unfinished children.
                 events.extend(
                     self._detect_unfinished_children(
-                        contract, pending_names, terminal_contract_ids | completed
+                        contract,
+                        pending_names,
+                        terminal_contract_ids | completed,
+                        contracts,
                     )
                 )
 
@@ -271,12 +284,13 @@ class FactReducer:
         completed_contract: Contract,
         pending_names: set[str],
         terminal_contract_ids: set[str],
+        contracts: tuple[Contract, ...],
     ) -> list[FactReducerEvent]:
         """Find child contracts that should be cancelled after *completed_contract*
         finishes."""
         events: list[FactReducerEvent] = []
 
-        for contract in self._store.get_all_contracts():
+        for contract in contracts:
             if contract.parent_id != completed_contract.id:
                 continue
             if contract.id in terminal_contract_ids:
@@ -292,6 +306,14 @@ class FactReducer:
                     )
                 )
         return events
+
+    def _contracts_with(
+        self, pending_contracts: tuple[Contract, ...]
+    ) -> tuple[Contract, ...]:
+        """Return the transaction-view Contract set without duplicate identities."""
+        by_id = {contract.id: contract for contract in self._store.get_all_contracts()}
+        by_id.update((contract.id, contract) for contract in pending_contracts)
+        return tuple(by_id[contract_id] for contract_id in sorted(by_id))
 
     # -- Helpers ------------------------------------------------------------
 

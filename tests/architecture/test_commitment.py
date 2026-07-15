@@ -824,6 +824,46 @@ def test_asset_effect_commits_fact_and_reduces_contract_completion(store):
     )
 
 
+def test_contract_and_activating_assets_commit_as_one_transaction_view(store):
+    genesis, base = _proposal()
+    signer = _Signer()
+    candidate = create_candidate_proposal(
+        domain_id=genesis.id,
+        actor_id="human:owner",
+        key_id="root",
+        effects=[
+            base.effects[0],
+            CandidateEffect(
+                "asset.propose",
+                {
+                    "asset": {
+                        "name": "report",
+                        "content": "published with its task",
+                        "origin": "human",
+                        "trust_tier": "human",
+                    }
+                },
+            ),
+        ],
+        signer=signer,
+    )
+    trace = store if isinstance(store, SQLiteStore) else MemoryTraceStore()
+
+    decision = CandidateCommitter(store, trace).commit(
+        candidate, genesis, verifier_factory=_verifier_factory
+    )
+
+    assert decision.accepted is True
+    assert store.get_contract(_contract().id) == _contract()
+    assert store.has_asset_named("report")
+    assert any(
+        record.record_type == "lifecycle.terminal"
+        and record.payload["contract_id"] == _contract().id
+        and record.payload["terminal"] == "complete"
+        for _, record in store.scan_runtime_records()
+    )
+
+
 def test_asset_effect_rejects_protected_namespace():
     genesis, candidate = _proposal(
         capabilities=("asset.publish",),

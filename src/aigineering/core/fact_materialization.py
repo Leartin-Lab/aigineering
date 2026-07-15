@@ -94,11 +94,20 @@ def materialize_fact_reduction(
     return traces, tuple(lifecycle)
 
 
-def reduce_asset_facts(store, trace, assets: Sequence[object], *, reducer=None):
+def reduce_asset_facts(
+    store,
+    trace,
+    assets: Sequence[object],
+    *,
+    reducer=None,
+    pending_contracts: Sequence[object] = (),
+):
     """Derive and materialize one atomic Asset batch through the pure reducer."""
     if reducer is None:
         from aigineering.core.fact_reducer import FactReducer
 
         reducer = FactReducer(store, trace)
-    events = reducer.on_assets_created(tuple(assets))
+    events = reducer.on_assets_created(
+        tuple(assets), pending_contracts=tuple(pending_contracts)
+    )
     return materialize_fact_reduction(events, assets)

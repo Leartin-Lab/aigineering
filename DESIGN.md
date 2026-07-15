@@ -169,12 +169,12 @@ effect projectors and Contract admission policy are separate pure modules. An
 architecture gate keeps effect names and payload semantics out of the
 coordinator and caps it below 300 source lines.
 
-One Candidate may now carry multiple effects as one atomic group. The pure
+One Candidate may carry multiple effects as one atomic group. The pure
 effect-batch projector checks every capability before commitment and rejects
-the whole Candidate if any effect is invalid. The current vertical slice
-supports at most one Contract and rejects Contract-plus-Asset batches because
-newly declared Contract consequences do not yet share the Asset reducer's
-transaction view; this limitation is explicit rather than order-dependent.
+the whole Candidate if any effect is invalid. A batch supports at most one
+Contract plus any proposed Assets. Fact reduction receives that pending
+Contract explicitly, so activation and completion consequences are computed
+against the atomic transaction view rather than effect insertion order.
 
 Candidate correctness does not depend on a process-local idempotency lock.
 Candidate and derived consequence records have deterministic identities;
