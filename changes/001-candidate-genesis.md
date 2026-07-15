@@ -191,8 +191,15 @@ Implementation progress:
   cannot become a claim-bypass path. Authentication and post-authentication
   submission failures use the same durable Candidate rejection vocabulary and
   Trace evidence rather than ending as caller-only errors.
+- Complete: a Store-free public TaskPlugin protocol separates pure proposal
+  construction from actor-authenticated publication. The planning expansion
+  plugin turns one disclosed plan Asset into an atomic fan-out of ordinary
+  `contract.declare` effects; its worker behavior and Candidate integration are
+  tested independently. It temporarily delegates to the existing containment
+  compiler while that implementation is moved out of `core.methods`.
 - Pending: move signing into the internal WorkerHost execution adapter, then
-  migrate Method task publication to plugins.
+  replace Method scheduling/completion call sites with TaskPlugin publication
+  and delete the compatibility handlers.
 
 ## Required architecture tests
 

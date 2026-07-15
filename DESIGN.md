@@ -236,11 +236,21 @@ The supported operational surface is the Store/claim/submission path.
 
 ## Methods and workers
 
+The public `TaskPlugin` protocol is now Store-free: a plugin receives a frozen,
+disclosure-bounded `PluginRequest` and returns a `PluginProposal` containing
+ordinary Candidate effects plus visible containment notes. The first planning
+expansion plugin converts a structured plan Asset into one atomic fan-out of
+`contract.declare` effects, independently unit-testable before publication.
+Publication still uses the identity-neutral Candidate publisher and a plugin
+actor key; plugins receive no trusted Store mutation handle.
+
 The current source tree still contains plan, replan, retry, recovery, fail, and
 tool Method handlers. They create explicit child Contracts rather than hidden
 agent state, but they remain feature-specific runtime code and are part of the
-0.5 refactor debt. LLM, human, script, plugin, and engine-backed executors do not
-yet share one authenticated actor protocol.
+0.5 refactor debt. The new planning plugin temporarily reuses the tested legacy
+containment compiler until that code is physically moved out of `core.methods`.
+LLM, human, script, plugin, and engine-backed executors do not yet share one
+authenticated actor protocol.
 
 ## Active change
 
