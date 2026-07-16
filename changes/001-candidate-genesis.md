@@ -270,6 +270,9 @@ Implementation progress:
   and system-asset construction moved together into plugin-owned pure task
   semantics. Production plugins and worker adapters no longer import
   `core.methods`; that module is a small compatibility export only.
+- Complete: release artifacts exclude legacy Engine, RuntimeIngress,
+  MethodRegistry/handlers, context-overflow controller, and state serializer.
+  A built-wheel audit imports every shipped module after those exclusions.
 - Complete: recovery replayers fail loudly when durable rejection, expiration,
   or provider-failure facts lack the Contract/raw Candidate evidence required
   to derive their consequence. These broken causal chains can no longer be

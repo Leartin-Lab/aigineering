@@ -33,6 +33,10 @@ def test_legacy_runtime_files_stay_out_of_release_artifacts():
 
     for path in (
         "src/aigineering/core/engine.py",
+        "src/aigineering/core/context_overflow.py",
+        "src/aigineering/core/method_handlers/**",
+        "src/aigineering/core/method_registry.py",
+        "src/aigineering/core/runtime_ingress.py",
         "src/aigineering/core/state_serializer.py",
     ):
         assert path in project

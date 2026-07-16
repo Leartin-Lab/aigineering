@@ -347,6 +347,10 @@ source-compatibility export, not a production semantics owner.
 Recovery task projection has moved to `plugins/recovery.py`; the old recovery
 handler module is now a thin source-compatibility adapter, and shipped runtime
 code no longer imports the handler directory.
+The 0.5.0 wheel and sdist exclude the legacy Engine, context-overflow
+controller, MethodRegistry/handlers, RuntimeIngress, and state serializer.
+They remain repository migration fixtures only; every module present in the
+wheel is importable without them.
 The remaining compatibility handlers are still source-visible, but the local
 LLM path and engine-backed inner execution now share the authenticated
 WorkerHost protocol.
