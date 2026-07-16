@@ -255,6 +255,10 @@ Implementation progress:
 - Complete: EngineWorker derives an in-memory publisher registry from its
   isolated domain actor and threads it through recovery, completion, claim, and
   execution. Nested runtimes no longer fall back to direct recovery mutation.
+- Complete: EngineWorker authorizes and registers each selected delegate in its
+  invocation domain, submits through WorkerHost, and composes the application
+  CompletionPlugin registry. It no longer imports MethodRegistry or the legacy
+  handler stack.
 - Complete: recovery replayers fail loudly when durable rejection, expiration,
   or provider-failure facts lack the Contract/raw Candidate evidence required
   to derive their consequence. These broken causal chains can no longer be
@@ -284,9 +288,9 @@ Implementation progress:
   proposes its ordinary continuation task through a Store-free plugin and signed
   Candidate; rejected publication is traced and terminates the parent instead of
   silently leaving suspended work.
-- Pending: replace Method scheduling/completion call sites with TaskPlugin
-  publication, delete the raw execution compatibility surface and handlers,
-  and migrate engine-backed inner execution to WorkerHost.
+- Pending: replace the remaining Method-named completion types with neutral
+  task/plugin names, then delete the raw execution compatibility surface and
+  source-only handlers.
 
 ## Required architecture tests
 

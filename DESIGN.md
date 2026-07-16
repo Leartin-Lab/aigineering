@@ -271,7 +271,10 @@ fact for an independently configured recovery worker/runtime.
 EngineWorker constructs the same publisher registry from its isolated inner
 domain actor (without filesystem keys) and passes it through recovery,
 completion, claim, and execution. Nested execution therefore does not regain a
-direct recovery write path.
+direct recovery write path. Each selected inner delegate is authorized and
+registered in that invocation domain, then submits through WorkerHost as a
+signed Candidate; EngineWorker no longer imports the legacy MethodRegistry or
+handler stack.
 Authentication, claim, policy, and binding failures append Candidate rejection
 records and Trace evidence before returning an error; an invalid worker result
 cannot disappear as an API-only failure.
@@ -337,8 +340,9 @@ tool Method handlers. They create explicit child Contracts rather than hidden
 agent state, but they remain feature-specific runtime code and are part of the
 0.5 refactor debt. The new planning plugin temporarily reuses the tested legacy
 containment compiler until that code is physically moved out of `core.methods`.
-LLM, human, script, plugin, and engine-backed executors do not yet share one
-authenticated actor protocol.
+The remaining compatibility handlers are still source-visible, but the local
+LLM path and engine-backed inner execution now share the authenticated
+WorkerHost protocol.
 
 The local production task loop injects an immutable, plugin-id keyed registry of
 actor-bound `CandidatePublisher` values into completion projection. This keeps

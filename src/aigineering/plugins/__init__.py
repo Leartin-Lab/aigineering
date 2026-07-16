@@ -12,12 +12,24 @@ from aigineering.plugins.planning_completion import (
 )
 from aigineering.plugins.tool_completion import ToolCompletionPlugin
 
+
+def default_completion_registry() -> CompletionRegistry:
+    """Compose the supported completion plugins without legacy handlers."""
+    registry = CompletionRegistry()
+    registry.register("plan", PlanningCompletionPlugin())
+    registry.register("replan", ReplanningCompletionPlugin())
+    registry.register("tool", ToolCompletionPlugin())
+    registry.register("fail", FailCompletionPlugin())
+    return registry
+
+
 __all__ = (
     "PlanningExpansionPlugin",
     "PlanningCompletionPlugin",
     "ContinuationTaskPlugin",
     "CompletionPlugin",
     "CompletionRegistry",
+    "default_completion_registry",
     "DelegationProjection",
     "FailCompletionPlugin",
     "PluginProposal",

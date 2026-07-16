@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
+from aigineering.agent.worker import WorkerHost
+from aigineering.plugins import default_completion_registry
 from aigineering.runtime import (
     WorkerInvocationError,
     claim_next_package,
@@ -20,20 +23,17 @@ from aigineering.core.candidate_publisher import (
 )
 from aigineering.core.domain import initialize_genesis
 from aigineering.core.ids import hash_contract_v3
-from aigineering.core.method_handlers.fail import FailMethodHandler
-from aigineering.core.method_handlers.plan import PlanMethodHandler
-from aigineering.core.method_handlers.replan import ReplanMethodHandler
-from aigineering.core.method_handlers.retry import RetryMethodHandler
-from aigineering.core.method_handlers.tool import ToolMethodHandler
-from aigineering.core.method_registry import MethodRegistry
 from aigineering.core.output_satisfaction import is_business_output
 from aigineering.core.provenance import verify_asset_seal
 from aigineering.core.signing import Ed25519Signer
 from aigineering.core.sqlite_store import SQLiteStore
+from aigineering.core.worker_routing import WorkerRegistration
 from aigineering.protocol.candidate import ActorKey, create_genesis_manifest
 from aigineering.protocol.effect_builders import (
+    actor_authorization_effect,
     asset_proposal_effect,
     contract_declaration_effect,
+    worker_registration_effect,
 )
 from aigineering.protocol.types import Candidate, Contract
 
@@ -66,15 +66,17 @@ class EngineWorker:
         try:
             signer = Ed25519Signer()
             actor_key = ActorKey(
-                self.worker_id,
+                f"{self.worker_id}:runtime",
                 "inner-root",
                 signer.kind,
                 signer.signer_id,
                 (
+                    "actor.authorize",
                     "asset.publish",
                     "asset.publish.protected",
                     "contract.publish",
                     "contract.publish.protected",
+                    "worker.register",
                 ),
             )
             genesis = create_genesis_manifest(
@@ -123,7 +125,8 @@ class EngineWorker:
             )
             if not decision.accepted:
                 return self._failure("inner domain rejected root contract")
-            registry = _method_registry()
+            registry = default_completion_registry()
+            worker_hosts: dict[str, tuple[ActorKey, Ed25519Signer]] = {}
             for _ in range(self._max_steps):
                 process_rejected_submissions(
                     inner, candidate_publishers=candidate_publishers
@@ -131,18 +134,18 @@ class EngineWorker:
                 process_method_completions(
                     inner, registry, candidate_publishers=candidate_publishers
                 )
-                claimed = claim_next_package(
+                selected = _claim_inner_work(
                     inner,
-                    worker_id=f"{self.worker_id}:delegate",
-                    candidate_publishers=candidate_publishers,
+                    self._delegate,
+                    self._worker_selector,
+                    publisher,
+                    genesis,
+                    worker_hosts,
+                    candidate_publishers,
                 )
-                if claimed is None:
+                if selected is None:
                     break
-                worker = (
-                    self._worker_selector(claimed.contract)
-                    if self._worker_selector is not None
-                    else self._delegate
-                )
+                claimed, worker = selected
                 try:
                     execute_claimed_package(
                         claimed,
@@ -227,11 +230,67 @@ def _inner_contract(outer: Contract) -> Contract:
     )
 
 
-def _method_registry() -> MethodRegistry:
-    registry = MethodRegistry()
-    registry.register("plan", PlanMethodHandler())
-    registry.register("replan", ReplanMethodHandler())
-    registry.register("retry", RetryMethodHandler())
-    registry.register("tool", ToolMethodHandler())
-    registry.register("fail", FailMethodHandler())
-    return registry
+def _claim_inner_work(
+    store,
+    delegate: Worker,
+    selector: Callable[[Contract], Worker] | None,
+    publisher: CandidatePublisher,
+    genesis,
+    worker_hosts: dict[str, tuple[ActorKey, Ed25519Signer]],
+    candidate_publishers: CandidatePublisherRegistry,
+):
+    for contract in store.get_all_contracts():
+        worker = selector(contract) if selector is not None else delegate
+        host = _inner_worker_host(worker, publisher, genesis, worker_hosts)
+        claimed = claim_next_package(
+            store,
+            worker_id=host.worker_id,
+            contract_id=contract.id,
+            candidate_publishers=candidate_publishers,
+        )
+        if claimed is not None:
+            return claimed, host
+    return None
+
+
+def _inner_worker_host(
+    worker: Worker,
+    publisher: CandidatePublisher,
+    genesis,
+    worker_hosts: dict[str, tuple[ActorKey, Ed25519Signer]],
+) -> WorkerHost:
+    identity = worker_hosts.get(worker.worker_id)
+    if identity is None:
+        signer = Ed25519Signer()
+        actor_key = ActorKey(
+            worker.worker_id,
+            "inner-worker",
+            signer.kind,
+            signer.signer_id,
+            ("worker.submit",),
+        )
+        registration_factory = getattr(worker, "registration", None)
+        registration = (
+            registration_factory()
+            if callable(registration_factory)
+            else WorkerRegistration(worker.worker_id)
+        )
+        registration = replace(
+            registration,
+            worker_id=worker.worker_id,
+            actor_id=worker.worker_id,
+            key_id=actor_key.key_id,
+        )
+        decision = publisher.publish(
+            (
+                actor_authorization_effect(actor_key),
+                worker_registration_effect(registration),
+            ),
+            idempotency_key=f"inner-worker:{worker.worker_id}",
+        )
+        if not decision.accepted:
+            raise ValueError(f"inner worker {worker.worker_id!r} was not authorized")
+        identity = (actor_key, signer)
+        worker_hosts[worker.worker_id] = identity
+    actor_key, signer = identity
+    return WorkerHost(worker, genesis, actor_key, signer)

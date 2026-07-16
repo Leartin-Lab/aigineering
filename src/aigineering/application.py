@@ -8,11 +8,7 @@ from typing import Optional
 from aigineering.agent.llm import LLMWorker
 from aigineering.agent.mock import MockWorker
 from aigineering.plugins import (
-    CompletionRegistry,
-    FailCompletionPlugin,
-    PlanningCompletionPlugin,
-    ReplanningCompletionPlugin,
-    ToolCompletionPlugin,
+    default_completion_registry as default_completion_registry,
 )
 from aigineering.core.session import SessionStore
 from aigineering.core.sqlite_store import SQLiteStore
@@ -23,16 +19,6 @@ from aigineering.protocol.types import TraceEntry
 def persistent_store(db_path: str = ".aig/store.db") -> SQLiteStore:
     """Open the default local operational StorePort."""
     return SQLiteStore(db_path=db_path)
-
-
-def default_completion_registry() -> CompletionRegistry:
-    """Build the transitional application-level completion registry."""
-    registry = CompletionRegistry()
-    registry.register("plan", PlanningCompletionPlugin())
-    registry.register("replan", ReplanningCompletionPlugin())
-    registry.register("tool", ToolCompletionPlugin())
-    registry.register("fail", FailCompletionPlugin())
-    return registry
 
 
 def build_worker(

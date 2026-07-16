@@ -394,20 +394,35 @@ def test_local_identity_is_application_service_not_cli_implementation():
     assert "aigineering.cli" not in local
 
 
+def test_engine_worker_composes_authenticated_worker_and_completion_plugins():
+    source = (ROOT / "src/aigineering/agent/engine_worker.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "WorkerHost" in source
+    assert "actor_authorization_effect" in source
+    assert "worker_registration_effect" in source
+    assert "default_completion_registry" in source
+    assert "aigineering.application" not in source
+    assert "MethodRegistry" not in source
+    assert "method_handlers" not in source
+
+
 def test_retry_delegation_does_not_ship_as_completion_registry_semantics():
     application = (ROOT / "src/aigineering/application.py").read_text(encoding="utf-8")
+    plugins = (ROOT / "src/aigineering/plugins/__init__.py").read_text(encoding="utf-8")
 
     assert "RetryMethodHandler" not in application
-    assert 'registry.register("retry"' not in application
+    assert 'registry.register("retry"' not in plugins
     assert "default_method_registry" not in application
     assert "default_completion_registry" in application
     assert "MethodRegistry" not in application
-    assert "CompletionRegistry" in application
+    assert "CompletionRegistry" in plugins
     assert "PlanMethodHandler" not in application
     assert "ReplanMethodHandler" not in application
-    assert "PlanningCompletionPlugin" in application
-    assert "ReplanningCompletionPlugin" in application
+    assert "PlanningCompletionPlugin" in plugins
+    assert "ReplanningCompletionPlugin" in plugins
     assert "ToolMethodHandler" not in application
-    assert "ToolCompletionPlugin" in application
+    assert "ToolCompletionPlugin" in plugins
     assert "FailMethodHandler" not in application
-    assert "FailCompletionPlugin" in application
+    assert "FailCompletionPlugin" in plugins
