@@ -274,7 +274,9 @@ completion, claim, and execution. Nested execution therefore does not regain a
 direct recovery write path. Each selected inner delegate is authorized and
 registered in that invocation domain, then submits through WorkerHost as a
 signed Candidate; EngineWorker no longer imports the legacy MethodRegistry or
-handler stack.
+handler stack. Durable local and ephemeral nested composition share the same
+identity-neutral WorkerHost authorization primitive rather than duplicating
+registration policy.
 Authentication, claim, policy, and binding failures append Candidate rejection
 records and Trace evidence before returning an error; an invalid worker result
 cannot disappear as an API-only failure.

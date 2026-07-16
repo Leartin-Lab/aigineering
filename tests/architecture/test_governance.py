@@ -398,10 +398,12 @@ def test_engine_worker_composes_authenticated_worker_and_completion_plugins():
     source = (ROOT / "src/aigineering/agent/engine_worker.py").read_text(
         encoding="utf-8"
     )
+    hosting = (ROOT / "src/aigineering/worker_hosting.py").read_text(encoding="utf-8")
 
-    assert "WorkerHost" in source
-    assert "actor_authorization_effect" in source
-    assert "worker_registration_effect" in source
+    assert "authorize_worker_host" in source
+    assert "actor_authorization_effect" in hosting
+    assert "worker_registration_effect" in hosting
+    assert "WorkerHost" in hosting
     assert "default_completion_registry" in source
     assert "aigineering.application" not in source
     assert "MethodRegistry" not in source

@@ -4,10 +4,8 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
-from dataclasses import replace
 from typing import TYPE_CHECKING
 
-from aigineering.agent.worker import WorkerHost
 from aigineering.plugins import default_completion_registry
 from aigineering.runtime import (
     WorkerInvocationError,
@@ -27,18 +25,16 @@ from aigineering.core.output_satisfaction import is_business_output
 from aigineering.core.provenance import verify_asset_seal
 from aigineering.core.signing import Ed25519Signer
 from aigineering.core.sqlite_store import SQLiteStore
-from aigineering.core.worker_routing import WorkerRegistration
 from aigineering.protocol.candidate import ActorKey, create_genesis_manifest
 from aigineering.protocol.effect_builders import (
-    actor_authorization_effect,
     asset_proposal_effect,
     contract_declaration_effect,
-    worker_registration_effect,
 )
 from aigineering.protocol.types import Candidate, Contract
+from aigineering.worker_hosting import authorize_worker_host
 
 if TYPE_CHECKING:
-    from aigineering.agent.worker import Worker
+    from aigineering.agent.worker import Worker, WorkerHost
     from aigineering.protocol.types import Asset
 
 
@@ -269,28 +265,7 @@ def _inner_worker_host(
             signer.signer_id,
             ("worker.submit",),
         )
-        registration_factory = getattr(worker, "registration", None)
-        registration = (
-            registration_factory()
-            if callable(registration_factory)
-            else WorkerRegistration(worker.worker_id)
-        )
-        registration = replace(
-            registration,
-            worker_id=worker.worker_id,
-            actor_id=worker.worker_id,
-            key_id=actor_key.key_id,
-        )
-        decision = publisher.publish(
-            (
-                actor_authorization_effect(actor_key),
-                worker_registration_effect(registration),
-            ),
-            idempotency_key=f"inner-worker:{worker.worker_id}",
-        )
-        if not decision.accepted:
-            raise ValueError(f"inner worker {worker.worker_id!r} was not authorized")
         identity = (actor_key, signer)
         worker_hosts[worker.worker_id] = identity
     actor_key, signer = identity
-    return WorkerHost(worker, genesis, actor_key, signer)
+    return authorize_worker_host(worker, genesis, actor_key, signer, publisher)

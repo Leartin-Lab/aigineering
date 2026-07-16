@@ -259,6 +259,9 @@ Implementation progress:
   invocation domain, submits through WorkerHost, and composes the application
   CompletionPlugin registry. It no longer imports MethodRegistry or the legacy
   handler stack.
+- Complete: durable local workers and invocation-scoped nested workers use one
+  identity-neutral WorkerHost authorization/registration primitive; key
+  persistence remains an outer application concern.
 - Complete: recovery replayers fail loudly when durable rejection, expiration,
   or provider-failure facts lack the Contract/raw Candidate evidence required
   to derive their consequence. These broken causal chains can no longer be
