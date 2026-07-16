@@ -943,21 +943,38 @@ def process_task_completions(
         method_context={},
         candidate_publishers=candidate_publishers,
     )
+    projected = {
+        str(record.payload["source_contract_id"])
+        for _, record in store.scan_runtime_records(
+            record_type="task_completion.projected"
+        )
+    }
     for contract in store.get_all_contracts():
         if contract.origin != "system" or contract.parent_id is None:
             continue
         entries = store.get_by_contract(contract.id)
         if not any(entry.event_type == "complete" for entry in entries):
             continue
-        if any(entry.event_type == "method_processed" for entry in entries):
+        if contract.id in projected:
             continue
-        continuations.resume_parent_from_method(contract)
+        if not continuations.resume_parent_from_method(contract):
+            continue
         trace_manager.record(
             contract.id,
-            "method_processed",
-            relation_type="method_completion",
+            "task_completion_projected",
+            relation_type="task_completion",
             relation_target=contract.parent_id,
         )
+        store.append_runtime_record(
+            create_runtime_record(
+                "task_completion.projected",
+                {
+                    "source_contract_id": contract.id,
+                    "parent_contract_id": contract.parent_id,
+                },
+            )
+        )
+        projected.add(contract.id)
         processed.append(contract.id)
     return processed
 

@@ -69,7 +69,11 @@ def all_outputs_satisfied(
         matching = store.get_assets_by_name(output_name)
         if not matching:
             return False
-        if contract.origin == "system":
+        if contract.origin in {"system", "recovery"}:
+            if not any(
+                getattr(asset, "created_by", "") == contract.id for asset in matching
+            ):
+                return False
             continue
         if not any(is_business_output(asset, output_name) for asset in matching):
             return False

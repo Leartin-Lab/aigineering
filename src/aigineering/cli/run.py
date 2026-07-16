@@ -321,6 +321,13 @@ def _run_task_pool(
         deadline = time.monotonic() + wait_timeout
         candidate_publishers = ensure_local_runtime_publishers(store)
         if target_task_id is None:
+            registry = _default_completion_registry()
+            recovered = process_rejected_submissions(
+                store, candidate_publishers=candidate_publishers
+            )
+            processed_before = process_task_completions(
+                store, registry, candidate_publishers=candidate_publishers
+            )
             claimed = claim_next_package(
                 store,
                 worker_id=host.worker_id,
@@ -343,6 +350,9 @@ def _run_task_pool(
                 store,
                 candidate_publishers=candidate_publishers,
             )
+            processed_after = process_task_completions(
+                store, registry, candidate_publishers=candidate_publishers
+            )
             status = project_task_status(claimed.contract, store)
             status["ok"] = status["status"] == "completed"
             status["submission_status"] = result["status"]
@@ -350,6 +360,8 @@ def _run_task_pool(
                 {
                     "contracts": [claimed.contract.id],
                     "trace_events": len(store.get_by_contract(claimed.contract.id)),
+                    "tasks_processed": processed_before + processed_after,
+                    "rejections_recovered": recovered,
                 }
             ]
             _emit_run_result(status, json_output)
@@ -393,7 +405,7 @@ def _run_task_pool(
                         "submission_status": (
                             submission.get("status") if submission is not None else None
                         ),
-                        "methods_processed": processed_before + processed_after,
+                        "tasks_processed": processed_before + processed_after,
                         "rejections_recovered": recovered,
                     }
                 )

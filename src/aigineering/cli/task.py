@@ -55,7 +55,7 @@ def task_create(
     sensitive_input_policy: str | None,
     as_json: bool,
 ) -> None:
-    """Create a task through the unified runtime ingress."""
+    """Create a task through authenticated Candidate commitment."""
     if description_file is not None:
         description = Path(description_file).read_text()
     policy = None

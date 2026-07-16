@@ -62,13 +62,11 @@ class PlanningCompletionPlugin:
             allowed_input_names = {asset.name for asset in scope}
             parent_budget_remaining = runtime.resolve_budget(parent_contract.id)
 
-        expanded = False
         created: list[str] = []
         recovery_scheduled = False
         for asset in method_assets:
             if not asset.name.startswith(self.result_prefix):
                 continue
-            expanded = True
             decision = None
             published = False
             rejections: list[dict] = []
@@ -124,6 +122,7 @@ class PlanningCompletionPlugin:
                         "field": "publication",
                         "reason": str(rejection.payload["reason"]),
                         "action": "rejected",
+                        "recoverable": True,
                     }
                 )
             for entry in rejections:
@@ -155,6 +154,16 @@ class PlanningCompletionPlugin:
                     rejections=rejections,
                 )
                 recovery_scheduled = recovery_scheduled or recovery is not None
+                if recovery is None and parent_contract is not None:
+                    runtime.fail_contract(
+                        parent_contract,
+                        reason=(
+                            f"{self.action_type} result was rejected and recovery "
+                            "could not be published"
+                        ),
+                        relation_target=contract.id,
+                    )
+                    return True
 
         if created and parent_id is not None:
             runtime.append_trace(
@@ -165,7 +174,7 @@ class PlanningCompletionPlugin:
                 budget_remaining=runtime.resolve_budget(parent_id),
             )
 
-        return expanded or recovery_scheduled
+        return bool(created) or recovery_scheduled
 
 
 class ReplanningCompletionPlugin(PlanningCompletionPlugin):

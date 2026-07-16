@@ -9,8 +9,9 @@ refers to the supported single-machine local-productivity scope only.
 
 Aigineering is a Zero Trust Agent Runtime. The current milestone is the **050
 local productivity formal release**: a traceable CLI/control-plane surface on top of the
-v0.4 single-node kernel, with runtime ingress as the production mutation gate,
-reactive declared-output completion, and output satisfaction that filters out
+v0.4 single-node kernel, with authenticated Candidate commitment as the sole
+production fact-creation gate, plugin-published ordinary tasks, reactive
+declared-output completion, and output satisfaction that filters out
 observation/context assets.
 
 The v0.4 kernel provides SQLite-backed transactional submission, reconstructable
@@ -26,7 +27,8 @@ records commit atomically through the SQLite runtime store.
 - Worker claim/idempotency tables with single-active-claim enforcement
 - Append-only runtime records with deterministic materialized-view rebuild
 - Same-machine active-active claim arbitration with epoch fencing and renewal
-- Engine-as-Worker isolation through the ordinary Candidate protocol
+- Candidate-native task delegation and completion plugins
+- Engine-as-Worker isolation through authenticated WorkerHost Candidates
 - OpenAI-compatible LLM worker with retry, usage metadata, multi-tool-call
 - Control-plane asset/contract/behavior injection via CLI
 - Additive asset slicing, replacement claims, version lists, lineage views
@@ -38,7 +40,8 @@ records commit atomically through the SQLite runtime store.
 
 **What's not done yet:**
 - PyPI publish (API stability gate)
-- Cryptographic signing enabled as the default runtime policy
+- Universal cryptographic provenance for committed Assets (Candidate actors
+  already use Ed25519; deterministic Asset seals remain integrity checks)
 - Universal trust-policy enforcement over signer, origin, trust tier, labels
 - Distributed runtime across shared stores
 - External security audit and deployment hardening
@@ -46,7 +49,7 @@ records commit atomically through the SQLite runtime store.
 - External real-LLM release evidence in unrestricted CI
 
 ```text
-Contract -> Worker/Sub-agent -> Candidate -> Projection/Method -> Asset/Trace
+Contract -> Worker/Plugin -> signed Candidate -> Commitment -> Asset/Contract/Trace
 ```
 
 The project has completed Waves 0–5 of its development plan. It is not
@@ -108,11 +111,11 @@ Focus: make the single-node runtime durable, resumable, protocolized, and safer.
 - [x] Database-enforced single active worker claim per contract
 - [x] Worker package and candidate envelope claim/package binding
 - [x] Claim-bound SQLite worker submission via `aig worker next` / `aig worker submit`
-- [x] Resumable engine state for completed/suspended contracts, budgets, and method context
-- [x] Crash recovery from persisted assets/contracts/traces/session manifest
+- [x] Reconstructable scheduling views for terminal, budget, delegation, and method context facts
+- [x] Crash recovery from persisted assets/contracts/traces without process-local task state
 - [x] `aig trace --tree` / `aig trace --dag` as views, not runtime truth
 - [x] CLI split into smaller command modules
-- [x] CLI default method registry for method-first `/plan`, `/replan`, `/retry`, and `/tool`
+- [x] Explicit `/plan`, `/replan`, `/retry`, and `/tool` delegation as ordinary child tasks
 - [x] 040 gate test suite for boundary, persistence, recovery, claim, and public-claim checks
 - [x] Release packaging and distribution checks
 
@@ -142,7 +145,9 @@ candidate/fact boundary.
 - [x] Immutable RuntimeRecord log and deterministic projection reconstruction
 - [x] Transactional claim/renew/package/submit protocol with fencing epochs
 - [x] Same-machine active-active worker processes over one SQLite domain
-- [x] Engine-as-Worker adapter with isolated inner fact domain
+- [x] Candidate-native completion/recovery plugins with separated actor keys
+- [x] Neutral `task.delegated` facts with historical Method-fact compatibility
+- [x] Engine-as-Worker adapter with isolated inner fact domain and signed delegates
 - [ ] PyPI publish after API stabilizes
 
 ## v0.6 - Asset Management and Evaluation

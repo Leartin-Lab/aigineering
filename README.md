@@ -64,9 +64,9 @@ aig replay <session_id>   # replay a session
 
 This release keeps the v0.4 single-node kernel constraint and adds a more
 practical local productivity layer. The important change in v0.5.0 is that
-the v0.5 boundary work is tighter: runtime ingress is the production mutation
-gate, declared-output completion is reactive, and output satisfaction now
-filters out observation/context assets.
+authenticated Candidate commitment is the production fact-creation gate,
+plugins publish ordinary delegated tasks, declared-output completion is
+reactive, and output satisfaction filters out observation/context assets.
 
 This is not a security-audited production release. It is intended for local
 experiments, research prototypes, and early integration work where auditable

@@ -103,3 +103,16 @@ def test_contract_prompt_separates_behavior_instructions_from_assets():
     assert "- behavior:concise: be concise" in behavior_section
     assert "- evidence: observed" in disclosed_section
     assert "behavior:concise" not in disclosed_section
+
+
+def test_planner_prompt_requires_boolean_activation_grammar():
+    contract = Contract(
+        id="plan-task",
+        name="root.plan",
+        outputs=("_plan_result_root",),
+    )
+
+    prompt = contract_prompt(contract, [])
+
+    assert "input_a AND input_b" in prompt
+    assert "never use commas" in prompt

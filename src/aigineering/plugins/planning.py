@@ -22,7 +22,23 @@ class PlanningExpansionPlugin:
             allowed_input_names=set(request.allowed_input_names),
             parent_budget_remaining=request.allowance,
         )
+        blocking = any(item.get("action") == "rejected" for item in rejections)
+        if not contracts and not rejections:
+            rejections.append(
+                {
+                    "child_name": "(plan_result)",
+                    "field": "contracts",
+                    "reason": "plan result produced no executable child tasks",
+                    "action": "rejected",
+                    "recoverable": True,
+                }
+            )
+            blocking = True
         return PluginProposal(
-            effects=tuple(contract_declaration_effect(item) for item in contracts),
+            effects=(
+                ()
+                if blocking
+                else tuple(contract_declaration_effect(item) for item in contracts)
+            ),
             rejections=tuple(rejections),
         )

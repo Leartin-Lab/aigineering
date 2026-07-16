@@ -82,7 +82,7 @@ class ContinuationManager:
 
     # ── Public API ──────────────────────────────────────────────────────
 
-    def resume_parent_from_method(self, contract: Contract) -> None:
+    def resume_parent_from_method(self, contract: Contract) -> bool:
         """Resume the parent contract after a system method contract completes.
 
         Called by :class:`Engine` when a method contract (plan, tool, replan,
@@ -91,7 +91,7 @@ class ContinuationManager:
         """
         parent_id = contract.parent_id
         if contract.origin != "system" or parent_id is None:
-            return
+            return False
 
         method_assets = [
             asset
@@ -143,13 +143,13 @@ class ContinuationManager:
                                 self._suspended.discard(parent.id)
                         else:
                             self.complete_satisfied_ancestors(contract)
-                        return
+                        return True
 
         parent = self._store.get_contract(parent_id)
         if parent is not None and self._all_outputs_satisfied(parent):
             self.complete_contract(parent)
             self.complete_satisfied_ancestors(parent)
-            return
+            return True
 
         if method_type == "tool" and parent is not None:
             if _tool_observation_succeeded(method_assets):
@@ -162,7 +162,7 @@ class ContinuationManager:
                 )
                 self._completed.add(parent.id)
                 self._suspended.discard(parent.id)
-            return
+            return True
 
         self._add_trace(
             parent_id,
@@ -176,6 +176,7 @@ class ContinuationManager:
             ],
             budget_remaining=self._budget_mgr.get_remaining(parent_id),
         )
+        return False
 
     def schedule_continuation_contract(
         self,

@@ -108,6 +108,157 @@ def test_run_once_idle_is_visible_and_nonzero():
         assert data["status"] == "idle"
 
 
+def test_run_once_projects_completed_plan_before_claiming_expanded_child():
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        created = runner.invoke(
+            cli,
+            ["task", "create", "--name", "root", "--output", "report", "--json"],
+        )
+        assert created.exit_code == 0, created.output
+        contract_id = json.loads(created.output)["contract_id"]
+
+        delegated = runner.invoke(
+            cli,
+            [
+                "run",
+                "--once",
+                "--worker",
+                "mock",
+                "--mock-preset",
+                'root=/plan {"reason":"decompose"}',
+                "--json",
+            ],
+        )
+        assert delegated.exit_code == 1, delegated.output
+        assert json.loads(delegated.output)["status"] == "blocked_delegation"
+
+        plan_content = json.dumps(
+            {
+                "contracts": [
+                    {
+                        "name": "finish",
+                        "inputs": [],
+                        "outputs": ["report"],
+                        "activation": "",
+                        "budget": 1,
+                        "tool_scope": [],
+                        "labels": [],
+                    }
+                ]
+            },
+            sort_keys=True,
+        )
+        plan_output = (
+            f'/exec {{"outputs": {{"_plan_result_{contract_id}": '
+            f"{json.dumps(plan_content)}}}}}"
+        )
+        planned = runner.invoke(
+            cli,
+            [
+                "run",
+                "--once",
+                "--worker",
+                "mock",
+                "--mock-preset",
+                f"root.plan={plan_output}",
+                "--json",
+            ],
+        )
+        assert planned.exit_code == 0, planned.output
+
+        expanded = runner.invoke(
+            cli,
+            [
+                "run",
+                "--once",
+                "--worker",
+                "mock",
+                "--mock-preset",
+                'finish=/exec {"outputs":{"report":"done"}}',
+                "--json",
+            ],
+        )
+        assert expanded.exit_code == 0, expanded.output
+        payload = json.loads(expanded.output)
+        assert payload["name"] == "finish"
+        assert payload["status"] == "completed"
+
+        root = runner.invoke(cli, ["task", "status", contract_id, "--json"])
+        assert json.loads(root.output)["status"] == "completed"
+
+
+def test_parent_status_projects_budget_risk_from_delegated_descendant():
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        created = runner.invoke(
+            cli,
+            ["task", "create", "--name", "root", "--output", "report", "--json"],
+        )
+        contract_id = json.loads(created.output)["contract_id"]
+        runner.invoke(
+            cli,
+            [
+                "run",
+                "--once",
+                "--worker",
+                "mock",
+                "--mock-preset",
+                'root=/plan {"reason":"decompose"}',
+                "--json",
+            ],
+        )
+        plan_content = json.dumps(
+            {
+                "contracts": [
+                    {
+                        "name": "child",
+                        "inputs": [],
+                        "outputs": ["report"],
+                        "activation": "",
+                        "budget": 1,
+                        "tool_scope": [],
+                        "labels": [],
+                    }
+                ]
+            },
+            sort_keys=True,
+        )
+        plan_output = (
+            f'/exec {{"outputs": {{"_plan_result_{contract_id}": '
+            f"{json.dumps(plan_content)}}}}}"
+        )
+        runner.invoke(
+            cli,
+            [
+                "run",
+                "--once",
+                "--worker",
+                "mock",
+                "--mock-preset",
+                f"root.plan={plan_output}",
+                "--json",
+            ],
+        )
+        delegated = runner.invoke(
+            cli,
+            [
+                "run",
+                "--once",
+                "--worker",
+                "mock",
+                "--mock-preset",
+                'child=/plan {"reason":"missing evidence"}',
+                "--json",
+            ],
+        )
+        assert json.loads(delegated.output)["status"] == "blocked_delegation"
+
+        root = runner.invoke(cli, ["task", "status", contract_id, "--json"])
+        risks = json.loads(root.output)["silent_failure_risks"]
+        assert any(risk["code"] == "descendant_budget_exhausted" for risk in risks)
+
+
 def test_run_once_provider_failure_is_json_and_has_no_traceback(monkeypatch):
     def fail_provider(self, contract, disclosed_assets):
         del self, contract, disclosed_assets

@@ -5,7 +5,10 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 
-from aigineering.core.activation import activation_names
+from aigineering.core.activation import (
+    activation_names,
+    validate_execution_activation,
+)
 from aigineering.core.authority import RESERVED_PREFIXES
 from aigineering.core.ids import (
     CONTRACT_SELF_REFERENCE,
@@ -493,6 +496,22 @@ def contracts_from_plan_asset(
         labels = _string_list(raw.get("labels", []))
         origin = "plan"
 
+        try:
+            validate_execution_activation(activation)
+        except (RecursionError, ValueError) as exc:
+            rejected.append(
+                {
+                    "child_name": name,
+                    "field": "activation",
+                    "reason": f"invalid activation expression: {exc}",
+                    "action": "rejected",
+                    "expected": "monotonic boolean expression using AND/OR",
+                    "actual": activation,
+                    "recoverable": True,
+                }
+            )
+            continue
+
         if parent_contract is None:
             # Backward-compatible path: no validation
             cid = hash_contract_v3(
@@ -784,6 +803,11 @@ def _can_contribute_sibling_promises(
     if not name or not name.strip():
         return False
     if _PLAN_PROTECTED_FIELDS & set(raw.keys()):
+        return False
+
+    try:
+        validate_execution_activation(str(raw.get("activation", "")))
+    except (RecursionError, ValueError):
         return False
 
     tool_scope = _string_list(raw.get("tool_scope", []))

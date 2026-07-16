@@ -140,6 +140,44 @@ def test_planning_plugin_fanout_commits_through_candidate_publisher():
     }
 
 
+def test_planning_plugin_rejects_invalid_activation_as_one_atomic_fanout():
+    content = json.dumps(
+        {
+            "contracts": [
+                {
+                    "name": "valid",
+                    "inputs": ["source"],
+                    "outputs": ["evidence"],
+                    "activation": "source",
+                },
+                {
+                    "name": "invalid",
+                    "inputs": ["evidence", "source"],
+                    "outputs": ["final_report"],
+                    "activation": "evidence, source",
+                },
+            ]
+        },
+        sort_keys=True,
+    )
+    asset = Asset(id="invalid-plan", name="plan", content=content)
+
+    proposal = PlanningExpansionPlugin().propose(
+        PluginRequest(
+            parent=_parent(),
+            assets=(asset,),
+            allowed_input_names=frozenset({"source"}),
+            allowance=4,
+        )
+    )
+
+    assert proposal.effects == ()
+    assert any(
+        rejection.get("field") == "activation" and rejection.get("recoverable") is True
+        for rejection in proposal.rejections
+    )
+
+
 def test_continuation_plugin_proposes_one_ordinary_task_and_registry_is_explicit():
     parent = _parent()
     source = method_contract(

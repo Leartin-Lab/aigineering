@@ -47,6 +47,8 @@ def project_task_status(contract: Contract, store) -> dict:
 
     status = _status_from_entries(contract, store, entries, terminal, view)
     risks = _silent_failure_risks(contract, store, entries, status)
+    if status not in {"completed", "failed", "cancelled", "unreachable"}:
+        risks.extend(_descendant_failure_risks(contract, store))
     return {
         "contract_id": contract.id,
         "name": contract.name,
@@ -183,3 +185,46 @@ def _has_active_recovery(contract: Contract, store) -> bool:
         ):
             return True
     return False
+
+
+def _descendant_failure_risks(contract: Contract, store) -> list[dict[str, str]]:
+    children: dict[str, list[Contract]] = {}
+    for candidate in store.get_all_contracts():
+        if candidate.parent_id is not None:
+            children.setdefault(candidate.parent_id, []).append(candidate)
+
+    risks: list[dict[str, str]] = []
+    visited: set[str] = {contract.id}
+
+    def visit(parent_id: str) -> None:
+        for child in children.get(parent_id, []):
+            if child.id in visited:
+                continue
+            visited.add(child.id)
+            entries = _trace_entries(store, child.id)
+            view = RuntimeProjection(store, store).contract_view(child)
+            terminal = _latest_terminal(entries)
+            status = _status_from_entries(child, store, entries, terminal, view)
+            if status in {"failed", "cancelled", "unreachable", "stalled"}:
+                risks.append(
+                    {
+                        "code": f"descendant_{status}",
+                        "message": (
+                            f"descendant task {child.id} ({child.name}) is {status}"
+                        ),
+                    }
+                )
+            for risk in _silent_failure_risks(child, store, entries, status):
+                risks.append(
+                    {
+                        "code": f"descendant_{risk['code']}",
+                        "message": (
+                            f"descendant task {child.id} ({child.name}): "
+                            f"{risk['message']}"
+                        ),
+                    }
+                )
+            visit(child.id)
+
+    visit(contract.id)
+    return risks
