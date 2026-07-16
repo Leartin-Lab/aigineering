@@ -355,6 +355,24 @@ def test_production_loops_use_neutral_task_completion_entrypoint():
     assert "process_method_completions" not in nested
 
 
+def test_new_delegations_write_task_facts_and_old_facts_remain_readable():
+    runtime = (ROOT / "src/aigineering/runtime.py").read_text(encoding="utf-8")
+    plugin = (ROOT / "src/aigineering/plugins/delegation.py").read_text(
+        encoding="utf-8"
+    )
+    projection = (ROOT / "src/aigineering/core/runtime_projection.py").read_text(
+        encoding="utf-8"
+    )
+    sqlite = (ROOT / "src/aigineering/core/sqlite_store.py").read_text(encoding="utf-8")
+
+    assert 'create_runtime_record(\n        "task.delegated"' in runtime
+    assert '"status": "task_delegated"' in runtime
+    assert '"task_delegated"' in plugin
+    assert '"task_delegated"' in projection
+    assert '"method_scheduled"' in projection
+    assert '{"task.delegated", "method.scheduled"}' in sqlite
+
+
 def test_recovery_replay_requires_authenticated_candidate_publisher():
     runtime = (ROOT / "src/aigineering/runtime.py").read_text(encoding="utf-8")
     replay = runtime.split("def _schedule_rejected_recovery", 1)[1].split(

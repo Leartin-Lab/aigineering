@@ -127,6 +127,7 @@ class RuntimeProjection:
         method_pending = False
         for entry in entries:
             if entry.event_type in {
+                "task_delegated",
                 "method_scheduled",
                 "method_continuation_scheduled",
             }:

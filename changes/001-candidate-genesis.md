@@ -276,6 +276,9 @@ Implementation progress:
 - Complete: CLI and EngineWorker completion loops use the neutral
   `process_task_completions` API. The Method-named function remains only as a
   forwarding source compatibility alias.
+- Complete: new delegation writes neutral `task.delegated` runtime facts and
+  `task_delegated` trace/API status. Read projections retain old Method-named
+  facts solely for log/database compatibility.
 - Complete: recovery replayers fail loudly when durable rejection, expiration,
   or provider-failure facts lack the Contract/raw Candidate evidence required
   to derive their consequence. These broken causal chains can no longer be

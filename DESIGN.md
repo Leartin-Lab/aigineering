@@ -368,6 +368,10 @@ tests deliberately omit a publisher.
 Production loops invoke the neutral `process_task_completions` entrypoint. The
 old Method-named function is only a source compatibility alias; it no longer
 defines the runtime composition surface.
+New worker delegation commits `task.delegated` records, `task_delegated` trace,
+and a `task_delegated` response. Runtime projections, CLI views, and SQLite
+causal binding still read historical `method.scheduled`/`method_scheduled`
+facts, so an existing database reconstructs without rewriting its log.
 
 ## Active change
 

@@ -140,7 +140,7 @@ def _print_timeline_entry(entry: TraceEntry) -> None:
                 tagged.append(f"[{cat}] {rest}")
             parts.append(f"REJECTED: {tagged}")
         click.echo(f"{prefix}← {' | '.join(parts)}")
-    elif entry.event_type == "method_scheduled":
+    elif entry.event_type in {"task_delegated", "method_scheduled"}:
         method = entry.relation_type or "method"
         target = entry.relation_target or "(unknown)"
         worker = entry.worker_id or "worker"
@@ -216,7 +216,7 @@ def _build_contract_tree(
 
     child_parent: dict[str, str] = {}
     for e in entries:
-        if e.event_type == "method_scheduled" and e.relation_target:
+        if e.event_type in {"task_delegated", "method_scheduled"} and e.relation_target:
             child_parent[e.relation_target] = e.contract_id
         elif e.event_type == "method_continuation_scheduled" and e.relation_target:
             child_parent[e.relation_target] = e.contract_id
@@ -328,7 +328,7 @@ def _entry_short_label(entry: TraceEntry) -> str:
         if rejected:
             parts.append(f"rejected {len(rejected)}")
         return " | ".join(parts) if parts else "no output"
-    elif entry.event_type == "method_scheduled":
+    elif entry.event_type in {"task_delegated", "method_scheduled"}:
         method = entry.relation_type or "method"
         target = entry.relation_target or "(unknown)"
         return f"/{method} → {target}"
@@ -377,7 +377,7 @@ def _build_contract_dag(
     edges: list[tuple[str, str, str]] = []
     seen: set[tuple[str, str, str]] = set()
     for e in entries:
-        if e.event_type == "method_scheduled" and e.relation_target:
+        if e.event_type in {"task_delegated", "method_scheduled"} and e.relation_target:
             edge = (e.contract_id, e.relation_type or "method", e.relation_target)
             if edge not in seen:
                 edges.append(edge)
@@ -422,7 +422,12 @@ def _contract_status_map(entries: list[TraceEntry]) -> dict[str, str]:
             status[cid] = "completed"
             continue
         has_scheduled = any(
-            e.event_type in ("method_scheduled", "method_continuation_scheduled")
+            e.event_type
+            in {
+                "task_delegated",
+                "method_scheduled",
+                "method_continuation_scheduled",
+            }
             for e in evts
         )
         has_resumed = any(e.event_type == "method_resumed" for e in evts)

@@ -233,13 +233,13 @@ def test_run_task_uses_engine_method_path_for_plan():
         audit = runner.invoke(cli, ["task", "audit", contract_id, "--json"])
         data = json.loads(audit.output)
         event_types = {entry["event_type"] for entry in data["trace"]}
-        assert "method_scheduled" in event_types
+        assert "task_delegated" in event_types
         store_audit = runner.invoke(cli, ["task", "audit", contract_id, "--json"])
         trace = json.loads(store_audit.output)["trace"]
         child_id = next(
             entry["relation_target"]
             for entry in trace
-            if entry["event_type"] == "method_scheduled"
+            if entry["event_type"] == "task_delegated"
         )
         child_audit = runner.invoke(cli, ["task", "audit", child_id, "--json"])
         child_data = json.loads(child_audit.output)

@@ -219,7 +219,7 @@ def test_delegation_plugin_projects_each_method_task_without_store(action_type):
     assert f"method:{action_type}" in projection.child.labels
     assert projection.context_asset is not None
     assert projection.context_asset.name == f"_method_ctx_{parent.id}"
-    assert projection.event_type == "method_scheduled"
+    assert projection.event_type == "task_delegated"
 
 
 def test_delegation_plugin_projects_retry_as_an_independent_task():

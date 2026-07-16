@@ -100,13 +100,13 @@ def test_worker_host_delegates_without_method_handler_authorization():
 
     result = execute_claimed_package(claimed, host, store)
 
-    assert result["status"] == "method_scheduled"
+    assert result["status"] == "task_delegated"
     receipt = next(
         record
         for _, record in store.scan_runtime_records(record_type="candidate.received")
         if record.payload.get("effect_types") == ("task.delegate",)
     )
-    method = store.scan_runtime_records(record_type="method.scheduled")[-1][1]
+    method = store.scan_runtime_records(record_type="task.delegated")[-1][1]
     delegation = store.scan_runtime_records(record_type="worker.delegation.received")[
         -1
     ][1]

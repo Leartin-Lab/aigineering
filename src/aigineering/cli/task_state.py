@@ -108,7 +108,11 @@ def _status_from_entries(
         return "submitted"
     suspended = False
     for entry in entries:
-        if entry.event_type in {"method_scheduled", "method_continuation_scheduled"}:
+        if entry.event_type in {
+            "task_delegated",
+            "method_scheduled",
+            "method_continuation_scheduled",
+        }:
             suspended = True
         elif entry.event_type == "method_resumed":
             suspended = False

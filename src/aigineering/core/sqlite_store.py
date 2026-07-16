@@ -2104,7 +2104,8 @@ class SQLiteStore:
                         causal_parents=[
                             record.id
                             for record in runtime_records
-                            if record.record_type == "method.scheduled"
+                            if record.record_type
+                            in {"task.delegated", "method.scheduled"}
                         ],
                     )
                 )
@@ -2134,7 +2135,7 @@ class SQLiteStore:
             method_parents = [
                 record.id
                 for record in runtime_records
-                if record.record_type == "method.scheduled"
+                if record.record_type in {"task.delegated", "method.scheduled"}
             ]
             self._insert_runtime_record(
                 create_runtime_record(

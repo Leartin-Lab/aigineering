@@ -63,7 +63,7 @@ def test_plan_method_and_independent_child_complete_root_from_assets():
     root_claim = claim_next_package(store, worker_id="worker", contract_id=root.id)
     assert root_claim is not None
     scheduled = execute_claimed_package(root_claim, worker, store)
-    assert scheduled["status"] == "method_scheduled"
+    assert scheduled["status"] == "task_delegated"
 
     plan_contract = store.get_contract(scheduled["child_contract_id"])
     assert plan_contract is not None

@@ -973,7 +973,7 @@ def test_worker_submit_uses_shared_method_submission_path():
 
         assert result.exit_code == 0, result.output
         payload = json.loads(result.output)
-        assert payload["status"] == "method_scheduled"
+        assert payload["status"] == "task_delegated"
         assert payload["method"] == "plan"
         persisted = SQLiteStore(".aig/store.db")
         child = persisted.get_contract(payload["child_contract_id"])

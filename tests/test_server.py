@@ -431,7 +431,7 @@ def test_worker_protocol_method_submission_uses_same_fenced_path(tmp_path, monke
 
     assert submitted.status_code == 200, submitted.text
     body = submitted.json()
-    assert body["status"] == "method_scheduled"
+    assert body["status"] == "task_delegated"
     child = SQLiteStore(".aig/store.db").get_contract(body["child_contract_id"])
     assert child is not None
     assert "method:plan" in child.labels

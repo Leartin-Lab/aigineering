@@ -845,8 +845,8 @@ def _submit_claimed_method(
             causal_parents=[candidate_record.id],
         )
         method_parent_id = output_record.id
-    method_record = create_runtime_record(
-        "method.scheduled",
+    delegation_record = create_runtime_record(
+        "task.delegated",
         {
             "contract_id": contract.id,
             "method": action.type,
@@ -859,7 +859,7 @@ def _submit_claimed_method(
         runtime_records.append(output_record)
     runtime_records.extend(
         [
-            method_record,
+            delegation_record,
             create_runtime_record(
                 "budget.consumed",
                 {
@@ -868,22 +868,22 @@ def _submit_claimed_method(
                     "remaining": remaining,
                     "trace_id": budget_entry.id,
                 },
-                causal_parents=[method_record.id],
+                causal_parents=[delegation_record.id],
             ),
             create_runtime_record(
                 "contract.declared",
                 {"contract": contract_to_dict(child)},
-                causal_parents=[method_record.id],
+                causal_parents=[delegation_record.id],
             ),
             create_runtime_record(
                 "trace.recorded",
                 {"trace": trace_entry_to_dict(method_entry)},
-                causal_parents=[method_record.id],
+                causal_parents=[delegation_record.id],
             ),
             create_runtime_record(
                 "trace.recorded",
                 {"trace": trace_entry_to_dict(budget_entry)},
-                causal_parents=[method_record.id],
+                causal_parents=[delegation_record.id],
             ),
         ]
     )
@@ -895,12 +895,12 @@ def _submit_claimed_method(
                     "asset": asset_to_dict(context_asset),
                     "contract_id": context_asset.created_by,
                 },
-                causal_parents=[method_record.id],
+                causal_parents=[delegation_record.id],
             )
         )
     response = {
         "contract_id": contract.id,
-        "status": "method_scheduled",
+        "status": "task_delegated",
         "method": action.type,
         "child_contract_id": child.id,
         "complete": False,

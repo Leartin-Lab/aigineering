@@ -64,4 +64,4 @@ class TaskDelegationPlugin:
                 created_by=parent.id,
             )
         )
-        return DelegationProjection(child, context_asset, "method_scheduled")
+        return DelegationProjection(child, context_asset, "task_delegated")
