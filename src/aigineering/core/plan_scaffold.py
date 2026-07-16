@@ -520,7 +520,7 @@ def contracts_from_scaffold(
     Falls through to the legacy ``final_contracts`` path if the scaffold
     has no task definitions but contains ``final_contracts``.
     """
-    from aigineering.core.methods import contracts_from_plan_asset
+    from aigineering.plugins.task_semantics import contracts_from_plan_asset
 
     # If there are no scaffold tasks, fall through to legacy final_contracts
     if not scaffold.step_1_tasks:

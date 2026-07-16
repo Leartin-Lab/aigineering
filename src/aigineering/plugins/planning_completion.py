@@ -8,7 +8,7 @@ from aigineering.plugins.recovery import (
     has_recoverable_method_result_rejection,
     schedule_method_result_recovery,
 )
-from aigineering.core.methods import contracts_from_plan_asset, method_payload
+from aigineering.plugins.task_semantics import contracts_from_plan_asset, method_payload
 from aigineering.plugins.planning import PlanningExpansionPlugin
 from aigineering.plugins.base import PluginRequest
 

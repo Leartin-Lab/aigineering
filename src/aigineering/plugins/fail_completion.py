@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING
 
-from aigineering.core.methods import method_payload, system_asset
+from aigineering.plugins.task_semantics import method_payload, system_asset
 from aigineering.protocol.effect_builders import asset_proposal_effect
 
 if TYPE_CHECKING:

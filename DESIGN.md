@@ -340,8 +340,10 @@ actor key; plugins receive no trusted Store mutation handle.
 The current source tree still contains plan, replan, retry, recovery, fail, and
 tool Method handlers. They create explicit child Contracts rather than hidden
 agent state, but they remain feature-specific runtime code and are part of the
-0.5 refactor debt. The new planning plugin temporarily reuses the tested legacy
-containment compiler until that code is physically moved out of `core.methods`.
+0.5 refactor debt. The tested containment compiler is now physically owned by
+`plugins/task_semantics.py` along with delegation and continuation projection.
+`core.methods` is a thin
+source-compatibility export, not a production semantics owner.
 Recovery task projection has moved to `plugins/recovery.py`; the old recovery
 handler module is now a thin source-compatibility adapter, and shipped runtime
 code no longer imports the handler directory.

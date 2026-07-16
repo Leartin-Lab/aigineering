@@ -415,6 +415,26 @@ def test_engine_worker_composes_authenticated_worker_and_completion_plugins():
     assert "method_handlers" not in source
 
 
+def test_task_projection_semantics_live_with_plugins_not_core_compatibility():
+    compatibility = (ROOT / "src/aigineering/core/methods.py").read_text(
+        encoding="utf-8"
+    )
+    semantics = (ROOT / "src/aigineering/plugins/task_semantics.py").read_text(
+        encoding="utf-8"
+    )
+    production = "\n".join(
+        path.read_text(encoding="utf-8")
+        for directory in ("plugins", "agent")
+        for path in (ROOT / f"src/aigineering/{directory}").glob("*.py")
+    )
+
+    assert "def contracts_from_plan_asset" in semantics
+    assert "def method_contract" in semantics
+    assert "def continuation_contract" in semantics
+    assert "aigineering.core.methods" not in production
+    assert len(compatibility.splitlines()) < 30
+
+
 def test_retry_delegation_does_not_ship_as_completion_registry_semantics():
     application = (ROOT / "src/aigineering/application.py").read_text(encoding="utf-8")
     plugins = (ROOT / "src/aigineering/plugins/__init__.py").read_text(encoding="utf-8")

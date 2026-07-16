@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from aigineering.core.methods import continuation_contract, method_payload
+from aigineering.plugins.task_semantics import continuation_contract, method_payload
 from aigineering.plugins.base import PluginProposal, PluginRequest
 from aigineering.protocol.effect_builders import contract_declaration_effect
 

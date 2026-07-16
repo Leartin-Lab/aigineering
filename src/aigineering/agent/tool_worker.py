@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 
 from aigineering.agent.tool_executor import ToolExecutor
 from aigineering.core.capability_descriptors import verify_descriptor
-from aigineering.core.methods import method_payload
+from aigineering.plugins.task_semantics import method_payload
 from aigineering.protocol.types import Candidate
 
 if TYPE_CHECKING:

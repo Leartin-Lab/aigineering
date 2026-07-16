@@ -6,7 +6,7 @@ import json
 from typing import TYPE_CHECKING
 
 from aigineering.core.ids import hash_contract_v3
-from aigineering.core.methods import system_asset
+from aigineering.plugins.task_semantics import system_asset
 from aigineering.protocol.effect_builders import (
     asset_proposal_effect,
     contract_declaration_effect,

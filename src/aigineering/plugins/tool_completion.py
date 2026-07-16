@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from aigineering.core.methods import method_payload
+from aigineering.plugins.task_semantics import method_payload
 
 if TYPE_CHECKING:
     from aigineering.core.method_runtime import MethodRuntime

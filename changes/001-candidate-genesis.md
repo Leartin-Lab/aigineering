@@ -266,6 +266,10 @@ Implementation progress:
   directory into the plugin layer. Runtime and planning completion no longer
   import handler implementations; the old module only preserves source
   compatibility.
+- Complete: plan containment, delegation, continuation, retry, method-context,
+  and system-asset construction moved together into plugin-owned pure task
+  semantics. Production plugins and worker adapters no longer import
+  `core.methods`; that module is a small compatibility export only.
 - Complete: recovery replayers fail loudly when durable rejection, expiration,
   or provider-failure facts lack the Contract/raw Candidate evidence required
   to derive their consequence. These broken causal chains can no longer be

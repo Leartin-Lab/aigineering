@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from aigineering.core.methods import (
+from aigineering.plugins.task_semantics import (
     method_context_content,
     method_contract,
     retry_contract,
