@@ -365,6 +365,9 @@ rejection is traced and closes the parent instead of leaving it suspended. The
 two former near-copy handlers now share one
 implementation; direct `runtime.add_contract` remains only when compatibility
 tests deliberately omit a publisher.
+Production loops invoke the neutral `process_task_completions` entrypoint. The
+old Method-named function is only a source compatibility alias; it no longer
+defines the runtime composition surface.
 
 ## Active change
 

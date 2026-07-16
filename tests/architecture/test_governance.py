@@ -318,7 +318,7 @@ def test_claim_bound_delegation_semantics_live_in_plugin_not_runtime_service():
 
     assert "TaskDelegationPlugin().project" in runtime
     submission = runtime.split("def _submit_claimed_method", 1)[1].split(
-        "def process_method_completions", 1
+        "def process_task_completions", 1
     )[0]
     assert "method_registry" not in submission
     assert ".can_handle(" not in submission
@@ -335,10 +335,24 @@ def test_claim_bound_delegation_semantics_live_in_plugin_not_runtime_service():
 
 def test_production_completion_projection_has_no_direct_ingress():
     runtime = (ROOT / "src/aigineering/runtime.py").read_text(encoding="utf-8")
-    completion = runtime.split("def process_method_completions", 1)[1]
+    completion = runtime.split("def process_task_completions", 1)[1].split(
+        "def process_method_completions", 1
+    )[0]
 
     assert "RuntimeIngress" not in completion
     assert "FactReducer" not in completion
+
+
+def test_production_loops_use_neutral_task_completion_entrypoint():
+    cli = (ROOT / "src/aigineering/cli/run.py").read_text(encoding="utf-8")
+    nested = (ROOT / "src/aigineering/agent/engine_worker.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "process_task_completions" in cli
+    assert "process_task_completions" in nested
+    assert "process_method_completions" not in cli
+    assert "process_method_completions" not in nested
 
 
 def test_recovery_replay_requires_authenticated_candidate_publisher():

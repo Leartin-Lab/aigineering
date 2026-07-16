@@ -26,7 +26,7 @@ from aigineering.runtime import (
     WorkerInvocationError,
     claim_next_package,
     execute_claimed_package,
-    process_method_completions,
+    process_task_completions,
     process_rejected_submissions,
 )
 from aigineering.core.session import SessionStore
@@ -363,7 +363,7 @@ def _run_task_pool(
             recovered = process_rejected_submissions(
                 store, candidate_publishers=candidate_publishers
             )
-            processed_before = process_method_completions(
+            processed_before = process_task_completions(
                 store, registry, candidate_publishers=candidate_publishers
             )
             claimed = claim_next_package(
@@ -379,7 +379,7 @@ def _run_task_pool(
                     store,
                     candidate_publishers=candidate_publishers,
                 )
-            processed_after = process_method_completions(
+            processed_after = process_task_completions(
                 store, registry, candidate_publishers=candidate_publishers
             )
             after_entries = store.get_all()

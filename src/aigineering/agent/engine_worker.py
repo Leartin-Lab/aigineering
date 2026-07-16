@@ -11,8 +11,8 @@ from aigineering.runtime import (
     WorkerInvocationError,
     claim_next_package,
     execute_claimed_package,
-    process_method_completions,
     process_rejected_submissions,
+    process_task_completions,
 )
 from aigineering.core.candidate_publisher import (
     CandidatePublisher,
@@ -127,7 +127,7 @@ class EngineWorker:
                 process_rejected_submissions(
                     inner, candidate_publishers=candidate_publishers
                 )
-                process_method_completions(
+                process_task_completions(
                     inner, registry, candidate_publishers=candidate_publishers
                 )
                 selected = _claim_inner_work(
@@ -151,7 +151,7 @@ class EngineWorker:
                     )
                 except (ValueError, WorkerInvocationError):
                     return self._failure("inner worker produced an invalid submission")
-                process_method_completions(
+                process_task_completions(
                     inner, registry, candidate_publishers=candidate_publishers
                 )
 

@@ -923,10 +923,10 @@ def _submit_claimed_method(
     return response
 
 
-def process_method_completions(
+def process_task_completions(
     store, completion_registry, *, candidate_publishers=None
 ) -> list[str]:
-    """Project completed method Contracts into their deterministic effects."""
+    """Project completed plugin tasks into their deterministic effects."""
     processed: list[str] = []
     trace_manager = TraceManager(store)
     budget = BudgetManager()
@@ -960,6 +960,17 @@ def process_method_completions(
         )
         processed.append(contract.id)
     return processed
+
+
+def process_method_completions(
+    store, completion_registry, *, candidate_publishers=None
+) -> list[str]:
+    """Compatibility alias for :func:`process_task_completions`."""
+    return process_task_completions(
+        store,
+        completion_registry,
+        candidate_publishers=candidate_publishers,
+    )
 
 
 def _method_context_assets_for(contract: Contract, store) -> tuple[Asset, ...]:
