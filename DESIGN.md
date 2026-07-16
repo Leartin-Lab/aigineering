@@ -372,6 +372,11 @@ New worker delegation commits `task.delegated` records, `task_delegated` trace,
 and a `task_delegated` response. Runtime projections, CLI views, and SQLite
 causal binding still read historical `method.scheduled`/`method_scheduled`
 facts, so an existing database reconstructs without rewriting its log.
+There is no persisted waiting/task-state row. `RuntimeProjection` derives one
+enabled boolean from terminal facts, output/input/activation satisfaction,
+budget, delegation facts, and the claim lease. An outstanding child is exposed
+as the derived blocker `delegation_pending`; CLI status is
+`blocked_delegation`.
 
 ## Active change
 

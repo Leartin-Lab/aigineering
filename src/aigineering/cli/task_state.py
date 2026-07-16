@@ -117,7 +117,7 @@ def _status_from_entries(
         elif entry.event_type == "method_resumed":
             suspended = False
     if suspended:
-        return "blocked_method"
+        return "blocked_delegation"
     if view.claim_status == "active":
         return "claimed"
     if not view.inputs_satisfied or not view.activation_satisfied:

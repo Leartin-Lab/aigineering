@@ -124,16 +124,16 @@ class RuntimeProjection:
             else _budget_remaining(contract, entries)
         )
         current_claim_id, claim_status = self._claim_view(contract.id)
-        method_pending = False
+        delegation_pending = False
         for entry in entries:
             if entry.event_type in {
                 "task_delegated",
                 "method_scheduled",
                 "method_continuation_scheduled",
             }:
-                method_pending = True
+                delegation_pending = True
             elif entry.event_type == "method_resumed":
-                method_pending = False
+                delegation_pending = False
 
         blockers: list[str] = []
         if terminal == "conflict":
@@ -154,8 +154,8 @@ class RuntimeProjection:
                 blockers.append("activation_unsatisfied")
         if budget_remaining <= 0:
             blockers.append("budget_exhausted")
-        if method_pending:
-            blockers.append("method_pending")
+        if delegation_pending:
+            blockers.append("delegation_pending")
         if current_claim_id is not None:
             blockers.append(f"claim:{claim_status}")
 

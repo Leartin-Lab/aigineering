@@ -373,6 +373,22 @@ def test_new_delegations_write_task_facts_and_old_facts_remain_readable():
     assert '{"task.delegated", "method.scheduled"}' in sqlite
 
 
+def test_runtime_task_state_is_a_pure_boolean_projection():
+    projection = (ROOT / "src/aigineering/core/runtime_projection.py").read_text(
+        encoding="utf-8"
+    )
+    task_state = (ROOT / "src/aigineering/cli/task_state.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'blockers.append("delegation_pending")' in projection
+    assert "method_pending" not in projection
+    assert 'return "blocked_delegation"' in task_state
+    assert ".add_contract(" not in projection
+    assert ".add_asset(" not in projection
+    assert ".append_runtime_record(" not in projection
+
+
 def test_recovery_replay_requires_authenticated_candidate_publisher():
     runtime = (ROOT / "src/aigineering/runtime.py").read_text(encoding="utf-8")
     replay = runtime.split("def _schedule_rejected_recovery", 1)[1].split(

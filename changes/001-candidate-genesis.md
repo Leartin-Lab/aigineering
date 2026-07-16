@@ -279,6 +279,9 @@ Implementation progress:
 - Complete: new delegation writes neutral `task.delegated` runtime facts and
   `task_delegated` trace/API status. Read projections retain old Method-named
   facts solely for log/database compatibility.
+- Complete: the runtime has no persisted waiting state. Delegation blocking is
+  a pure boolean projection (`delegation_pending` / `blocked_delegation`) over
+  immutable facts and the database-arbitrated claim lease.
 - Complete: recovery replayers fail loudly when durable rejection, expiration,
   or provider-failure facts lack the Contract/raw Candidate evidence required
   to derive their consequence. These broken causal chains can no longer be

@@ -229,7 +229,7 @@ def test_run_task_uses_engine_method_path_for_plan():
         )
 
         assert result.exit_code == 1, result.output
-        assert json.loads(result.output)["status"] == "blocked_method"
+        assert json.loads(result.output)["status"] == "blocked_delegation"
         audit = runner.invoke(cli, ["task", "audit", contract_id, "--json"])
         data = json.loads(audit.output)
         event_types = {entry["event_type"] for entry in data["trace"]}
