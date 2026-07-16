@@ -17,7 +17,7 @@ from aigineering.core.context_overflow import (
 from aigineering.core.continuation_manager import ContinuationManager
 from aigineering.core.disclosure import compute_disclosure, redact_for_disclosure
 from aigineering.core.labels import Label, LABEL_MODE_DEBUG, resolve_contract_labels
-from aigineering.core.method_handlers.recovery import (
+from aigineering.plugins.recovery import (
     schedule_method_result_recovery,
     schedule_projection_recovery,
 )

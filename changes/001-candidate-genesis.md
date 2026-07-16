@@ -262,6 +262,10 @@ Implementation progress:
 - Complete: durable local workers and invocation-scoped nested workers use one
   identity-neutral WorkerHost authorization/registration primitive; key
   persistence remains an outer application concern.
+- Complete: recovery task projection moved from the legacy Method handler
+  directory into the plugin layer. Runtime and planning completion no longer
+  import handler implementations; the old module only preserves source
+  compatibility.
 - Complete: recovery replayers fail loudly when durable rejection, expiration,
   or provider-failure facts lack the Contract/raw Candidate evidence required
   to derive their consequence. These broken causal chains can no longer be

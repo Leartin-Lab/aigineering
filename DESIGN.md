@@ -342,6 +342,9 @@ tool Method handlers. They create explicit child Contracts rather than hidden
 agent state, but they remain feature-specific runtime code and are part of the
 0.5 refactor debt. The new planning plugin temporarily reuses the tested legacy
 containment compiler until that code is physically moved out of `core.methods`.
+Recovery task projection has moved to `plugins/recovery.py`; the old recovery
+handler module is now a thin source-compatibility adapter, and shipped runtime
+code no longer imports the handler directory.
 The remaining compatibility handlers are still source-visible, but the local
 LLM path and engine-backed inner execution now share the authenticated
 WorkerHost protocol.

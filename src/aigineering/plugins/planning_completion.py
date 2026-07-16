@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from aigineering.core.method_handlers.recovery import (
+from aigineering.plugins.recovery import (
     has_recoverable_method_result_rejection,
     schedule_method_result_recovery,
 )

@@ -20,7 +20,7 @@ from aigineering.core.disclosure import (
 )
 from aigineering.core.store import require_operational_store
 from aigineering.core.method_runtime import MethodRuntime
-from aigineering.core.method_handlers.recovery import schedule_projection_recovery
+from aigineering.plugins.recovery import schedule_projection_recovery
 from aigineering.core.runtime_projection import RuntimeProjection
 from aigineering.core.submit import (
     SubmitClaimError,

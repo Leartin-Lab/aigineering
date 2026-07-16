@@ -359,9 +359,12 @@ def test_projection_failure_terminal_is_distinct_from_recovery_progress():
 
 
 def test_local_recovery_replay_publishes_contract_and_context_as_candidate():
-    recovery = (ROOT / "src/aigineering/core/method_handlers/recovery.py").read_text(
+    recovery = (ROOT / "src/aigineering/plugins/recovery.py").read_text(
         encoding="utf-8"
     )
+    compatibility = (
+        ROOT / "src/aigineering/core/method_handlers/recovery.py"
+    ).read_text(encoding="utf-8")
     identity = (ROOT / "src/aigineering/local_identity.py").read_text(encoding="utf-8")
 
     assert 'can_publish_candidates("recovery.publish.v1")' in recovery
@@ -370,6 +373,8 @@ def test_local_recovery_replay_publishes_contract_and_context_as_candidate():
     assert '"recovery.publish.v1"' in identity
     assert '"contract.publish.protected"' in identity
     assert '"asset.publish.protected"' in identity
+    assert "publish_task_effects" not in compatibility
+    assert len(compatibility.splitlines()) < 60
 
 
 def test_http_worker_ingress_never_provisions_local_private_keys_or_direct_recovery():
