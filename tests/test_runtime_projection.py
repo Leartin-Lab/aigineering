@@ -73,6 +73,25 @@ def test_projection_is_reconstructable_across_store_adapters():
     sqlite.close()
 
 
+def test_projection_snapshot_reuses_runtime_records_across_contract_views():
+    store = MemoryStore()
+    contracts = (Contract(id="one", budget=1), Contract(id="two", budget=1))
+    for contract in contracts:
+        store.add_contract(contract)
+    snapshot = tuple(store.scan_runtime_records())
+    projection = RuntimeProjection(store, MemoryTraceStore(), runtime_records=snapshot)
+
+    def unexpected_scan(*_args, **_kwargs):
+        raise AssertionError("runtime fact snapshot must be reused")
+
+    store.scan_runtime_records = unexpected_scan
+
+    assert [projection.contract_view(contract).enabled for contract in contracts] == [
+        True,
+        True,
+    ]
+
+
 def test_conflicting_terminal_facts_fail_closed():
     store = MemoryStore()
     trace = MemoryTraceStore()

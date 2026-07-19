@@ -472,6 +472,9 @@ enabled boolean from terminal facts, output/input/activation satisfaction,
 budget, attempt/delegation facts, and the claim lease. A staged root projects as
 `expanded` until descendant facts satisfy it; historical delegation tasks may
 still project as `blocked_delegation` during migration.
+One scheduler pass derives all Contract views from one immutable runtime-record
+snapshot; this changes no facts or state semantics and avoids reconstructing the
+same SQLite log once per Contract.
 Once a terminal fact exists, the blocker projection contains only that terminal
 explanation; historical claims or delegation facts do not appear as current
 work blockers.

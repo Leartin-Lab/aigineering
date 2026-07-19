@@ -24,6 +24,7 @@ from aigineering.protocol.wire import trace_entry_from_dict
 if TYPE_CHECKING:
     from aigineering.core.store import StoreProtocol
     from aigineering.core.trace import TraceStoreProtocol
+    from aigineering.protocol.runtime_record import RuntimeRecord
     from aigineering.protocol.types import Contract, TraceEntry
 
 
@@ -60,6 +61,7 @@ class RuntimeProjection:
         *,
         as_of: str | None = None,
         as_of_revision: int | None = None,
+        runtime_records: tuple[tuple[int, RuntimeRecord], ...] | None = None,
     ) -> None:
         if as_of is not None and as_of_revision is not None:
             raise ValueError("choose either as_of timestamp or as_of_revision")
@@ -67,6 +69,7 @@ class RuntimeProjection:
         self._trace = trace
         self._as_of = as_of
         self._as_of_revision = as_of_revision
+        self._runtime_records = runtime_records
 
     def contract_view(self, contract: Contract) -> ContractView:
         historical = self._historical_facts(contract)
@@ -78,9 +81,7 @@ class RuntimeProjection:
             )
             entries = self._entries_for(contract.id)
             typed_terminal_events: tuple[str, ...] = ()
-            allowance_records = tuple(
-                record for _, record in self._store.scan_runtime_records()
-            )
+            allowance_records = tuple(record for _, record in self._records())
             typed_budget = (
                 allowance_available(contract, allowance_records)
                 if allowance_is_recorded(contract.id, allowance_records)
@@ -220,7 +221,7 @@ class RuntimeProjection:
     ) -> tuple[list[dict], list[TraceEntry], tuple[str, ...], int | None] | None:
         if self._as_of is None and self._as_of_revision is None:
             return None
-        records = self._store.scan_runtime_records()
+        records = self._records()
         declared = [
             record
             for _, record in records
@@ -299,7 +300,7 @@ class RuntimeProjection:
     def _claim_view(self, contract_id: str) -> tuple[str | None, str | None]:
         claim_id: str | None = None
         status: str | None = None
-        for revision, record in self._store.scan_runtime_records():
+        for revision, record in self._records():
             if not self._record_selected(revision, record.recorded_at):
                 continue
             payload = record.payload
@@ -317,6 +318,11 @@ class RuntimeProjection:
             ):
                 status = record.record_type.removeprefix("claim.")
         return claim_id, status
+
+    def _records(self) -> tuple[tuple[int, RuntimeRecord], ...]:
+        if self._runtime_records is not None:
+            return self._runtime_records
+        return tuple(self._store.scan_runtime_records())
 
 
 def _activation_names(expression: str) -> set[str]:

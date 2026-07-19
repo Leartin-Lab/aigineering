@@ -125,6 +125,11 @@ def claim_next_package(
     available_names = {a.name for a in store.get_all_assets()}
     registered_worker = store.get_worker_registration(worker_id)
     policy_blockers: list[DisclosurePolicyError] = []
+    projection = RuntimeProjection(
+        store,
+        store,
+        runtime_records=tuple(store.scan_runtime_records()),
+    )
     for contract in store.get_all_contracts():
         if contract_id is not None and contract.id != contract_id:
             continue
@@ -132,7 +137,7 @@ def claim_next_package(
             contract.activation, available_names
         ):
             continue
-        view = RuntimeProjection(store, store).contract_view(contract)
+        view = projection.contract_view(contract)
         if not view.enabled:
             continue
 

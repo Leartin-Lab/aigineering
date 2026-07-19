@@ -356,6 +356,9 @@ Implementation progress:
 - Complete: SQLite `commit_candidate_submission` and `commit_method_submission`
   specialized transactions were deleted. Modern 100-step chain and 100-task
   stress oracles commit through authenticated WorkerHost Candidates.
+- Complete: scheduler projection takes one immutable runtime-record snapshot per
+  claim pass instead of reconstructing every SQLite fact for every Contract.
+  The 100-step WorkerHost chain fell from about 55 seconds to under 6 seconds.
 
 ## Required architecture tests
 
