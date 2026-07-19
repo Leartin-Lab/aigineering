@@ -937,6 +937,27 @@ def test_asset_effect_rejects_protected_namespace():
     assert privileged.accepted is True
 
 
+def test_protected_method_result_preserves_explicit_contract_provenance():
+    genesis, candidate = _proposal(
+        capabilities=("asset.publish", "asset.publish.protected"),
+        effect=CandidateEffect(
+            "asset.propose",
+            {
+                "asset": {
+                    "name": "_plan_result_parent",
+                    "content": '{"contracts": []}',
+                    "created_by": "plan-task",
+                }
+            },
+        ),
+    )
+
+    decision = reduce_candidate(candidate, genesis, verifier_factory=_verifier_factory)
+
+    assert decision.accepted is True
+    assert decision.assets[0].created_by == "plan-task"
+
+
 def test_contract_publisher_cannot_self_grant_protected_minting_authority():
     contract = _contract()
     protected = Contract(

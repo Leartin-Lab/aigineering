@@ -14,11 +14,15 @@ from aigineering.core.ids import hash_contract_v3
 from aigineering.core.methods import method_contract
 from aigineering.core.signing import Ed25519Signer
 from aigineering.core.store import MemoryStore
-from aigineering.core.trace import MemoryTraceStore
+from aigineering.core.trace import MemoryTraceStore, create_entry
 from aigineering.core.trace_manager import TraceManager
 from aigineering.protocol.actions import WorkerAction
 from aigineering.protocol.candidate import ActorKey, create_genesis_manifest
-from aigineering.protocol.effect_builders import contract_declaration_effect
+from aigineering.protocol.effect_builders import (
+    asset_proposal_effect,
+    contract_declaration_effect,
+)
+from aigineering.protocol.runtime_record import create_runtime_record
 from aigineering.protocol.types import Asset, Contract
 
 
@@ -125,3 +129,82 @@ def test_continuation_manager_publishes_through_registered_plugin_candidate():
     ]
     assert len(receipts) == 2
     assert trace.get_by_event_type("method_continuation_scheduled")
+
+
+def test_satisfied_ancestor_cannot_change_failed_terminal_to_complete():
+    store = MemoryStore()
+    trace = MemoryTraceStore()
+    signer = Ed25519Signer()
+    actor = ActorKey(
+        "test:terminal",
+        "terminal-1",
+        signer.kind,
+        signer.signer_id,
+        ("asset.publish", "contract.publish"),
+    )
+    genesis = create_genesis_manifest("terminal-test", (actor,), "policy:terminal")
+    initialize_genesis(store, genesis)
+    publisher = CandidatePublisher(store, trace, genesis, actor, signer)
+    parent_fields = {
+        "name": "parent",
+        "description": "",
+        "inputs": (),
+        "outputs": ("report",),
+        "activation": "",
+        "budget": 2,
+        "tool_scope": (),
+        "labels": (),
+        "origin": "human",
+    }
+    parent = Contract(id=hash_contract_v3(**parent_fields), **parent_fields)
+    child_fields = {
+        "parent_id": parent.id,
+        "name": "child",
+        "description": "",
+        "inputs": (),
+        "outputs": ("child-output",),
+        "activation": "",
+        "origin": "system",
+        "budget": 1,
+        "tool_scope": (),
+        "labels": (),
+    }
+    child = Contract(id=hash_contract_v3(**child_fields), **child_fields)
+    assert publisher.publish(
+        (contract_declaration_effect(parent), contract_declaration_effect(child)),
+        idempotency_key="terminal-contracts",
+    ).accepted
+    store.append_runtime_record(
+        create_runtime_record(
+            "lifecycle.terminal",
+            {"contract_id": parent.id, "terminal": "failed"},
+        )
+    )
+    trace.append(create_entry(parent.id, "failed"))
+    assert publisher.publish(
+        (asset_proposal_effect(Asset(id="report", name="report", content="done")),),
+        idempotency_key="late-report",
+    ).accepted
+    budget = BudgetManager()
+    budget.initialize(parent.id, parent.budget)
+    manager = ContinuationManager(
+        store=store,
+        budget_mgr=budget,
+        trace_mgr=TraceManager(trace),
+        completion_registry=None,
+        completed=set(),
+        suspended=set(),
+        method_scheduled=set(),
+        method_context={},
+    )
+
+    manager.complete_satisfied_ancestors(child)
+
+    terminals = [entry.event_type for entry in trace.get_by_contract(parent.id)]
+    assert terminals == ["failed"]
+    lifecycle = [
+        record.payload["terminal"]
+        for _, record in store.scan_runtime_records(record_type="lifecycle.terminal")
+        if record.payload["contract_id"] == parent.id
+    ]
+    assert lifecycle == ["failed"]

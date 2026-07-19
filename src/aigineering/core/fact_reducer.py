@@ -36,7 +36,7 @@ if TYPE_CHECKING:
 # Method-result asset name prefixes that trigger method completion handling.
 # ---------------------------------------------------------------------------
 
-_METHOD_RESULT_PREFIXES: tuple[str, ...] = (
+METHOD_RESULT_PREFIXES: tuple[str, ...] = (
     "_plan_result_",
     "_replan_result_",
     "_fail_result_",
@@ -141,7 +141,7 @@ class FactReducer:
 
         # 1. Method result detection
         for asset in assets:
-            events.extend(self._detect_method_result(asset))
+            events.extend(self._detect_method_result(asset, contracts))
 
         # 2. Activation satisfaction
         activated: set[str] = set()
@@ -164,12 +164,24 @@ class FactReducer:
 
     # -- Method result detection --------------------------------------------
 
-    def _detect_method_result(self, asset: Asset) -> list[FactReducerEvent]:
+    def _detect_method_result(
+        self, asset: Asset, contracts: tuple[Contract, ...]
+    ) -> list[FactReducerEvent]:
         """If *asset* name starts with a method-result prefix, emit an event."""
-        for prefix in _METHOD_RESULT_PREFIXES:
+        for prefix in METHOD_RESULT_PREFIXES:
             if asset.name.startswith(prefix):
+                source = next(
+                    (
+                        contract
+                        for contract in contracts
+                        if contract.id == asset.created_by
+                    ),
+                    None,
+                )
+                if source is None or asset.name not in source.outputs:
+                    return []
                 # Determine which prefix matched (longest match first order)
-                matched = _longest_matching_prefix(asset.name, _METHOD_RESULT_PREFIXES)
+                matched = _longest_matching_prefix(asset.name, METHOD_RESULT_PREFIXES)
                 return [
                     FactReducerEvent(
                         type="method_result_detected",
@@ -238,7 +250,7 @@ class FactReducer:
             if asset.name not in contract.outputs:
                 continue
 
-            if contract.origin != "system" and not is_business_output(
+            if contract.origin not in {"system", "recovery"} and not is_business_output(
                 asset, asset.name
             ):
                 continue

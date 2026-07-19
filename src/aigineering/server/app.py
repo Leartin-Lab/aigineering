@@ -24,7 +24,10 @@ from aigineering.core.submit import (
     SubmitCommitError,
     SubmitConflictError,
 )
-from aigineering.protocol.candidate import candidate_proposal_from_dict
+from aigineering.core.worker_coordination import authenticate_worker_command
+from aigineering.protocol.candidate import (
+    candidate_proposal_from_dict,
+)
 from aigineering.protocol.effect_builders import (
     asset_proposal_effect,
     replacement_claim_effect,
@@ -54,18 +57,6 @@ class CandidateProposalRequest(BaseModel):
     causal_parents: list[str] = Field(default_factory=list)
     idempotency_key: str = ""
     protocol_version: int = 1
-
-
-class WorkerClaimRequest(BaseModel):
-    worker_id: str
-    contract_id: str | None = None
-    lease_seconds: int = 60
-
-
-class WorkerRenewRequest(BaseModel):
-    worker_id: str
-    claim_epoch: int
-    lease_seconds: int = 60
 
 
 class AssetSliceCandidateRequest(CandidateProposalRequest):
@@ -402,30 +393,29 @@ def get_contract(contract_id: str):
 
 
 @app.post("/worker/claims")
-def claim_worker_package(body: WorkerClaimRequest):
-    """Atomically claim one contract and return its disclosure-bound package."""
-    if body.lease_seconds < 1:
-        raise HTTPException(status_code=400, detail="lease_seconds must be positive")
-    store = _persistent_store()
-    registration = store.get_worker_registration(body.worker_id)
-    if (
-        registration is None
-        or not registration.enabled
-        or registration.actor_id != body.worker_id
-        or not registration.key_id
-    ):
-        raise HTTPException(
-            status_code=422,
-            detail="worker must have an enabled actor-key registration before claim",
-        )
+def claim_worker_package(body: CandidateProposalRequest):
+    """Authenticate and atomically claim one disclosure-bound worker package."""
     try:
+        store = _persistent_store()
+        command = authenticate_worker_command(
+            candidate_proposal_from_dict(body.model_dump()), "worker.claim", store
+        )
+        payload = command.payload
+        worker_id = str(payload.get("worker_id", ""))
+        contract_id = payload.get("contract_id")
+        if contract_id is not None and not isinstance(contract_id, str):
+            raise ValueError("worker.claim contract_id must be a string or null")
+        lease_seconds = int(payload.get("lease_seconds", 60))
+        if lease_seconds < 1:
+            raise ValueError("lease_seconds must be positive")
         claimed = claim_next_package(
             store,
-            worker_id=body.worker_id,
-            contract_id=body.contract_id,
-            lease_seconds=body.lease_seconds,
+            worker_id=worker_id,
+            contract_id=contract_id,
+            lease_seconds=lease_seconds,
+            claim_runtime_records=command.runtime_records,
         )
-    except ValueError as exc:
+    except (LookupError, TypeError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     if claimed is None:
         raise HTTPException(status_code=409, detail="No eligible contract available")
@@ -433,20 +423,31 @@ def claim_worker_package(body: WorkerClaimRequest):
 
 
 @app.post("/worker/claims/{claim_id}/renew")
-def renew_worker_claim(claim_id: str, body: WorkerRenewRequest):
-    """Renew a fenced claim; any replica may service the request."""
-    if body.lease_seconds < 1 or body.claim_epoch < 1:
-        raise HTTPException(
-            status_code=400,
-            detail="lease_seconds and claim_epoch must be positive",
+def renew_worker_claim(claim_id: str, body: CandidateProposalRequest):
+    """Authenticate and renew one fenced claim on any replica."""
+    try:
+        store = _persistent_store()
+        command = authenticate_worker_command(
+            candidate_proposal_from_dict(body.model_dump()),
+            "worker.claim.renew",
+            store,
         )
-    store = _persistent_store()
-    renewed = store.renew_claim(
-        claim_id,
-        body.claim_epoch,
-        body.worker_id,
-        lease_seconds=body.lease_seconds,
-    )
+        payload = command.payload
+        if str(payload.get("claim_id", "")) != claim_id:
+            raise ValueError("renewal Candidate claim_id does not match request path")
+        claim_epoch = int(payload.get("claim_epoch", 0))
+        lease_seconds = int(payload.get("lease_seconds", 60))
+        if lease_seconds < 1 or claim_epoch < 1:
+            raise ValueError("lease_seconds and claim_epoch must be positive")
+        renewed = store.renew_claim(
+            claim_id,
+            claim_epoch,
+            str(payload.get("worker_id", "")),
+            lease_seconds=lease_seconds,
+            runtime_records=command.runtime_records,
+        )
+    except (LookupError, TypeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     if renewed is None:
         raise HTTPException(status_code=409, detail="Claim renewal was rejected")
     return renewed

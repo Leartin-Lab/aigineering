@@ -137,8 +137,10 @@ def _silent_failure_risks(
     store,
     entries: list[TraceEntry],
     status: str,
+    *,
+    has_active_recovery: bool | None = None,
 ) -> list[dict[str, str]]:
-    if status in {"completed", "failed", "cancelled", "unreachable"}:
+    if status in {"completed", "failed", "cancelled", "unreachable", "stalled"}:
         return []
     risks: list[dict[str, str]] = []
     if (
@@ -151,7 +153,12 @@ def _silent_failure_risks(
                 "message": "budget is exhausted before declared outputs are satisfied",
             }
         )
-    if status == "submitted" and not _has_active_recovery(contract, store):
+    active_recovery = (
+        _has_active_recovery(contract, store)
+        if has_active_recovery is None
+        else has_active_recovery
+    )
+    if status == "submitted" and not active_recovery:
         risks.append(
             {
                 "code": "submitted_without_recovery",
@@ -188,21 +195,33 @@ def _has_active_recovery(contract: Contract, store) -> bool:
 
 
 def _descendant_failure_risks(contract: Contract, store) -> list[dict[str, str]]:
+    contracts = store.get_all_contracts()
     children: dict[str, list[Contract]] = {}
-    for candidate in store.get_all_contracts():
+    contracts_by_name = {candidate.name: candidate.id for candidate in contracts}
+    active_recovery_for: set[str] = set()
+    for candidate in contracts:
         if candidate.parent_id is not None:
             children.setdefault(candidate.parent_id, []).append(candidate)
+        if candidate.origin == "recovery":
+            if candidate.parent_id is not None:
+                active_recovery_for.add(candidate.parent_id)
+            base_name = candidate.name.split(".recover", 1)[0]
+            parent_id = contracts_by_name.get(base_name)
+            if parent_id is not None:
+                active_recovery_for.add(parent_id)
 
     risks: list[dict[str, str]] = []
     visited: set[str] = {contract.id}
-
-    def visit(parent_id: str) -> None:
+    projection = RuntimeProjection(store, store)
+    pending = [contract.id]
+    while pending:
+        parent_id = pending.pop()
         for child in children.get(parent_id, []):
             if child.id in visited:
                 continue
             visited.add(child.id)
             entries = _trace_entries(store, child.id)
-            view = RuntimeProjection(store, store).contract_view(child)
+            view = projection.contract_view(child)
             terminal = _latest_terminal(entries)
             status = _status_from_entries(child, store, entries, terminal, view)
             if status in {"failed", "cancelled", "unreachable", "stalled"}:
@@ -214,7 +233,14 @@ def _descendant_failure_risks(contract: Contract, store) -> list[dict[str, str]]
                         ),
                     }
                 )
-            for risk in _silent_failure_risks(child, store, entries, status):
+            child_risks = _silent_failure_risks(
+                child,
+                store,
+                entries,
+                status,
+                has_active_recovery=child.id in active_recovery_for,
+            )
+            for risk in child_risks:
                 risks.append(
                     {
                         "code": f"descendant_{risk['code']}",
@@ -224,7 +250,5 @@ def _descendant_failure_risks(contract: Contract, store) -> list[dict[str, str]]
                         ),
                     }
                 )
-            visit(child.id)
-
-    visit(contract.id)
+            pending.append(child.id)
     return risks

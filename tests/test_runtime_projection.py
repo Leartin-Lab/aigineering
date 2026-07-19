@@ -104,6 +104,7 @@ def test_projection_as_of_excludes_later_terminal_event():
     current = RuntimeProjection(store, trace).contract_view(contract)
     assert before_terminal.terminal is None
     assert current.terminal == "complete"
+    assert current.blockers == ("terminal:complete",)
     assert before_terminal.projection_hash != current.projection_hash
 
 

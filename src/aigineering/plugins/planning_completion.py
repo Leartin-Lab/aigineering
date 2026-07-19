@@ -9,7 +9,10 @@ from aigineering.plugins.recovery import (
     schedule_method_result_recovery,
 )
 from aigineering.plugins.task_semantics import contracts_from_plan_asset, method_payload
-from aigineering.plugins.planning import PlanningExpansionPlugin
+from aigineering.plugins.planning import (
+    PlanningExpansionPlugin,
+    is_blocking_plan_rejection,
+)
 from aigineering.plugins.base import PluginRequest
 
 if TYPE_CHECKING:
@@ -100,6 +103,11 @@ class PlanningCompletionPlugin:
                     allowed_input_names=allowed_input_names,
                     parent_budget_remaining=parent_budget_remaining,
                 )
+                blocking_rejections = [
+                    entry for entry in rejections if is_blocking_plan_rejection(entry)
+                ]
+                if blocking_rejections:
+                    children = []
                 for child in children:
                     if runtime.get_contract(child.id) is None:
                         runtime.add_contract(child)
@@ -126,6 +134,9 @@ class PlanningCompletionPlugin:
                     }
                 )
             for entry in rejections:
+                if is_blocking_plan_rejection(entry):
+                    entry.setdefault("recoverable", True)
+            for entry in rejections:
                 runtime.append_trace(
                     parent_id,
                     "containment_rejected",
@@ -140,10 +151,8 @@ class PlanningCompletionPlugin:
                     authority_result=entry.get("action", "rejected"),
                     budget_remaining=runtime.resolve_budget(parent_id),
                 )
-            if (
-                parent_id is not None
-                and not children
-                and has_recoverable_method_result_rejection(rejections)
+            if parent_id is not None and has_recoverable_method_result_rejection(
+                rejections
             ):
                 recovery = schedule_method_result_recovery(
                     runtime,

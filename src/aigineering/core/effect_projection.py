@@ -11,6 +11,7 @@ from aigineering.core.actor_facts import actor_key_payload
 from aigineering.core.asset_versions import replacement_claim_payload
 from aigineering.core.contract_admission import validate_contract_commitment
 from aigineering.core.fact_materialization import asset_committed_record
+from aigineering.core.fact_reducer import METHOD_RESULT_PREFIXES
 from aigineering.core.ids import hash_asset_content, hash_asset_definition, hash_claim
 from aigineering.core.provenance import sign_asset
 from aigineering.core.worker_routing import (
@@ -105,6 +106,15 @@ def project_asset_proposal(
     if not name:
         raise ValueError("asset.propose asset.name must not be empty")
     prefix = matched_reserved_prefix(name)
+    proposed_creator = str(data.get("created_by", ""))
+    is_method_result = name.startswith(METHOD_RESULT_PREFIXES)
+    if is_method_result and not proposed_creator:
+        raise ValueError("method-result asset.propose requires asset.created_by")
+    created_by = (
+        proposed_creator
+        if prefix is not None and proposed_creator
+        else candidate.actor_id
+    )
     content_hash = hash_asset_content(name, content)
     asset = sign_asset(
         Asset(
@@ -112,7 +122,7 @@ def project_asset_proposal(
             name=name,
             content=content,
             content_type=str(data.get("content_type", "text")),
-            created_by=candidate.actor_id,
+            created_by=created_by,
             origin=str(data.get("origin", "human")),
             trust_tier=str(data.get("trust_tier", "human")),
             source_uri=str(data.get("source_uri", "")),

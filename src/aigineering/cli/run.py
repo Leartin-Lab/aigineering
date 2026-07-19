@@ -320,8 +320,8 @@ def _run_task_pool(
         host = ensure_local_worker_host(store, worker)
         deadline = time.monotonic() + wait_timeout
         candidate_publishers = ensure_local_runtime_publishers(store)
+        registry = _default_completion_registry()
         if target_task_id is None:
-            registry = _default_completion_registry()
             recovered = process_rejected_submissions(
                 store, candidate_publishers=candidate_publishers
             )
@@ -371,7 +371,6 @@ def _run_task_pool(
 
         while True:
             before_trace_count = len(store.get_all())
-            registry = _default_completion_registry()
             recovered = process_rejected_submissions(
                 store, candidate_publishers=candidate_publishers
             )

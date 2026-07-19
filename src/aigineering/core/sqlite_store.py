@@ -1689,6 +1689,7 @@ class SQLiteStore:
         lease_seconds: int = 60,
         package_id: str = "",
         expected_registration_version: str = "",
+        runtime_records: tuple[RuntimeRecord, ...] = (),
     ) -> dict | None:
         """Atomically arbitrate contract exclusivity and registered capacity."""
         from datetime import datetime, timedelta, timezone
@@ -1738,6 +1739,14 @@ class SQLiteStore:
                 ).fetchone()[0]
             )
             timestamp = now_iso()
+            if any(
+                self.get_runtime_record(record.id) is not None
+                for record in runtime_records
+            ):
+                self._conn.rollback()
+                return None
+            for record in runtime_records:
+                self._insert_runtime_record(record)
             self._conn.execute(
                 """INSERT INTO worker_claims (
                     claim_id, contract_id, worker_id, lease_until, status,
@@ -1780,6 +1789,7 @@ class SQLiteStore:
         worker_id: str,
         *,
         lease_seconds: int = 60,
+        runtime_records: tuple[RuntimeRecord, ...] = (),
     ) -> dict | None:
         """Renew an active claim only when all fencing identities still match."""
         from datetime import datetime, timedelta, timezone
@@ -1789,6 +1799,11 @@ class SQLiteStore:
         now = datetime.now(timezone.utc)
         deadline = (now + timedelta(seconds=lease_seconds)).isoformat()
         with self._conn:
+            if any(
+                self.get_runtime_record(record.id) is not None
+                for record in runtime_records
+            ):
+                return None
             cursor = self._conn.execute(
                 "UPDATE worker_claims SET lease_until = ?, updated_at = ? "
                 "WHERE claim_id = ? AND epoch = ? AND worker_id = ? "
@@ -1797,6 +1812,8 @@ class SQLiteStore:
             )
             if cursor.rowcount != 1:
                 return None
+            for record in runtime_records:
+                self._insert_runtime_record(record)
             row = self._conn.execute(
                 "SELECT contract_id, worker_id, epoch, package_id, lease_until "
                 "FROM worker_claims WHERE claim_id = ?",

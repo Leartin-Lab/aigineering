@@ -30,6 +30,8 @@ from aigineering.protocol.effect_builders import (
     actor_authorization_effect,
     asset_proposal_effect,
     replacement_claim_effect,
+    worker_claim_effect,
+    worker_claim_renewal_effect,
     worker_output_effect,
     worker_registration_effect,
 )
@@ -137,6 +139,21 @@ def _worker_submission(actor, worker_key, package, raw_output: str):
             effects=[effect],
             signer=signer,
             idempotency_key=idempotency_key,
+        )
+    )
+
+
+def _worker_command(actor, worker_key, effect: CandidateEffect, request_id: str):
+    signer, key = worker_key
+    _root_signer, genesis = actor
+    return candidate_proposal_to_dict(
+        create_candidate_proposal(
+            domain_id=genesis.id,
+            actor_id=key.actor_id,
+            key_id=key.key_id,
+            effects=[effect],
+            signer=signer,
+            idempotency_key=request_id,
         )
     )
 
@@ -348,23 +365,47 @@ def test_worker_protocol_cross_replica_claim_renew_submit(tmp_path, monkeypatch)
 
     claimed = replica_a.post(
         "/worker/claims",
-        json={
-            "worker_id": "remote-worker",
-            "contract_id": contract_id,
-            "lease_seconds": 30,
-        },
+        json=_worker_command(
+            actor,
+            worker_key,
+            worker_claim_effect(
+                "remote-worker", contract_id=contract_id, lease_seconds=30
+            ),
+            "claim:remote-worker:1",
+        ),
     )
     assert claimed.status_code == 200, claimed.text
     package = claimed.json()
     renewed = replica_b.post(
         f"/worker/claims/{package['claim_id']}/renew",
-        json={
-            "worker_id": "remote-worker",
-            "claim_epoch": package["claim_epoch"],
-            "lease_seconds": 30,
-        },
+        json=_worker_command(
+            actor,
+            worker_key,
+            worker_claim_renewal_effect(
+                "remote-worker",
+                package["claim_id"],
+                package["claim_epoch"],
+                lease_seconds=30,
+            ),
+            "renew:remote-worker:1",
+        ),
     )
     assert renewed.status_code == 200, renewed.text
+    replayed_renewal = replica_c.post(
+        f"/worker/claims/{package['claim_id']}/renew",
+        json=_worker_command(
+            actor,
+            worker_key,
+            worker_claim_renewal_effect(
+                "remote-worker",
+                package["claim_id"],
+                package["claim_epoch"],
+                lease_seconds=30,
+            ),
+            "renew:remote-worker:1",
+        ),
+    )
+    assert replayed_renewal.status_code == 409
 
     submission = _worker_submission(
         actor, worker_key, package, "out: accepted across replicas"
@@ -386,7 +427,9 @@ def test_worker_protocol_cross_replica_claim_renew_submit(tmp_path, monkeypatch)
     records = SQLiteStore(".aig/store.db").scan_runtime_records()
     record_types = [record.record_type for _, record in records]
     assert record_types.count("claim.granted") == 1
+    assert record_types.count("worker.claim.requested") == 1
     assert "claim.renewed" in record_types
+    assert record_types.count("worker.claim.renew.requested") == 1
     assert record_types.count("claim.submitted") == 1
 
 
@@ -399,12 +442,39 @@ def test_unregistered_worker_cannot_lock_a_server_task(tmp_path, monkeypatch):
 
     claimed = client.post(
         "/worker/claims",
-        json={"worker_id": "unknown-worker", "contract_id": created.json()["id"]},
+        json=_candidate_body(
+            actor,
+            worker_claim_effect("unknown-worker", contract_id=created.json()["id"]),
+        ),
     )
 
     assert claimed.status_code == 422
     store = SQLiteStore(".aig/store.db")
     assert store.get_claim(created.json()["id"]) is None
+
+
+def test_unsigned_or_tampered_worker_claim_command_is_rejected(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    client, actor = _signed_client()
+    created = _post_contract(client, actor, name="signed_claim", outputs=["out"])
+    worker_key = _register_worker(client, actor, "signed-worker")
+
+    unsigned = client.post(
+        "/worker/claims",
+        json={"worker_id": "signed-worker", "contract_id": created.json()["id"]},
+    )
+    assert unsigned.status_code == 422
+
+    tampered = _worker_command(
+        actor,
+        worker_key,
+        worker_claim_effect("signed-worker", contract_id=created.json()["id"]),
+        "claim:signed-worker:1",
+    )
+    tampered["effects"][0]["payload"]["worker_id"] = "other-worker"
+    rejected = client.post("/worker/claims", json=tampered)
+    assert rejected.status_code == 422
+    assert SQLiteStore(".aig/store.db").get_claim(created.json()["id"]) is None
 
 
 def test_worker_protocol_method_submission_uses_same_fenced_path(tmp_path, monkeypatch):
@@ -417,7 +487,12 @@ def test_worker_protocol_method_submission_uses_same_fenced_path(tmp_path, monke
     worker_key = _register_worker(client, actor, "remote-planner")
     claimed = client.post(
         "/worker/claims",
-        json={"worker_id": "remote-planner", "contract_id": contract_id},
+        json=_worker_command(
+            actor,
+            worker_key,
+            worker_claim_effect("remote-planner", contract_id=contract_id),
+            "claim:remote-planner:1",
+        ),
     )
     package = claimed.json()
 

@@ -122,6 +122,7 @@ def claim_next_package(
     lease_seconds: int = 60,
     contract_id: str | None = None,
     candidate_publishers=None,
+    claim_runtime_records=(),
 ) -> ClaimedPackage | None:
     """Claim the next ready contract and return its worker package."""
     store = require_operational_store(store)
@@ -192,6 +193,7 @@ def claim_next_package(
             expected_registration_version=(
                 registered_worker.version if registered_worker else ""
             ),
+            runtime_records=tuple(claim_runtime_records),
         )
         if claim is None:
             continue
@@ -959,21 +961,29 @@ def process_task_completions(
             continue
         if not continuations.resume_parent_from_method(contract):
             continue
-        trace_manager.record(
-            contract.id,
-            "task_completion_projected",
+        marker = create_entry(
+            contract_id=contract.id,
+            event_type="task_completion_projected",
             relation_type="task_completion",
             relation_target=contract.parent_id,
         )
-        store.append_runtime_record(
-            create_runtime_record(
-                "task_completion.projected",
-                {
-                    "source_contract_id": contract.id,
-                    "parent_contract_id": contract.parent_id,
-                },
-            )
+        marker_record = create_runtime_record(
+            "trace.recorded", {"trace": trace_entry_to_dict(marker)}
         )
+        projected_record = create_runtime_record(
+            "task_completion.projected",
+            {
+                "source_contract_id": contract.id,
+                "parent_contract_id": contract.parent_id,
+            },
+        )
+        store.commit_ingress_batch(
+            accepted_assets=[],
+            trace_entries=[marker],
+            runtime_records=(marker_record, projected_record),
+        )
+        if trace_manager.store is not store:
+            trace_manager.store.append(marker)
         projected.add(contract.id)
         processed.append(contract.id)
     return processed

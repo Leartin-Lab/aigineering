@@ -16,7 +16,10 @@ from aigineering.core.method_runtime import MethodRuntime
 from aigineering.core.methods import method_payload
 from aigineering.core.output_satisfaction import all_outputs_satisfied
 from aigineering.core.runtime_projection import TERMINAL_EVENTS
+from aigineering.core.trace import create_entry
+from aigineering.protocol.runtime_record import create_runtime_record
 from aigineering.protocol.types import Contract
+from aigineering.protocol.wire import trace_entry_to_dict
 
 if TYPE_CHECKING:
     from aigineering.core.budget_manager import BudgetManager
@@ -292,14 +295,35 @@ class ContinuationManager:
     def _emit_terminal_event(
         self, contract_id: str, event_type: str, **kwargs: object
     ) -> None:
-        existing = [
+        existing_trace = [
             e
             for e in self._trace_mgr.store.get_all()
-            if e.event_type == event_type and e.contract_id == contract_id
+            if e.event_type in self._TERMINAL_EVENTS and e.contract_id == contract_id
         ]
-        if existing:
+        existing_facts = [
+            record
+            for _, record in self._store.scan_runtime_records(
+                record_type="lifecycle.terminal"
+            )
+            if str(record.payload.get("contract_id", "")) == contract_id
+        ]
+        if existing_trace or existing_facts:
             return
-        self._add_trace(contract_id, event_type, **kwargs)
+        entry = create_entry(contract_id, event_type, **kwargs)
+        terminal = create_runtime_record(
+            "lifecycle.terminal",
+            {"contract_id": contract_id, "terminal": event_type},
+        )
+        trace_record = create_runtime_record(
+            "trace.recorded", {"trace": trace_entry_to_dict(entry)}
+        )
+        self._store.commit_ingress_batch(
+            accepted_assets=[],
+            trace_entries=[entry],
+            runtime_records=(terminal, trace_record),
+        )
+        if self._trace_mgr.store is not self._store:
+            self._trace_mgr.store.append(entry)
 
     def _add_trace(self, contract_id: str, event_type: str, **kwargs: object) -> None:
         self._trace_mgr.record(contract_id, event_type, **kwargs)

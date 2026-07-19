@@ -97,6 +97,7 @@ class OperationalStoreProtocol(StoreProtocol, Protocol):
         lease_seconds: int = 60,
         package_id: str = "",
         expected_registration_version: str = "",
+        runtime_records: tuple[RuntimeRecord, ...] = (),
     ) -> dict | None: ...
     def renew_claim(
         self,
@@ -105,6 +106,7 @@ class OperationalStoreProtocol(StoreProtocol, Protocol):
         worker_id: str,
         *,
         lease_seconds: int = 60,
+        runtime_records: tuple[RuntimeRecord, ...] = (),
     ) -> dict | None: ...
     def get_idempotency(
         self, contract_id: str, idempotency_key: str

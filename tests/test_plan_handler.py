@@ -282,6 +282,75 @@ def test_malformed_plan_result_schedules_recovery_and_expands_repaired_result():
     assert recovery_events[0].relation_target == recovery_contracts[0].id
 
 
+def test_mixed_plan_rejection_is_atomic_and_schedules_recovery():
+    registry = MethodRegistry()
+    registry.register("plan", PlanMethodHandler())
+    mixed_plan = json.dumps(
+        {
+            "contracts": [
+                {
+                    "name": "premature",
+                    "inputs": ["source"],
+                    "outputs": ["notes"],
+                    "activation": "source",
+                    "budget": 1,
+                },
+                {
+                    "name": "invalid",
+                    "inputs": ["notes", "source"],
+                    "outputs": ["report"],
+                    "activation": "notes, source",
+                    "budget": 1,
+                },
+            ]
+        },
+        sort_keys=True,
+    )
+    repaired_plan = json.dumps(
+        {
+            "contracts": [
+                {
+                    "name": "final",
+                    "inputs": ["source"],
+                    "outputs": ["report"],
+                    "activation": "source",
+                    "budget": 1,
+                }
+            ]
+        },
+        sort_keys=True,
+    )
+    worker = SequenceWorker(
+        [
+            '/plan {"reason": "split work"}',
+            f'/exec {{"outputs": {{"_plan_result_contract_parent": {json.dumps(mixed_plan)}}}}}',
+            f'/exec {{"outputs": {{"_plan_result_contract_parent": {json.dumps(repaired_plan)}}}}}',
+            '/exec {"outputs": {"report": "done"}}',
+            "",
+        ]
+    )
+    store = MemoryStore()
+    trace_store = TraceStore()
+    contract = Contract(
+        id="contract_parent",
+        name="root",
+        inputs=["source"],
+        outputs=["report"],
+        budget=5,
+    )
+    engine = Engine(store, worker, trace_store, method_registry=registry)
+    engine.add_contract(contract)
+    engine.add_asset(Asset(id="asset_source", name="source", content="observed"))
+
+    engine.run()
+
+    names = {child.name for child in store.get_all_contracts()}
+    assert "premature" not in names
+    assert "final" in names
+    assert "root.plan.recover" in names
+    assert trace_store.get_by_event_type("method_recovery_scheduled")
+
+
 def test_plan_method_action_schedules_recovery_instead_of_nested_plan():
     """A .plan task returning /plan is repaired instead of nested indefinitely."""
     registry = MethodRegistry()

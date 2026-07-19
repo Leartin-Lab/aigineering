@@ -341,6 +341,20 @@ def test_production_completion_projection_has_no_direct_ingress():
 
     assert "RuntimeIngress" not in completion
     assert "FactReducer" not in completion
+    assert "commit_ingress_batch" in completion
+    assert ".append_runtime_record(" not in completion
+
+
+def test_server_delegates_worker_command_authentication_to_protocol_service():
+    server = (ROOT / "src/aigineering/server/app.py").read_text(encoding="utf-8")
+    coordination = (ROOT / "src/aigineering/core/worker_coordination.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "authenticate_worker_command" in server
+    assert "candidate_received_record" not in server
+    assert "load_effective_actor_keys" not in server
+    assert "worker command actor lacks" in coordination
 
 
 def test_production_loops_use_neutral_task_completion_entrypoint():

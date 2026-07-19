@@ -298,6 +298,7 @@ def test_fail_completion_plugin_closes_parent_and_publishes_report_candidate():
     root_view = RuntimeProjection(store, store).contract_view(root)
     assert root_view.terminal == "failed"
     assert root_view.enabled is False
+    assert root_view.blockers == ("terminal:failed",)
     reports = store.get_assets_by_name(f"_fail_report_{fail_contract.id}")
     assert len(reports) == 1
     receipts = [

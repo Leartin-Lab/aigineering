@@ -7,6 +7,14 @@ from aigineering.plugins.task_semantics import contracts_from_plan_asset
 from aigineering.protocol.effect_builders import contract_declaration_effect
 
 
+_BLOCKING_REJECTION_ACTIONS = frozenset({"rejected", "scaffold_rejected"})
+
+
+def is_blocking_plan_rejection(entry: dict) -> bool:
+    """Return whether one planner diagnostic invalidates the atomic fan-out."""
+    return entry.get("action") in _BLOCKING_REJECTION_ACTIONS
+
+
 class PlanningExpansionPlugin:
     """Convert one structured plan Asset into contained ordinary tasks."""
 
@@ -22,7 +30,7 @@ class PlanningExpansionPlugin:
             allowed_input_names=set(request.allowed_input_names),
             parent_budget_remaining=request.allowance,
         )
-        blocking = any(item.get("action") == "rejected" for item in rejections)
+        blocking = any(is_blocking_plan_rejection(item) for item in rejections)
         if not contracts and not rejections:
             rejections.append(
                 {

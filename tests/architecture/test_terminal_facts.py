@@ -139,3 +139,37 @@ def test_fact_reducer_does_not_repeat_a_recorded_terminal():
     events = FactReducer(store, MemoryTraceStore()).on_assets_created((asset,))
 
     assert not [event for event in events if event.contract_id == contract.id]
+
+
+def test_method_result_event_requires_declaring_contract_provenance():
+    store = MemoryStore()
+    result_name = "_plan_result_parent"
+    plan_task = Contract(
+        id="plan-task",
+        name="parent.plan",
+        outputs=(result_name,),
+        origin="system",
+    )
+    store.add_contract(plan_task)
+    forged = Asset(
+        id="forged-plan",
+        name=result_name,
+        content='{"contracts": []}',
+        created_by="plugin:planning",
+    )
+    authentic = replace(forged, id="authentic-plan", created_by=plan_task.id)
+    reducer = FactReducer(store, MemoryTraceStore())
+
+    assert not [
+        event
+        for event in reducer.on_assets_created((forged,))
+        if event.type == "method_result_detected"
+    ]
+    detected = [
+        event
+        for event in reducer.on_assets_created((authentic,))
+        if event.type == "method_result_detected"
+    ]
+    assert [(event.contract_id, event.asset_name) for event in detected] == [
+        (plan_task.id, result_name)
+    ]

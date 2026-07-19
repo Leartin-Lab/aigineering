@@ -24,6 +24,7 @@ def asset_proposal_effect(asset: Asset) -> CandidateEffect:
             "asset": {
                 "content": asset.content,
                 "content_type": asset.content_type,
+                "created_by": asset.created_by,
                 "disclosure_view": asset.disclosure_view,
                 "lineage_id": asset.lineage_id,
                 "name": asset.name,
@@ -51,6 +52,42 @@ def worker_registration_effect(registration: WorkerRegistration) -> CandidateEff
                 "actor_id": registration.actor_id,
                 "key_id": registration.key_id,
             }
+        },
+    )
+
+
+def worker_claim_effect(
+    worker_id: str,
+    *,
+    contract_id: str | None = None,
+    lease_seconds: int = 60,
+) -> CandidateEffect:
+    """Authenticate one operational claim request without making it a fact effect."""
+    return CandidateEffect(
+        "worker.claim",
+        {
+            "worker_id": worker_id,
+            "contract_id": contract_id,
+            "lease_seconds": lease_seconds,
+        },
+    )
+
+
+def worker_claim_renewal_effect(
+    worker_id: str,
+    claim_id: str,
+    claim_epoch: int,
+    *,
+    lease_seconds: int = 60,
+) -> CandidateEffect:
+    """Authenticate one fenced lease-renewal request."""
+    return CandidateEffect(
+        "worker.claim.renew",
+        {
+            "worker_id": worker_id,
+            "claim_id": claim_id,
+            "claim_epoch": claim_epoch,
+            "lease_seconds": lease_seconds,
         },
     )
 

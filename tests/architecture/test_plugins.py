@@ -178,6 +178,36 @@ def test_planning_plugin_rejects_invalid_activation_as_one_atomic_fanout():
     )
 
 
+def test_planning_plugin_rejects_invalid_scaffold_as_one_atomic_fanout():
+    content = json.dumps(
+        {
+            "reason": "missing data-flow stage",
+            "goal_outline": "produce final report",
+            "intermediate_assets": [],
+            "step_1_tasks": [{"name": "draft", "description": "Draft."}],
+            "step_2_data_flow": [],
+            "step_3_activation": [
+                {"task_name": "draft", "expression": "source", "depends_on": ["source"]}
+            ],
+        },
+        sort_keys=True,
+    )
+    proposal = PlanningExpansionPlugin().propose(
+        PluginRequest(
+            parent=_parent(),
+            assets=(Asset(id="invalid-scaffold", name="plan", content=content),),
+            allowed_input_names=frozenset({"source"}),
+            allowance=4,
+        )
+    )
+
+    assert proposal.effects == ()
+    assert any(
+        rejection.get("action") == "scaffold_rejected"
+        for rejection in proposal.rejections
+    )
+
+
 def test_continuation_plugin_proposes_one_ordinary_task_and_registry_is_explicit():
     parent = _parent()
     source = method_contract(

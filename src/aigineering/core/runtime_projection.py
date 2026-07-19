@@ -140,24 +140,27 @@ class RuntimeProjection:
             blockers.append("terminal_conflict")
         elif terminal is not None:
             blockers.append(f"terminal:{terminal}")
-        if outputs_satisfied:
-            blockers.append("outputs_satisfied")
-        if not inputs_satisfied:
-            blockers.extend(f"missing_asset:{name}" for name in sorted(missing_inputs))
-        if not activation_satisfied:
-            blockers.extend(
-                f"missing_asset:{name}"
-                for name in sorted(missing_activation)
-                if f"missing_asset:{name}" not in blockers
-            )
-            if not missing_activation:
-                blockers.append("activation_unsatisfied")
-        if budget_remaining <= 0:
-            blockers.append("budget_exhausted")
-        if delegation_pending:
-            blockers.append("delegation_pending")
-        if current_claim_id is not None:
-            blockers.append(f"claim:{claim_status}")
+        else:
+            if outputs_satisfied:
+                blockers.append("outputs_satisfied")
+            if not inputs_satisfied:
+                blockers.extend(
+                    f"missing_asset:{name}" for name in sorted(missing_inputs)
+                )
+            if not activation_satisfied:
+                blockers.extend(
+                    f"missing_asset:{name}"
+                    for name in sorted(missing_activation)
+                    if f"missing_asset:{name}" not in blockers
+                )
+                if not missing_activation:
+                    blockers.append("activation_unsatisfied")
+            if budget_remaining <= 0:
+                blockers.append("budget_exhausted")
+            if delegation_pending:
+                blockers.append("delegation_pending")
+            if current_claim_id is not None:
+                blockers.append(f"claim:{claim_status}")
 
         canonical = {
             "activation_satisfied": activation_satisfied,
