@@ -347,6 +347,9 @@ Implementation progress:
   Worker usage metadata is now canonical signed Candidate data. The migration
   also fixed parsed-action double normalization and legacy-root allowance views
   that previously ignored reservation-only facts.
+- Complete: public `worker_output_effect` / `task_delegation_effect` constructors
+  and the old `TaskDelegationPlugin.propose/project` compatibility API were
+  deleted. Claim-scoped delegation emits only ordinary `contract.declare`.
 
 ## Required architecture tests
 

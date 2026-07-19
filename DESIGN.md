@@ -171,6 +171,10 @@ server-side mock `/contracts/{id}/run` mutation endpoint returns 410 and directs
 clients to the claim/submission protocol; the server never impersonates a
 worker actor.
 `aig worker submit` uses the same generic Candidate commitment service as HTTP.
+The public effect-builder surface exposes only ordinary protocol effects; the
+former `worker_output_effect` and `task_delegation_effect` wrapper constructors
+have been removed, so new clients cannot accidentally generate the rejected
+compatibility protocol.
 
 `contract.publish` does not authorize an actor to populate
 `minting_authority`. A declaration containing protected minting authority also

@@ -33,6 +33,7 @@ from aigineering.protocol.actions import WorkerAction
 from aigineering.protocol.candidate import ActorKey, create_genesis_manifest
 from aigineering.protocol.effect_builders import contract_declaration_effect
 from aigineering.protocol.types import Asset, Contract
+from aigineering.protocol.wire import contract_from_dict
 
 
 def _parent() -> Contract:
@@ -269,8 +270,8 @@ def test_continuation_plugin_proposes_one_ordinary_task_and_registry_is_explicit
     assert len(store.get_all_contracts()) == 2
 
 
-@pytest.mark.parametrize("action_type", ["plan", "replan", "tool", "fail"])
-def test_delegation_plugin_projects_each_method_task_without_store(action_type):
+@pytest.mark.parametrize("action_type", ["tool", "fail"])
+def test_claimed_action_plugin_proposes_ordinary_task_without_store(action_type):
     parent = _parent()
     payload = (
         {"name": "lookup", "args": {}}
@@ -294,39 +295,40 @@ def test_delegation_plugin_projects_each_method_task_without_store(action_type):
             tool_scope=("lookup",),
         )
 
-    projection = TaskDelegationPlugin().project(
+    proposal = TaskDelegationPlugin().propose_claimed(
         parent,
         WorkerAction(type=action_type, payload=payload),
+        allowance=parent.budget,
     )
+    child = contract_from_dict(proposal.effects[0].payload["contract"])
 
-    assert projection.child.parent_id == parent.id
-    assert projection.child.origin == "system"
-    assert f"method:{action_type}" in projection.child.labels
-    assert projection.context_asset is not None
-    assert projection.context_asset.name == f"_method_ctx_{parent.id}"
-    assert projection.event_type == "task_delegated"
+    assert proposal.effects[0].effect_type == "contract.declare"
+    assert child.parent_id == parent.id
+    assert child.origin == "system"
+    assert f"plugin:{action_type}" in child.labels
 
 
-def test_delegation_plugin_projects_retry_as_an_independent_task():
+def test_claimed_action_plugin_proposes_retry_descendant():
     parent = _parent()
 
-    projection = TaskDelegationPlugin().project(
+    proposal = TaskDelegationPlugin().propose_claimed(
         parent,
         WorkerAction(type="retry", payload={"reason": "retry"}),
+        allowance=parent.budget,
     )
+    child = contract_from_dict(proposal.effects[0].payload["contract"])
 
-    assert projection.child.origin == "retry"
-    assert projection.child.parent_id == parent.parent_id
-    assert projection.child.outputs == parent.outputs
-    assert projection.context_asset is None
-    assert projection.event_type == "retry_created"
+    assert child.origin == "retry"
+    assert child.parent_id == parent.id
+    assert child.outputs == parent.outputs
 
 
-def test_delegation_plugin_rejects_unknown_action_without_handler_fallback():
-    with pytest.raises(ValueError, match="unsupported task delegation action"):
-        TaskDelegationPlugin().project(
+def test_claimed_action_plugin_rejects_unknown_action_without_fallback():
+    with pytest.raises(ValueError, match="unsupported claimed task action"):
+        TaskDelegationPlugin().propose_claimed(
             _parent(),
             WorkerAction(type="unknown", payload={}),
+            allowance=1,
         )
 
 

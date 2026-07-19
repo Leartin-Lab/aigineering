@@ -21,7 +21,6 @@ from aigineering.protocol.candidate import (
 )
 from aigineering.protocol.effect_builders import (
     contract_declaration_effect,
-    worker_output_effect,
     worker_registration_effect,
 )
 from aigineering.protocol.envelope import CandidateEnvelope
@@ -304,11 +303,7 @@ def test_claim_bound_legacy_wrapper_is_rejected_and_closes_attempt(effect_type):
         claim_epoch=claimed.package.claim_epoch,
         idempotency_key=f"run-{claimed.package.package_id}",
     )
-    effect = (
-        worker_output_effect(envelope)
-        if effect_type == "worker.output"
-        else CandidateEffect("task.delegate", {"envelope": envelope.to_dict()})
-    )
+    effect = CandidateEffect(effect_type, {"envelope": envelope.to_dict()})
     proposal = create_candidate_proposal(
         domain_id=host.genesis.id,
         actor_id=host.actor_key.actor_id,
