@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from conftest import hosted_worker
 
 from aigineering.agent.engine_worker import EngineWorker
 from aigineering.agent.mock import MockWorker
@@ -32,6 +33,7 @@ def test_engine_worker_exports_only_declared_candidate_outputs():
         {"nested_task": '/exec {"outputs": {"report": "isolated result"}}'}
     )
     worker = EngineWorker(delegate)
+    host = hosted_worker(store, worker)
     preview = worker.invoke(contract, [evidence])
 
     assert preview.parsed_action == {
@@ -43,13 +45,14 @@ def test_engine_worker_exports_only_declared_candidate_outputs():
 
     claimed = claim_next_package(
         store,
-        worker_id="engine_worker:nested",
+        worker_id=host.worker_id,
         contract_id=contract.id,
     )
     assert claimed is not None
-    result = execute_claimed_package(claimed, worker, store)
+    result = execute_claimed_package(claimed, host, store)
 
-    assert result["status"] == "accepted"
+    assert not result["rejected"], result["rejected"]
+    assert result["status"] == "accepted", result
     committed = store.get_assets_by_name("report")
     assert len(committed) == 1
     assert committed[0].content == "isolated result"
@@ -63,14 +66,15 @@ def test_engine_worker_unfinished_inner_run_fails_visibly_at_outer_boundary():
     contract = Contract(id="task:outer-failure", name="nested", outputs=("report",))
     RuntimeIngress(store, store).accept_contract(contract)
     worker = EngineWorker(MockWorker(), max_steps=1)
+    host = hosted_worker(store, worker)
     claimed = claim_next_package(
         store,
-        worker_id="engine_worker:nested",
+        worker_id=host.worker_id,
         contract_id=contract.id,
     )
     assert claimed is not None
 
-    result = execute_claimed_package(claimed, worker, store)
+    result = execute_claimed_package(claimed, host, store)
 
     assert result["status"] == "rejected"
     assert store.get_assets_by_name("report") == []

@@ -5,6 +5,7 @@ from __future__ import annotations
 import sqlite3
 
 import pytest
+from conftest import hosted_worker
 
 from aigineering.agent.mock import MockWorker
 from aigineering.runtime import claim_next_package, execute_claimed_package
@@ -39,21 +40,22 @@ def test_delete_and_rebuild_all_runtime_materializations(tmp_path):
             budget=1,
         )
     )
-    store.register_worker(
-        WorkerRegistration(
-            "worker",
-            capabilities=("text",),
-            profile_id="profile:test",
-            version="1",
-        )
+    worker = MockWorker(
+        {"rebuildable": '/exec {"outputs": {"report": "done"}}'},
+        worker_id="worker",
     )
-    claimed = claim_next_package(store, worker_id="worker", contract_id=contract.id)
+    worker.registration = lambda: WorkerRegistration(
+        "worker",
+        capabilities=("text",),
+        profile_id="profile:test",
+        version="1",
+    )
+    host = hosted_worker(store, worker)
+    claimed = claim_next_package(
+        store, worker_id=host.worker_id, contract_id=contract.id
+    )
     assert claimed is not None
-    worker = MockWorker({"rebuildable": '/exec {"outputs": {"report": "done"}}'})
-    execute_claimed_package(claimed, worker, store)
-    idempotency_key = f"run-{claimed.package.package_id}"
-    before_idempotency = store.get_idempotency(contract.id, idempotency_key)
-    assert before_idempotency is not None
+    execute_claimed_package(claimed, host, store)
     before_digest = store.runtime_materialization_digest()
     before_view = RuntimeProjection(store, store).contract_view(contract)
 
@@ -67,7 +69,6 @@ def test_delete_and_rebuild_all_runtime_materializations(tmp_path):
     assert after_view.terminal == "complete"
     assert store.get_assets_by_name("report")[0].content == "done"
     assert store.get_claim(contract.id)["status"] == "submitted"
-    assert store.get_idempotency(contract.id, idempotency_key) == before_idempotency
     assert store.get_worker_registration("worker").profile_id == "profile:test"
     assert store.get_claims_for_asset(source.id) == [replacement_claim]
     store.close()

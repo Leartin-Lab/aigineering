@@ -97,7 +97,10 @@ class WorkerHost:
                     "payload": {"reason": "worker produced no candidate output"},
                 },
             )
-        elif not envelope.raw_output.lstrip().startswith("/"):
+        elif (
+            envelope.parsed_action is None
+            and not envelope.raw_output.lstrip().startswith("/")
+        ):
             outputs: dict[str, str] = {}
             for line in envelope.raw_output.splitlines():
                 name, separator, content = line.partition(":")
@@ -202,4 +205,5 @@ class WorkerHost:
             signer=self.signer,
             idempotency_key=envelope.idempotency_key,
             claim_binding=binding,
+            metadata=envelope.usage_metadata,
         )

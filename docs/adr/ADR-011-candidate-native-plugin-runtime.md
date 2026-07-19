@@ -74,6 +74,9 @@ A claimed Worker signs the ordinary effects it proposes. Claim-bound
 `worker.output` and `task.delegate` wrappers are not alternate protocol paths.
 Plugin invocation parameters are immutable proposal inputs and must participate
 in derived task identity whenever they can change intent.
+Provider/model usage metadata used for audit or productivity evidence is also
+signed Candidate data; it is not appended later by an ingress-specific trace
+shortcut.
 
 Claim delegation is inherited authority, not payload authority. A child cannot
 obtain protected publication by declaring its own minting templates; protected

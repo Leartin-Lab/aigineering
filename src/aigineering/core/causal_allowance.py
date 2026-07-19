@@ -258,8 +258,14 @@ def validate_allowance_commit(
 
 def allowance_is_recorded(contract_id: str, records: Iterable[RuntimeRecord]) -> bool:
     return any(
-        record.record_type == "allowance.granted"
-        and record.payload.get("contract_id") == contract_id
+        (
+            record.record_type in {"allowance.granted", "allowance.extinguished"}
+            and record.payload.get("contract_id") == contract_id
+        )
+        or (
+            record.record_type in {"allowance.reserved", "allowance.returned"}
+            and record.payload.get("source_contract_id") == contract_id
+        )
         for record in records
     )
 

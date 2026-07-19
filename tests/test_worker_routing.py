@@ -6,6 +6,7 @@ import sqlite3
 import time
 
 import pytest
+from conftest import hosted_worker
 
 from aigineering.agent.llm import LLMWorker, ProviderError
 from aigineering.agent.prompt import contract_prompt
@@ -238,18 +239,21 @@ def test_claim_rechecks_registration_version_inside_transaction():
 
 def test_long_worker_invocation_renews_claim_before_submit():
     class SlowWorker:
+        worker_id = "slow-worker"
+
         def invoke(self, contract, disclosed_assets):
             del contract, disclosed_assets
             time.sleep(1.1)
-            return Candidate(worker_id="slow", raw_output="report: done")
+            return Candidate(worker_id=self.worker_id, raw_output="report: done")
 
     store = SQLiteStore(":memory:")
     contract = Contract(id="task:slow", outputs=("report",), budget=1)
     store.add_contract(contract)
-    claimed = claim_next_package(store, worker_id="slow-worker", lease_seconds=1)
+    host = hosted_worker(store, SlowWorker())
+    claimed = claim_next_package(store, worker_id=host.worker_id, lease_seconds=1)
     assert claimed is not None
 
-    result = execute_claimed_package(claimed, SlowWorker(), store)
+    result = execute_claimed_package(claimed, host, store)
 
     assert result["status"] == "accepted"
     record_types = [record.record_type for _, record in store.scan_runtime_records()]
@@ -260,20 +264,23 @@ def test_long_worker_invocation_renews_claim_before_submit():
 
 def test_renewal_failure_discards_worker_result(monkeypatch):
     class SlowWorker:
+        worker_id = "slow-worker"
+
         def invoke(self, contract, disclosed_assets):
             del contract, disclosed_assets
             time.sleep(0.5)
-            return Candidate(worker_id="slow", raw_output="report: forbidden")
+            return Candidate(worker_id=self.worker_id, raw_output="report: forbidden")
 
     store = SQLiteStore(":memory:")
     contract = Contract(id="task:lost-lease", outputs=("report",), budget=1)
     store.add_contract(contract)
-    claimed = claim_next_package(store, worker_id="slow-worker", lease_seconds=1)
+    host = hosted_worker(store, SlowWorker())
+    claimed = claim_next_package(store, worker_id=host.worker_id, lease_seconds=1)
     assert claimed is not None
     monkeypatch.setattr(store, "renew_claim", lambda *args, **kwargs: None)
 
     with pytest.raises(ValueError, match="result was not submitted"):
-        execute_claimed_package(claimed, SlowWorker(), store)
+        execute_claimed_package(claimed, host, store)
 
     assert store.get_assets_by_name("report") == []
     assert store.get_claim(contract.id)["status"] == "active"

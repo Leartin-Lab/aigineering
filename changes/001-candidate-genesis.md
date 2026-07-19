@@ -340,8 +340,13 @@ Implementation progress:
   authority self-grants and contains input/tool/pool/capability/allowance fields.
   CLI/HTTP submit use the same generic committer and reject raw wrapper effects.
 - Pending: replace the remaining Method-named completion types with neutral
-  task/plugin names, then delete the now-unreachable legacy submission helpers
-  and source-only handlers.
+  task/plugin names and delete source-only handlers.
+- Complete: `submit_candidate_envelope` and `_submit_claimed_method` were
+  deleted. Runtime execution accepts only an authenticated WorkerHost for a
+  successful submission; a bare adapter closes its claim as a visible failure.
+  Worker usage metadata is now canonical signed Candidate data. The migration
+  also fixed parsed-action double normalization and legacy-root allowance views
+  that previously ignored reservation-only facts.
 
 ## Required architecture tests
 

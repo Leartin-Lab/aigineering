@@ -3,6 +3,7 @@
 import json
 
 from click.testing import CliRunner
+from conftest import hosted_worker
 
 from aigineering.cli.main import cli
 from aigineering.core.ids import (
@@ -847,6 +848,8 @@ def test_local_worker_invocation_receives_continuation_method_context():
     """Built-in workers and external WorkerPackages receive equivalent context."""
 
     class CapturingWorker:
+        worker_id = "local-worker"
+
         def __init__(self) -> None:
             self.assets: list[Asset] = []
 
@@ -859,13 +862,14 @@ def test_local_worker_invocation_receives_continuation_method_context():
 
     store = SQLiteStore(":memory:")
     _parent, continuation, obs = _seed_continuation_with_method_context(store)
+    worker = CapturingWorker()
+    host = hosted_worker(store, worker)
     claimed = claim_next_package(
-        store, worker_id="local-worker", contract_id=continuation.id
+        store, worker_id=host.worker_id, contract_id=continuation.id
     )
     assert claimed is not None
-    worker = CapturingWorker()
 
-    result = execute_claimed_package(claimed, worker, store)
+    result = execute_claimed_package(claimed, host, store)
 
     assert result["status"] == "accepted"
     assert [(asset.name, asset.content) for asset in worker.assets] == [
@@ -876,34 +880,28 @@ def test_local_worker_invocation_receives_continuation_method_context():
 
 def test_local_worker_usage_metadata_reaches_projection_trace():
     class UsageWorker:
+        worker_id = "local-worker"
+
         def invoke(self, contract, disclosed_assets):
             del contract, disclosed_assets
             return Candidate(
-                worker_id="llm:test",
+                worker_id=self.worker_id,
                 raw_output='/exec {"outputs":{"final_report":"done"}}',
                 metadata={"model": "test-model", "total_tokens": 17},
             )
 
     store = SQLiteStore(":memory:")
     contract, _asset = _seed_contract_with_asset(store)
-    claimed = claim_next_package(store, worker_id="local-worker")
+    host = hosted_worker(store, UsageWorker())
+    claimed = claim_next_package(store, worker_id=host.worker_id)
     assert claimed is not None
 
-    execute_claimed_package(claimed, UsageWorker(), store)
+    execute_claimed_package(claimed, host, store)
 
-    projection = next(
-        entry
-        for entry in store.get_by_contract(contract.id)
-        if entry.event_type == "projection"
-    )
-    assert dict(projection.usage_metadata or {}) == {
-        "model": "test-model",
-        "total_tokens": 17,
-    }
     candidate_record = store.scan_runtime_records(record_type="candidate.received")[-1][
         1
     ]
-    assert dict(candidate_record.payload["usage_metadata"]) == {
+    assert dict(candidate_record.payload["metadata"]) == {
         "model": "test-model",
         "total_tokens": 17,
     }

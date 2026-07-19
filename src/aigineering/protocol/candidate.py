@@ -196,6 +196,7 @@ class CandidateProposal:
     causal_parents: tuple[str, ...] = field(default_factory=tuple)
     idempotency_key: str = ""
     claim_binding: CandidateClaimBinding | None = None
+    metadata: Mapping[str, Any] = field(default_factory=dict)
     protocol_version: int = CANDIDATE_PROTOCOL_VERSION
 
     def __post_init__(self) -> None:
@@ -206,6 +207,7 @@ class CandidateProposal:
             raise ValueError("CandidateProposal.effects must not be empty")
         object.__setattr__(self, "effects", tuple(self.effects))
         object.__setattr__(self, "causal_parents", tuple(self.causal_parents))
+        object.__setattr__(self, "metadata", deep_freeze(dict(self.metadata)))
 
 
 def candidate_effective_payload(candidate: CandidateProposal) -> dict[str, Any]:
@@ -234,6 +236,8 @@ def candidate_effective_payload(candidate: CandidateProposal) -> dict[str, Any]:
             "contract_id": candidate.claim_binding.contract_id,
             "package_id": candidate.claim_binding.package_id,
         }
+    if candidate.metadata:
+        payload["metadata"] = deep_thaw(candidate.metadata)
     return payload
 
 
@@ -280,6 +284,7 @@ def candidate_proposal_from_dict(data: Mapping[str, Any]) -> CandidateProposal:
         causal_parents=tuple(data.get("causal_parents", ())),
         idempotency_key=str(data.get("idempotency_key", "")),
         claim_binding=claim_binding,
+        metadata=data.get("metadata", {}),
         protocol_version=int(data.get("protocol_version", CANDIDATE_PROTOCOL_VERSION)),
     )
 
@@ -294,6 +299,7 @@ def create_candidate_proposal(
     causal_parents: tuple[str, ...] | list[str] = (),
     idempotency_key: str = "",
     claim_binding: CandidateClaimBinding | None = None,
+    metadata: Mapping[str, Any] | None = None,
 ) -> CandidateProposal:
     provisional = CandidateProposal(
         id="pending",
@@ -306,6 +312,7 @@ def create_candidate_proposal(
         causal_parents=tuple(causal_parents),
         idempotency_key=idempotency_key,
         claim_binding=claim_binding,
+        metadata=metadata or {},
     )
     candidate_id = "candidate:v1:" + compute_content_hash(
         canonical_json(candidate_effective_payload(provisional))
@@ -383,6 +390,7 @@ def candidate_received_record(
             "domain_id": candidate.domain_id,
             "effect_types": [effect.effect_type for effect in candidate.effects],
             "key_id": candidate.key_id,
+            "metadata": deep_thaw(candidate.metadata),
             "signature": candidate.signature,
             "signature_kind": candidate.signature_kind,
         },

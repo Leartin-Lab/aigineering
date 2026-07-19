@@ -134,6 +134,34 @@ def test_receipt_is_not_effect_acceptance():
     assert "contract" not in record.payload
 
 
+def test_candidate_metadata_is_signed_and_receipted():
+    genesis, candidate = _genesis_and_candidate()
+    signer = _TestSigner()
+    signed = create_candidate_proposal(
+        domain_id=genesis.id,
+        actor_id=candidate.actor_id,
+        key_id=candidate.key_id,
+        effects=candidate.effects,
+        signer=signer,
+        idempotency_key=candidate.idempotency_key,
+        metadata={"model": "test-model", "total_tokens": 17},
+    )
+
+    receipt = candidate_received_record(
+        signed, genesis, verifier_factory=_verifier_factory
+    )
+    assert dict(receipt.payload["metadata"]) == {
+        "model": "test-model",
+        "total_tokens": 17,
+    }
+    with pytest.raises(ValueError, match="content id"):
+        verify_candidate_proposal(
+            replace(signed, metadata={"model": "tampered"}),
+            genesis,
+            verifier_factory=_verifier_factory,
+        )
+
+
 def test_revoked_genesis_key_fails_closed():
     genesis, candidate = _genesis_and_candidate()
     revoked = replace(genesis.root_keys[0], revoked=True)

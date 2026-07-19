@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from conftest import hosted_worker
 
 from aigineering.agent.mcp_worker import MCPWorker
 from aigineering.agent.tool_worker import ToolWorker
@@ -61,21 +62,20 @@ def test_tool_worker_effect_is_observed_candidate_fact():
         claim_next_package(store, worker_id="llm:untrusted", contract_id=child.id)
         is None
     )
-    store.register_worker(
-        WorkerRegistration(
-            "tool_worker:local", capabilities=("tool-execution",), version="1"
-        )
+    worker = ToolWorker(registry, worker_id="tool_worker:local")
+    worker.registration = lambda: WorkerRegistration(
+        "tool_worker:local", capabilities=("tool-execution",), version="1"
     )
-    claimed = claim_next_package(
-        store, worker_id="tool_worker:local", contract_id=child.id
-    )
+    host = hosted_worker(store, worker)
+    claimed = claim_next_package(store, worker_id=host.worker_id, contract_id=child.id)
     assert claimed is not None
 
-    result = execute_claimed_package(claimed, ToolWorker(registry), store)
+    result = execute_claimed_package(claimed, host, store)
 
-    assert result["status"] == "accepted"
+    assert not result["rejected"], result["rejected"]
+    assert result["status"] == "accepted", result
     observation = store.get_assets_by_name(child.outputs[0])[0]
-    assert observation.origin == "tool"
+    assert observation.origin == "worker"
     assert observation.trust_tier == "observed"
     assert json.loads(observation.content)["result"] == "value:x"
     store.close()
@@ -109,21 +109,18 @@ def test_mcp_worker_effect_is_observed_candidate_fact():
         claim_next_package(store, worker_id="llm:untrusted", contract_id=child.id)
         is None
     )
-    store.register_worker(
-        WorkerRegistration(
-            "mcp_worker:search", capabilities=("mcp-execution",), version="1"
-        )
+    worker.registration = lambda: WorkerRegistration(
+        "mcp_worker:search", capabilities=("mcp-execution",), version="1"
     )
-    claimed = claim_next_package(
-        store, worker_id="mcp_worker:search", contract_id=child.id
-    )
+    host = hosted_worker(store, worker)
+    claimed = claim_next_package(store, worker_id=host.worker_id, contract_id=child.id)
     assert claimed is not None
 
-    result = execute_claimed_package(claimed, worker, store)
+    result = execute_claimed_package(claimed, host, store)
 
-    assert result["status"] == "accepted"
+    assert result["status"] == "accepted", result
     observation = store.get_assets_by_name(child.outputs[0])[0]
-    assert observation.origin == "mcp"
+    assert observation.origin == "worker"
     assert observation.trust_tier == "observed"
     assert json.loads(observation.content)["result"] == "search.query:facts"
     store.close()

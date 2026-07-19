@@ -299,13 +299,12 @@ def test_worker_submission_uses_shared_fact_reduction_without_runtime_ingress():
     submit = (ROOT / "src/aigineering/core/submit.py").read_text(encoding="utf-8")
     runtime = (ROOT / "src/aigineering/runtime.py").read_text(encoding="utf-8")
     worker_cli = (ROOT / "src/aigineering/cli/worker.py").read_text(encoding="utf-8")
-    submit_surface = runtime.split("def submit_candidate_envelope", 1)[1].split(
-        "def _schedule_rejected_recovery", 1
-    )[0]
 
     assert "reduce_asset_facts" in submit
     assert "RuntimeIngress" not in submit
-    assert "RuntimeIngress" not in submit_surface
+    assert "def submit_candidate_envelope" not in runtime
+    assert "def _submit_claimed_method" not in runtime
+    assert "CandidateCommitter(store, trace).commit(proposal)" in runtime
     assert "RuntimeIngress" not in worker_cli
 
 
@@ -316,12 +315,8 @@ def test_claim_bound_delegation_semantics_live_in_plugin_not_runtime_service():
         encoding="utf-8"
     )
 
-    assert "TaskDelegationPlugin().project" in runtime
-    submission = runtime.split("def _submit_claimed_method", 1)[1].split(
-        "def process_task_completions", 1
-    )[0]
-    assert "method_registry" not in submission
-    assert ".can_handle(" not in submission
+    assert "TaskDelegationPlugin().project" not in runtime
+    assert "task.delegate" not in runtime
     assert "method_contract" not in runtime
     assert "retry_contract" not in runtime
     assert "method_context_content" not in runtime
@@ -375,7 +370,7 @@ def test_production_loops_use_neutral_task_completion_entrypoint():
     assert "process_method_completions" not in nested
 
 
-def test_new_delegations_write_task_facts_and_old_facts_remain_readable():
+def test_new_expansion_avoids_delegation_facts_and_old_facts_remain_readable():
     runtime = (ROOT / "src/aigineering/runtime.py").read_text(encoding="utf-8")
     plugin = (ROOT / "src/aigineering/plugins/delegation.py").read_text(
         encoding="utf-8"
@@ -385,9 +380,9 @@ def test_new_delegations_write_task_facts_and_old_facts_remain_readable():
     )
     sqlite = (ROOT / "src/aigineering/core/sqlite_store.py").read_text(encoding="utf-8")
 
-    assert 'create_runtime_record(\n        "task.delegated"' in runtime
+    assert 'create_runtime_record(\n        "task.delegated"' not in runtime
     assert '"status": "task_delegated"' in runtime
-    assert '"task_delegated"' in plugin
+    assert 'CandidateEffect("task.delegate"' not in plugin
     assert '"task_delegated"' in projection
     assert '"method_scheduled"' in projection
     assert '{"task.delegated", "method.scheduled"}' in sqlite

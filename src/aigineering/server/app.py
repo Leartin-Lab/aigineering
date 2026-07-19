@@ -64,6 +64,7 @@ class CandidateProposalRequest(BaseModel):
     causal_parents: list[str] = Field(default_factory=list)
     idempotency_key: str = ""
     claim_binding: CandidateClaimBindingRequest | None = None
+    metadata: dict = Field(default_factory=dict)
     protocol_version: int = 1
 
 
