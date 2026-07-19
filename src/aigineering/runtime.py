@@ -243,6 +243,32 @@ def execute_claimed_package(
                 claimed.contract,
                 list(claimed.disclosed_assets + claimed.method_context_assets),
             )
+            envelope = CandidateEnvelope(
+                contract_id=claimed.contract.id,
+                worker_id=claimed.worker_id,
+                raw_output=candidate.raw_output,
+                parsed_action=(
+                    dict(candidate.parsed_action)
+                    if candidate.parsed_action is not None
+                    else None
+                ),
+                package_id=claimed.package.package_id,
+                claim_id=claimed.package.claim_id,
+                claim_epoch=claimed.package.claim_epoch,
+                idempotency_key=f"run-{claimed.package.package_id}",
+                usage_metadata=candidate.metadata,
+            )
+            proposal = (
+                worker.sign_envelope(
+                    envelope,
+                    contract=claimed.contract,
+                    disclosed_assets=claimed.disclosed_assets
+                    + claimed.method_context_assets,
+                    allowance=claimed.package.budget_remaining,
+                )
+                if isinstance(worker, WorkerHost)
+                else None
+            )
         except (ProviderError, WorkerExecutionError) as exc:
             status_code = exc.status_code if isinstance(exc, ProviderError) else 0
             retryable = exc.is_retryable if isinstance(exc, ProviderError) else False
@@ -273,29 +299,10 @@ def execute_claimed_package(
             f"claim lease renewal failed for {claimed.package.claim_id!r}; "
             "worker result was not submitted"
         )
-    envelope = CandidateEnvelope(
-        contract_id=claimed.contract.id,
-        worker_id=claimed.worker_id,
-        raw_output=candidate.raw_output,
-        parsed_action=(
-            dict(candidate.parsed_action)
-            if candidate.parsed_action is not None
-            else None
-        ),
-        package_id=claimed.package.package_id,
-        claim_id=claimed.package.claim_id,
-        claim_epoch=claimed.package.claim_epoch,
-        idempotency_key=f"run-{claimed.package.package_id}",
-        usage_metadata=candidate.metadata,
-    )
     if isinstance(worker, WorkerHost):
+        assert proposal is not None
         return submit_worker_proposal(
-            worker.sign_envelope(
-                envelope,
-                contract=claimed.contract,
-                disclosed_assets=claimed.disclosed_assets
-                + claimed.method_context_assets,
-            ),
+            proposal,
             store,
             trace_store=trace,
             candidate_publishers=candidate_publishers,
@@ -975,12 +982,7 @@ def process_task_completions(
         )
     }
     for contract in store.get_all_contracts():
-        if contract.parent_id is None:
-            continue
-        if contract.origin != "system" and not any(
-            label in {"plugin:plan.compile", "plugin:replan.compile"}
-            for label in contract.labels
-        ):
+        if contract.parent_id is None or contract.origin != "system":
             continue
         entries = store.get_by_contract(contract.id)
         if not any(entry.event_type == "complete" for entry in entries):

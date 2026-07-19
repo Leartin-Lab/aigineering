@@ -380,14 +380,19 @@ ordinary Candidate effects plus visible containment notes.
 `StagedPlanningPlugin` and `StagedReplanningPlugin` publish draft,
 dependency-analysis and compile as three ordinary Contracts in one atomic
 Candidate group. Each stage has a distinct label, prompt schema, exact protected
-output and independent test oracle. Draft output activates dependency analysis;
-both intermediate facts activate compile. A completed compile result enters the
-deterministic planning completion projector, which publishes the contained
-business fan-out as another signed Candidate.
+intermediate output and independent test oracle. Draft output activates
+dependency analysis; both intermediate facts activate compile. Planning reserves
+one allowance unit for each intermediate stage and transfers the remaining
+lineage allowance to compile. The compile Worker uses its Store-free local
+planning plugin to turn one temporary `planning_blueprint` response directly
+into claim-bound `contract.declare` effects. No `_plan_result_` Asset or
+completion callback exists on the hosted staged path.
 The continuation plugin converts a completed method task into one ordinary
 follow-up `contract.declare` effect by the same rule.
-Publication still uses the identity-neutral Candidate publisher and a plugin
-actor key; plugins receive no trusted Store mutation handle.
+Compile publication uses the claimed Worker key and limited claim delegation;
+standalone continuation/recovery plugins use identity-neutral Candidate
+publishers and explicit plugin actor keys. Plugins receive no trusted Store
+mutation handle.
 
 The current source tree still contains plan, replan, retry, recovery, fail, and
 tool Method handlers. They create explicit child Contracts rather than hidden

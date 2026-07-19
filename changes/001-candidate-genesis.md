@@ -325,16 +325,19 @@ Implementation progress:
   market.
 - Complete for the hosted plan/replan path: the staged planning constructor emits one atomic group containing
   ordinary draft, dependency-analysis, and compile Contracts. Each stage has a
-  distinct label, output-schema prompt, protected output, and independent unit
+  distinct label, output-schema prompt and independent unit
   oracle. Candidate identity binds Contract/claim/package/epoch; SQLite commits
   stage declarations, `attempt.closed(expanded)`, audit, and claim transition
-  atomically. Draft and dependency facts activate compile, whose accepted result
-  publishes business children through the signed planning publisher.
+  atomically. Draft and dependency facts activate compile. Compile owns the
+  remaining allowance and its Worker-local plugin signs business child
+  declarations directly; the hosted path creates neither `_plan_result_` Assets
+  nor completion callback markers.
 - Complete: root and child declarations now materialize immutable causal
   allowance grants/reservations. Runtime views reconstruct the balance;
   terminal facts extinguish the remainder; exact replay is stable; and SQLite
   transaction-time validation prevents concurrent lineage overspend. The
-  legacy BudgetManager and one-shot completion callback remain deletion debt.
+  legacy BudgetManager and source-only Method completion callbacks remain
+  deletion debt; staged planning no longer calls them.
 - Pending: replace the remaining Method-named completion types with neutral
   task/plugin names, then delete the raw execution compatibility surface and
   source-only handlers.

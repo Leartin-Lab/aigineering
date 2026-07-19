@@ -96,7 +96,16 @@ def test_root_grant_and_staged_planning_are_reconstructed_from_facts():
     reservations = _records(store, "allowance.reserved")
     assert len(reservations) == 3
     assert {record.payload["purpose"] for record in reservations} == {"planning"}
-    assert RuntimeProjection(store, trace).contract_view(root).budget_remaining == 5
+    assert RuntimeProjection(store, trace).contract_view(root).budget_remaining == 0
+    compile_contract = next(
+        contract
+        for contract in stage_decision.contracts
+        if "plugin:plan.compile" in contract.labels
+    )
+    assert (
+        RuntimeProjection(store, trace).contract_view(compile_contract).budget_remaining
+        == 6
+    )
 
 
 def test_overallocation_rejects_the_whole_candidate_batch():

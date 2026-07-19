@@ -69,11 +69,15 @@ def test_staged_plan_proposes_three_atomic_ordinary_contracts():
     assert draft.parent_id == dependencies.parent_id == compile_contract.parent_id
     assert draft.outputs[0] in dependencies.inputs
     assert set(compile_contract.inputs) == {
+        "source",
         draft.outputs[0],
         dependencies.outputs[0],
     }
-    assert compile_contract.activation == " AND ".join(compile_contract.inputs)
-    assert compile_contract.outputs == (f"_plan_result_{_parent().id}",)
+    assert compile_contract.activation == " AND ".join(
+        (draft.outputs[0], dependencies.outputs[0])
+    )
+    assert compile_contract.outputs == _parent().outputs
+    assert [contract.budget for contract in stages.contracts] == [1, 1, 6]
     assert all(contract.origin == "plugin" for contract in stages.contracts)
     assert all(
         contract.acceptance_policy["mode"] == "mechanical"
@@ -101,7 +105,10 @@ def test_each_plan_stage_has_distinct_label_schema_and_expected_output(
 
     assert label in contract.labels
     assert prompt_marker in contract_prompt(contract, [])
-    assert contract.outputs == tuple(contract.minting_authority)
+    if index < 2:
+        assert contract.outputs == tuple(contract.minting_authority)
+    else:
+        assert contract.minting_authority == ()
     assert json.loads(contract.description)["stage"] in {
         "draft",
         "dependencies",

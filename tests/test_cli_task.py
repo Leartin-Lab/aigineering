@@ -205,7 +205,7 @@ def test_run_once_projects_completed_plan_before_claiming_expanded_child():
         )
         compile_stage = stages["plugin:plan.compile"]
         plan_output = "/exec " + json.dumps(
-            {"outputs": {compile_stage.outputs[0]: plan_content}}, sort_keys=True
+            {"outputs": {"planning_blueprint": plan_content}}, sort_keys=True
         )
         planned = runner.invoke(
             cli,
@@ -219,7 +219,19 @@ def test_run_once_projects_completed_plan_before_claiming_expanded_child():
                 "--json",
             ],
         )
-        assert planned.exit_code == 0, planned.output
+        assert planned.exit_code == 1, planned.output
+        assert json.loads(planned.output)["status"] == "expanded"
+
+        store = SQLiteStore(".aig/store.db")
+        finish = next(
+            item for item in store.get_all_contracts() if item.name == "finish"
+        )
+        assert finish.parent_id == compile_stage.id
+        assert not store.scan_runtime_records(record_type="task_completion.projected")
+        assert not any(
+            asset.name.startswith(("_plan_result_", "_replan_result_"))
+            for asset in store.get_all_assets()
+        )
 
         expanded = runner.invoke(
             cli,

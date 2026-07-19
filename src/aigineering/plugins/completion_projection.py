@@ -182,11 +182,7 @@ class TaskCompletionProjector:
             if asset.promptable
         ]
         action_type = method_payload(contract).get("method")
-        if "plugin:plan.compile" in contract.labels:
-            action_type = "plan"
-        elif "plugin:replan.compile" in contract.labels:
-            action_type = "replan"
-        elif contract.origin != "system":
+        if contract.origin != "system":
             return False
         handled = False
         if isinstance(action_type, str):

@@ -156,7 +156,27 @@ class WorkerHost:
                         "outputs": dict(parsed.outputs),
                     },
                 )
-            effects = claim_bound_output_effects(parsed_envelope)
+            if contract is not None and any(
+                label in {"plugin:plan.compile", "plugin:replan.compile"}
+                for label in contract.labels
+            ):
+                from aigineering.plugins.planning import (
+                    PlanningCompileError,
+                    compile_planning_blueprint,
+                )
+
+                try:
+                    effects = compile_planning_blueprint(
+                        contract,
+                        (parsed_envelope.parsed_action or {}).get("outputs", {}),
+                        allowance=contract.budget if allowance is None else allowance,
+                    )
+                except PlanningCompileError as exc:
+                    raise WorkerExecutionError(
+                        "planning_compile_rejected", str(exc)
+                    ) from exc
+            else:
+                effects = claim_bound_output_effects(parsed_envelope)
         binding = CandidateClaimBinding(
             contract_id=envelope.contract_id,
             claim_id=envelope.claim_id,

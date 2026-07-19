@@ -343,6 +343,11 @@ def test_production_completion_projection_has_no_direct_ingress():
     assert "FactReducer" not in completion
     assert "commit_ingress_batch" in completion
     assert ".append_runtime_record(" not in completion
+    projector = (ROOT / "src/aigineering/plugins/completion_projection.py").read_text(
+        encoding="utf-8"
+    )
+    assert "plugin:plan.compile" not in projector
+    assert "plugin:replan.compile" not in projector
 
 
 def test_server_delegates_worker_command_authentication_to_protocol_service():

@@ -140,13 +140,16 @@ def _planning_stage_instructions(contract: Contract) -> list[str]:
         ),
         "plugin:plan.compile": (
             "Planning compiler protocol (required):",
-            "Return the declared output as one JSON object with a contracts array. "
+            "Return /exec with exactly one temporary output named planning_blueprint; "
+            "its content is one JSON object with a contracts array. The Worker host "
+            "compiles it to child declarations, so it is not committed as an Asset. "
             "Use only facts present in the draft and dependency analysis.",
         ),
         "plugin:replan.compile": (
             "Replanning compiler protocol (required):",
-            "Return the declared output as one JSON object with a contracts array of "
-            "successors; never mutate prior Contracts.",
+            "Return /exec with exactly one temporary output named planning_blueprint; "
+            "its content is one JSON object with a contracts array of successors. "
+            "The Worker host compiles it to declarations; never mutate prior Contracts.",
         ),
     }
     for label in contract.labels:

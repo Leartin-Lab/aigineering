@@ -50,6 +50,11 @@ facts satisfy its outputs. Retry, fail, and tool still use a bounded
 compatibility action while their plugins are cut over. No production scheduler
 depends on Engine-owned waiting/suspended/resume state.
 
+Draft and dependency tasks reserve one allowance unit each; compile receives the
+remaining lineage grant. Its Worker-local plugin converts one temporary
+blueprint directly to claim-bound child declarations. The hosted path does not
+commit a `_plan_result_` Asset or wait for a completion callback.
+
 ## 7. Worker pull submission is claim-bound
 
 Operational worker execution uses a `WorkerPackage` and actor-signed Candidate

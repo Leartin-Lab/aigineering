@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from aigineering.agent.mock import MockWorker
 from aigineering.agent.worker import WorkerHost
 from aigineering.core.candidate_publisher import publish_effect
@@ -24,6 +26,7 @@ from aigineering.protocol.effect_builders import (
 from aigineering.protocol.envelope import CandidateEnvelope
 from aigineering.protocol.types import Contract
 from aigineering.runtime import (
+    WorkerInvocationError,
     claim_next_package,
     execute_claimed_package,
     submit_worker_proposal,
@@ -97,6 +100,21 @@ def test_worker_host_signs_ordinary_claim_submission():
     )
     assert output.causal_parents == (receipt.id,)
     assert store.get_claim(contract.id)["status"] == "submitted"
+
+
+def test_invalid_host_action_closes_claim_instead_of_ending_silently():
+    store, contract, host = _runtime("/unsupported {}")
+    claimed = claim_next_package(store, worker_id=host.worker_id)
+    assert claimed is not None
+
+    with pytest.raises(WorkerInvocationError, match="claim was released"):
+        execute_claimed_package(claimed, host, store)
+
+    assert store.get_claim(contract.id)["status"] == "released"
+    failure = store.scan_runtime_records(record_type="worker.invocation_failed")[-1][1]
+    assert failure.payload["category"] == "worker_error:invalid_action"
+    terminal = store.scan_runtime_records(record_type="lifecycle.terminal")[-1][1]
+    assert terminal.payload["terminal"] == "failed"
 
 
 def test_worker_host_plan_publishes_three_claim_bound_stage_contracts():

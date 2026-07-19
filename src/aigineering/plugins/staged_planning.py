@@ -49,7 +49,6 @@ class StagedPlanningPlugin:
         invocation = _invocation_id(request, self.mode)
         draft_output = f"_{self.mode}_draft_{invocation}"
         dependencies_output = f"_{self.mode}_dependencies_{invocation}"
-        result_output = f"_{self.mode}_result_{parent.id}"
         policy = {"mode": "mechanical", "required_attestations": 1}
 
         draft = _stage_contract(
@@ -70,6 +69,7 @@ class StagedPlanningPlugin:
             outputs=(draft_output,),
             activation=parent.activation,
             acceptance_policy=policy,
+            budget=1,
         )
         dependencies = _stage_contract(
             parent,
@@ -88,6 +88,7 @@ class StagedPlanningPlugin:
             outputs=(dependencies_output,),
             activation=draft_output,
             acceptance_policy=policy,
+            budget=1,
         )
         compile_contract = _stage_contract(
             parent,
@@ -95,7 +96,9 @@ class StagedPlanningPlugin:
             stage="compile",
             invocation=invocation,
             description={
-                "allowed_inputs": sorted(request.allowed_input_names),
+                "allowed_inputs": sorted(
+                    request.allowed_input_names or frozenset(parent.inputs)
+                ),
                 "required_outputs": list(parent.outputs),
                 "stage": "compile",
                 "task": (
@@ -104,10 +107,18 @@ class StagedPlanningPlugin:
                     "weakening parent constraints."
                 ),
             },
-            inputs=(draft_output, dependencies_output),
-            outputs=(result_output,),
+            inputs=tuple(
+                dict.fromkeys((*parent.inputs, draft_output, dependencies_output))
+            ),
+            outputs=parent.outputs,
             activation=f"{draft_output} AND {dependencies_output}",
             acceptance_policy=policy,
+            budget=request.allowance - 2,
+            minting_authority=tuple(
+                output
+                for output in parent.outputs
+                if output in parent.minting_authority
+            ),
         )
         return PlanningStages(draft, dependencies, compile_contract)
 
@@ -142,17 +153,19 @@ def _stage_contract(
     outputs: tuple[str, ...],
     activation: str,
     acceptance_policy: dict[str, object],
+    budget: int,
+    minting_authority: tuple[str, ...] | None = None,
 ) -> Contract:
     name = f"{parent.name or parent.id}.{mode}.{stage}.{invocation}"
     labels = tuple(dict.fromkeys((*parent.labels, f"plugin:{mode}.{stage}")))
-    authority_templates = outputs
+    authority_templates = outputs if minting_authority is None else minting_authority
     fields = {
         "name": name,
         "description": json.dumps(description, sort_keys=True, ensure_ascii=False),
         "inputs": inputs,
         "outputs": outputs,
         "activation": activation,
-        "budget": 1,
+        "budget": budget,
         "tool_scope": parent.tool_scope,
         "labels": labels,
         "worker_capabilities": (),
