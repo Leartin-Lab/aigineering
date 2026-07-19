@@ -30,8 +30,8 @@ the protocol does not rely on a process-local task lock.
 3. WorkerHost translates `/exec` into `asset.propose`; `/plan` or `/replan`
    invokes the Store-free staged plugin and signs three `contract.declare`
    effects. Hosted `/tool`, `/fail`, and `/retry` likewise use Store-free local
-   plugins and sign one ordinary contained `contract.declare`. Raw external
-   envelope submission remains a compatibility slice.
+   plugins and sign one ordinary contained `contract.declare`. CLI and HTTP
+   submission accept the same claim-bound ordinary effect protocol.
 4. Candidate identity binds the Contract, package, claim, epoch and effects.
    SQLite rechecks the registered actor key and live claim in the commit
    transaction.
@@ -160,16 +160,16 @@ operations remain compatibility surfaces pending additional effect types.
 Candidates whose actor/key matches the enabled Worker registration. Claim and
 renew authentication records commit atomically with the lease transition, and
 an accepted command Candidate cannot be replayed. `POST /worker/submissions`
-likewise accepts only one signed claim-bound `worker.output` or `task.delegate`
-CandidateProposal. Server claims require proof of the enabled actor/key-bound
+accepts a signed claim-bound CandidateProposal whose batch contains only
+`asset.propose` outputs or `contract.declare` expansion. Legacy `worker.output`
+and `task.delegate` wrappers are rejected even with a valid claim binding.
+Server claims require proof of the enabled actor/key-bound
 Worker, so an anonymous or self-reported claimant cannot lock work it is unable
 to submit. The former
 server-side mock `/contracts/{id}/run` mutation endpoint returns 410 and directs
 clients to the claim/submission protocol; the server never impersonates a
 worker actor.
-`aig worker submit` uses the same authenticated, method-aware submission
-service and default registry as HTTP, so a signed `/plan` output has identical
-semantics at both ingress surfaces.
+`aig worker submit` uses the same generic Candidate commitment service as HTTP.
 
 `contract.publish` does not authorize an actor to populate
 `minting_authority`. A declaration containing protected minting authority also
@@ -248,9 +248,9 @@ lease and epoch while atomically committing receipt, projected Facts, Trace,
 `attempt.closed`, terminal consequences and claim transition. A successful
 output attempt is `output_asserted`; planning is `expanded` and does not satisfy
 the root; an invalid contained expansion is `failed`. Exact replay after claim
-closure returns the same decision without duplicate facts. Tool/fail/retry
-still use the bounded `task.delegate` compatibility adapter pending their plugin
-cutover.
+closure returns the same decision without duplicate facts. A different
+Candidate against the closed claim fails the transaction fence and records a
+visible rejection.
 The submission path no longer queries MethodRegistry to authorize delegation;
 the plugin owns the closed supported-action set and rejects unknown actions.
 MethodRegistry remains only in the completion compatibility layer while those
@@ -383,9 +383,12 @@ The supported operational surface is the Store/claim/submission path.
 ## Methods and workers
 
 The public `TaskPlugin` protocol is now Store-free: a plugin receives a frozen,
-disclosure-bounded `PluginRequest` (including an optional causal source task)
+disclosure-bounded `PluginRequest` (including an optional causal source task and
+immutable invocation parameters)
 and returns a `PluginProposal` containing
 ordinary Candidate effects plus visible containment notes.
+Invocation parameters participate in staged task identity and task description,
+so distinct plan/replan requests cannot collapse to the same Candidate.
 `StagedPlanningPlugin` and `StagedReplanningPlugin` publish draft,
 dependency-analysis and compile as three ordinary Contracts in one atomic
 Candidate group. Each stage has a distinct label, prompt schema, exact protected

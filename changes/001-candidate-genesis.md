@@ -181,17 +181,13 @@ Implementation progress:
   bindings remain readable only for explicit migration compatibility.
 - Complete: cryptography is a base dependency; the runtime does not silently
   substitute a non-authenticating deterministic seal.
-- Complete: external claim-bound worker submission accepts only an
-  actor-signed CandidateProposal containing one `worker.output` or
-  `task.delegate` effect. The
-  actor must have `worker.submit`, match the registered worker/key binding, and
-  sign the same non-empty idempotency key as the embedded envelope. SQLite
-  rechecks key binding with the claim predicate in the commitment transaction;
-  authenticated receipt, output evidence, and projection form one causal chain.
-  The generic Candidate committer intentionally rejects both claim-bound effect
-  types so they cannot become a claim-bypass path. Authentication and post-authentication
-  submission failures use the same durable Candidate rejection vocabulary and
-  Trace evidence rather than ending as caller-only errors.
+- Complete: CLI and HTTP claim-bound submission accept only actor-signed
+  ordinary `asset.propose` or `contract.declare` effects plus an exact
+  `CandidateClaimBinding`. The actor must have `worker.submit`, match the
+  registered worker/key binding, and sign a non-empty idempotency key. Legacy
+  `worker.output` and `task.delegate` effects are rejected even with a valid
+  claim; rejection closes the attempt and writes a visible terminal rather than
+  leaving an active lease.
 - Complete: a Store-free public TaskPlugin protocol separates pure proposal
   construction from actor-authenticated publication. The planning expansion
   plugin turns one disclosed plan Asset into an atomic fan-out of ordinary
@@ -203,10 +199,10 @@ Implementation progress:
   register by Candidate, claim as that actor, and use the signed path for both
   ordinary output and transitional Method actions. SQLite key fencing is shared
   by ordinary and Method submission transactions.
-- Complete: WorkerHost selects `task.delegate` through a pure adapter plugin for
-  explicit method actions; the claim-bound runtime rejects attempts to
-  reinterpret a signed ordinary `worker.output` as delegation. Delegation
-  receipt and method scheduling are a typed causal chain.
+- Complete: WorkerHost compiles every supported action to ordinary effects
+  before signing. Distinct staged plan/replan invocation parameters participate
+  in task identity and description, preventing semantically different requests
+  from collapsing to one Candidate.
 - Complete: the TaskDelegationPlugin, rather than the runtime service, projects
   plan/replan/tool/fail/retry requests into a contained child task and optional
   context Asset. Each supported method type has the same plugin-level
@@ -338,14 +334,14 @@ Implementation progress:
   transaction-time validation prevents concurrent lineage overspend. The
   legacy BudgetManager and source-only Method completion callbacks remain
   deletion debt; staged planning no longer calls them.
-- Complete for WorkerHost: tool/fail/retry local plugins now sign ordinary
+- Complete for every supported submission ingress: tool/fail/retry local plugins sign ordinary
   claim-bound child declarations instead of `task.delegate`. New procedural
   outputs use ordinary isolated names. Claim projection rejects protected
   authority self-grants and contains input/tool/pool/capability/allowance fields.
-  CLI/HTTP raw-envelope compatibility still requires removal.
+  CLI/HTTP submit use the same generic committer and reject raw wrapper effects.
 - Pending: replace the remaining Method-named completion types with neutral
-  task/plugin names, then delete the raw execution compatibility surface and
-  source-only handlers.
+  task/plugin names, then delete the now-unreachable legacy submission helpers
+  and source-only handlers.
 
 ## Required architecture tests
 

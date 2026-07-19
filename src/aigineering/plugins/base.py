@@ -19,12 +19,14 @@ class PluginRequest:
     assets: tuple[Asset, ...] = ()
     allowed_input_names: frozenset[str] = field(default_factory=frozenset)
     allowance: int = 0
+    parameters: Mapping[str, object] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "assets", tuple(self.assets))
         object.__setattr__(
             self, "allowed_input_names", frozenset(self.allowed_input_names)
         )
+        object.__setattr__(self, "parameters", deep_freeze(dict(self.parameters)))
         if self.allowance < 0:
             raise ValueError("PluginRequest.allowance must not be negative")
 

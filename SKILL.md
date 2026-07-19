@@ -128,6 +128,7 @@ Avoid these commands for normal agent delegation:
 - Remote claim and lease-renew requests are signed `worker.claim` and
   `worker.claim.renew` Candidates. Never send a self-reported `worker_id` body
   or reuse one command Candidate. Hosted `/exec` signs `asset.propose` effects;
-  staged plan/replan signs `contract.declare` effects. Both bind the returned
-  Contract/claim/package/epoch. Tool/fail/retry remain compatibility actions
-  until their plugin cutover is complete.
+  staged plan/replan and tool/fail/retry sign contained `contract.declare`
+  effects. All bind the returned Contract/claim/package/epoch and a non-empty
+  idempotency key. Custom Workers must compile raw actions before signing;
+  `worker.output` and `task.delegate` wrappers are rejected.

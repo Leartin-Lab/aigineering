@@ -15,12 +15,19 @@ from aigineering.core.signing import Ed25519Signer
 from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.core.domain import load_genesis
 from aigineering.protocol.candidate import (
+    CandidateClaimBinding,
     candidate_proposal_to_dict,
     create_candidate_proposal,
 )
+from aigineering.protocol.actions import parse_action
 from aigineering.protocol.envelope import CandidateEnvelope
-from aigineering.protocol.effect_builders import worker_output_effect
-from aigineering.plugins import TaskDelegationPlugin
+from aigineering.protocol.effect_builders import claim_bound_output_effects
+from aigineering.plugins import (
+    StagedPlanningPlugin,
+    StagedReplanningPlugin,
+    TaskDelegationPlugin,
+)
+from aigineering.plugins.base import PluginRequest
 from aigineering.protocol.package import WorkerPackage
 from aigineering.protocol.types import Asset, Contract, TraceEntry
 from aigineering.protocol.types import Candidate
@@ -239,20 +246,67 @@ def _ensure_cli_worker_identity(runner: CliRunner) -> None:
 def _signed_worker_candidate_json(envelope: CandidateEnvelope) -> str:
     store = SQLiteStore(".aig/store.db")
     genesis = load_genesis(store)
-    effect = (
-        TaskDelegationPlugin().propose(envelope)
-        if envelope.raw_output.lstrip().startswith(
-            ("/plan", "/replan", "/retry", "/tool", "/fail")
+    contract = store.get_contract(envelope.contract_id)
+    if contract is None:
+        contract = Contract(id=envelope.contract_id, outputs=("result",))
+    raw = envelope.raw_output
+    if not raw.lstrip().startswith("/"):
+        name, separator, content = raw.partition(":")
+        raw = "/exec " + json.dumps({"outputs": {name.strip(): content.strip()}})
+    action = parse_action(raw)
+    parsed_envelope = CandidateEnvelope(
+        contract_id=envelope.contract_id,
+        worker_id=envelope.worker_id,
+        raw_output=raw,
+        parsed_action=(
+            {"type": "exec", "outputs": dict(action.outputs)}
+            if action.type == "exec"
+            else {"type": action.type, "payload": dict(action.payload)}
+        ),
+        package_id=envelope.package_id,
+        claim_id=envelope.claim_id,
+        claim_epoch=envelope.claim_epoch,
+        idempotency_key=envelope.idempotency_key,
+    )
+    if action.type in {"plan", "replan"}:
+        plugin = (
+            StagedPlanningPlugin()
+            if action.type == "plan"
+            else StagedReplanningPlugin()
         )
-        else worker_output_effect(envelope)
+        effects = plugin.propose(
+            PluginRequest(
+                parent=contract,
+                allowance=contract.budget,
+                parameters=action.payload,
+            )
+        ).effects
+    elif action.type in {"tool", "fail", "retry"}:
+        effects = (
+            TaskDelegationPlugin()
+            .propose_claimed(contract, action, allowance=contract.budget)
+            .effects
+        )
+    else:
+        effects = claim_bound_output_effects(parsed_envelope)
+    binding = (
+        CandidateClaimBinding(
+            envelope.contract_id,
+            envelope.claim_id,
+            envelope.claim_epoch,
+            envelope.package_id,
+        )
+        if envelope.claim_id
+        else None
     )
     candidate = create_candidate_proposal(
         domain_id=genesis.id,
         actor_id=envelope.worker_id,
         key_id="cli-worker-1",
-        effects=(effect,),
+        effects=effects,
         signer=_CLI_WORKER_SIGNER,
         idempotency_key=envelope.idempotency_key,
+        claim_binding=binding,
     )
     return json.dumps(candidate_proposal_to_dict(candidate))
 
@@ -412,10 +466,7 @@ def test_submit_creates_projection_assets():
         assert data["contract_id"] == contract.id
         assert data["status"] == "accepted"
         assert not data["duplicate"]
-        assert "accepted_assets" in data
-        assert len(data["accepted_assets"]) == 1
-        assert data["accepted_assets"][0]["name"] == "final_report"
-        assert "trace_id" in data
+        assert data["accepted"] == ["final_report"]
 
         # Verify asset is actually in the store
         stored = SQLiteStore(".aig/store.db")
@@ -425,17 +476,14 @@ def test_submit_creates_projection_assets():
         records = [record for _, record in stored.scan_runtime_records()]
         record_types = [record.record_type for record in records]
         assert "candidate.received" in record_types
-        assert "projection.decided" in record_types
         assert "asset.committed" in record_types
-        assert "budget.consumed" in record_types
+        assert "allowance.extinguished" in record_types
         assert "lifecycle.terminal" in record_types
-        projection = next(
-            record for record in records if record.record_type == "projection.decided"
-        )
-        output = next(
+        committed_asset = next(
             record
             for record in records
-            if record.record_type == "worker.output.received"
+            if record.record_type == "asset.committed"
+            and record.payload.get("asset", {}).get("name") == "final_report"
         )
         receipt = next(
             record
@@ -443,12 +491,17 @@ def test_submit_creates_projection_assets():
             if record.record_type == "candidate.received"
             and record.payload.get("actor_id") == "cli-worker"
         )
-        assert output.causal_parents == (receipt.id,)
-        assert projection.causal_parents == (output.id,)
+        assert committed_asset.causal_parents == (receipt.id,)
         claim_submitted = next(
             record for record in records if record.record_type == "claim.submitted"
         )
-        assert projection.id in claim_submitted.causal_parents
+        candidate_committed = next(
+            record
+            for record in records
+            if record.record_type == "candidate.committed"
+            and record.payload.get("candidate_id") == receipt.payload["candidate_id"]
+        )
+        assert candidate_committed.id in claim_submitted.causal_parents
 
 
 def test_submit_rejects_tampered_signed_worker_candidate():
@@ -458,20 +511,24 @@ def test_submit_rejects_tampered_signed_worker_candidate():
         contract, _asset = _seed_contract_with_asset(store)
         pkg_data = _claimed_package(runner)
         candidate = json.loads(_candidate_json_from_package(pkg_data))
-        candidate["effects"][0]["payload"]["envelope"]["raw_output"] = (
-            "final_report: tampered after signing"
+        candidate["effects"][0]["payload"]["asset"]["content"] = (
+            "tampered after signing"
         )
 
         result = runner.invoke(
             cli, ["worker", "submit", "--json", json.dumps(candidate)]
         )
 
-        assert result.exit_code != 0
+        assert result.exit_code == 0
         data = json.loads(result.output)
-        assert "content id" in data["error"] or "signature" in data["error"]
+        assert data["status"] == "rejected"
+        assert any(
+            "content id" in reason or "signature" in reason
+            for reason in data["rejected"]
+        )
         persisted = SQLiteStore(".aig/store.db")
         assert persisted.get_assets_by_name("final_report") == []
-        assert persisted.get_claim(contract.id)["status"] == "active"
+        assert persisted.get_claim(contract.id)["status"] == "submitted"
         assert persisted.scan_runtime_records(
             record_type="candidate.authentication_rejected"
         )
@@ -491,7 +548,7 @@ def test_submit_without_claim_rejected_for_sqlite_store():
         assert result.exit_code != 0
         data = json.loads(result.output)
         assert data["status"] == "error"
-        assert "requires claim-bound submission" in data["error"]
+        assert "requires an explicit claim binding" in data["error"]
         stored = SQLiteStore(".aig/store.db")
         assert stored.get_assets_by_name("final_report") == []
 
@@ -538,9 +595,9 @@ def test_idempotent_duplicate_submit():
         )
         assert result2.exit_code == 0
         data2 = json.loads(result2.output)
-        assert data2["duplicate"] is True
-        # Same accepted assets (no new assets created)
-        assert data2["accepted_assets"] == data1["accepted_assets"]
+        # Candidate identity supplies replay idempotence without a second
+        # mutable response cache.
+        assert data2["accepted"] == data1["accepted"]
         assert data2["status"] == data1["status"]
 
         # Verify only one asset exists (not duplicated)
@@ -574,8 +631,8 @@ def test_different_key_conflict():
         )
         assert result2.exit_code != 0
         data2 = json.loads(result2.output)
-        assert data2.get("status") == "conflict"
-        assert "already has a submission" in data2.get("error", "")
+        assert data2.get("status") == "error"
+        assert "active worker claim predicate failed" in data2.get("error", "")
 
 
 def test_signed_submit_requires_idempotency_key():
@@ -589,10 +646,13 @@ def test_signed_submit_requires_idempotency_key():
         envelope_json = _candidate_json_from_package(pkg_data, idempotency_key="")
 
         result = runner.invoke(cli, ["worker", "submit", "--json", envelope_json])
-        assert result.exit_code != 0
+        assert result.exit_code == 0
         data = json.loads(result.output)
-        assert data["status"] == "error"
-        assert "idempotency_key" in data["error"]
+        assert data["status"] == "rejected"
+        assert any("idempotency_key" in reason for reason in data["rejected"])
+        persisted = SQLiteStore(".aig/store.db")
+        assert persisted.get_claim(contract.id)["status"] == "submitted"
+        assert persisted.get_by_event_type("failed")
 
 
 def test_sealed_config_not_in_output():
@@ -638,6 +698,9 @@ def test_submit_missing_contract():
             contract_id="nonexistent_contract",
             worker_id="cli-worker",
             raw_output="result: ok",
+            package_id="pkg:missing",
+            claim_id="claim:missing",
+            claim_epoch=1,
             idempotency_key="missing-contract",
         )
         result = runner.invoke(
@@ -647,7 +710,7 @@ def test_submit_missing_contract():
         assert result.exit_code != 0
         data = json.loads(result.output)
         assert "error" in data
-        assert "not found" in data["error"]
+        assert "unknown claim" in data["error"]
 
 
 def test_submit_rejected_candidate():
@@ -676,8 +739,8 @@ def test_submit_rejected_candidate():
         assert result.exit_code == 0
         data = json.loads(result.output)
         assert data["status"] == "rejected"
-        assert len(data["accepted_assets"]) == 0
-        assert len(data["rejected_candidates"]) > 0
+        assert data["accepted"] == []
+        assert data["rejected"]
 
 
 def test_submit_rejected_preserves_trace():
@@ -705,14 +768,14 @@ def test_submit_rejected_preserves_trace():
         assert result.exit_code == 0
         data = json.loads(result.output)
         assert data["status"] == "rejected"
-        assert "trace_id" in data
+        assert data["rejected"]
 
         stored = SQLiteStore(".aig/store.db")
         trace_entries = stored.get_trace_events(contract.id)
         assert len(trace_entries) >= 1
         event_types = [entry.event_type for entry in trace_entries]
-        assert "projection" in event_types
-        assert "budget_consumed" in event_types
+        assert "failed" in event_types
+        assert stored.get_by_event_type("candidate_rejected")
 
 
 # ---------------------------------------------------------------------------
@@ -934,21 +997,13 @@ def test_worker_next_submit_full_cycle():
         assert result.exit_code == 0
         submit_data = json.loads(result.output)
         assert submit_data["status"] == "accepted"
-        assert len(submit_data["accepted_assets"]) == 1
-        assert submit_data["accepted_assets"][0]["name"] == "final_report"
+        assert submit_data["accepted"] == ["final_report"]
 
         # ── Step 3: verify trace entries ────────────────────────────────
         stored = SQLiteStore(".aig/store.db")
         event_types = [e.event_type for e in stored.get_trace_events(contract.id)]
-        assert "projection" in event_types, f"trace events: {event_types}"
-        assert "budget_consumed" in event_types, f"trace events: {event_types}"
+        assert "output_satisfied" in event_types, f"trace events: {event_types}"
         assert "complete" in event_types, f"trace events: {event_types}"
-
-        from aigineering.agent.mock import MockWorker
-        from aigineering.core.engine import Engine
-
-        restored = Engine.restore_from_store(stored, MockWorker(), stored)
-        assert restored._budget[contract.id] == contract.budget - 1
 
         # ── Step 4: next after completion returns null ──────────────────
         result = runner.invoke(cli, ["worker", "next", "--json"])
@@ -974,12 +1029,16 @@ def test_worker_submit_uses_shared_method_submission_path():
         assert result.exit_code == 0, result.output
         payload = json.loads(result.output)
         assert payload["status"] == "task_delegated"
-        assert payload["method"] == "plan"
+        assert payload["method"] == "task_expansion"
+        assert len(payload["child_contract_ids"]) == 3
         persisted = SQLiteStore(".aig/store.db")
-        child = persisted.get_contract(payload["child_contract_id"])
-        assert child is not None
-        assert child.parent_id == contract.id
-        assert child.origin == "system"
+        children = [
+            persisted.get_contract(child_id)
+            for child_id in payload["child_contract_ids"]
+        ]
+        assert all(child is not None for child in children)
+        assert all(child.parent_id == contract.id for child in children)
+        assert all(child.origin == "plugin" for child in children)
 
 
 def test_no_push_semantics():

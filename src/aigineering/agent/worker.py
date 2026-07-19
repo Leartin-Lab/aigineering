@@ -136,6 +136,7 @@ class WorkerHost:
                     assets=tuple(disclosed_assets),
                     allowed_input_names=frozenset(contract.inputs),
                     allowance=contract.budget if allowance is None else allowance,
+                    parameters=action.payload,
                 )
             ).effects
         elif action is not None:

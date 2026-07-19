@@ -26,13 +26,8 @@ from aigineering.plugins.recovery import schedule_projection_recovery
 from aigineering.plugins.task_semantics import method_payload
 from aigineering.core.runtime_projection import RuntimeProjection
 from aigineering.core.submit import (
-    SubmitClaimError,
-    SubmitCommitError,
-    SubmitConflictError,
     WorkerCandidateAuthentication,
-    authenticate_worker_candidate,
     replay_idempotent_submission,
-    submit_authenticated_worker_candidate,
     submit_candidate,
     validate_submission_claim,
 )
@@ -323,96 +318,53 @@ def submit_worker_proposal(
     trace_store=None,
     candidate_publishers=None,
 ) -> dict:
-    """Submit one WorkerHost-signed proposal, including transitional methods."""
+    """Submit one claim-bound ordinary-effect Candidate."""
     trace = trace_store if trace_store is not None else store
-    if proposal.claim_binding is not None and {
-        effect.effect_type for effect in proposal.effects
-    } <= {"asset.propose", "contract.declare"}:
-        try:
-            decision = CandidateCommitter(store, trace).commit(proposal)
-        except (sqlite3.Error, TypeError, ValueError) as exc:
-            record_candidate_rejection(proposal, str(exc), store, trace)
-            raise
-        terminal = any(
-            record.record_type == "lifecycle.terminal"
-            and record.payload.get("contract_id") == proposal.claim_binding.contract_id
-            and record.payload.get("terminal") == "complete"
-            for record in decision.runtime_records
-        )
-        if decision.contracts:
-            first = decision.contracts[0]
-            declared_method = str(method_payload(first).get("method", ""))
-            return {
-                "contract_id": proposal.claim_binding.contract_id,
-                "status": "task_delegated" if decision.accepted else "rejected",
-                "method": declared_method or "task_expansion",
-                "child_contract_id": (
-                    first.id if len(decision.contracts) == 1 else None
-                ),
-                "child_contract_ids": [item.id for item in decision.contracts],
-                "complete": False,
-                "duplicate": False,
-            }
+    if proposal.claim_binding is None:
+        raise ValueError("worker Candidate requires an explicit claim binding")
+    duplicate = any(
+        record.payload.get("candidate_id") == proposal.id
+        for _, record in store.scan_runtime_records(record_type="candidate.committed")
+    )
+    try:
+        decision = CandidateCommitter(store, trace).commit(proposal)
+    except (sqlite3.Error, TypeError, ValueError) as exc:
+        record_candidate_rejection(proposal, str(exc), store, trace)
+        raise ValueError(str(exc)) from exc
+    if not decision.accepted and candidate_publishers is not None:
+        process_rejected_submissions(store, candidate_publishers=candidate_publishers)
+    terminal = any(
+        record.record_type == "lifecycle.terminal"
+        and record.payload.get("contract_id") == proposal.claim_binding.contract_id
+        and record.payload.get("terminal") == "complete"
+        for record in decision.runtime_records
+    )
+    if decision.contracts:
+        first = decision.contracts[0]
+        declared_method = str(method_payload(first).get("method", ""))
         return {
             "contract_id": proposal.claim_binding.contract_id,
-            "status": "accepted" if decision.accepted else "rejected",
-            "accepted": [asset.name for asset in decision.assets],
-            "rejected": [] if decision.accepted else ["candidate rejected"],
-            "complete": terminal,
-            "duplicate": False,
+            "status": "task_delegated" if decision.accepted else "rejected",
+            "method": declared_method or "task_expansion",
+            "child_contract_id": first.id if len(decision.contracts) == 1 else None,
+            "child_contract_ids": [item.id for item in decision.contracts],
+            "complete": False,
+            "duplicate": duplicate,
         }
-    envelope, authentication = authenticate_worker_candidate(proposal, store, trace)
-    contract = store.get_contract(envelope.contract_id)
-    if contract is None:
-        raise ValueError(f"Contract '{envelope.contract_id}' not found in store")
-    candidate = Candidate(
-        worker_id=envelope.worker_id,
-        raw_output=envelope.raw_output,
-        parsed_action=envelope.parsed_action,
-        metadata=envelope.usage_metadata,
-    )
-    method_action = parse_method_action(candidate)
-    if method_action is None:
-        result = submit_authenticated_worker_candidate(
-            envelope, authentication, store, trace
-        )
-        if result["status"] == "rejected" and candidate_publishers is not None:
-            process_rejected_submissions(
-                store, candidate_publishers=candidate_publishers
-            )
-        return result
-    try:
-        budget_consumed = sum(
-            1
-            for entry in trace.get_by_contract(contract.id)
-            if entry.event_type == "budget_consumed"
-        )
-        return _submit_claimed_method(
-            contract,
-            envelope,
-            candidate,
-            method_action,
-            max(0, contract.budget - budget_consumed),
-            store,
-            trace,
-            authentication=authentication,
-        )
-    except (
-        DisclosurePolicyError,
-        SubmitClaimError,
-        SubmitCommitError,
-        SubmitConflictError,
-        TypeError,
-        ValueError,
-    ) as exc:
-        record_candidate_rejection(
-            proposal,
-            str(exc),
-            store,
-            trace,
-            receipt=authentication.receipt,
-        )
-        raise
+    rejection_reasons = [
+        str(record.payload.get("reason", "candidate rejected"))
+        for record in decision.runtime_records
+        if record.record_type
+        in {"candidate.rejected", "candidate.authentication_rejected"}
+    ]
+    return {
+        "contract_id": proposal.claim_binding.contract_id,
+        "status": "accepted" if decision.accepted else "rejected",
+        "accepted": [asset.name for asset in decision.assets],
+        "rejected": rejection_reasons,
+        "complete": terminal,
+        "duplicate": duplicate,
+    }
 
 
 def submit_candidate_envelope(

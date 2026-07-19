@@ -70,6 +70,11 @@ Planning may use multiple explicit tasks—for example draft, dependency
 analysis, and structured publication—so each stage has independently testable
 inputs, outputs, authority, and acceptance evidence.
 
+A claimed Worker signs the ordinary effects it proposes. Claim-bound
+`worker.output` and `task.delegate` wrappers are not alternate protocol paths.
+Plugin invocation parameters are immutable proposal inputs and must participate
+in derived task identity whenever they can change intent.
+
 Claim delegation is inherited authority, not payload authority. A child cannot
 obtain protected publication by declaring its own minting templates; protected
 outputs and templates must already belong to the claimed parent. Hosted action
@@ -104,6 +109,8 @@ Costs:
 - existing RuntimeIngress and Method APIs require staged migration or deletion;
 - adapters must preserve atomic append, uniqueness, and reconstruction rules;
 - external clients must sign Candidates rather than rely on server-side trust.
+- custom Worker adapters must compile raw model actions into ordinary effects
+  before signing.
 
 ## Boundaries
 

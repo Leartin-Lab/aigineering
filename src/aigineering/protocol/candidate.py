@@ -328,6 +328,8 @@ def verify_candidate_proposal(
 ) -> None:
     """Fail closed unless identity, domain, bytes, and signature all match."""
     validate_genesis_manifest(genesis)
+    if candidate.claim_binding is not None and not candidate.idempotency_key:
+        raise ValueError("claim-bound Candidate.idempotency_key must not be empty")
     if candidate.domain_id != genesis.id:
         raise ValueError("Candidate domain does not match Genesis manifest")
     effective_keys = actor_keys if actor_keys is not None else genesis.root_keys

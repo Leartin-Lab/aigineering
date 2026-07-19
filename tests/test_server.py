@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 pytest.importorskip("fastapi")
@@ -20,22 +22,29 @@ from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.core.worker_routing import WorkerRegistration
 from aigineering.protocol.candidate import (
     ActorKey,
+    CandidateClaimBinding,
     CandidateEffect,
     candidate_proposal_to_dict,
     create_candidate_proposal,
     create_genesis_manifest,
 )
-from aigineering.protocol.wire import contract_to_dict
+from aigineering.protocol.actions import parse_action
+from aigineering.protocol.wire import contract_from_dict, contract_to_dict
 from aigineering.protocol.effect_builders import (
     actor_authorization_effect,
     asset_proposal_effect,
+    claim_bound_output_effects,
     replacement_claim_effect,
     worker_claim_effect,
     worker_claim_renewal_effect,
-    worker_output_effect,
     worker_registration_effect,
 )
-from aigineering.plugins import TaskDelegationPlugin
+from aigineering.plugins import (
+    StagedPlanningPlugin,
+    StagedReplanningPlugin,
+    TaskDelegationPlugin,
+)
+from aigineering.plugins.base import PluginRequest
 from aigineering.protocol.envelope import CandidateEnvelope
 from aigineering.server.app import app
 
@@ -115,30 +124,62 @@ def _worker_submission(actor, worker_key, package, raw_output: str):
     signer, key = worker_key
     _root_signer, genesis = actor
     idempotency_key = f"remote-{package['package_id']}"
+    raw = raw_output
+    if not raw.lstrip().startswith("/"):
+        name, _, content = raw.partition(":")
+        raw = "/exec " + json.dumps({"outputs": {name.strip(): content.strip()}})
+    action = parse_action(raw)
     envelope = CandidateEnvelope(
         contract_id=package["contract_id"],
         worker_id=key.actor_id,
-        raw_output=raw_output,
+        raw_output=raw,
+        parsed_action=(
+            {"type": "exec", "outputs": dict(action.outputs)}
+            if action.type == "exec"
+            else {"type": action.type, "payload": dict(action.payload)}
+        ),
         package_id=package["package_id"],
         claim_id=package["claim_id"],
         claim_epoch=package["claim_epoch"],
         idempotency_key=idempotency_key,
     )
-    effect = (
-        TaskDelegationPlugin().propose(envelope)
-        if raw_output.lstrip().startswith(
-            ("/plan", "/replan", "/retry", "/tool", "/fail")
+    contract = contract_from_dict(package["contract"])
+    if action.type in {"plan", "replan"}:
+        plugin = (
+            StagedPlanningPlugin()
+            if action.type == "plan"
+            else StagedReplanningPlugin()
         )
-        else worker_output_effect(envelope)
+        effects = plugin.propose(
+            PluginRequest(
+                parent=contract,
+                allowance=package["budget_remaining"],
+                parameters=action.payload,
+            )
+        ).effects
+    elif action.type in {"tool", "fail", "retry"}:
+        effects = (
+            TaskDelegationPlugin()
+            .propose_claimed(contract, action, allowance=package["budget_remaining"])
+            .effects
+        )
+    else:
+        effects = claim_bound_output_effects(envelope)
+    binding = CandidateClaimBinding(
+        package["contract_id"],
+        package["claim_id"],
+        package["claim_epoch"],
+        package["package_id"],
     )
     return candidate_proposal_to_dict(
         create_candidate_proposal(
             domain_id=genesis.id,
             actor_id=key.actor_id,
             key_id=key.key_id,
-            effects=[effect],
+            effects=effects,
             signer=signer,
             idempotency_key=idempotency_key,
+            claim_binding=binding,
         )
     )
 
@@ -422,7 +463,7 @@ def test_worker_protocol_cross_replica_claim_renew_submit(tmp_path, monkeypatch)
         "/worker/submissions",
         json=_worker_submission(actor, worker_key, package, "out: changed replay"),
     )
-    assert changed.status_code == 409
+    assert changed.status_code == 422
 
     records = SQLiteStore(".aig/store.db").scan_runtime_records()
     record_types = [record.record_type for _, record in records]
@@ -481,7 +522,7 @@ def test_worker_protocol_method_submission_uses_same_fenced_path(tmp_path, monke
     monkeypatch.chdir(tmp_path)
     client, actor = _signed_client()
     created = _post_contract(
-        client, actor, name="remote_plan", outputs=["report"], budget=2
+        client, actor, name="remote_plan", outputs=["report"], budget=3
     )
     contract_id = created.json()["id"]
     worker_key = _register_worker(client, actor, "remote-planner")
@@ -507,9 +548,22 @@ def test_worker_protocol_method_submission_uses_same_fenced_path(tmp_path, monke
     assert submitted.status_code == 200, submitted.text
     body = submitted.json()
     assert body["status"] == "task_delegated"
-    child = SQLiteStore(".aig/store.db").get_contract(body["child_contract_id"])
-    assert child is not None
-    assert "method:plan" in child.labels
+    persisted = SQLiteStore(".aig/store.db")
+    children = [
+        persisted.get_contract(child_id) for child_id in body["child_contract_ids"]
+    ]
+    assert len(children) == 3
+    assert all(child is not None for child in children)
+    assert {
+        label
+        for child in children
+        for label in child.labels
+        if label.startswith("plugin:")
+    } == {
+        "plugin:plan.draft",
+        "plugin:plan.dependencies",
+        "plugin:plan.compile",
+    }
     duplicate = client.post("/worker/submissions", json=submission)
     assert duplicate.status_code == 200
     assert duplicate.json()["duplicate"] is True
@@ -519,7 +573,7 @@ def test_worker_protocol_method_submission_uses_same_fenced_path(tmp_path, monke
             actor, worker_key, package, '/plan {"reason": "changed"}'
         ),
     )
-    assert changed.status_code == 409
+    assert changed.status_code == 422
 
 
 def test_asset_slice_versions_and_replacement_claims(tmp_path, monkeypatch):

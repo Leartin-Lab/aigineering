@@ -58,6 +58,7 @@ class StagedPlanningPlugin:
             invocation=invocation,
             description={
                 "goal": parent.description,
+                "invocation": dict(request.parameters),
                 "required_outputs": list(parent.outputs),
                 "stage": "draft",
                 "task": (
@@ -139,6 +140,7 @@ def _invocation_id(request: PluginRequest, mode: str) -> str:
                 "asset_ids": sorted(asset.id for asset in request.assets),
                 "mode": mode,
                 "parent_id": request.parent.id,
+                "parameters": dict(request.parameters),
             }
         )
     )[:24]

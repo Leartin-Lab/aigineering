@@ -15,6 +15,7 @@ from aigineering.core.worker_routing import WorkerRegistration
 from aigineering.protocol.candidate import (
     ActorKey,
     CandidateClaimBinding,
+    CandidateEffect,
     create_candidate_proposal,
     create_genesis_manifest,
 )
@@ -289,7 +290,8 @@ def test_worker_host_delegates_without_method_handler_authorization():
     assert store.get_claim(contract.id)["status"] == "submitted"
 
 
-def test_signed_output_effect_cannot_be_reinterpreted_as_task_delegation():
+@pytest.mark.parametrize("effect_type", ["worker.output", "task.delegate"])
+def test_claim_bound_legacy_wrapper_is_rejected_and_closes_attempt(effect_type):
     store, _contract, host = _runtime('/retry {"reason":"try again"}')
     claimed = claim_next_package(store, worker_id=host.worker_id)
     assert claimed is not None
@@ -302,25 +304,32 @@ def test_signed_output_effect_cannot_be_reinterpreted_as_task_delegation():
         claim_epoch=claimed.package.claim_epoch,
         idempotency_key=f"run-{claimed.package.package_id}",
     )
+    effect = (
+        worker_output_effect(envelope)
+        if effect_type == "worker.output"
+        else CandidateEffect("task.delegate", {"envelope": envelope.to_dict()})
+    )
     proposal = create_candidate_proposal(
         domain_id=host.genesis.id,
         actor_id=host.actor_key.actor_id,
         key_id=host.actor_key.key_id,
-        effects=(worker_output_effect(envelope),),
+        effects=(effect,),
         signer=host.signer,
         idempotency_key=envelope.idempotency_key,
+        claim_binding=CandidateClaimBinding(
+            claimed.contract.id,
+            claimed.package.claim_id,
+            claimed.package.claim_epoch,
+            claimed.package.package_id,
+        ),
     )
 
-    try:
-        submit_worker_proposal(
-            proposal,
-            store,
-        )
-    except ValueError as exc:
-        assert "requires a 'task.delegate' effect" in str(exc)
-    else:
-        raise AssertionError("ordinary output effect was accepted as delegation")
+    result = submit_worker_proposal(proposal, store)
 
-    assert store.get_claim(claimed.contract.id)["status"] == "active"
+    assert result["status"] == "rejected"
+    assert any("unsupported effect" in reason for reason in result["rejected"])
+    assert store.get_claim(claimed.contract.id)["status"] == "submitted"
     assert store.get_contract(claimed.contract.id) is not None
     assert len(store.get_all_contracts()) == 1
+    terminal = store.scan_runtime_records(record_type="lifecycle.terminal")[-1][1]
+    assert terminal.payload["terminal"] == "failed"

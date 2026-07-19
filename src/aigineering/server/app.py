@@ -46,6 +46,13 @@ class CandidateEffectRequest(BaseModel):
     atomic_group: str = ""
 
 
+class CandidateClaimBindingRequest(BaseModel):
+    contract_id: str
+    claim_id: str
+    claim_epoch: int
+    package_id: str
+
+
 class CandidateProposalRequest(BaseModel):
     id: str
     domain_id: str
@@ -56,6 +63,7 @@ class CandidateProposalRequest(BaseModel):
     effects: list[CandidateEffectRequest]
     causal_parents: list[str] = Field(default_factory=list)
     idempotency_key: str = ""
+    claim_binding: CandidateClaimBindingRequest | None = None
     protocol_version: int = 1
 
 
