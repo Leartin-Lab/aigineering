@@ -4,14 +4,9 @@ import json
 
 
 from aigineering.agent.tool_executor import ToolExecutor
-from aigineering.core.capability_descriptors import create_tool_descriptor
-from aigineering.core.method_handlers.tool import ToolMethodHandler
-from aigineering.core.method_runtime import MethodRuntime
-from aigineering.core.runtime_ingress import RuntimeIngress
 from aigineering.core.store import MemoryStore
 from aigineering.core.tools import ToolRegistry
-from aigineering.core.trace import TraceStore
-from aigineering.protocol.types import Asset, Candidate, Contract, ToolSpec
+from aigineering.protocol.types import Asset, Candidate, ToolSpec
 
 
 # ── ToolExecutor unit tests ─────────────────────────────────────────────
@@ -79,67 +74,6 @@ def test_worker_parity_with_direct_registry():
 
 
 # ── Handler integration tests ──────────────────────────────────────────
-
-
-def test_tool_handler_uses_tool_worker():
-    """ToolMethodHandler.handle_completion dispatches via ToolExecutor."""
-    handler = ToolMethodHandler()
-
-    store = MemoryStore()
-    trace_store = TraceStore()
-    tools = ToolRegistry()
-    tools.register(ToolSpec(name="lookup"), lambda args: f"value:{args['key']}")
-    store._add_system_asset(
-        create_tool_descriptor(
-            "lookup",
-            "Lookup test values.",
-            {"type": "object"},
-            trust_tier="configured",
-        )
-    )
-
-    # Verify the handler module imports ToolExecutor
-    import aigineering.core.method_handlers.tool as handler_mod
-
-    assert hasattr(handler_mod, "ToolExecutor")
-
-    runtime = MethodRuntime(
-        store,
-        trace_store,
-        {},
-        tools=tools,
-        ingress=RuntimeIngress(store, trace_store),
-    )
-    tool_contract = Contract(
-        id="tool_child_1",
-        parent_id="parent_1",
-        name="parent.tool",
-        description=json.dumps(
-            {
-                "method": "tool",
-                "parent_contract_id": "parent_1",
-                "parent_contract_name": "parent",
-                "payload": {"name": "lookup", "args": {"key": "x"}},
-            },
-            sort_keys=True,
-        ),
-        inputs=[],
-        outputs=["_tool_obs_tool_child_1"],
-        activation="_method_ctx_parent_1",
-        budget=1,
-        tool_scope=["lookup"],
-        origin="system",
-        minting_authority=("_tool_obs_tool_child_1", "_tool_call_tool_child_1"),
-    )
-
-    result = handler.handle_completion(runtime, tool_contract, [])
-    assert result is True
-
-    obs_assets = store.get_assets_by_name("_tool_obs_tool_child_1")
-    assert len(obs_assets) == 1
-    obs = json.loads(obs_assets[0].content)
-    assert obs["ok"] is True
-    assert obs["result"] == "value:x"
 
 
 def test_worker_candidate_not_committed_directly():

@@ -14,118 +14,12 @@ from __future__ import annotations
 import pytest
 
 from aigineering.core.store import MemoryStore
-from aigineering.core.engine import Engine
 from aigineering.core.ids import hash_asset_content, hash_contract
-from aigineering.core.provenance import sign_asset
 from aigineering.core.trace import TraceStore
-from aigineering.agent.mock import MockWorker
 from aigineering.protocol.types import Asset, Contract
 
 # ============================================================================
 # W1 — Asset-driven parent completion (Plan §2.1, §4 Phase A item 1)
-# ============================================================================
-
-
-class TestParentCompletionByAssets:
-    """Parent contracts must complete when their declared output assets exist,
-    regardless of child execution state or ingress path.
-
-    Gap: Engine.add_asset() writes directly to store without triggering
-    reactive parent completion.  Only Engine.run() checks output
-    satisfaction, and only for contracts it executes.
-    """
-
-    def test_externally_injected_output_completes_parent(self):
-        """DESIRED: Injecting a promised output asset reactively completes
-        every parent contract whose declared outputs are now satisfied.
-
-        Currently Engine.add_asset is fire-and-forget — no reactive check.
-        """
-        store = MemoryStore()
-        trace_store = TraceStore()
-        worker = MockWorker()
-        engine = Engine(store, worker, trace_store)
-
-        parent = Contract(
-            id=hash_contract("parent_task", "", [], ["report"], "", 3, [], [], "human"),
-            name="parent_task",
-            inputs=[],
-            outputs=["report"],
-            activation="",
-            budget=3,
-        )
-        engine.add_contract(parent)
-
-        report = Asset(
-            id=hash_asset_content("report", "Completed report content"),
-            name="report",
-            content="Completed report content",
-        )
-        engine.add_asset(report)
-
-        # DESIRED: after adding the output asset, the parent should be
-        # complete WITHOUT needing engine.run().
-        complete_events = [
-            e for e in trace_store.get_all() if e.event_type == "complete"
-        ]
-        assert len(complete_events) >= 1, (
-            f"Parent {parent.id} should have 'complete' trace event "
-            f"because its declared output 'report' now exists."
-        )
-
-    def test_suspended_parent_completes_when_output_injected(self):
-        """DESIRED: A parent suspended by a method child should complete
-        when its promised output is injected externally, without needing
-        Engine.run() to re-process the suspended contract.
-        """
-        store = MemoryStore()
-        trace_store = TraceStore()
-
-        plan_output = (
-            '/plan {"reason": "need sub work", "contracts": ['
-            '{"name": "child_work", "description": "do work", '
-            '"inputs": [], "outputs": ["final_report"], '
-            '"activation": "", "budget": 3, "tool_scope": [], "labels": []}]}'
-        )
-        worker = MockWorker()
-        worker.set_output("parent_plan", plan_output)
-
-        engine = Engine(store, worker, trace_store)
-
-        parent = Contract(
-            id=hash_contract(
-                "parent_plan", "", [], ["final_report"], "", 5, [], [], "human"
-            ),
-            name="parent_plan",
-            inputs=[],
-            outputs=["final_report"],
-            activation="",
-            budget=5,
-        )
-        engine.add_contract(parent)
-        engine.run()
-
-        final_report = Asset(
-            id=hash_asset_content("final_report", "Report done"),
-            name="final_report",
-            content="Report done",
-        )
-        engine.add_asset(final_report)
-
-        # DESIRED: parent should complete reactively when output injected.
-        # Currently the parent stays suspended.
-        complete_events = [
-            e for e in trace_store.get_all() if e.event_type == "complete"
-        ]
-        parent_complete = [e for e in complete_events if e.contract_id == parent.id]
-        assert len(parent_complete) >= 1, (
-            f"Parent {parent.id} should complete after 'final_report' "
-            f"was injected externally."
-        )
-
-
-# ============================================================================
-# W3 — Task identity includes parent_id (Plan §4 Phase A item 2)
 # ============================================================================
 
 
@@ -367,70 +261,6 @@ class TestProtectedAssetMinting:
 
 # ============================================================================
 # W5 — Tool/MCP observation cannot satisfy declared outputs (Plan §2.6)
-# ============================================================================
-
-
-class TestObservationNotOutputSatisfaction:
-    """_tool_obs_* and _tool_call_* assets are context/control facts, not
-    business output facts.  The reducer must check both name match AND
-    authority/source class.
-    """
-
-    def test_observation_asset_should_not_satisfy_output(self):
-        """DESIRED: An asset with origin='tool' and name matching a declared
-        output should NOT satisfy that output.  The reducer must verify
-        the asset's source class.
-
-        Currently Engine._all_outputs_satisfied() only checks
-        store.get_assets_by_name() — any asset with matching name counts.
-        """
-        store = MemoryStore()
-        trace_store = TraceStore()
-        worker = MockWorker()
-        engine = Engine(store, worker, trace_store)
-
-        contract = Contract(
-            id=hash_contract("obs_test", "", [], ["report"], "", 1, [], [], "human"),
-            name="obs_test",
-            inputs=[],
-            outputs=["report"],
-            activation="",
-            budget=1,
-        )
-        engine.add_contract(contract)
-
-        tool_report = Asset(
-            id=hash_asset_content("report", "tool observation result"),
-            name="report",
-            content="tool observation result",
-            origin="tool",
-            trust_tier="observed",
-        )
-        engine.add_asset(sign_asset(tool_report, signed_by="tool_worker"))
-
-        engine.run()
-
-        # DESIRED: contract should NOT complete because the 'report' asset
-        # has origin='tool' / trust_tier='observed' — not a valid output.
-        # Currently Engine._all_outputs_satisfied() finds ANY asset named
-        # 'report' and marks the contract complete, ignoring provenance.
-        complete_events = [
-            e for e in trace_store.get_all() if e.event_type == "complete"
-        ]
-        assert len(complete_events) == 0, (
-            f"Tool observation (origin=tool) should NOT satisfy "
-            f"declared output 'report'.  Found complete events: "
-            f"{[(e.contract_id, e.event_type) for e in complete_events]}"
-        )
-
-        # But the asset itself should exist (it's valid context, just
-        # not an output satisfier)
-        stored = store.get_assets_by_name("report")
-        assert len(stored) >= 1, "tool observation should exist as context asset"
-
-
-# ============================================================================
-# W1A — Direct-write eradication (Plan §W1A, §4 Phase A)
 # ============================================================================
 
 

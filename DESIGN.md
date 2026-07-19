@@ -256,11 +256,10 @@ the root; an invalid contained expansion is `failed`. Exact replay after claim
 closure returns the same decision without duplicate facts. A different
 Candidate against the closed claim fails the transaction fence and records a
 visible rejection.
-The submission path no longer queries MethodRegistry to authorize delegation;
-the plugin owns the closed supported-action set and rejects unknown actions.
-MethodRegistry remains only in the completion compatibility layer while those
-handlers move behind completion plugins. Worker execution, CLI submission, and
-HTTP submission no longer accept or construct a method registry; task
+The plugin owns the closed supported-action set and rejects unknown actions.
+The former MethodRegistry and feature-specific handlers have been deleted.
+Worker execution, CLI submission, and HTTP submission do not construct a
+method registry; task
 publication is protocol behavior, not application handler configuration.
 Application composition now names this residual surface
 `default_completion_registry` and excludes retry: retry delegation creates its
@@ -275,12 +274,9 @@ SQLite likewise exposes one generic `commit_ingress_batch` Candidate transaction
 the former candidate-envelope and method-specialized Store commit operations are
 not part of the runtime protocol.
 The application uses the minimal public `CompletionPlugin`/
-`CompletionRegistry` protocol, which exposes only `handle_completion`; the old
-MethodRegistry is confined to the source-only legacy Engine compatibility path.
+`CompletionRegistry` protocol, which exposes only `handle_completion`.
 Plan and replan completion now live in `plugins/planning_completion.py` and are
-registered directly by application composition. Their old core handlers are
-thin Engine scheduling adapters; the former replan copy remains only a
-parameterized compatibility subclass.
+registered directly by application composition.
 Worker-produced tool observations use the small ToolCompletionPlugin;
 application composition no longer imports the legacy ToolMethodHandler or its
 in-process MCP/tool execution machinery. A multistep runtime test proves that
@@ -291,11 +287,9 @@ protected failure report through its own Candidate actor and records the parent
 as `failed` even if report publication is rejected. The application no longer
 imports FailMethodHandler, and `/fail` can no longer leave a processed child
 with a non-terminal, unsatisfied parent.
-Production completion projection no longer constructs RuntimeIngress or a
-FactReducer. MethodRuntime receives direct ingress only from the excluded legacy
-Engine or explicit compatibility tests; without one, direct Contract/Asset
-mutation fails and completion plugins must use their registered Candidate
-publisher.
+Production completion projection constructs neither RuntimeIngress nor a
+FactReducer. The former MethodRuntime has been deleted; completion plugins use
+their registered Candidate publisher.
 
 Planning fan-out is atomic at the semantic boundary. A child or scaffold
 rejection suppresses the entire proposed fan-out and creates explicit recovery
@@ -388,8 +382,8 @@ reputation, payment, or verifier-market semantics. `aig verify attest` uses a
 separate locally authorized verifier actor rather than the producing/root
 publication identity.
 
-The shipped package excludes the legacy in-process Engine and state serializer;
-their source remains temporarily for migration tests. The superseded startup
+The legacy in-process Engine, state serializer, Method runtime/registry/handlers,
+ContinuationManager, and context-overflow controller have been deleted. The superseded startup
 checker has been deleted: expired claims and recovery are derived directly from
 lease/runtime facts, without a second process-lifecycle trace state machine.
 The supported operational surface is the Store/claim/submission path.
@@ -420,23 +414,14 @@ standalone continuation/recovery plugins use identity-neutral Candidate
 publishers and explicit plugin actor keys. Plugins receive no trusted Store
 mutation handle.
 
-The current source tree still contains plan, replan, retry, recovery, fail, and
-tool Method handlers. They create explicit child Contracts rather than hidden
-agent state, but they remain feature-specific runtime code and are part of the
-0.5 refactor debt. The tested containment compiler is now physically owned by
+The tested containment compiler is physically owned by
 `plugins/task_semantics.py` along with delegation and continuation projection.
 `core.methods` is a thin
 source-compatibility export, not a production semantics owner.
-Recovery task projection has moved to `plugins/recovery.py`; the old recovery
-handler module is now a thin source-compatibility adapter, and shipped runtime
-code no longer imports the handler directory.
-The 0.5.0 wheel and sdist exclude the legacy Engine, context-overflow
-controller, ContinuationManager, MethodRuntime/registry/handlers,
-RuntimeIngress, and state serializer.
-They remain repository migration fixtures only; every module present in the
-wheel is importable without them.
-The remaining compatibility handlers are still source-visible, but the local
-LLM path and engine-backed inner execution now share the authenticated
+Recovery task projection lives in `plugins/recovery.py`. The 0.5.0 wheel and
+sdist still exclude RuntimeIngress while its remaining history/setup callers
+are migrated; every module present in the wheel is importable without it.
+The local LLM path and engine-backed inner execution share the authenticated
 WorkerHost protocol.
 
 Production completion projection is stateless. `TaskCompletionProjector`

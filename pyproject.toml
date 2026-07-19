@@ -37,26 +37,12 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/aigineering"]
 exclude = [
-    "src/aigineering/core/engine.py",
-    "src/aigineering/core/context_overflow.py",
-    "src/aigineering/core/method_handlers/**",
-    "src/aigineering/core/method_registry.py",
-    "src/aigineering/core/method_runtime.py",
-    "src/aigineering/core/continuation_manager.py",
     "src/aigineering/core/runtime_ingress.py",
-    "src/aigineering/core/state_serializer.py",
 ]
 
 [tool.hatch.build.targets.sdist]
 exclude = [
-    "src/aigineering/core/engine.py",
-    "src/aigineering/core/context_overflow.py",
-    "src/aigineering/core/method_handlers/**",
-    "src/aigineering/core/method_registry.py",
-    "src/aigineering/core/method_runtime.py",
-    "src/aigineering/core/continuation_manager.py",
     "src/aigineering/core/runtime_ingress.py",
-    "src/aigineering/core/state_serializer.py",
     "tests/**",
 ]
 

@@ -31,15 +31,17 @@ def test_design_truth_and_active_change_are_present():
 def test_legacy_runtime_files_stay_out_of_release_artifacts():
     project = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
 
+    assert "src/aigineering/core/runtime_ingress.py" in project
     for path in (
-        "src/aigineering/core/engine.py",
-        "src/aigineering/core/context_overflow.py",
-        "src/aigineering/core/method_handlers/**",
-        "src/aigineering/core/method_registry.py",
-        "src/aigineering/core/runtime_ingress.py",
-        "src/aigineering/core/state_serializer.py",
+        "engine.py",
+        "context_overflow.py",
+        "method_registry.py",
+        "method_runtime.py",
+        "continuation_manager.py",
+        "state_serializer.py",
     ):
-        assert path in project
+        assert not (ROOT / "src/aigineering/core" / path).exists()
+    assert not list((ROOT / "src/aigineering/core/method_handlers").glob("*.py"))
 
     assert "src/aigineering/core/startup_check.py" not in project
     assert not (ROOT / "src/aigineering/core/startup_check.py").exists()
@@ -442,9 +444,6 @@ def test_local_recovery_replay_publishes_contract_and_context_as_candidate():
     recovery = (ROOT / "src/aigineering/plugins/recovery.py").read_text(
         encoding="utf-8"
     )
-    compatibility = (
-        ROOT / "src/aigineering/core/method_handlers/recovery.py"
-    ).read_text(encoding="utf-8")
     identity = (ROOT / "src/aigineering/local_identity.py").read_text(encoding="utf-8")
 
     assert 'can_publish_candidates("recovery.publish.v1")' in recovery
@@ -453,8 +452,7 @@ def test_local_recovery_replay_publishes_contract_and_context_as_candidate():
     assert '"recovery.publish.v1"' in identity
     assert '"contract.publish.protected"' in identity
     assert '"asset.publish.protected"' in identity
-    assert "publish_task_effects" not in compatibility
-    assert len(compatibility.splitlines()) < 60
+    assert not (ROOT / "src/aigineering/core/method_handlers/recovery.py").exists()
 
 
 def test_http_worker_ingress_never_provisions_local_private_keys_or_direct_recovery():

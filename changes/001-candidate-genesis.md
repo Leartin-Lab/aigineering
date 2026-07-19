@@ -266,9 +266,10 @@ Implementation progress:
   and system-asset construction moved together into plugin-owned pure task
   semantics. Production plugins and worker adapters no longer import
   `core.methods`; that module is a small compatibility export only.
-- Complete: release artifacts exclude legacy Engine, RuntimeIngress,
-  MethodRegistry/handlers, context-overflow controller, and state serializer.
-  A built-wheel audit imports every shipped module after those exclusions.
+- Complete: legacy Engine, MethodRuntime/registry/handlers,
+  ContinuationManager, context-overflow controller, and state serializer are
+  physically deleted. RuntimeIngress remains release-excluded pending its final
+  history/setup migration. A built-wheel audit imports every shipped module.
 - Complete: production completion and recovery projection no longer imports
   ContinuationManager or MethodRuntime. A stateless TaskCompletionProjector
   reconstructs work from durable facts on each pass; both legacy lifecycle
@@ -367,13 +368,11 @@ Implementation progress:
 - Any domain, actor, key, content, or signature mismatch fails closed.
 - Candidate receipt is distinct from effect acceptance.
 - Runtime modules do not import a concrete Store adapter.
-- Legacy files excluded from the wheel remain excluded until deleted.
+- RuntimeIngress remains excluded until its final callers migrate.
 - Direct fact-writing call sites monotonically decrease; no new exceptions.
 
 ## Deletion ledger
 
-- `core/engine.py`, `core/state_serializer.py`
-- feature-specific Method runtime/registry/handlers after plugin migration
 - `RuntimeIngress.accept_asset` and `accept_contract` after Candidate adapters
   have no callers
 - deterministic provenance seal as an authorization mechanism (it may remain a
