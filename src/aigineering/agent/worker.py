@@ -2,18 +2,24 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+import json
 from typing import Protocol, runtime_checkable
 
 from aigineering.core.signing import Signer
 from aigineering.protocol.candidate import (
     ActorKey,
+    CandidateClaimBinding,
     CandidateProposal,
     GenesisManifest,
     create_candidate_proposal,
 )
-from aigineering.protocol.actions import parse_method_action
-from aigineering.protocol.effect_builders import worker_output_effect
+from aigineering.protocol.actions import (
+    ActionParseError,
+    parse_action,
+    parse_method_action,
+)
+from aigineering.protocol.effect_builders import claim_bound_output_effects
 from aigineering.protocol.envelope import CandidateEnvelope
 from aigineering.protocol.types import Asset, Candidate, Contract
 
@@ -72,26 +78,97 @@ class WorkerHost:
             )
         return candidate
 
-    def sign_envelope(self, envelope: CandidateEnvelope) -> CandidateProposal:
+    def sign_envelope(
+        self,
+        envelope: CandidateEnvelope,
+        *,
+        contract: Contract | None = None,
+        disclosed_assets: tuple[Asset, ...] = (),
+        allowance: int | None = None,
+    ) -> CandidateProposal:
         if envelope.worker_id != self.worker_id:
             raise ValueError("WorkerHost can sign only its own worker envelope")
+        if not envelope.raw_output.strip():
+            envelope = replace(
+                envelope,
+                raw_output='/fail {"reason":"worker produced no candidate output"}',
+                parsed_action={
+                    "type": "fail",
+                    "payload": {"reason": "worker produced no candidate output"},
+                },
+            )
+        elif not envelope.raw_output.lstrip().startswith("/"):
+            outputs: dict[str, str] = {}
+            for line in envelope.raw_output.splitlines():
+                name, separator, content = line.partition(":")
+                if separator and name.strip() and content.strip():
+                    outputs[name.strip()] = content.strip()
+            envelope = replace(
+                envelope,
+                raw_output="/exec "
+                + json.dumps({"outputs": outputs}, sort_keys=True, ensure_ascii=False),
+                parsed_action={"type": "exec", "outputs": outputs},
+            )
         envelope_candidate = Candidate(
             worker_id=envelope.worker_id,
             raw_output=envelope.raw_output,
             parsed_action=envelope.parsed_action,
             metadata=envelope.usage_metadata,
         )
-        if parse_method_action(envelope_candidate) is not None:
+        action = parse_method_action(envelope_candidate)
+        if action is not None and action.type in {"plan", "replan"}:
+            if contract is None or contract.id != envelope.contract_id:
+                raise ValueError("staged planning requires the claimed Contract")
+            from aigineering.plugins import (
+                PluginRequest,
+                StagedPlanningPlugin,
+                StagedReplanningPlugin,
+            )
+
+            plugin = (
+                StagedPlanningPlugin()
+                if action.type == "plan"
+                else StagedReplanningPlugin()
+            )
+            effects = plugin.propose(
+                PluginRequest(
+                    parent=contract,
+                    assets=tuple(disclosed_assets),
+                    allowed_input_names=frozenset(contract.inputs),
+                    allowance=contract.budget if allowance is None else allowance,
+                )
+            ).effects
+        elif action is not None:
             from aigineering.plugins import TaskDelegationPlugin
 
-            effect = TaskDelegationPlugin().propose(envelope)
+            effects = (TaskDelegationPlugin().propose(envelope),)
         else:
-            effect = worker_output_effect(envelope)
+            parsed_envelope = envelope
+            if envelope.parsed_action is None:
+                try:
+                    parsed = parse_action(envelope.raw_output)
+                except ActionParseError as exc:
+                    raise WorkerExecutionError("invalid_action", str(exc)) from exc
+                parsed_envelope = replace(
+                    envelope,
+                    parsed_action={
+                        "type": parsed.type,
+                        "outputs": dict(parsed.outputs),
+                    },
+                )
+            effects = claim_bound_output_effects(parsed_envelope)
+        binding = CandidateClaimBinding(
+            contract_id=envelope.contract_id,
+            claim_id=envelope.claim_id,
+            claim_epoch=envelope.claim_epoch,
+            package_id=envelope.package_id,
+        )
         return create_candidate_proposal(
             domain_id=self.genesis.id,
             actor_id=self.actor_key.actor_id,
             key_id=self.actor_key.key_id,
-            effects=(effect,),
+            effects=effects,
             signer=self.signer,
             idempotency_key=envelope.idempotency_key,
+            claim_binding=binding,
         )

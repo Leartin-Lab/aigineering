@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import time
 from typing import Optional
 
@@ -317,6 +318,18 @@ def _run_task_pool(
                             "--mock-preset must use contract_name=raw_output"
                         )
                     set_output(name, output)
+        elif worker_kind == "mock":
+            set_output = getattr(worker, "set_output", None)
+            if set_output is not None:
+                for contract in store.get_all_contracts():
+                    outputs = {
+                        name: f"Deterministic mock output for {contract.name}:{name}"
+                        for name in contract.outputs
+                    }
+                    set_output(
+                        contract.name,
+                        "/exec " + json.dumps({"outputs": outputs}, sort_keys=True),
+                    )
         host = ensure_local_worker_host(store, worker)
         deadline = time.monotonic() + wait_timeout
         candidate_publishers = ensure_local_runtime_publishers(store)

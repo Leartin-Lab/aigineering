@@ -107,7 +107,6 @@ def project_asset_proposal(
     receipt_id: str,
     context: EffectProjectionContext,
 ) -> EffectProjection:
-    del context
     value = effect.payload.get("asset")
     if not isinstance(value, Mapping):
         raise ValueError("asset.propose requires an object payload.asset")
@@ -121,11 +120,26 @@ def project_asset_proposal(
     is_method_result = name.startswith(METHOD_RESULT_PREFIXES)
     if is_method_result and not proposed_creator:
         raise ValueError("method-result asset.propose requires asset.created_by")
-    created_by = (
-        proposed_creator
-        if prefix is not None and proposed_creator
-        else candidate.actor_id
-    )
+    if candidate.claim_binding is not None:
+        contract = next(
+            (
+                item
+                for item in context.contracts
+                if item.id == candidate.claim_binding.contract_id
+            ),
+            None,
+        )
+        if contract is None or name not in contract.outputs:
+            raise ValueError("claim-bound Asset must use a declared Contract output")
+        if proposed_creator and proposed_creator != contract.id:
+            raise ValueError("claim-bound Asset created_by must equal its Contract")
+        created_by = contract.id
+    else:
+        created_by = (
+            proposed_creator
+            if prefix is not None and proposed_creator
+            else candidate.actor_id
+        )
     content_hash = hash_asset_content(name, content)
     asset = sign_asset(
         Asset(
@@ -410,19 +424,29 @@ def project_effect_batch(
     if len(groups) > 1:
         raise ValueError("one Candidate cannot mix different atomic_group values")
     effective_context = context or EffectProjectionContext()
+    claimed_parent = _validate_claim_bound_effects(
+        candidate, actor_capabilities, effective_context
+    )
     projections: list[tuple[CandidateEffect, EffectProjection]] = []
     for effect in candidate.effects:
         handler = BUILTIN_EFFECTS.get(effect.effect_type)
         if handler is None:
             raise ValueError(f"unsupported effect type {effect.effect_type!r}")
         required_capability, projector = handler
-        if required_capability not in actor_capabilities:
+        claim_delegated = claimed_parent is not None and effect.effect_type in {
+            "asset.propose",
+            "contract.declare",
+        }
+        if not claim_delegated and required_capability not in actor_capabilities:
             raise ValueError(f"actor lacks required capability {required_capability!r}")
         projection = projector(effect, candidate, receipt_id, effective_context)
         missing = tuple(
             capability
             for capability in projection.additional_capabilities
             if capability not in actor_capabilities
+            and not _claim_delegates_protected_capability(
+                claimed_parent, projection, capability
+            )
         )
         if missing:
             raise ValueError(f"actor lacks required capabilities {missing!r}")
@@ -436,6 +460,8 @@ def project_effect_batch(
     assets = tuple(
         asset for _, projection in projections for asset in projection.assets
     )
+    if claimed_parent is not None:
+        _validate_claim_bound_projection(claimed_parent, contracts, assets)
     targets = tuple(
         (effect.effect_type, projection.relation_target)
         for effect, projection in projections
@@ -454,3 +480,89 @@ def project_effect_batch(
             for name in projection.accepted_asset_names
         ),
     )
+
+
+def _validate_claim_bound_effects(
+    candidate: CandidateProposal,
+    actor_capabilities: tuple[str, ...],
+    context: EffectProjectionContext,
+) -> Contract | None:
+    binding = candidate.claim_binding
+    if binding is None:
+        return None
+    if "worker.submit" not in actor_capabilities:
+        raise ValueError("claim-bound Candidate actor lacks 'worker.submit'")
+    parent = next(
+        (
+            contract
+            for contract in context.contracts
+            if contract.id == binding.contract_id
+        ),
+        None,
+    )
+    if parent is None:
+        raise ValueError("claim-bound Candidate references an unknown Contract")
+    effect_types = {effect.effect_type for effect in candidate.effects}
+    if not effect_types <= {"asset.propose", "contract.declare"}:
+        raise ValueError("claim-bound Candidate contains an unsupported effect")
+    if len(effect_types) != 1:
+        raise ValueError(
+            "claim-bound Candidate cannot mix output and expansion effects"
+        )
+    return parent
+
+
+def _claim_delegates_protected_capability(
+    parent: Contract | None,
+    projection: EffectProjection,
+    capability: str,
+) -> bool:
+    if parent is None:
+        return False
+    if capability == "asset.publish.protected":
+        return all(
+            asset.name in parent.minting_authority for asset in projection.assets
+        )
+    if capability == "contract.publish.protected" and projection.contract is not None:
+        return all(
+            output in projection.contract.minting_authority
+            for output in projection.contract.outputs
+            if matched_reserved_prefix(output) is not None
+        )
+    return False
+
+
+def _validate_claim_bound_projection(
+    parent: Contract,
+    contracts: tuple[Contract, ...],
+    assets: tuple[Asset, ...],
+) -> None:
+    if assets:
+        if any(asset.created_by != parent.id for asset in assets):
+            raise ValueError("claim-bound output Asset has invalid Contract provenance")
+        if {asset.name for asset in assets} != set(parent.outputs):
+            raise ValueError(
+                "claim-bound output must satisfy exactly all declared outputs"
+            )
+        return
+    if not contracts:
+        raise ValueError("claim-bound expansion produced no Contracts")
+    available_inputs = set(parent.inputs)
+    for contract in contracts:
+        available_inputs.update(contract.outputs)
+    if sum(contract.budget for contract in contracts) > parent.budget:
+        raise ValueError("claim-bound expansion exceeds parent causal allowance")
+    for contract in contracts:
+        if contract.parent_id != parent.id:
+            raise ValueError("claim-bound child must reference the claimed parent")
+        if not set(contract.inputs) <= available_inputs:
+            raise ValueError("claim-bound child widens disclosed input scope")
+        if not set(contract.tool_scope) <= set(parent.tool_scope):
+            raise ValueError("claim-bound child widens tool scope")
+        if not set(contract.worker_pools) <= set(parent.worker_pools):
+            raise ValueError("claim-bound child widens worker pools")
+        non_plugin_labels = {
+            label for label in contract.labels if not label.startswith("plugin:")
+        }
+        if not non_plugin_labels <= set(parent.labels):
+            raise ValueError("claim-bound child widens parent labels")

@@ -157,11 +157,9 @@ class MemoryTraceStore:
         return list(self.entries)
 
     def get_reverse_lineage(self, asset_id: str) -> list[TraceEntry]:
-        results: list[TraceEntry] = []
-        for entry in self.entries:
-            if asset_id in entry.accepted_fragments:
-                results.append(entry)
-        return results
+        return [
+            entry for entry in self.entries if _entry_references_asset(entry, asset_id)
+        ]
 
 
 class JsonLTraceStore:
@@ -259,15 +257,30 @@ class JsonLTraceStore:
         return list(self._entries)
 
     def get_reverse_lineage(self, asset_id: str) -> list[TraceEntry]:
-        results: list[TraceEntry] = []
-        for entry in self._entries:
-            if asset_id in entry.accepted_fragments:
-                results.append(entry)
-        return results
+        return [
+            entry for entry in self._entries if _entry_references_asset(entry, asset_id)
+        ]
 
 
 # Backward compatibility: TraceStore alias points to MemoryTraceStore
 TraceStore = MemoryTraceStore
+
+
+def _entry_references_asset(entry: TraceEntry, asset_id: str) -> bool:
+    if asset_id in entry.accepted_fragments:
+        return True
+    if entry.parent_id == asset_id or entry.relation_target == asset_id:
+        return True
+    for fragment in entry.accepted_fragments:
+        if not isinstance(fragment, str) or not fragment.startswith("{"):
+            continue
+        try:
+            payload = json.loads(fragment)
+        except json.JSONDecodeError:
+            continue
+        if payload.get("relation_target") == asset_id:
+            return True
+    return False
 
 
 def trace_effective_payload(entry: TraceEntry) -> dict[str, object]:

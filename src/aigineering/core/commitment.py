@@ -1,8 +1,6 @@
 """Pure Candidate decision and transactional commitment boundary.
 
-Built-in effect projection is delegated to a closed registry. Unsupported or
-invalid effects are rejected as a whole and recorded visibly; there is no
-fallback to direct RuntimeIngress writes.
+Effect projection is delegated; invalid effects have no direct-write fallback.
 """
 
 from __future__ import annotations
@@ -12,6 +10,7 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 from aigineering.core.actor_facts import load_effective_actor_keys
+from aigineering.core.attempt_projection import close_claim_attempt
 from aigineering.core.acceptance import materialize_qualification_facts
 from aigineering.core.effect_projection import project_effect_batch
 from aigineering.core.projection_context import (
@@ -232,6 +231,7 @@ class CandidateCommitter:
             actor_keys=load_effective_actor_keys(self._store, genesis),
             projection_context=load_effect_projection_context(self._store),
         )
+        decision = close_claim_attempt(candidate, decision)
         if decision.assets:
             reducer_traces, reducer_records = reduce_asset_facts(
                 self._store,
@@ -260,6 +260,10 @@ class CandidateCommitter:
             trace_entries=list(decision.trace_entries),
             contracts=decision.contracts,
             runtime_records=decision.runtime_records,
+            claim_binding=candidate.claim_binding,
+            candidate_actor_id=candidate.actor_id,
+            candidate_key_id=candidate.key_id,
+            candidate_id=candidate.id,
         )
         if self._trace is not self._store:
             for entry in decision.trace_entries:

@@ -11,9 +11,9 @@ Aigineering is a zero-trust runtime for turning untrusted worker output into
 auditable facts. The runtime is asset-driven and append-oriented. A worker does
 not mutate shared state: it claims a Contract, receives a disclosure-bounded
 WorkerPackage, and submits a signed CandidateProposal containing one claim-bound
-`worker.output` or `task.delegate` envelope. Projection and authority checks
-decide which declared outputs may become Assets; delegation can only publish a
-contained follow-up task while the source claim is valid.
+effect batch. `/exec` becomes ordinary `asset.propose` effects; `/plan` and
+`/replan` become contained `contract.declare` effects. Projection and authority
+checks decide which declared outputs or child obligations may become facts.
 
 The 0.5 reference implementation is single-domain and SQLite-first. SQLite WAL,
 transactions, leases, and unique constraints provide the concurrency control;
@@ -27,12 +27,14 @@ the protocol does not rely on a process-local task lock.
    SQLite atomically records its authenticated request and claim before returning
    a WorkerPackage. Local WorkerHost coordination uses the same fenced Store
    operation without crossing a transport boundary.
-3. The worker signs raw output and claim metadata as one `worker.output` effect,
-   or signs an explicit method action as `task.delegate`.
-4. `submit_worker_candidate` authenticates the actor, capability, routing-key,
-   package, worker, claim, lease, epoch, and idempotency bindings.
-5. Pure projection parses the candidate and applies declared-output and
-   reserved-namespace authority rules.
+3. WorkerHost translates `/exec` into `asset.propose`; `/plan` or `/replan`
+   invokes the Store-free staged plugin and signs three `contract.declare`
+   effects. Other action adapters remain a compatibility slice.
+4. Candidate identity binds the Contract, package, claim, epoch and effects.
+   SQLite rechecks the registered actor key and live claim in the commit
+   transaction.
+5. Pure projection applies exact-output, protected-namespace and child
+   containment rules before any fact exists.
 6. SQLite atomically commits accepted Assets, rejection/acceptance TraceEntry
    records, idempotency state, runtime records, and the claim transition.
 7. RuntimeRecord replay reconstructs lifecycle projections. Trace is audit
@@ -49,11 +51,11 @@ without either progress or a visible failure.
 - Asset: immutable content with provenance metadata. Assets are runtime facts.
 - Contract: immutable declaration of inputs, outputs, activation, allowance,
   routing requirements, and authority.
-- CandidateEnvelope: immutable claim/package and raw-output payload nested
-  inside a worker Candidate; the internal WorkerHost compatibility path still
-  constructs it before signing is moved into the host.
+- CandidateEnvelope: Worker-adapter value used to normalize one raw action.
+  WorkerHost converts it to ordinary typed effects before signing.
 - CandidateProposal: actor-authenticated typed effects used by external
-  publishers and the external worker-submit protocol.
+  publishers and Workers; an optional `CandidateClaimBinding` canonically binds
+  pull execution to Contract/package/claim/epoch.
 - RuntimeRecord: versioned, content-addressed append-only event used for
   reconstruction.
 - TraceEntry: human- and machine-readable audit evidence for decisions.
@@ -214,20 +216,16 @@ process crash after physical Asset insertion but before Trace/RuntimeRecord
 insertion rolls back the entire Candidate; restart observes neither a partial
 fact nor a false receipt/terminal record.
 
-Claim-bound external worker submission does not depend on RuntimeIngress. The
-dedicated worker interpreter verifies the Candidate signature,
-`worker.submit` capability, worker-to-key registration, and signed idempotency
-binding before calling the same pure projection and Asset-fact reducer. SQLite
-rechecks routing-key and claim predicates while atomically committing receipt,
-output evidence, projection, lifecycle consequences, trace, idempotency, and
-claim transition. `worker.output` and `task.delegate` are deliberately
-unsupported by the generic effect committer, so `/candidates` cannot bypass
-claim/package fencing. A WorkerHost uses the TaskDelegationPlugin to select the
-delegation effect; signed method submissions cannot be reinterpreted from an
-ordinary output effect. The same Store-free plugin projects every supported
-delegation action (`plan`, `replan`, `tool`, `fail`, and `retry`) into its
-contained child Contract and optional activation-context Asset; the runtime
-transaction only commits that projection with the source claim transition.
+Claim-bound Worker submission now uses the generic commitment reducer for
+ordinary output and staged plan/replan effects. The signed Candidate carries an
+exact `CandidateClaimBinding`; SQLite rechecks routing-key, Contract, package,
+lease and epoch while atomically committing receipt, projected Facts, Trace,
+`attempt.closed`, terminal consequences and claim transition. A successful
+output attempt is `output_asserted`; planning is `expanded` and does not satisfy
+the root; an invalid contained expansion is `failed`. Exact replay after claim
+closure returns the same decision without duplicate facts. Tool/fail/retry
+still use the bounded `task.delegate` compatibility adapter pending their plugin
+cutover.
 The submission path no longer queries MethodRegistry to authorize delegation;
 the plugin owns the closed supported-action set and rejects unknown actions.
 MethodRegistry remains only in the completion compatibility layer while those
@@ -362,9 +360,14 @@ The supported operational surface is the Store/claim/submission path.
 The public `TaskPlugin` protocol is now Store-free: a plugin receives a frozen,
 disclosure-bounded `PluginRequest` (including an optional causal source task)
 and returns a `PluginProposal` containing
-ordinary Candidate effects plus visible containment notes. The first planning
-expansion plugin converts a structured plan Asset into one atomic fan-out of
-`contract.declare` effects, independently unit-testable before publication.
+ordinary Candidate effects plus visible containment notes.
+`StagedPlanningPlugin` and `StagedReplanningPlugin` publish draft,
+dependency-analysis and compile as three ordinary Contracts in one atomic
+Candidate group. Each stage has a distinct label, prompt schema, exact protected
+output and independent test oracle. Draft output activates dependency analysis;
+both intermediate facts activate compile. A completed compile result enters the
+deterministic planning completion projector, which publishes the contained
+business fan-out as another signed Candidate.
 The continuation plugin converts a completed method task into one ordinary
 follow-up `contract.declare` effect by the same rule.
 Publication still uses the identity-neutral Candidate publisher and a plugin
@@ -413,15 +416,15 @@ The completion consequence marker and its audit trace commit as one Store
 batch. Terminal consequence emission checks both immutable terminal facts and
 historical terminal traces, and commits a new terminal fact and trace together;
 a later satisfied child cannot change a failed parent into complete.
-New worker delegation commits `task.delegated` records, `task_delegated` trace,
-and a `task_delegated` response. Runtime projections, CLI views, and SQLite
-causal binding still read historical `method.scheduled`/`method_scheduled`
-facts, so an existing database reconstructs without rewriting its log.
+Plan/replan expansion commits `attempt.closed(outcome=expanded)` and an
+`expanded` audit event, not waiting or method-delegation state. Runtime
+projections and SQLite still read historical Method-named records for database
+compatibility while the remaining action adapters are removed.
 There is no persisted waiting/task-state row. `RuntimeProjection` derives one
 enabled boolean from terminal facts, output/input/activation satisfaction,
-budget, delegation facts, and the claim lease. An outstanding child is exposed
-as the derived blocker `delegation_pending`; CLI status is
-`blocked_delegation`.
+budget, attempt/delegation facts, and the claim lease. A staged root projects as
+`expanded` until descendant facts satisfy it; historical delegation tasks may
+still project as `blocked_delegation` during migration.
 Once a terminal fact exists, the blocker projection contains only that terminal
 explanation; historical claims or delegation facts do not appear as current
 work blockers.

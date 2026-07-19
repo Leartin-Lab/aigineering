@@ -118,11 +118,16 @@ Avoid these commands for normal agent delegation:
 - Labels select context/asset injection; labels do not grant business authority.
 - A claimed/submitted task must not be returned to an unclaimed state. Recovery
   or retry must create a new task.
+- `/plan` and `/replan` publish independently claimable draft, dependency, and
+  compile tasks. Treat an `expanded` root as unfinished, not successful or
+  waiting on an in-process call stack.
 - Parent task completion is based on declared output satisfaction, not on all
   child tasks finishing.
 - An independent-acceptance task is incomplete until `output.qualified` binds
   its declared slot to one exact task-produced Asset ID.
 - Remote claim and lease-renew requests are signed `worker.claim` and
   `worker.claim.renew` Candidates. Never send a self-reported `worker_id` body
-  or reuse one command Candidate; submission remains a signed `worker.output`
-  or `task.delegate` Candidate bound to the returned claim/package/epoch.
+  or reuse one command Candidate. Hosted `/exec` signs `asset.propose` effects;
+  staged plan/replan signs `contract.declare` effects. Both bind the returned
+  Contract/claim/package/epoch. Tool/fail/retry remain compatibility actions
+  until their plugin cutover is complete.

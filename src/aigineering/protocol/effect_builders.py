@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 from aigineering.protocol.candidate import ActorKey, CandidateEffect
@@ -185,6 +186,36 @@ def actor_rotation_effect(
 def worker_output_effect(envelope: CandidateEnvelope) -> CandidateEffect:
     """Wrap one claim-bound worker result in an authenticated Candidate effect."""
     return CandidateEffect("worker.output", {"envelope": envelope.to_dict()})
+
+
+def claim_bound_output_effects(
+    envelope: CandidateEnvelope,
+) -> tuple[CandidateEffect, ...]:
+    """Translate one parsed `/exec` assertion into ordinary Asset effects."""
+    parsed = envelope.parsed_action
+    if not isinstance(parsed, Mapping) or parsed.get("type") != "exec":
+        raise ValueError("claim-bound output effects require a parsed /exec action")
+    outputs = parsed.get("outputs")
+    if not isinstance(outputs, Mapping) or not outputs:
+        raise ValueError("claim-bound /exec requires non-empty outputs")
+    return tuple(
+        CandidateEffect(
+            "asset.propose",
+            {
+                "asset": {
+                    "content": content,
+                    "content_type": "text",
+                    "created_by": envelope.contract_id,
+                    "name": name,
+                    "origin": "worker",
+                    "promptable": True,
+                    "trust_tier": "observed",
+                }
+            },
+            atomic_group=f"output:{envelope.contract_id}",
+        )
+        for name, content in sorted(outputs.items())
+    )
 
 
 def task_delegation_effect(envelope: CandidateEnvelope) -> CandidateEffect:

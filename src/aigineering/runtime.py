@@ -35,7 +35,7 @@ from aigineering.core.submit import (
     submit_candidate,
     validate_submission_claim,
 )
-from aigineering.core.commitment import record_candidate_rejection
+from aigineering.core.commitment import CandidateCommitter, record_candidate_rejection
 from aigineering.core.worker_routing import is_eligible
 from aigineering.core.trace_manager import TraceManager
 from aigineering.core.trace import create_entry
@@ -290,7 +290,12 @@ def execute_claimed_package(
     )
     if isinstance(worker, WorkerHost):
         return submit_worker_proposal(
-            worker.sign_envelope(envelope),
+            worker.sign_envelope(
+                envelope,
+                contract=claimed.contract,
+                disclosed_assets=claimed.disclosed_assets
+                + claimed.method_context_assets,
+            ),
             store,
             trace_store=trace,
             candidate_publishers=candidate_publishers,
@@ -312,6 +317,37 @@ def submit_worker_proposal(
 ) -> dict:
     """Submit one WorkerHost-signed proposal, including transitional methods."""
     trace = trace_store if trace_store is not None else store
+    if proposal.claim_binding is not None and {
+        effect.effect_type for effect in proposal.effects
+    } <= {"asset.propose", "contract.declare"}:
+        try:
+            decision = CandidateCommitter(store, trace).commit(proposal)
+        except (sqlite3.Error, TypeError, ValueError) as exc:
+            record_candidate_rejection(proposal, str(exc), store, trace)
+            raise
+        terminal = any(
+            record.record_type == "lifecycle.terminal"
+            and record.payload.get("contract_id") == proposal.claim_binding.contract_id
+            and record.payload.get("terminal") == "complete"
+            for record in decision.runtime_records
+        )
+        if decision.contracts:
+            return {
+                "contract_id": proposal.claim_binding.contract_id,
+                "status": "task_delegated" if decision.accepted else "rejected",
+                "method": "staged_planning",
+                "child_contract_ids": [item.id for item in decision.contracts],
+                "complete": False,
+                "duplicate": False,
+            }
+        return {
+            "contract_id": proposal.claim_binding.contract_id,
+            "status": "accepted" if decision.accepted else "rejected",
+            "accepted": [asset.name for asset in decision.assets],
+            "rejected": [] if decision.accepted else ["candidate rejected"],
+            "complete": terminal,
+            "duplicate": False,
+        }
     envelope, authentication = authenticate_worker_candidate(proposal, store, trace)
     contract = store.get_contract(envelope.contract_id)
     if contract is None:
@@ -939,7 +975,12 @@ def process_task_completions(
         )
     }
     for contract in store.get_all_contracts():
-        if contract.origin != "system" or contract.parent_id is None:
+        if contract.parent_id is None:
+            continue
+        if contract.origin != "system" and not any(
+            label in {"plugin:plan.compile", "plugin:replan.compile"}
+            for label in contract.labels
+        ):
             continue
         entries = store.get_by_contract(contract.id)
         if not any(entry.event_type == "complete" for entry in entries):

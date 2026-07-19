@@ -154,10 +154,7 @@ def _run_demo(
     except ValueError as exc:
         raise click.ClickException(str(exc)) from exc
     if isinstance(worker, MockWorker):
-        raw_output = (
-            f"final_report: Report content for goal '{goal}'\n"
-            f"citation_summary: Citation summary for goal '{goal}'"
-        )
+        raw_output = f"final_report: Report content for goal '{goal}'"
         worker.set_output("build_report", raw_output)
 
     if save_config and worker_kind == "llm" and model:

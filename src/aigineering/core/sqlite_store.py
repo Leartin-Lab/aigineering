@@ -2313,8 +2313,53 @@ class SQLiteStore:
         contracts: tuple[Contract, ...] = (),
         reducer_callback: Callable[[], list[TraceEntry]] | None = None,
         runtime_records: tuple[RuntimeRecord, ...] = (),
+        claim_binding=None,
+        candidate_actor_id: str = "",
+        candidate_key_id: str = "",
+        candidate_id: str = "",
     ) -> None:
         with self._conn:
+            if claim_binding is not None:
+                if candidate_actor_id == "" or candidate_key_id == "":
+                    raise ValueError(
+                        "claim-bound commitment requires actor key binding"
+                    )
+                self._lock_worker_key_binding(candidate_actor_id, candidate_key_id)
+                existing_claim = self._conn.execute(
+                    "SELECT contract_id, worker_id, epoch, package_id, status, lease_until "
+                    "FROM worker_claims WHERE claim_id = ?",
+                    (claim_binding.claim_id,),
+                ).fetchone()
+                if existing_claim is None:
+                    raise sqlite3.IntegrityError(
+                        "claim-bound Candidate has unknown claim"
+                    )
+                if existing_claim["status"] == "submitted":
+                    replay = next(
+                        (
+                            record
+                            for _, record in self.scan_runtime_records(
+                                record_type="claim.submitted"
+                            )
+                            if record.payload.get("claim_id") == claim_binding.claim_id
+                            and record.payload.get("candidate_id") == candidate_id
+                        ),
+                        None,
+                    )
+                    if replay is not None:
+                        return
+                now = now_iso()
+                if (
+                    existing_claim["status"] != "active"
+                    or existing_claim["contract_id"] != claim_binding.contract_id
+                    or existing_claim["worker_id"] != candidate_actor_id
+                    or int(existing_claim["epoch"]) != claim_binding.claim_epoch
+                    or existing_claim["package_id"] != claim_binding.package_id
+                    or existing_claim["lease_until"] < now
+                ):
+                    raise sqlite3.IntegrityError(
+                        "active worker claim predicate failed during Candidate commit"
+                    )
             declarations = ((contract,) if contract is not None else ()) + tuple(
                 contracts
             )
@@ -2336,6 +2381,49 @@ class SQLiteStore:
                 self._insert_trace_entry(entry)
             for record in runtime_records:
                 self._insert_runtime_record(record)
+            if claim_binding is not None:
+                committed_at = now_iso()
+                cursor = self._conn.execute(
+                    "UPDATE worker_claims SET status = 'submitted', updated_at = ? "
+                    "WHERE claim_id = ? AND status = 'active' AND worker_id = ? "
+                    "AND contract_id = ? AND package_id = ? AND epoch = ? "
+                    "AND lease_until >= ?",
+                    (
+                        committed_at,
+                        claim_binding.claim_id,
+                        candidate_actor_id,
+                        claim_binding.contract_id,
+                        claim_binding.package_id,
+                        claim_binding.claim_epoch,
+                        committed_at,
+                    ),
+                )
+                if cursor.rowcount != 1:
+                    raise sqlite3.IntegrityError(
+                        "claim changed during Candidate commitment"
+                    )
+                decision_parents = [
+                    record.id
+                    for record in runtime_records
+                    if record.record_type == "candidate.committed"
+                ]
+                self._insert_runtime_record(
+                    create_runtime_record(
+                        "claim.submitted",
+                        {
+                            "candidate_id": candidate_id,
+                            "claim_id": claim_binding.claim_id,
+                            "contract_id": claim_binding.contract_id,
+                            "epoch": claim_binding.claim_epoch,
+                            "package_id": claim_binding.package_id,
+                            "worker_id": candidate_actor_id,
+                        },
+                        causal_parents=[
+                            self._claim_granted_record_id(claim_binding.claim_id)
+                        ]
+                        + decision_parents,
+                    )
+                )
             check_crash_point("after_trace_before_budget")
             check_crash_point("after_budget_before_complete")
 

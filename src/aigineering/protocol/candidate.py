@@ -19,6 +19,27 @@ CANDIDATE_PROTOCOL_VERSION = 1
 
 
 @dataclass(frozen=True)
+class CandidateClaimBinding:
+    """Exact claim/package fence for one pull-Worker Candidate."""
+
+    contract_id: str
+    claim_id: str
+    claim_epoch: int
+    package_id: str
+
+    def __post_init__(self) -> None:
+        for field_name in ("contract_id", "claim_id", "package_id"):
+            if not getattr(self, field_name):
+                raise ValueError(
+                    f"CandidateClaimBinding.{field_name} must not be empty"
+                )
+        if self.claim_epoch < 1:
+            raise ValueError("CandidateClaimBinding.claim_epoch must be positive")
+        if not self.package_id.startswith("pkg:"):
+            raise ValueError("CandidateClaimBinding.package_id must start with 'pkg:'")
+
+
+@dataclass(frozen=True)
 class ActorKey:
     """One actor key authorized by a Genesis manifest."""
 
@@ -174,6 +195,7 @@ class CandidateProposal:
     effects: tuple[CandidateEffect, ...]
     causal_parents: tuple[str, ...] = field(default_factory=tuple)
     idempotency_key: str = ""
+    claim_binding: CandidateClaimBinding | None = None
     protocol_version: int = CANDIDATE_PROTOCOL_VERSION
 
     def __post_init__(self) -> None:
@@ -188,7 +210,7 @@ class CandidateProposal:
 
 def candidate_effective_payload(candidate: CandidateProposal) -> dict[str, Any]:
     """Return the bytes-bound payload, excluding ID and signature."""
-    return {
+    payload = {
         "actor_id": candidate.actor_id,
         "causal_parents": list(candidate.causal_parents),
         "domain_id": candidate.domain_id,
@@ -205,6 +227,14 @@ def candidate_effective_payload(candidate: CandidateProposal) -> dict[str, Any]:
         "protocol_version": candidate.protocol_version,
         "signature_kind": candidate.signature_kind,
     }
+    if candidate.claim_binding is not None:
+        payload["claim_binding"] = {
+            "claim_epoch": candidate.claim_binding.claim_epoch,
+            "claim_id": candidate.claim_binding.claim_id,
+            "contract_id": candidate.claim_binding.contract_id,
+            "package_id": candidate.claim_binding.package_id,
+        }
+    return payload
 
 
 def candidate_signing_bytes(candidate: CandidateProposal) -> bytes:
@@ -228,6 +258,17 @@ def candidate_proposal_from_dict(data: Mapping[str, Any]) -> CandidateProposal:
         )
         for item in data.get("effects", ())
     )
+    raw_claim = data.get("claim_binding")
+    claim_binding = None
+    if raw_claim is not None:
+        if not isinstance(raw_claim, Mapping):
+            raise ValueError("Candidate claim_binding must be an object")
+        claim_binding = CandidateClaimBinding(
+            contract_id=str(raw_claim.get("contract_id", "")),
+            claim_id=str(raw_claim.get("claim_id", "")),
+            claim_epoch=int(raw_claim.get("claim_epoch", 0)),
+            package_id=str(raw_claim.get("package_id", "")),
+        )
     return CandidateProposal(
         id=str(data.get("id", "")),
         domain_id=str(data.get("domain_id", "")),
@@ -238,6 +279,7 @@ def candidate_proposal_from_dict(data: Mapping[str, Any]) -> CandidateProposal:
         effects=effects,
         causal_parents=tuple(data.get("causal_parents", ())),
         idempotency_key=str(data.get("idempotency_key", "")),
+        claim_binding=claim_binding,
         protocol_version=int(data.get("protocol_version", CANDIDATE_PROTOCOL_VERSION)),
     )
 
@@ -251,6 +293,7 @@ def create_candidate_proposal(
     signer: Signer,
     causal_parents: tuple[str, ...] | list[str] = (),
     idempotency_key: str = "",
+    claim_binding: CandidateClaimBinding | None = None,
 ) -> CandidateProposal:
     provisional = CandidateProposal(
         id="pending",
@@ -262,6 +305,7 @@ def create_candidate_proposal(
         effects=tuple(effects),
         causal_parents=tuple(causal_parents),
         idempotency_key=idempotency_key,
+        claim_binding=claim_binding,
     )
     candidate_id = "candidate:v1:" + compute_content_hash(
         canonical_json(candidate_effective_payload(provisional))

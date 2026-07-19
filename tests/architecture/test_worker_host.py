@@ -12,10 +12,12 @@ from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.core.worker_routing import WorkerRegistration
 from aigineering.protocol.candidate import (
     ActorKey,
+    CandidateClaimBinding,
     create_candidate_proposal,
     create_genesis_manifest,
 )
 from aigineering.protocol.effect_builders import (
+    contract_declaration_effect,
     worker_output_effect,
     worker_registration_effect,
 )
@@ -63,7 +65,7 @@ def _runtime(output: str):
         "inputs": (),
         "outputs": ("result",),
         "activation": "",
-        "budget": 2,
+        "budget": 3,
         "tool_scope": (),
         "labels": (),
         "origin": "human",
@@ -86,11 +88,122 @@ def test_worker_host_signs_ordinary_claim_submission():
         record
         for _, record in store.scan_runtime_records(record_type="candidate.received")
         if record.payload.get("actor_id") == host.worker_id
-        and record.payload.get("effect_types") == ("worker.output",)
+        and record.payload.get("effect_types") == ("asset.propose",)
     )
-    output = store.scan_runtime_records(record_type="worker.output.received")[-1][1]
+    output = next(
+        record
+        for _, record in store.scan_runtime_records(record_type="asset.committed")
+        if record.payload["asset"]["name"] == "result"
+    )
     assert output.causal_parents == (receipt.id,)
     assert store.get_claim(contract.id)["status"] == "submitted"
+
+
+def test_worker_host_plan_publishes_three_claim_bound_stage_contracts():
+    store, contract, host = _runtime('/plan {"reason":"split review"}')
+    claimed = claim_next_package(store, worker_id=host.worker_id)
+    assert claimed is not None
+
+    result = execute_claimed_package(claimed, host, store)
+
+    assert result["status"] == "task_delegated"
+    assert len(result["child_contract_ids"]) == 3
+    children = [
+        item for item in store.get_all_contracts() if item.parent_id == contract.id
+    ]
+    assert {
+        label
+        for item in children
+        for label in item.labels
+        if label.startswith("plugin:")
+    } == {
+        "plugin:plan.draft",
+        "plugin:plan.dependencies",
+        "plugin:plan.compile",
+    }
+    assert store.scan_runtime_records(record_type="task.delegated") == []
+    assert store.get_claim(contract.id)["status"] == "submitted"
+    assert not any(
+        record.payload.get("contract_id") == contract.id
+        for _, record in store.scan_runtime_records(record_type="lifecycle.terminal")
+    )
+    attempt = store.scan_runtime_records(record_type="attempt.closed")[-1][1]
+    assert attempt.payload["outcome"] == "expanded"
+
+
+def test_claim_bound_candidate_replay_is_idempotent_after_claim_closes():
+    store, contract, host = _runtime('/exec {"result":"done"}')
+    claimed = claim_next_package(store, worker_id=host.worker_id)
+    assert claimed is not None
+    envelope = CandidateEnvelope(
+        contract_id=contract.id,
+        worker_id=host.worker_id,
+        raw_output='/exec {"result":"done"}',
+        package_id=claimed.package.package_id,
+        claim_id=claimed.package.claim_id,
+        claim_epoch=claimed.package.claim_epoch,
+        idempotency_key=f"run-{claimed.package.package_id}",
+    )
+    proposal = host.sign_envelope(envelope, contract=contract)
+
+    first = submit_worker_proposal(proposal, store)
+    second = submit_worker_proposal(proposal, store)
+
+    assert first["status"] == second["status"] == "accepted"
+    committed = [
+        record
+        for _, record in store.scan_runtime_records(record_type="candidate.committed")
+        if record.payload.get("candidate_id") == proposal.id
+    ]
+    assert len(committed) == 1
+
+
+def test_claim_bound_expansion_cannot_widen_parent_tool_scope():
+    store, contract, host = _runtime('/plan {"reason":"split"}')
+    claimed = claim_next_package(store, worker_id=host.worker_id)
+    assert claimed is not None
+    fields = {
+        "name": "malicious_child",
+        "description": "widen tool scope",
+        "inputs": (),
+        "outputs": ("child_result",),
+        "activation": "",
+        "budget": 1,
+        "tool_scope": ("undelegated_tool",),
+        "labels": (),
+        "origin": "plugin",
+        "parent_id": contract.id,
+    }
+    child = Contract(id=hash_contract_v3(**fields), **fields)
+    binding = CandidateClaimBinding(
+        contract.id,
+        claimed.package.claim_id,
+        claimed.package.claim_epoch,
+        claimed.package.package_id,
+    )
+    proposal = create_candidate_proposal(
+        domain_id=host.genesis.id,
+        actor_id=host.actor_key.actor_id,
+        key_id=host.actor_key.key_id,
+        effects=(contract_declaration_effect(child),),
+        signer=host.signer,
+        idempotency_key=f"run-{claimed.package.package_id}",
+        claim_binding=binding,
+    )
+
+    result = submit_worker_proposal(proposal, store)
+
+    assert result["status"] == "rejected"
+    assert store.get_contract(child.id) is None
+    assert store.get_claim(contract.id)["status"] == "submitted"
+    attempt = store.scan_runtime_records(record_type="attempt.closed")[-1][1]
+    assert attempt.payload["outcome"] == "failed"
+    terminal = store.scan_runtime_records(record_type="lifecycle.terminal")[-1][1]
+    assert terminal.payload == {
+        "contract_id": contract.id,
+        "reason": "claim-bound Candidate was rejected",
+        "terminal": "failed",
+    }
 
 
 def test_worker_host_delegates_without_method_handler_authorization():

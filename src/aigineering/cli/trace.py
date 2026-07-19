@@ -631,12 +631,21 @@ def _resolve_asset_by_name(
     """Return (id, name) for the first projection entry whose
     accepted_asset_names contains *asset_name*."""
     for entry in trace_store.get_all():
-        if entry.event_type == "projection":
+        if entry.event_type in {"projection", "candidate_committed"}:
             names = entry.accepted_asset_names or []
             frags = entry.accepted_fragments or []
             for i, name in enumerate(names):
                 if name == asset_name and i < len(frags):
-                    return frags[i], name
+                    fragment = frags[i]
+                    if entry.event_type == "candidate_committed":
+                        try:
+                            payload = json.loads(fragment)
+                        except (TypeError, json.JSONDecodeError):
+                            continue
+                        target = payload.get("relation_target")
+                        if isinstance(target, str) and target:
+                            return target, name
+                    return fragment, name
     return None, None
 
 

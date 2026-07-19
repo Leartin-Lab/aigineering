@@ -35,7 +35,11 @@ class PlanningCompletionPlugin:
         contract: Contract,
         method_assets: list[Asset],
     ) -> bool:
-        if method_payload(contract).get("method") != self.action_type:
+        stage_label = f"plugin:{self.action_type}.compile"
+        if (
+            method_payload(contract).get("method") != self.action_type
+            and stage_label not in contract.labels
+        ):
             return False
 
         parent_id = contract.parent_id

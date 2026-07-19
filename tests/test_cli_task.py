@@ -131,7 +131,61 @@ def test_run_once_projects_completed_plan_before_claiming_expanded_child():
             ],
         )
         assert delegated.exit_code == 1, delegated.output
-        assert json.loads(delegated.output)["status"] == "blocked_delegation"
+        assert json.loads(delegated.output)["status"] == "expanded"
+
+        store = SQLiteStore(".aig/store.db")
+        stages = {
+            next(label for label in item.labels if label.startswith("plugin:")): item
+            for item in store.get_all_contracts()
+            if item.parent_id == contract_id
+        }
+        assert set(stages) == {
+            "plugin:plan.draft",
+            "plugin:plan.dependencies",
+            "plugin:plan.compile",
+        }
+
+        for label, content in (
+            (
+                "plugin:plan.draft",
+                json.dumps(
+                    {
+                        "goals": ["produce report"],
+                        "evidence_needs": [],
+                        "uncertainties": [],
+                        "proposed_steps": ["finish"],
+                    }
+                ),
+            ),
+            (
+                "plugin:plan.dependencies",
+                json.dumps(
+                    {
+                        "producers": [],
+                        "consumers": [],
+                        "missing_inputs": [],
+                        "cycles": [],
+                    }
+                ),
+            ),
+        ):
+            stage = stages[label]
+            action = "/exec " + json.dumps(
+                {"outputs": {stage.outputs[0]: content}}, sort_keys=True
+            )
+            stage_run = runner.invoke(
+                cli,
+                [
+                    "run",
+                    "--once",
+                    "--worker",
+                    "mock",
+                    "--mock-preset",
+                    f"{stage.name}={action}",
+                    "--json",
+                ],
+            )
+            assert stage_run.exit_code == 0, stage_run.output
 
         plan_content = json.dumps(
             {
@@ -149,9 +203,9 @@ def test_run_once_projects_completed_plan_before_claiming_expanded_child():
             },
             sort_keys=True,
         )
-        plan_output = (
-            f'/exec {{"outputs": {{"_plan_result_{contract_id}": '
-            f"{json.dumps(plan_content)}}}}}"
+        compile_stage = stages["plugin:plan.compile"]
+        plan_output = "/exec " + json.dumps(
+            {"outputs": {compile_stage.outputs[0]: plan_content}}, sort_keys=True
         )
         planned = runner.invoke(
             cli,
@@ -161,7 +215,7 @@ def test_run_once_projects_completed_plan_before_claiming_expanded_child():
                 "--worker",
                 "mock",
                 "--mock-preset",
-                f"root.plan={plan_output}",
+                f"{compile_stage.name}={plan_output}",
                 "--json",
             ],
         )
@@ -188,7 +242,7 @@ def test_run_once_projects_completed_plan_before_claiming_expanded_child():
         assert json.loads(root.output)["status"] == "completed"
 
 
-def test_parent_status_projects_budget_risk_from_delegated_descendant():
+def test_parent_status_projects_staged_descendants_without_wait_state():
     runner = CliRunner()
     with runner.isolated_filesystem():
         created = runner.invoke(
@@ -208,55 +262,19 @@ def test_parent_status_projects_budget_risk_from_delegated_descendant():
                 "--json",
             ],
         )
-        plan_content = json.dumps(
-            {
-                "contracts": [
-                    {
-                        "name": "child",
-                        "inputs": [],
-                        "outputs": ["report"],
-                        "activation": "",
-                        "budget": 1,
-                        "tool_scope": [],
-                        "labels": [],
-                    }
-                ]
-            },
-            sort_keys=True,
-        )
-        plan_output = (
-            f'/exec {{"outputs": {{"_plan_result_{contract_id}": '
-            f"{json.dumps(plan_content)}}}}}"
-        )
-        runner.invoke(
-            cli,
-            [
-                "run",
-                "--once",
-                "--worker",
-                "mock",
-                "--mock-preset",
-                f"root.plan={plan_output}",
-                "--json",
-            ],
-        )
-        delegated = runner.invoke(
-            cli,
-            [
-                "run",
-                "--once",
-                "--worker",
-                "mock",
-                "--mock-preset",
-                'child=/plan {"reason":"missing evidence"}',
-                "--json",
-            ],
-        )
-        assert json.loads(delegated.output)["status"] == "blocked_delegation"
-
         root = runner.invoke(cli, ["task", "status", contract_id, "--json"])
-        risks = json.loads(root.output)["silent_failure_risks"]
-        assert any(risk["code"] == "descendant_budget_exhausted" for risk in risks)
+        payload = json.loads(root.output)
+        assert payload["status"] == "expanded"
+        assert payload["terminal"] is False
+        store = SQLiteStore(".aig/store.db")
+        children = [
+            item for item in store.get_all_contracts() if item.parent_id == contract_id
+        ]
+        assert len(children) == 3
+        assert not any(
+            entry.event_type in {"task_delegated", "method_scheduled"}
+            for entry in store.get_by_contract(contract_id)
+        )
 
 
 def test_run_once_provider_failure_is_json_and_has_no_traceback(monkeypatch):
@@ -338,7 +356,7 @@ def test_task_wait_and_audit_json_after_run():
         assert len(audit_data["trace"]) > 0
 
 
-def test_run_task_uses_engine_method_path_for_plan():
+def test_plan_attempt_is_expanded_without_method_lifecycle():
     runner = CliRunner()
     with runner.isolated_filesystem():
         create = runner.invoke(
@@ -355,51 +373,30 @@ def test_run_task_uses_engine_method_path_for_plan():
         )
         assert create.exit_code == 0, create.output
         contract_id = json.loads(create.output)["contract_id"]
-        empty_plan = json.dumps({"contracts": []}, sort_keys=True)
-        plan_result = (
-            f'/exec {{"outputs": {{"_plan_result_{contract_id}": '
-            f"{json.dumps(empty_plan)}}}}}"
-        )
 
         result = runner.invoke(
             cli,
             [
                 "run",
-                "--task",
-                contract_id,
+                "--once",
                 "--worker",
                 "mock",
                 "--mock-preset",
                 'root=/plan {"reason": "need context"}',
-                "--mock-preset",
-                f"root.plan={plan_result}",
-                "--wait-timeout",
-                "1",
                 "--json",
             ],
         )
 
         assert result.exit_code == 1, result.output
-        assert json.loads(result.output)["status"] == "blocked_delegation"
+        assert json.loads(result.output)["status"] == "expanded"
         audit = runner.invoke(cli, ["task", "audit", contract_id, "--json"])
         data = json.loads(audit.output)
         event_types = {entry["event_type"] for entry in data["trace"]}
-        assert "task_delegated" in event_types
-        store_audit = runner.invoke(cli, ["task", "audit", contract_id, "--json"])
-        trace = json.loads(store_audit.output)["trace"]
-        child_id = next(
-            entry["relation_target"]
-            for entry in trace
-            if entry["event_type"] == "task_delegated"
-        )
-        child_audit = runner.invoke(cli, ["task", "audit", child_id, "--json"])
-        child_data = json.loads(child_audit.output)
-        child_events = {entry["event_type"] for entry in child_data["trace"]}
-        assert "projection" in child_events
-        assert child_data["task"]["status"] == "completed"
+        assert "expanded" in event_types
+        assert "task_delegated" not in event_types
 
 
-def test_run_task_rejected_output_schedules_recovery():
+def test_run_task_rejected_output_closes_failed_without_implicit_recovery():
     runner = CliRunner()
     with runner.isolated_filesystem():
         create = runner.invoke(
@@ -438,8 +435,8 @@ def test_run_task_rejected_output_schedules_recovery():
         audit = runner.invoke(cli, ["task", "audit", contract_id, "--json"])
         data = json.loads(audit.output)
         event_types = {entry["event_type"] for entry in data["trace"]}
-        assert "recovery_scheduled" in event_types
-        assert data["task"]["recovery_count"] == 1
+        assert "failed" in event_types
+        assert data["task"]["recovery_count"] == 0
 
 
 def test_task_status_reports_submitted_without_recovery_risk():

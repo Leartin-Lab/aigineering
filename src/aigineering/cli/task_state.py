@@ -24,7 +24,8 @@ def project_task_status(contract: Contract, store) -> dict:
     store = require_operational_store(store)
     entries = _trace_entries(store, contract.id)
     view = RuntimeProjection(store, store).contract_view(contract)
-    terminal = _latest_terminal(entries)
+    terminal = _latest_terminal(entries) or _runtime_terminal(store, contract.id)
+    attempt_outcome = _latest_attempt_outcome(store, contract.id)
     output_assets = _output_assets(contract, store)
     rejections = [
         fragment
@@ -45,7 +46,9 @@ def project_task_status(contract: Contract, store) -> dict:
         if entry.usage_metadata is not None
     ]
 
-    status = _status_from_entries(contract, store, entries, terminal, view)
+    status = _status_from_entries(
+        contract, store, entries, terminal, view, attempt_outcome
+    )
     risks = _silent_failure_risks(contract, store, entries, status)
     if status not in {"completed", "failed", "cancelled", "unreachable"}:
         risks.extend(_descendant_failure_risks(contract, store))
@@ -82,6 +85,26 @@ def _latest_terminal(entries: list[TraceEntry]) -> str:
     return terminal
 
 
+def _runtime_terminal(store, contract_id: str) -> str:
+    terminals = {
+        str(record.payload["terminal"])
+        for _, record in store.scan_runtime_records(record_type="lifecycle.terminal")
+        if record.payload.get("contract_id") == contract_id
+    }
+    if len(terminals) > 1:
+        return "stalled"
+    return next(iter(terminals), "")
+
+
+def _latest_attempt_outcome(store, contract_id: str) -> str:
+    outcomes = [
+        str(record.payload.get("outcome", ""))
+        for _, record in store.scan_runtime_records(record_type="attempt.closed")
+        if record.payload.get("contract_id") == contract_id
+    ]
+    return outcomes[-1] if outcomes else ""
+
+
 def _output_assets(contract: Contract, store) -> dict[str, str]:
     outputs: dict[str, str] = {}
     for name in contract.outputs:
@@ -97,15 +120,20 @@ def _status_from_entries(
     entries: list[TraceEntry],
     terminal: str,
     view: ContractView,
+    attempt_outcome: str,
 ) -> str:
     if view.terminal == "conflict":
         return "stalled"
+    if view.terminal is not None:
+        return "completed" if view.terminal == "complete" else view.terminal
     if terminal == "complete":
         return "completed"
     if terminal:
         return terminal
     if _all_outputs_satisfied(contract, store):
         return "completed"
+    if attempt_outcome == "expanded":
+        return "expanded"
     if any(entry.event_type == "projection" for entry in entries):
         return "submitted"
     suspended = False
@@ -223,7 +251,14 @@ def _descendant_failure_risks(contract: Contract, store) -> list[dict[str, str]]
             entries = _trace_entries(store, child.id)
             view = projection.contract_view(child)
             terminal = _latest_terminal(entries)
-            status = _status_from_entries(child, store, entries, terminal, view)
+            status = _status_from_entries(
+                child,
+                store,
+                entries,
+                terminal,
+                view,
+                _latest_attempt_outcome(store, child.id),
+            )
             if status in {"failed", "cancelled", "unreachable", "stalled"}:
                 risks.append(
                     {

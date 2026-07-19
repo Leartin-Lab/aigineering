@@ -323,8 +323,17 @@ class MemoryStore(_ProjectionIndexMixin):
         contracts: tuple[Contract, ...] = (),
         reducer_callback=None,
         runtime_records: tuple[RuntimeRecord, ...] = (),
+        claim_binding=None,
+        candidate_actor_id: str = "",
+        candidate_key_id: str = "",
+        candidate_id: str = "",
     ) -> None:
         """Apply one ingress batch with rollback-equivalent memory semantics."""
+        if claim_binding is not None:
+            raise TypeError(
+                "MemoryStore does not implement transactional claim fencing"
+            )
+        del candidate_actor_id, candidate_key_id, candidate_id
         del trace_entries
         for record in runtime_records:
             validate_runtime_record(record)

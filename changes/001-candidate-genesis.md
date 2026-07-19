@@ -323,11 +323,14 @@ Implementation progress:
   concurrent-verifier regressions are executable gates. v0.5 intentionally
   fixes the required attestation count at one and does not implement a quorum
   market.
-- Implementing: the staged planning constructor emits one atomic group containing
+- Complete for the hosted plan/replan path: the staged planning constructor emits one atomic group containing
   ordinary draft, dependency-analysis, and compile Contracts. Each stage has a
   distinct label, output-schema prompt, protected output, and independent unit
-  oracle. Claim-bound publication and causal reservation are still pending, so
-  the one-shot compatibility planner remains the executable path for now.
+  oracle. Candidate identity binds Contract/claim/package/epoch; SQLite commits
+  stage declarations, `attempt.closed(expanded)`, audit, and claim transition
+  atomically. Draft and dependency facts activate compile, whose accepted result
+  publishes business children through the signed planning publisher. Immutable
+  causal reservation remains pending.
 - Pending: replace the remaining Method-named completion types with neutral
   task/plugin names, then delete the raw execution compatibility surface and
   source-only handlers.

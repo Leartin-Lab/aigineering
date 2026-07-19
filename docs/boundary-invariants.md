@@ -42,13 +42,13 @@ authority rejection, or protected-name collision — is recorded with a
 
 ## 6. Delegated behavior is ordinary task publication
 
-Planning, replanning, retry, and tool execution enter the system as method
-compatibility actions but publish ordinary Contracts through Store-free
-plugins and signed Candidates. Results and follow-up work are Assets and new
-Contracts; no production scheduler depends on an Engine-owned
-waiting/suspended/resume state. Production completion projection reconstructs
-from durable facts and does not import `MethodRuntime` or
-`ContinuationManager`.
+Planning and replanning enter through Store-free staged plugins and one
+claim-bound signed Candidate containing ordinary Contract declarations. Draft,
+dependency analysis, and compile are independently claimable tasks. The source
+attempt closes as `expanded`; the root remains unsatisfied until descendant
+facts satisfy its outputs. Retry, fail, and tool still use a bounded
+compatibility action while their plugins are cut over. No production scheduler
+depends on Engine-owned waiting/suspended/resume state.
 
 ## 7. Worker pull submission is claim-bound
 
@@ -60,6 +60,11 @@ renewal and rejects replay of a committed command. Submission validates the
 claim, worker identity, fencing epoch, lease, and package binding before
 projection. A failed invocation or expired lease becomes a durable terminal
 fact and schedules a new recovery Contract.
+
+Hosted `/exec` signs ordinary Asset effects; staged plan/replan signs ordinary
+Contract effects. The same SQLite transaction rechecks the binding, commits
+facts, and records an immutable attempt outcome (`output_asserted`, `expanded`,
+or `failed`).
 
 ## 8. Commit is transactional on the SQLite path
 
