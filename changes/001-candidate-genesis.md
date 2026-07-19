@@ -353,6 +353,9 @@ Implementation progress:
 - Complete: the 592-line `core/submit.py` raw-envelope commitment owner was
   deleted. Candidate crash/fencing tests now target `CandidateCommitter`, and
   recovery migration tests replay immutable historical facts directly.
+- Complete: SQLite `commit_candidate_submission` and `commit_method_submission`
+  specialized transactions were deleted. Modern 100-step chain and 100-task
+  stress oracles commit through authenticated WorkerHost Candidates.
 
 ## Required architecture tests
 

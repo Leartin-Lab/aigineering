@@ -271,6 +271,9 @@ an unsigned-adapter failure; only an authenticated WorkerHost may submit work.
 The former `core/submit.py` envelope committer has also been deleted; all
 supported WorkerHost, CLI, and HTTP submissions now have one commitment owner,
 `CandidateCommitter`.
+SQLite likewise exposes one generic `commit_ingress_batch` Candidate transaction;
+the former candidate-envelope and method-specialized Store commit operations are
+not part of the runtime protocol.
 The application uses the minimal public `CompletionPlugin`/
 `CompletionRegistry` protocol, which exposes only `handle_completion`; the old
 MethodRegistry is confined to the source-only legacy Engine compatibility path.

@@ -310,6 +310,17 @@ def test_worker_submission_uses_shared_fact_reduction_without_runtime_ingress():
     assert "RuntimeIngress" not in worker_cli
 
 
+def test_store_has_one_generic_candidate_commit_transaction():
+    store = (ROOT / "src/aigineering/core/sqlite_store.py").read_text(encoding="utf-8")
+    protocol = (ROOT / "src/aigineering/core/store.py").read_text(encoding="utf-8")
+
+    assert "def commit_ingress_batch" in store
+    assert "def commit_candidate_submission" not in store
+    assert "def commit_method_submission" not in store
+    assert "commit_candidate_submission" not in protocol
+    assert "commit_method_submission" not in protocol
+
+
 def test_claim_bound_delegation_semantics_live_in_plugin_not_runtime_service():
     runtime = (ROOT / "src/aigineering/runtime.py").read_text(encoding="utf-8")
     worker = (ROOT / "src/aigineering/agent/worker.py").read_text(encoding="utf-8")
@@ -380,14 +391,12 @@ def test_new_expansion_avoids_delegation_facts_and_old_facts_remain_readable():
     projection = (ROOT / "src/aigineering/core/runtime_projection.py").read_text(
         encoding="utf-8"
     )
-    sqlite = (ROOT / "src/aigineering/core/sqlite_store.py").read_text(encoding="utf-8")
 
     assert 'create_runtime_record(\n        "task.delegated"' not in runtime
     assert '"status": "task_delegated"' in runtime
     assert 'CandidateEffect("task.delegate"' not in plugin
     assert '"task_delegated"' in projection
     assert '"method_scheduled"' in projection
-    assert '{"task.delegated", "method.scheduled"}' in sqlite
 
 
 def test_runtime_task_state_is_a_pure_boolean_projection():
