@@ -23,6 +23,7 @@ from aigineering.plugins.completion_projection import (
     TaskCompletionProjector,
 )
 from aigineering.plugins.recovery import schedule_projection_recovery
+from aigineering.plugins.task_semantics import method_payload
 from aigineering.core.runtime_projection import RuntimeProjection
 from aigineering.core.submit import (
     SubmitClaimError,
@@ -339,10 +340,15 @@ def submit_worker_proposal(
             for record in decision.runtime_records
         )
         if decision.contracts:
+            first = decision.contracts[0]
+            declared_method = str(method_payload(first).get("method", ""))
             return {
                 "contract_id": proposal.claim_binding.contract_id,
                 "status": "task_delegated" if decision.accepted else "rejected",
-                "method": "staged_planning",
+                "method": declared_method or "task_expansion",
+                "child_contract_id": (
+                    first.id if len(decision.contracts) == 1 else None
+                ),
                 "child_contract_ids": [item.id for item in decision.contracts],
                 "complete": False,
                 "duplicate": False,

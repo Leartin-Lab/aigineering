@@ -105,10 +105,7 @@ def test_each_plan_stage_has_distinct_label_schema_and_expected_output(
 
     assert label in contract.labels
     assert prompt_marker in contract_prompt(contract, [])
-    if index < 2:
-        assert contract.outputs == tuple(contract.minting_authority)
-    else:
-        assert contract.minting_authority == ()
+    assert contract.minting_authority == ()
     assert json.loads(contract.description)["stage"] in {
         "draft",
         "dependencies",

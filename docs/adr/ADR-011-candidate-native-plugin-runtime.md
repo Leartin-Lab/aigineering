@@ -70,6 +70,11 @@ Planning may use multiple explicit tasks—for example draft, dependency
 analysis, and structured publication—so each stage has independently testable
 inputs, outputs, authority, and acceptance evidence.
 
+Claim delegation is inherited authority, not payload authority. A child cannot
+obtain protected publication by declaring its own minting templates; protected
+outputs and templates must already belong to the claimed parent. Hosted action
+plugins prefer ordinary isolated names for procedural intermediate results.
+
 ### Allowance and acceptance
 
 Allowance limits how much computation a task may consume or delegate. It is not

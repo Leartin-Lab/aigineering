@@ -46,9 +46,10 @@ Planning and replanning enter through Store-free staged plugins and one
 claim-bound signed Candidate containing ordinary Contract declarations. Draft,
 dependency analysis, and compile are independently claimable tasks. The source
 attempt closes as `expanded`; the root remains unsatisfied until descendant
-facts satisfy its outputs. Retry, fail, and tool still use a bounded
-compatibility action while their plugins are cut over. No production scheduler
-depends on Engine-owned waiting/suspended/resume state.
+facts satisfy its outputs. Retry, fail, and tool use ordinary contained Contract
+declarations in WorkerHost; only the raw external envelope surface retains a
+bounded compatibility action. No production scheduler depends on Engine-owned
+waiting/suspended/resume state.
 
 Draft and dependency tasks reserve one allowance unit each; compile receives the
 remaining lineage grant. Its Worker-local plugin converts one temporary
@@ -70,6 +71,12 @@ Hosted `/exec` signs ordinary Asset effects; staged plan/replan signs ordinary
 Contract effects. The same SQLite transaction rechecks the binding, commits
 facts, and records an immutable attempt outcome (`output_asserted`, `expanded`,
 or `failed`).
+
+A claim-bound child cannot self-grant protected publication by filling
+`minting_authority`. Protected child outputs/templates must be an exact subset
+of authority already present on the claimed parent. Routing capabilities, tool
+scope, Worker pools, disclosed inputs, labels, and causal allowance are also
+contained.
 
 ## 8. Commit is transactional on the SQLite path
 

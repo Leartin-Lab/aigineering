@@ -532,10 +532,14 @@ def _claim_delegates_protected_capability(
             asset.name in parent.minting_authority for asset in projection.assets
         )
     if capability == "contract.publish.protected" and projection.contract is not None:
-        return all(
-            output in projection.contract.minting_authority
-            for output in projection.contract.outputs
-            if matched_reserved_prefix(output) is not None
+        inherited = set(parent.minting_authority)
+        return (
+            all(
+                output in inherited and output in projection.contract.minting_authority
+                for output in projection.contract.outputs
+                if matched_reserved_prefix(output) is not None
+            )
+            and set(projection.contract.minting_authority) <= inherited
         )
     return False
 
@@ -556,6 +560,16 @@ def _validate_claim_bound_projection(
     if not contracts:
         raise ValueError("claim-bound expansion produced no Contracts")
     available_inputs = set(parent.inputs)
+    available_inputs.update(
+        f"_tool_capability_{name}"
+        for name in parent.tool_scope
+        if not name.startswith("mcp:")
+    )
+    available_inputs.update(
+        f"_mcp_{name[4:].split('.', 1)[0]}"
+        for name in parent.tool_scope
+        if name.startswith("mcp:")
+    )
     for contract in contracts:
         available_inputs.update(contract.outputs)
     if sum(contract.budget for contract in contracts) > parent.budget:
@@ -569,6 +583,16 @@ def _validate_claim_bound_projection(
             raise ValueError("claim-bound child widens tool scope")
         if not set(contract.worker_pools) <= set(parent.worker_pools):
             raise ValueError("claim-bound child widens worker pools")
+        extra_capabilities = set(contract.worker_capabilities) - set(
+            parent.worker_capabilities
+        )
+        allowed_capabilities = (
+            {"tool-execution", "mcp-execution"} if contract.tool_scope else set()
+        )
+        if not extra_capabilities <= allowed_capabilities:
+            raise ValueError("claim-bound child widens worker capabilities")
+        if not set(contract.minting_authority) <= set(parent.minting_authority):
+            raise ValueError("claim-bound child widens minting authority")
         non_plugin_labels = {
             label for label in contract.labels if not label.startswith("plugin:")
         }

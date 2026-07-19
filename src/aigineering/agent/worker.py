@@ -141,7 +141,17 @@ class WorkerHost:
         elif action is not None:
             from aigineering.plugins import TaskDelegationPlugin
 
-            effects = (TaskDelegationPlugin().propose(envelope),)
+            if contract is None or contract.id != envelope.contract_id:
+                raise ValueError("task expansion requires the claimed Contract")
+            effects = (
+                TaskDelegationPlugin()
+                .propose_claimed(
+                    contract,
+                    action,
+                    allowance=contract.budget if allowance is None else allowance,
+                )
+                .effects
+            )
         else:
             parsed_envelope = envelope
             if envelope.parsed_action is None:

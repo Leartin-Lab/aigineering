@@ -97,7 +97,7 @@ class FailCompletionPlugin:
             (
                 asset.content
                 for asset in method_assets
-                if asset.name.startswith("_fail_result_")
+                if asset.name in contract.outputs
             ),
             None,
         )

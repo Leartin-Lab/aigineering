@@ -29,7 +29,9 @@ the protocol does not rely on a process-local task lock.
    operation without crossing a transport boundary.
 3. WorkerHost translates `/exec` into `asset.propose`; `/plan` or `/replan`
    invokes the Store-free staged plugin and signs three `contract.declare`
-   effects. Other action adapters remain a compatibility slice.
+   effects. Hosted `/tool`, `/fail`, and `/retry` likewise use Store-free local
+   plugins and sign one ordinary contained `contract.declare`. Raw external
+   envelope submission remains a compatibility slice.
 4. Candidate identity binds the Contract, package, claim, epoch and effects.
    SQLite rechecks the registered actor key and live claim in the commit
    transaction.
@@ -39,6 +41,13 @@ the protocol does not rely on a process-local task lock.
    records, idempotency state, runtime records, and the claim transition.
 7. RuntimeRecord replay reconstructs lifecycle projections. Trace is audit
    evidence; it is not a second mutable task state machine.
+
+Claim delegation cannot be amplified by child payload fields. A child may carry
+protected outputs or minting templates only when they are inherited from the
+claimed parent's existing `minting_authority`; declaring its own authority does
+not grant `contract.publish.protected`. New planning intermediates and hosted
+tool/failure results use ordinary content-isolated names, so they need no
+reserved-namespace exception.
 
 Replay is fail-loud on broken causal chains. A rejected projection without raw
 Candidate evidence, or an expiration/provider-failure fact whose Contract is

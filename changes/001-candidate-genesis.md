@@ -338,6 +338,11 @@ Implementation progress:
   transaction-time validation prevents concurrent lineage overspend. The
   legacy BudgetManager and source-only Method completion callbacks remain
   deletion debt; staged planning no longer calls them.
+- Complete for WorkerHost: tool/fail/retry local plugins now sign ordinary
+  claim-bound child declarations instead of `task.delegate`. New procedural
+  outputs use ordinary isolated names. Claim projection rejects protected
+  authority self-grants and contains input/tool/pool/capability/allowance fields.
+  CLI/HTTP raw-envelope compatibility still requires removal.
 - Pending: replace the remaining Method-named completion types with neutral
   task/plugin names, then delete the raw execution compatibility surface and
   source-only handlers.

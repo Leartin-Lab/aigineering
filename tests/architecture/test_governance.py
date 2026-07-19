@@ -325,7 +325,8 @@ def test_claim_bound_delegation_semantics_live_in_plugin_not_runtime_service():
     assert "method_contract" not in runtime
     assert "retry_contract" not in runtime
     assert "method_context_content" not in runtime
-    assert "TaskDelegationPlugin().propose" in worker
+    assert "TaskDelegationPlugin()" in worker
+    assert ".propose_claimed(" in worker
     assert "task_delegation_effect" in plugin
     assert "def project" in plugin
     assert "RuntimeIngress" not in plugin

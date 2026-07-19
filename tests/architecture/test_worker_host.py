@@ -224,6 +224,48 @@ def test_claim_bound_expansion_cannot_widen_parent_tool_scope():
     }
 
 
+def test_claim_bound_child_cannot_self_grant_protected_authority():
+    store, contract, host = _runtime('/plan {"reason":"split"}')
+    claimed = claim_next_package(store, worker_id=host.worker_id)
+    assert claimed is not None
+    fields = {
+        "name": "forged_system_child",
+        "description": "attempt protected self-grant",
+        "inputs": (),
+        "outputs": ("_sys_forged",),
+        "activation": "",
+        "budget": 1,
+        "tool_scope": (),
+        "labels": ("plugin:forged",),
+        "origin": "system",
+        "parent_id": contract.id,
+        "minting_authority": ("_sys_forged",),
+    }
+    child = Contract(id=hash_contract_v3(**fields), **fields)
+    binding = CandidateClaimBinding(
+        contract.id,
+        claimed.package.claim_id,
+        claimed.package.claim_epoch,
+        claimed.package.package_id,
+    )
+    proposal = create_candidate_proposal(
+        domain_id=host.genesis.id,
+        actor_id=host.actor_key.actor_id,
+        key_id=host.actor_key.key_id,
+        effects=(contract_declaration_effect(child),),
+        signer=host.signer,
+        idempotency_key=f"run-{claimed.package.package_id}",
+        claim_binding=binding,
+    )
+
+    result = submit_worker_proposal(proposal, store)
+
+    assert result["status"] == "rejected"
+    assert store.get_contract(child.id) is None
+    rejection = store.scan_runtime_records(record_type="candidate.rejected")[-1][1]
+    assert "contract.publish.protected" in rejection.payload["reason"]
+
+
 def test_worker_host_delegates_without_method_handler_authorization():
     store, contract, host = _runtime('/retry {"reason":"try again"}')
     claimed = claim_next_package(store, worker_id=host.worker_id)
@@ -235,14 +277,15 @@ def test_worker_host_delegates_without_method_handler_authorization():
     receipt = next(
         record
         for _, record in store.scan_runtime_records(record_type="candidate.received")
-        if record.payload.get("effect_types") == ("task.delegate",)
+        if record.payload.get("effect_types") == ("contract.declare",)
     )
-    method = store.scan_runtime_records(record_type="task.delegated")[-1][1]
-    delegation = store.scan_runtime_records(record_type="worker.delegation.received")[
-        -1
-    ][1]
-    assert delegation.causal_parents == (receipt.id,)
-    assert method.causal_parents == (delegation.id,)
+    declared = store.scan_runtime_records(record_type="contract.declared")[-1][1]
+    assert declared.causal_parents == (receipt.id,)
+    child = store.get_contract(result["child_contract_id"])
+    assert child is not None
+    assert child.parent_id == contract.id
+    assert "plugin:retry" in child.labels
+    assert not store.scan_runtime_records(record_type="task.delegated")
     assert store.get_claim(contract.id)["status"] == "submitted"
 
 

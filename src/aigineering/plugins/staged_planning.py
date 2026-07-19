@@ -47,8 +47,8 @@ class StagedPlanningPlugin:
             raise ValueError("staged planning requires at least 3 allowance units")
         parent = request.parent
         invocation = _invocation_id(request, self.mode)
-        draft_output = f"_{self.mode}_draft_{invocation}"
-        dependencies_output = f"_{self.mode}_dependencies_{invocation}"
+        draft_output = f"{self.mode}_draft_{invocation}"
+        dependencies_output = f"{self.mode}_dependencies_{invocation}"
         policy = {"mode": "mechanical", "required_attestations": 1}
 
         draft = _stage_contract(
@@ -70,6 +70,7 @@ class StagedPlanningPlugin:
             activation=parent.activation,
             acceptance_policy=policy,
             budget=1,
+            minting_authority=(),
         )
         dependencies = _stage_contract(
             parent,
@@ -89,6 +90,7 @@ class StagedPlanningPlugin:
             activation=draft_output,
             acceptance_policy=policy,
             budget=1,
+            minting_authority=(),
         )
         compile_contract = _stage_contract(
             parent,
