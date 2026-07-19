@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from conftest import hosted_worker
+from conftest import candidate_runtime, hosted_worker
 
 from aigineering.agent.mcp_worker import MCPWorker
 from aigineering.agent.tool_worker import ToolWorker
@@ -13,7 +13,6 @@ from aigineering.core.capability_descriptors import (
     create_tool_descriptor,
 )
 from aigineering.core.methods import method_contract, system_asset
-from aigineering.core.runtime_ingress import RuntimeIngress
 from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.core.tools import ToolRegistry
 from aigineering.core.worker_routing import WorkerRegistration
@@ -22,11 +21,11 @@ from aigineering.protocol.types import Contract, ToolSpec
 
 
 def _install_method(store, parent: Contract, action_text: str, descriptor):
-    ingress = RuntimeIngress(store, store)
-    ingress.accept_contract(parent)
+    ingress = candidate_runtime(store)
+    parent = ingress.accept_contract(parent)
     ingress.accept_asset(descriptor, source="capability", allow_protected=True)
     child = method_contract(parent, parse_action(action_text))
-    ingress.accept_contract(child)
+    child = ingress.accept_contract(child)
     ingress.accept_asset(
         system_asset(
             name=f"_method_ctx_{parent.id}",
@@ -36,7 +35,7 @@ def _install_method(store, parent: Contract, action_text: str, descriptor):
         source="method",
         allow_protected=True,
     )
-    return child
+    return child, ingress
 
 
 def test_tool_worker_effect_is_observed_candidate_fact():
@@ -48,7 +47,7 @@ def test_tool_worker_effect_is_observed_candidate_fact():
         tool_scope=("lookup",),
         budget=2,
     )
-    child = _install_method(
+    child, runtime = _install_method(
         store,
         parent,
         '/tool {"name": "lookup", "args": {"key": "x"}}',
@@ -66,7 +65,13 @@ def test_tool_worker_effect_is_observed_candidate_fact():
     worker.registration = lambda: WorkerRegistration(
         "tool_worker:local", capabilities=("tool-execution",), version="1"
     )
-    host = hosted_worker(store, worker)
+    host = hosted_worker(
+        store,
+        worker,
+        genesis=runtime.genesis,
+        authority_key=runtime.actor_key,
+        authority_signer=runtime.signer,
+    )
     claimed = claim_next_package(store, worker_id=host.worker_id, contract_id=child.id)
     assert claimed is not None
 
@@ -90,7 +95,7 @@ def test_mcp_worker_effect_is_observed_candidate_fact():
         tool_scope=("mcp:search.query",),
         budget=2,
     )
-    child = _install_method(
+    child, runtime = _install_method(
         store,
         parent,
         '/tool {"name": "mcp:search.query", "args": {"q": "facts"}}',
@@ -112,7 +117,13 @@ def test_mcp_worker_effect_is_observed_candidate_fact():
     worker.registration = lambda: WorkerRegistration(
         "mcp_worker:search", capabilities=("mcp-execution",), version="1"
     )
-    host = hosted_worker(store, worker)
+    host = hosted_worker(
+        store,
+        worker,
+        genesis=runtime.genesis,
+        authority_key=runtime.actor_key,
+        authority_signer=runtime.signer,
+    )
     claimed = claim_next_package(store, worker_id=host.worker_id, contract_id=child.id)
     assert claimed is not None
 

@@ -1,14 +1,14 @@
 # ADR-008: Unified Runtime Ingress
 
-**Status:** Accepted (superseded in part by Change 001)
+**Status:** Superseded by ADR-011 and Change 001
 **Date:** 2026-06-23
 **Scope:** v0.5.0 delivery-blocking
 **Related:** ADR-001, ADR-003, ADR-005, ADR-007, internal ADR-031, ADR-039, ADR-042, ADR-043
 
-> Transition note (2026-07-15): `aig contract add` and `aig asset add` now
-> publish signed typed Candidates through the commitment reducer. RuntimeIngress
-> remains the compatibility ingress for surfaces not yet migrated. See
-> `DESIGN.md` and `changes/001-candidate-genesis.md` for current truth.
+> Supersession note (2026-07-19): the `RuntimeIngress` implementation has been
+> deleted. Every current publication surface emits a signed typed Candidate and
+> uses the shared commitment reducer. This ADR remains as history for the first
+> consolidation step; ADR-011, `DESIGN.md`, and Change 001 define current truth.
 
 ## Context
 
@@ -35,7 +35,7 @@ ran all checks; others ran a subset.  It was possible to add an asset to
 the store without any trace record, and it was possible to create a
 contract with reserved output names without rejection.
 
-## Decision
+## Historical decision
 
 All runtime facts enter the system through a single **RuntimeIngress**.
 This ingress is the **only** production path for creating or modifying

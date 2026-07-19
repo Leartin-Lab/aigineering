@@ -8,11 +8,7 @@ import tomllib
 
 def test_all_release_artifacts_exclude_legacy_stateful_engine_modules():
     config = tomllib.loads(Path("pyproject.toml").read_text())
-    required = {"src/aigineering/core/runtime_ingress.py"}
-
-    for target in ("wheel", "sdist"):
-        excluded = set(config["tool"]["hatch"]["build"]["targets"][target]["exclude"])
-        assert required <= excluded
+    assert "exclude" not in config["tool"]["hatch"]["build"]["targets"]["wheel"]
     assert not Path("src/aigineering/core/startup_check.py").exists()
     for removed in (
         "engine.py",
@@ -21,6 +17,7 @@ def test_all_release_artifacts_exclude_legacy_stateful_engine_modules():
         "method_runtime.py",
         "continuation_manager.py",
         "state_serializer.py",
+        "runtime_ingress.py",
     ):
         assert not Path("src/aigineering/core", removed).exists()
     assert not list(Path("src/aigineering/core/method_handlers").glob("*.py"))

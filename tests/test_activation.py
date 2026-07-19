@@ -7,7 +7,7 @@ from aigineering.core.activation import (
     check_activation,
     validate_execution_activation,
 )
-from aigineering.core.runtime_ingress import RuntimeIngress
+from conftest import candidate_runtime
 from aigineering.core.store import MemoryStore
 from aigineering.core.trace import MemoryTraceStore
 from aigineering.protocol.types import Contract
@@ -49,16 +49,16 @@ def test_execution_activation_accepts_positive_boolean_expression():
     validate_execution_activation("input_a AND (input_b OR explicit_denial)")
 
 
-def test_runtime_ingress_enforces_monotonic_activation():
+def test_candidate_commitment_enforces_monotonic_activation():
     store = MemoryStore()
     trace = MemoryTraceStore()
-    ingress = RuntimeIngress(store, trace)
+    ingress = candidate_runtime(store, trace)
 
-    with pytest.raises(NonMonotonicActivationError):
+    with pytest.raises(AssertionError, match="monotonic"):
         ingress.accept_contract(Contract(id="c-not", activation="NOT approval"))
 
     assert store.get_contract("c-not") is None
-    assert trace.get_all() == []
+    assert trace.get_by_event_type("candidate_rejected")
 
 
 def test_parentheses():

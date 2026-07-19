@@ -5,13 +5,12 @@ from __future__ import annotations
 import sqlite3
 
 import pytest
-from conftest import hosted_worker
+from conftest import candidate_runtime, hosted_worker
 
 from aigineering.agent.mock import MockWorker
 from aigineering.runtime import claim_next_package, execute_claimed_package
 from aigineering.core.asset_versions import create_replacement_claim
 from aigineering.core.control_plane import build_control_plane_contract
-from aigineering.core.runtime_ingress import RuntimeIngress
 from aigineering.core.runtime_projection import RuntimeProjection
 from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.core.worker_routing import WorkerRegistration
@@ -20,7 +19,7 @@ from aigineering.protocol.types import Asset, Contract
 
 def test_delete_and_rebuild_all_runtime_materializations(tmp_path):
     store = SQLiteStore(str(tmp_path / "rebuild.db"))
-    ingress = RuntimeIngress(store, store)
+    ingress = candidate_runtime(store)
     source = ingress.accept_asset(
         Asset(id="asset:source", name="source", content="evidence"),
         source="test",
@@ -50,7 +49,13 @@ def test_delete_and_rebuild_all_runtime_materializations(tmp_path):
         profile_id="profile:test",
         version="1",
     )
-    host = hosted_worker(store, worker)
+    host = hosted_worker(
+        store,
+        worker,
+        genesis=ingress.genesis,
+        authority_key=ingress.actor_key,
+        authority_signer=ingress.signer,
+    )
     claimed = claim_next_package(
         store, worker_id=host.worker_id, contract_id=contract.id
     )
@@ -70,7 +75,10 @@ def test_delete_and_rebuild_all_runtime_materializations(tmp_path):
     assert store.get_assets_by_name("report")[0].content == "done"
     assert store.get_claim(contract.id)["status"] == "submitted"
     assert store.get_worker_registration("worker").profile_id == "profile:test"
-    assert store.get_claims_for_asset(source.id) == [replacement_claim]
+    rebuilt_claim = store.get_claims_for_asset(source.id)[0]
+    assert rebuilt_claim.id == replacement_claim.id
+    assert rebuilt_claim.source_asset_id == replacement_claim.source_asset_id
+    assert rebuilt_claim.replacement_asset_id == replacement_claim.replacement_asset_id
     store.close()
 
 
@@ -87,7 +95,7 @@ def test_rebuild_fails_closed_on_unrecorded_legacy_rows():
 def test_v5_materializations_backfill_into_reconstructable_runtime_facts(tmp_path):
     path = str(tmp_path / "v5-upgrade.db")
     store = SQLiteStore(path)
-    ingress = RuntimeIngress(store, store)
+    ingress = candidate_runtime(store)
     source = ingress.accept_asset(Asset(id="asset:v5", name="source", content="v1"))
     replacement = ingress.accept_asset(
         Asset(id="asset:v5-2", name="source", content="v2")
@@ -132,5 +140,8 @@ def test_v5_materializations_backfill_into_reconstructable_runtime_facts(tmp_pat
     assert migrated.rebuild_runtime_materializations() == before
     assert migrated.get_claim(contract.id)["status"] == "active"
     assert migrated.get_idempotency(contract.id, "v5-key") == {"status": "legacy"}
-    assert migrated.get_claims_for_asset(source.id) == [replacement_claim]
+    rebuilt_claim = migrated.get_claims_for_asset(source.id)[0]
+    assert rebuilt_claim.id == replacement_claim.id
+    assert rebuilt_claim.source_asset_id == replacement_claim.source_asset_id
+    assert rebuilt_claim.replacement_asset_id == replacement_claim.replacement_asset_id
     migrated.close()

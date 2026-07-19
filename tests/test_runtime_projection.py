@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from aigineering.core.provenance import sign_asset
-from aigineering.core.runtime_ingress import RuntimeIngress
+from conftest import candidate_runtime
 from aigineering.core.runtime_projection import RuntimeProjection
 from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.core.store import MemoryStore
@@ -130,7 +130,7 @@ def test_projection_as_of_excludes_later_terminal_event():
 def test_projection_as_of_revision_excludes_future_asset_fact():
     store = MemoryStore()
     trace = MemoryTraceStore()
-    ingress = RuntimeIngress(store, trace)
+    ingress = candidate_runtime(store, trace)
     contract = ingress.accept_contract(
         Contract(id="c-history", activation="input", outputs=["report"], budget=1)
     )
@@ -152,7 +152,7 @@ def test_projection_as_of_revision_excludes_future_asset_fact():
 def test_historical_projection_fails_closed_for_unrecorded_assets():
     store = MemoryStore()
     trace = MemoryTraceStore()
-    ingress = RuntimeIngress(store, trace)
+    ingress = candidate_runtime(store, trace)
     contract = ingress.accept_contract(Contract(id="c-incomplete", budget=1))
     store.add_asset(
         sign_asset(

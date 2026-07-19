@@ -60,13 +60,12 @@ def test_projection_indexes_rebuild_to_same_digest(store):
 
 
 def test_sqlite_reducer_sees_new_fact_inside_atomic_commit(store):
-    from aigineering.core.fact_reducer import FactReducer
-    from aigineering.core.runtime_ingress import RuntimeIngress
+    from conftest import candidate_runtime
     from aigineering.core.trace import MemoryTraceStore
 
     trace = MemoryTraceStore()
     store.add_contract(Contract(id="c1", outputs=["report"]))
-    ingress = RuntimeIngress(store, trace, FactReducer(store, trace))
+    ingress = candidate_runtime(store, trace)
 
     ingress.accept_asset(
         Asset(id="report-a", name="report", content="done", origin="worker")

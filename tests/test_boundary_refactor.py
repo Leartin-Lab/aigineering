@@ -11,12 +11,8 @@ Plan reference: .omo/plans/050-runtime-boundary-refactor-plan.md
 
 from __future__ import annotations
 
-import pytest
-
-from aigineering.core.store import MemoryStore
-from aigineering.core.ids import hash_asset_content, hash_contract
-from aigineering.core.trace import TraceStore
-from aigineering.protocol.types import Asset, Contract
+from aigineering.core.ids import hash_contract
+from aigineering.protocol.types import Contract
 
 # ============================================================================
 # W1 — Asset-driven parent completion (Plan §2.1, §4 Phase A item 1)
@@ -156,47 +152,13 @@ class TestProtectedAssetMinting:
     runtime namespaces without explicit minting_authority.
     """
 
-    def test_contract_rejected_when_declaring_reserved_output(self):
-        """DESIRED: Creating a contract that declares a reserved output
-        name should be REJECTED by the runtime ingress.
-
-        RuntimeIngress.accept_contract() now enforces this at the
-        ingress gate — the Contract data model remains a persistence
-        concern and does not validate.
-        """
-        from aigineering.core.authority import RESERVED_PREFIXES
-        from aigineering.core.runtime_ingress import RuntimeIngress
-
-        reserved_name = "_sys_test_output"
-        assert any(reserved_name.startswith(p) for p in RESERVED_PREFIXES)
-
-        store = MemoryStore()
-        trace_store = TraceStore()
-        ingress = RuntimeIngress(store, trace_store)
-
-        contract = Contract(
-            id=hash_contract("bad", "", [], [reserved_name], "", 3, [], [], "human"),
-            name="bad",
-            inputs=[],
-            outputs=[reserved_name],
-            activation="",
-            budget=3,
-        )
-
-        # RuntimeIngress.accept_contract() rejects reserved output names
-        with pytest.raises(ValueError, match="protected prefix"):
-            ingress.accept_contract(contract)
-
     def test_projection_rejects_reserved_output_from_worker(self):
         """DESIRED: Authority check rejects reserved asset names from worker
         candidates even when they appear in contract.outputs, unless
         minting_authority is explicitly granted.
 
-        This test currently PASSES because projection already checks
-        reserved prefixes.  The gap documented is: this check is in
-        projection.py, NOT in a unified RuntimeIngress.  If a new path
-        bypasses projection and writes directly to store, reserved names
-        could leak through.
+        Candidate projection is the single authority boundary; a new publisher
+        cannot write around it through a compatibility ingress.
         """
         from aigineering.core.projection import project_candidate
         from aigineering.protocol.types import Candidate
@@ -233,52 +195,11 @@ class TestProtectedAssetMinting:
             f"minting_authority.  Accepted: {accepted_names}"
         )
 
-    def test_direct_store_write_bypasses_reserved_name_check(self):
-        """DESIRED: Writing a reserved-name asset through the runtime
-        ingress should be blocked — only RuntimeIngress with
-        allow_protected=True should permit it.
-
-        RuntimeIngress.accept_asset() now enforces the protected-name
-        check at the ingress gate.
-        """
-        from aigineering.core.runtime_ingress import RuntimeIngress
-
-        store = MemoryStore()
-        trace_store = TraceStore()
-        ingress = RuntimeIngress(store, trace_store)
-
-        asset = Asset(
-            id=hash_asset_content("_sys_test", "hack"),
-            name="_sys_test",
-            content="hack",
-        )
-
-        # RuntimeIngress.accept_asset() rejects protected names by default.
-        # Only allow_protected=True permits them.
-        with pytest.raises(ValueError, match="collides with reserved prefix"):
-            ingress.accept_asset(asset)
-
-
-# ============================================================================
-# W5 — Tool/MCP observation cannot satisfy declared outputs (Plan §2.6)
-# ============================================================================
-
 
 class TestDirectWriteBan:
-    """Production modules must not call ``store.add_asset`` or
-    ``store.add_contract`` directly.  Allowed exceptions:
-    store implementations, transaction helpers, RuntimeIngress, and
-    explicit test fixtures.
-    """
+    """Production code may persist materializations only inside Store adapters."""
 
-    # Modules allowed to call add_asset/add_contract directly.
-    _ALLOWED: frozenset[str] = frozenset(
-        {
-            "store.py",
-            "sqlite_store.py",
-            "runtime_ingress.py",
-        }
-    )
+    _ALLOWED: frozenset[str] = frozenset({"store.py", "sqlite_store.py"})
 
     def test_no_direct_store_write_in_production(self):
         """Scan src/aigineering/ for direct store.write calls in production

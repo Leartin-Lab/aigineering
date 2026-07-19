@@ -8,7 +8,6 @@ from click.testing import CliRunner
 
 from aigineering.cli.main import cli
 from aigineering.core.ids import hash_contract, hash_contract_v3
-from aigineering.core.runtime_ingress import RuntimeIngress
 from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.core.trace import create_entry
 from aigineering.protocol.types import Contract
@@ -36,9 +35,6 @@ def _make_recovery_scenario(db_path: str) -> tuple[SQLiteStore, Contract, Contra
     """Populate a SQLiteStore with two contracts and recovery_required trace
     entries.  Returns (store, contract_a, contract_b)."""
     store = SQLiteStore(db_path=db_path)
-
-    # Create two contracts via RuntimeIngress so they are properly registered.
-    ingress = RuntimeIngress(store, store)
 
     contract_a = Contract(
         id=hash_contract(
@@ -73,8 +69,8 @@ def _make_recovery_scenario(db_path: str) -> tuple[SQLiteStore, Contract, Contra
         budget=5,
     )
 
-    ingress.accept_contract(contract_a)
-    ingress.accept_contract(contract_b)
+    store.add_contract(contract_a)
+    store.add_contract(contract_b)
 
     # Append legacy recovery_required trace entries for compatibility input.
     for c in (contract_a, contract_b):

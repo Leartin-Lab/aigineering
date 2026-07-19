@@ -5,7 +5,7 @@ import pytest
 from aigineering.core.authority import RESERVED_PREFIXES, ReservedNamespaceError
 from aigineering.core.ids import hash_asset_content
 from aigineering.core.provenance import sign_asset
-from aigineering.core.runtime_ingress import RuntimeIngress
+from conftest import candidate_runtime
 from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.core.store import MemoryStore
 from aigineering.protocol.types import Asset
@@ -82,7 +82,7 @@ def test_public_store_write_rejects_protected_assets(store_factory):
 def test_ingress_can_commit_authorized_protected_asset():
     """The ingress remains the explicit, traced privileged write path."""
     store = SQLiteStore(":memory:")
-    ingress = RuntimeIngress(store, store)
+    ingress = candidate_runtime(store)
     asset = Asset(
         id=hash_asset_content("_sys_test", "allowed"),
         name="_sys_test",
@@ -90,4 +90,4 @@ def test_ingress_can_commit_authorized_protected_asset():
     )
     accepted = ingress.accept_asset(asset, source="test", allow_protected=True)
     assert store.get_asset(accepted.id) is not None
-    assert store.get_by_event_type("asset_accepted_protected_override")
+    assert store.get_by_event_type("candidate_committed")

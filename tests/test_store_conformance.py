@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from aigineering.core.fact_reducer import FactReducer
 from aigineering.core.provenance import sign_asset
-from aigineering.core.runtime_ingress import RuntimeIngress
+from conftest import candidate_runtime
 from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.core.store import MemoryStore
 from aigineering.core.trace import MemoryTraceStore, create_entry
@@ -125,10 +125,12 @@ def test_ingress_appends_typed_facts_on_both_adapters():
     contract = Contract(id="c-runtime", outputs=["report"])
     asset = Asset(id="a-runtime", name="input", content="value", origin="human")
 
-    RuntimeIngress(memory, memory_trace).accept_contract(contract)
-    RuntimeIngress(memory, memory_trace).accept_asset(asset)
-    RuntimeIngress(sqlite, sqlite).accept_contract(contract)
-    RuntimeIngress(sqlite, sqlite).accept_asset(asset)
+    memory_runtime = candidate_runtime(memory, memory_trace)
+    sqlite_runtime = candidate_runtime(sqlite, sqlite)
+    contract = memory_runtime.accept_contract(contract)
+    memory_runtime.accept_asset(asset)
+    sqlite_runtime.accept_contract(contract)
+    sqlite_runtime.accept_asset(asset)
 
     for store in (memory, sqlite):
         record_types = [

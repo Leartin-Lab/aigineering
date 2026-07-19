@@ -1,13 +1,14 @@
 # ADR-009: Runtime Communication Modes
 
-**Status:** Accepted (superseded in part by Change 001)
+**Status:** Accepted (ingress mechanics superseded by ADR-011 and Change 001)
 **Date:** 2026-06-23
 **Scope:** v0.5.0 delivery-blocking
 **Related:** ADR-008, ADR-006, internal ADR-039, ADR-042, ADR-043
 
-> Transition note (2026-07-15): authenticated typed Candidates and persisted
-> Genesis now replace RuntimeIngress for Contract publication. Other modes are
-> migrating incrementally; `DESIGN.md` is the current implemented truth.
+> Current implementation note (2026-07-19): all three modes publish signed
+> typed Candidates through the shared commitment reducer. `RuntimeIngress` has
+> been deleted; references below describe the historical consolidation step.
+> `DESIGN.md` is the current implemented truth.
 
 ## Context
 
@@ -16,8 +17,8 @@ with the runtime without blurring the candidate-to-fact boundary or
 leaking implementation details across domain boundaries.
 
 The plan (`.omo/plans/050-runtime-boundary-refactor-plan.md` §2.11)
-identifies three distinct communication modes.  All three must use the
-same `RuntimeIngress` (ADR-008) — otherwise the system reintroduces
+identifies three distinct communication modes. All three must use the same
+Candidate protocol and commitment boundary — otherwise the system reintroduces
 hidden mutation paths and makes worker substitutability false.
 
 ## Decision
@@ -32,7 +33,7 @@ sharing, discovery, and consensus remain deferred.
 protocol.
 
 ```
-aig command → RuntimeIngress / worker protocol
+aig command → signed Candidate / worker protocol
 → task/asset declarations accepted into shared pools
 → CLI worker polls/claims next eligible package
 → CLI worker invokes execution or creates ordinary child tasks
@@ -47,7 +48,7 @@ Commands:
 - `aig serve` — long-lived CLI worker: keep claiming eligible work
 
 CLI commands (`contract add`, `asset add`, `capability add`, etc.) are
-worker actions against Engine's unified ingress — they never write
+actor actions against the Candidate commitment boundary — they never write
 store/control state directly.
 
 ### Mode 2: Engine-to-Engine Black-Box Direction
@@ -62,7 +63,7 @@ task package + disclosed facts
 → local/nested/remote Engine claims it like any worker
 → EngineWorker executes in an invocation-scoped inner fact domain
 → Engine submits candidate envelope / declared facts
-→ shared RuntimeIngress projects, authorizes, traces, reduces
+→ shared Candidate commitment projects, authorizes, traces, reduces
 ```
 
 **Visibility rule (mode 2)**: When an Engine operates as a worker across

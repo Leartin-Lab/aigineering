@@ -31,7 +31,7 @@ def test_design_truth_and_active_change_are_present():
 def test_legacy_runtime_files_stay_out_of_release_artifacts():
     project = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
 
-    assert "src/aigineering/core/runtime_ingress.py" in project
+    assert "src/aigineering/core/runtime_ingress.py" not in project
     for path in (
         "engine.py",
         "context_overflow.py",
@@ -39,6 +39,7 @@ def test_legacy_runtime_files_stay_out_of_release_artifacts():
         "method_runtime.py",
         "continuation_manager.py",
         "state_serializer.py",
+        "runtime_ingress.py",
     ):
         assert not (ROOT / "src/aigineering/core" / path).exists()
     assert not list((ROOT / "src/aigineering/core/method_handlers").glob("*.py"))

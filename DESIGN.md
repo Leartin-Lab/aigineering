@@ -419,8 +419,10 @@ The tested containment compiler is physically owned by
 `core.methods` is a thin
 source-compatibility export, not a production semantics owner.
 Recovery task projection lives in `plugins/recovery.py`. The 0.5.0 wheel and
-sdist still exclude RuntimeIngress while its remaining history/setup callers
-are migrated; every module present in the wheel is importable without it.
+sdist no longer contain a `RuntimeIngress`: setup, CLI, server, worker and
+recovery publication all use signed Candidates and the shared commitment
+reducer. Every module present in the wheel is importable without a legacy
+mutation adapter.
 The local LLM path and engine-backed inner execution share the authenticated
 WorkerHost protocol.
 

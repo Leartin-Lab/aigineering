@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from conftest import hosted_worker
+from conftest import candidate_runtime, hosted_worker
 
 from aigineering.agent.mock import MockWorker
 from aigineering.agent.worker import WorkerHost
@@ -15,7 +15,6 @@ from aigineering.core.candidate_publisher import (
 from aigineering.core.capability_descriptors import create_tool_descriptor
 from aigineering.core.control_plane import build_control_plane_contract
 from aigineering.core.domain import initialize_genesis
-from aigineering.core.runtime_ingress import RuntimeIngress
 from aigineering.core.runtime_projection import RuntimeProjection
 from aigineering.core.signing import Ed25519Signer
 from aigineering.core.sqlite_store import SQLiteStore
@@ -46,7 +45,9 @@ def test_plan_action_expands_to_three_independent_stage_tasks():
         "runtime-multistep", (plugin_key,), "policy:runtime-multistep"
     )
     initialize_genesis(store, genesis)
-    ingress = RuntimeIngress(store, store)
+    ingress = candidate_runtime(
+        store, genesis=genesis, actor_key=plugin_key, signer=plugin_signer
+    )
     root = ingress.accept_contract(
         build_control_plane_contract(
             name="research_report",
@@ -143,7 +144,9 @@ def test_tool_completion_plugin_publishes_continuation_candidate():
     )
     assert registration.accepted is True
     publishers = CandidatePublisherRegistry((("continuation.publish.v1", publisher),))
-    ingress = RuntimeIngress(store, store)
+    ingress = candidate_runtime(
+        store, genesis=genesis, actor_key=plugin_key, signer=plugin_signer
+    )
     root = ingress.accept_contract(
         build_control_plane_contract(
             name="tool_report",
@@ -208,7 +211,7 @@ def test_tool_completion_plugin_publishes_continuation_candidate():
         if record.payload.get("actor_id") == plugin_key.actor_id
         and record.payload.get("effect_types") == ("contract.declare",)
     ]
-    assert len(receipts) == 1
+    assert len(receipts) == 2
 
 
 def test_fail_completion_plugin_closes_parent_and_publishes_report_candidate():
@@ -223,13 +226,14 @@ def test_fail_completion_plugin_closes_parent_and_publishes_report_candidate():
             "actor.authorize",
             "asset.publish",
             "asset.publish.protected",
+            "contract.publish",
             "worker.register",
         ),
     )
     genesis = create_genesis_manifest("runtime-fail", (actor,), "policy:runtime-fail")
     initialize_genesis(store, genesis)
     publisher = CandidatePublisher(store, store, genesis, actor, signer)
-    ingress = RuntimeIngress(store, store)
+    ingress = candidate_runtime(store, genesis=genesis, actor_key=actor, signer=signer)
     root = ingress.accept_contract(
         build_control_plane_contract(
             name="failing_task",

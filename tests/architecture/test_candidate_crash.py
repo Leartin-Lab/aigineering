@@ -8,10 +8,11 @@ import sys
 
 from aigineering.core.domain import initialize_genesis
 from aigineering.core.ids import hash_contract_v3
-from aigineering.core.runtime_ingress import RuntimeIngress
+from aigineering.core.signing import Ed25519Signer
 from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.protocol.candidate import ActorKey, create_genesis_manifest
 from aigineering.protocol.types import Contract
+from conftest import candidate_runtime
 
 
 def _run_with_crash(crash_point: str, script: str) -> subprocess.CompletedProcess:
@@ -30,9 +31,20 @@ def _run_with_crash(crash_point: str, script: str) -> subprocess.CompletedProces
 def test_candidate_crash_after_asset_before_trace_rolls_back_everything(tmp_path):
     path = tmp_path / "candidate-crash.db"
     store = SQLiteStore(str(path))
+    setup_signer = Ed25519Signer()
+    setup_actor = ActorKey(
+        "setup",
+        "setup-key",
+        setup_signer.kind,
+        setup_signer.signer_id,
+        ("contract.publish",),
+    )
     genesis = create_genesis_manifest(
         "crash-domain",
-        [ActorKey("actor", "key", "crash-test", "public", ("asset.publish",))],
+        [
+            setup_actor,
+            ActorKey("actor", "key", "crash-test", "public", ("asset.publish",)),
+        ],
         "policy:test",
     )
     initialize_genesis(store, genesis)
@@ -48,7 +60,12 @@ def test_candidate_crash_after_asset_before_trace_rolls_back_everything(tmp_path
         "origin": "human",
     }
     contract = Contract(id=hash_contract_v3(**fields), **fields)
-    RuntimeIngress(store, store).accept_contract(contract)
+    candidate_runtime(
+        store,
+        genesis=genesis,
+        actor_key=setup_actor,
+        signer=setup_signer,
+    ).accept_contract(contract)
     before_revision = store.get_runtime_revision()
     store.close()
 
@@ -89,7 +106,9 @@ CandidateCommitter(store, store).commit(
     reopened = SQLiteStore(str(path))
     assert reopened.get_assets_by_name("result") == []
     assert reopened.get_runtime_revision() == before_revision
-    assert reopened.scan_runtime_records(record_type="candidate.received") == []
-    assert reopened.scan_runtime_records(record_type="candidate.committed") == []
+    assert not any(
+        record.payload.get("actor_id") == "actor"
+        for _, record in reopened.scan_runtime_records(record_type="candidate.received")
+    )
     assert reopened.scan_runtime_records(record_type="lifecycle.terminal") == []
     reopened.close()

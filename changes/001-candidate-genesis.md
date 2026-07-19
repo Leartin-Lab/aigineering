@@ -268,8 +268,7 @@ Implementation progress:
   `core.methods`; that module is a small compatibility export only.
 - Complete: legacy Engine, MethodRuntime/registry/handlers,
   ContinuationManager, context-overflow controller, and state serializer are
-  physically deleted. RuntimeIngress remains release-excluded pending its final
-  history/setup migration. A built-wheel audit imports every shipped module.
+  physically deleted. A built-wheel audit imports every shipped module.
 - Complete: production completion and recovery projection no longer imports
   ContinuationManager or MethodRuntime. A stateless TaskCompletionProjector
   reconstructs work from durable facts on each pass; both legacy lifecycle
@@ -360,6 +359,10 @@ Implementation progress:
 - Complete: scheduler projection takes one immutable runtime-record snapshot per
   claim pass instead of reconstructing every SQLite fact for every Contract.
   The 100-step WorkerHost chain fell from about 55 seconds to under 6 seconds.
+- Complete: the final `RuntimeIngress` compatibility adapter was physically
+  deleted. Tests publish setup facts through explicit Genesis actors and signed
+  Candidates; the only direct historical writes left are migration fixtures
+  that intentionally model databases predating Genesis.
 
 ## Required architecture tests
 
@@ -368,13 +371,11 @@ Implementation progress:
 - Any domain, actor, key, content, or signature mismatch fails closed.
 - Candidate receipt is distinct from effect acceptance.
 - Runtime modules do not import a concrete Store adapter.
-- RuntimeIngress remains excluded until its final callers migrate.
+- No production or test setup API may reintroduce a claimless runtime ingress.
 - Direct fact-writing call sites monotonically decrease; no new exceptions.
 
 ## Deletion ledger
 
-- `RuntimeIngress.accept_asset` and `accept_contract` after Candidate adapters
-  have no callers
 - deterministic provenance seal as an authorization mechanism (it may remain a
   content checksum)
 - duplicated protected-prefix and terminal-state logic
