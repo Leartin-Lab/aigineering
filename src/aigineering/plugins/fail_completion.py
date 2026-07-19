@@ -9,7 +9,7 @@ from aigineering.plugins.task_semantics import method_payload, system_asset
 from aigineering.protocol.effect_builders import asset_proposal_effect
 
 if TYPE_CHECKING:
-    from aigineering.core.method_runtime import MethodRuntime
+    from aigineering.plugins.completion_projection import TaskCompletionContext
     from aigineering.protocol.types import Asset, Contract
 
 
@@ -24,7 +24,7 @@ class FailCompletionPlugin:
 
     def handle_completion(
         self,
-        runtime: MethodRuntime,
+        runtime: TaskCompletionContext,
         contract: Contract,
         method_assets: list[Asset],
     ) -> bool:

@@ -14,12 +14,12 @@ from aigineering.protocol.effect_builders import (
 from aigineering.protocol.types import Contract
 
 if TYPE_CHECKING:
-    from aigineering.core.method_runtime import MethodRuntime
+    from aigineering.plugins.completion_projection import TaskCompletionContext
     from aigineering.protocol.types import Asset
 
 
 def schedule_method_result_recovery(
-    runtime: MethodRuntime,
+    runtime: TaskCompletionContext,
     *,
     method_type: str,
     parent_id: str,
@@ -157,7 +157,7 @@ def schedule_method_result_recovery(
 
 
 def schedule_projection_recovery(
-    runtime: MethodRuntime,
+    runtime: TaskCompletionContext,
     *,
     failed_contract: Contract,
     candidate_raw: str,

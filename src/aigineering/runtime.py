@@ -12,14 +12,16 @@ from aigineering.agent.mock import MockWorker
 from aigineering.agent.worker import WorkerExecutionError, WorkerHost
 from aigineering.core.activation import check_activation
 from aigineering.core.budget_manager import BudgetManager
-from aigineering.core.continuation_manager import ContinuationManager
 from aigineering.core.disclosure import (
     DisclosurePolicyError,
     compute_disclosure,
     redact_for_disclosure,
 )
 from aigineering.core.store import require_operational_store
-from aigineering.core.method_runtime import MethodRuntime
+from aigineering.plugins.completion_projection import (
+    TaskCompletionContext,
+    TaskCompletionProjector,
+)
 from aigineering.plugins.recovery import schedule_projection_recovery
 from aigineering.core.runtime_projection import RuntimeProjection
 from aigineering.core.submit import (
@@ -427,12 +429,7 @@ def _schedule_rejected_recovery(
     for current in store.get_all_contracts():
         budget.initialize(current.id, current.budget)
     trace_manager = TraceManager(trace)
-    runtime = MethodRuntime(
-        store=store,
-        trace=trace_manager,
-        budget=budget,
-        candidate_publishers=candidate_publishers,
-    )
+    runtime = TaskCompletionContext(store, trace_manager, budget, candidate_publishers)
     recovery = schedule_projection_recovery(
         runtime,
         failed_contract=contract,
@@ -930,19 +927,9 @@ def process_task_completions(
 ) -> list[str]:
     """Project completed plugin tasks into their deterministic effects."""
     processed: list[str] = []
-    trace_manager = TraceManager(store)
-    budget = BudgetManager()
-    for contract in store.get_all_contracts():
-        budget.initialize(contract.id, contract.budget)
-    continuations = ContinuationManager(
-        store=store,
-        budget_mgr=budget,
-        trace_mgr=trace_manager,
-        completion_registry=completion_registry,
-        completed=set(),
-        suspended=set(),
-        method_scheduled=set(),
-        method_context={},
+    projector = TaskCompletionProjector(
+        store,
+        completion_registry,
         candidate_publishers=candidate_publishers,
     )
     projected = {
@@ -959,7 +946,7 @@ def process_task_completions(
             continue
         if contract.id in projected:
             continue
-        if not continuations.resume_parent_from_method(contract):
+        if not projector.project(contract):
             continue
         marker = create_entry(
             contract_id=contract.id,
@@ -982,8 +969,6 @@ def process_task_completions(
             trace_entries=[marker],
             runtime_records=(marker_record, projected_record),
         )
-        if trace_manager.store is not store:
-            trace_manager.store.append(marker)
         projected.add(contract.id)
         processed.append(contract.id)
     return processed

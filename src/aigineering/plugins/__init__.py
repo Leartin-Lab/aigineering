@@ -2,6 +2,10 @@
 
 from aigineering.plugins.base import PluginProposal, PluginRequest, TaskPlugin
 from aigineering.plugins.completion import CompletionPlugin, CompletionRegistry
+from aigineering.plugins.completion_projection import (
+    TaskCompletionContext,
+    TaskCompletionProjector,
+)
 from aigineering.plugins.continuation import ContinuationTaskPlugin
 from aigineering.plugins.delegation import DelegationProjection, TaskDelegationPlugin
 from aigineering.plugins.fail_completion import FailCompletionPlugin
@@ -29,6 +33,8 @@ __all__ = (
     "ContinuationTaskPlugin",
     "CompletionPlugin",
     "CompletionRegistry",
+    "TaskCompletionContext",
+    "TaskCompletionProjector",
     "default_completion_registry",
     "DelegationProjection",
     "FailCompletionPlugin",

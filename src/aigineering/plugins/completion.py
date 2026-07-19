@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
-    from aigineering.core.method_runtime import MethodRuntime
+    from aigineering.plugins.completion_projection import TaskCompletionContext
     from aigineering.protocol.types import Asset, Contract
 
 
@@ -16,7 +16,7 @@ class CompletionPlugin(Protocol):
 
     def handle_completion(
         self,
-        runtime: MethodRuntime,
+        runtime: TaskCompletionContext,
         contract: Contract,
         method_assets: list[Asset],
     ) -> bool: ...

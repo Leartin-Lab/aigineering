@@ -273,6 +273,10 @@ Implementation progress:
 - Complete: release artifacts exclude legacy Engine, RuntimeIngress,
   MethodRegistry/handlers, context-overflow controller, and state serializer.
   A built-wheel audit imports every shipped module after those exclusions.
+- Complete: production completion and recovery projection no longer imports
+  ContinuationManager or MethodRuntime. A stateless TaskCompletionProjector
+  reconstructs work from durable facts on each pass; both legacy lifecycle
+  owners are excluded from wheel and sdist, with an architecture import gate.
 - Complete: CLI and EngineWorker completion loops use the neutral
   `process_task_completions` API. The Method-named function remains only as a
   forwarding source compatibility alias.

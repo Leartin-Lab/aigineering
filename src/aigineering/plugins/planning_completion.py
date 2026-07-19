@@ -16,7 +16,7 @@ from aigineering.plugins.planning import (
 from aigineering.plugins.base import PluginRequest
 
 if TYPE_CHECKING:
-    from aigineering.core.method_runtime import MethodRuntime
+    from aigineering.plugins.completion_projection import TaskCompletionContext
     from aigineering.protocol.types import Asset, Contract
 
 
@@ -31,7 +31,7 @@ class PlanningCompletionPlugin:
 
     def handle_completion(
         self,
-        runtime: MethodRuntime,
+        runtime: TaskCompletionContext,
         contract: Contract,
         method_assets: list[Asset],
     ) -> bool:
@@ -39,31 +39,31 @@ class PlanningCompletionPlugin:
             return False
 
         parent_id = contract.parent_id
+        if parent_id is None:
+            return False
         parent_contract: Contract | None = None
-        if parent_id is not None:
-            parent_contract = runtime.get_contract(parent_id)
-            if parent_contract is None:
-                runtime.append_trace(
-                    parent_id,
-                    "containment_rejected",
-                    relation_type=self.action_type,
-                    relation_target="parent_not_found",
-                    rejected_fragments=[
-                        "[rejected] parent_not_found: "
-                        f"parent contract {parent_id} not in store — "
-                        f"{self.action_type} expansion abort (fail-closed)"
-                    ],
-                    authority_result="rejected",
-                    budget_remaining=0,
-                )
-                return True
+        parent_contract = runtime.get_contract(parent_id)
+        if parent_contract is None:
+            runtime.append_trace(
+                parent_id,
+                "containment_rejected",
+                relation_type=self.action_type,
+                relation_target="parent_not_found",
+                rejected_fragments=[
+                    "[rejected] parent_not_found: "
+                    f"parent contract {parent_id} not in store — "
+                    f"{self.action_type} expansion abort (fail-closed)"
+                ],
+                authority_result="rejected",
+                budget_remaining=0,
+            )
+            return True
 
         allowed_input_names: set[str] | None = None
         parent_budget_remaining: int | None = None
-        if parent_contract is not None:
-            scope = runtime.compute_disclosure(parent_contract)
-            allowed_input_names = {asset.name for asset in scope}
-            parent_budget_remaining = runtime.resolve_budget(parent_contract.id)
+        scope = runtime.compute_disclosure(parent_contract)
+        allowed_input_names = {asset.name for asset in scope}
+        parent_budget_remaining = runtime.resolve_budget(parent_contract.id)
 
         created: list[str] = []
         recovery_scheduled = False

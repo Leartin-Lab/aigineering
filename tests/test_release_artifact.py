@@ -13,6 +13,8 @@ def test_all_release_artifacts_exclude_legacy_stateful_engine_modules():
         "src/aigineering/core/context_overflow.py",
         "src/aigineering/core/method_handlers/**",
         "src/aigineering/core/method_registry.py",
+        "src/aigineering/core/method_runtime.py",
+        "src/aigineering/core/continuation_manager.py",
         "src/aigineering/core/runtime_ingress.py",
         "src/aigineering/core/state_serializer.py",
     }
