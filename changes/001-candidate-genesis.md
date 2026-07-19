@@ -363,6 +363,9 @@ Implementation progress:
   deleted. Tests publish setup facts through explicit Genesis actors and signed
   Candidates; the only direct historical writes left are migration fixtures
   that intentionally model databases predating Genesis.
+- Complete: SQLite DDL and v1-v13 historical migrations moved out of the
+  operational Store facade. The public `SQLiteStore` and schema version remain
+  compatible; migration and reconstruction tests exercise the same databases.
 
 ## Required architecture tests
 

@@ -273,6 +273,11 @@ supported WorkerHost, CLI, and HTTP submissions now have one commitment owner,
 SQLite likewise exposes one generic `commit_ingress_batch` Candidate transaction;
 the former candidate-envelope and method-specialized Store commit operations are
 not part of the runtime protocol.
+The adapter remains one StorePort facade. Declarative DDL and historical v1-v13
+migrations live in separate adapter-internal modules, so operational claim and
+commit code cannot silently become a second schema owner. Migration backfills
+still run in the existing schema transaction and reuse the facade's canonical
+row materializers.
 The application uses the minimal public `CompletionPlugin`/
 `CompletionRegistry` protocol, which exposes only `handle_completion`.
 Plan and replan completion now live in `plugins/planning_completion.py` and are
