@@ -49,8 +49,11 @@ Method handlers operate through `MethodRuntime`, not Engine private state.
 
 ## 7. Worker pull submission is claim-bound
 
-Operational worker execution uses a `WorkerPackage` and `CandidateEnvelope`.
-SQLite enforces one active worker claim per contract. Submission validates the
+Operational worker execution uses a `WorkerPackage` and actor-signed Candidate
+commands. Across a transport boundary, claim and renewal prove possession of
+the enabled Worker's registered key; a self-reported `worker_id` is not
+identity. SQLite atomically records the authenticated command with the claim or
+renewal and rejects replay of a committed command. Submission validates the
 claim, worker identity, fencing epoch, lease, and package binding before
 projection. A failed invocation or expired lease becomes a durable terminal
 fact and schedules a new recovery Contract.
@@ -60,6 +63,8 @@ fact and schedules a new recovery Contract.
 For SQLite-backed worker submission, Candidate, projection, accepted assets,
 trace events, idempotency, terminal facts, and claim transition commit in one
 database transaction. A mid-commit failure rolls the whole submission back.
+Derived completion markers and their audit traces likewise commit as one
+transaction consequence; a terminal fact and terminal trace cannot disagree.
 
 ## 9. Runtime progress is reconstructable
 

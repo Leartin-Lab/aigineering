@@ -23,7 +23,10 @@ the protocol does not rely on a process-local task lock.
 
 1. An external root Contract is published as a signed `contract.declare`
    Candidate; legacy Method children remain a documented transition path.
-2. An eligible worker atomically claims it and receives a WorkerPackage.
+2. Across HTTP, an eligible Worker signs a single-use `worker.claim` Candidate;
+   SQLite atomically records its authenticated request and claim before returning
+   a WorkerPackage. Local WorkerHost coordination uses the same fenced Store
+   operation without crossing a transport boundary.
 3. The worker signs raw output and claim metadata as one `worker.output` effect,
    or signs an explicit method action as `task.delegate`.
 4. `submit_worker_candidate` authenticates the actor, capability, routing-key,
@@ -126,10 +129,14 @@ validate the effect type before commitment. Unsigned legacy request bodies fail
 schema validation and cannot mutate the Store. Slice and replacement-claim HTTP
 operations remain compatibility surfaces pending additional effect types.
 
-`POST /worker/submissions` likewise accepts only one signed claim-bound
-`worker.output` or `task.delegate` CandidateProposal. Server claims require an
-enabled actor/key-bound worker, so
-an anonymous claimant cannot lock work it is unable to submit. The former
+`POST /worker/claims` and its renewal endpoint accept signed operational
+Candidates whose actor/key matches the enabled Worker registration. Claim and
+renew authentication records commit atomically with the lease transition, and
+an accepted command Candidate cannot be replayed. `POST /worker/submissions`
+likewise accepts only one signed claim-bound `worker.output` or `task.delegate`
+CandidateProposal. Server claims require proof of the enabled actor/key-bound
+Worker, so an anonymous or self-reported claimant cannot lock work it is unable
+to submit. The former
 server-side mock `/contracts/{id}/run` mutation endpoint returns 410 and directs
 clients to the claim/submission protocol; the server never impersonates a
 worker actor.
@@ -252,6 +259,13 @@ FactReducer. MethodRuntime receives direct ingress only from the excluded legacy
 Engine or explicit compatibility tests; without one, direct Contract/Asset
 mutation fails and completion plugins must use their registered Candidate
 publisher.
+
+Planning fan-out is atomic at the semantic boundary. A child or scaffold
+rejection suppresses the entire proposed fan-out and creates explicit recovery
+work; accepted siblings from the same invalid plan are not committed. Method
+result Assets retain the Contract that declared them as `created_by`, and the
+FactReducer ignores protected method-result names whose provenance does not
+match a declaring Contract.
 Local projection-, expiration-, provider-, and malformed-plan recovery now
 receives the same plugin publisher registry. Recovery Contract plus protected
 failure-context Asset commit as one signed `recovery.publish.v1` Candidate;
@@ -368,6 +382,10 @@ tests deliberately omit a publisher.
 Production loops invoke the neutral `process_task_completions` entrypoint. The
 old Method-named function is only a source compatibility alias; it no longer
 defines the runtime composition surface.
+The completion consequence marker and its audit trace commit as one Store
+batch. Terminal consequence emission checks both immutable terminal facts and
+historical terminal traces, and commits a new terminal fact and trace together;
+a later satisfied child cannot change a failed parent into complete.
 New worker delegation commits `task.delegated` records, `task_delegated` trace,
 and a `task_delegated` response. Runtime projections, CLI views, and SQLite
 causal binding still read historical `method.scheduled`/`method_scheduled`
@@ -377,6 +395,9 @@ enabled boolean from terminal facts, output/input/activation satisfaction,
 budget, delegation facts, and the claim lease. An outstanding child is exposed
 as the derived blocker `delegation_pending`; CLI status is
 `blocked_delegation`.
+Once a terminal fact exists, the blocker projection contains only that terminal
+explanation; historical claims or delegation facts do not appear as current
+work blockers.
 
 ## Active change
 
@@ -384,6 +405,10 @@ as the derived blocker `delegation_pending`; CLI status is
 Candidates, a Genesis trust root, one commitment reducer, and plugin-produced
 ordinary tasks. Until that change closes, this file remains authoritative about
 what is actually supported.
+
+`changes/002-post-review-boundary-hardening.md` records the 0.5 review closure
+for authenticated Worker coordination, atomic completion projection, terminal
+single assignment, and atomic planning recovery.
 
 ADR-011 records the stable Candidate-native and plugin direction. It does not
 make unfinished migration items part of current runtime truth.

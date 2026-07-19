@@ -1,3 +1,8 @@
+---
+name: aigineering
+description: Use the Aigineering 0.5 CLI and signed Worker protocol to create, run, inspect, and audit asset-driven tasks with declared outputs, recoverable delegation, and Candidate-to-Fact commitment. Use when work needs durable outputs, task status, replayable evidence, or a custom Worker integration rather than an unstructured chat result.
+---
+
 # Aigineering CLI Gateway
 
 Use this skill when a task needs an auditable, recoverable execution result
@@ -80,7 +85,8 @@ Avoid these commands for normal agent delegation:
 
 - Treat `status: completed` with declared outputs as the normal success case.
 - Treat `failed`, `cancelled`, and `unreachable` as terminal failures.
-- Treat `blocked`, `ready`, `waiting`, and `submitted` as non-terminal states.
+- Treat `blocked`, `blocked_delegation`, `blocked_capability`, `ready`,
+  `claimed`, `stalled`, and `submitted` as non-success states.
 - Do not claim a task is complete unless `task status` or `run --task` reports
   terminal completion and the expected output asset exists.
 - If `rejection_count` is nonzero, read `task audit` before trusting the result.
@@ -95,3 +101,7 @@ Avoid these commands for normal agent delegation:
   or retry must create a new task.
 - Parent task completion is based on declared output satisfaction, not on all
   child tasks finishing.
+- Remote claim and lease-renew requests are signed `worker.claim` and
+  `worker.claim.renew` Candidates. Never send a self-reported `worker_id` body
+  or reuse one command Candidate; submission remains a signed `worker.output`
+  or `task.delegate` Candidate bound to the returned claim/package/epoch.

@@ -84,8 +84,9 @@ asset satisfied a completed contract without an explicit signed override.
 
 All terminal states (satisfied, failed, cancelled, unreachable) are:
 - **Projected from durable records** — contracts, claims, assets, trace
-- **Appended exactly once** — terminal trace events are idempotent and
-  never duplicated or dropped
+- **Appended exactly once** — one immutable `lifecycle.terminal` fact exists per
+  Contract; its audit trace is committed in the same transaction and cannot
+  introduce a second, conflicting terminal
 - **Replayable** — rebuilding from RuntimeRecords derives the same blockers,
   budget, claim head, and terminal view
 
