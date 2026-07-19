@@ -26,7 +26,6 @@ from aigineering.core.candidate_publisher import (
 )
 from aigineering.core.domain import initialize_genesis
 from aigineering.core.signing import Ed25519Signer
-from aigineering.core.submit import submit_candidate
 from aigineering.core.trace import create_entry
 from aigineering.core.record_conflict import ImmutableRecordConflict
 from aigineering.core.store import MemoryStore
@@ -35,7 +34,6 @@ from aigineering.core.worker_routing import (
     eligible_workers,
     select_worker,
 )
-from aigineering.protocol.envelope import CandidateEnvelope
 from aigineering.protocol.candidate import ActorKey, create_genesis_manifest
 from aigineering.protocol.runtime_record import create_runtime_record
 from aigineering.protocol.types import Candidate, Contract
@@ -291,19 +289,35 @@ def test_rejected_submission_recovery_replays_after_crash_gap():
     store = SQLiteStore(":memory:")
     contract = Contract(id="task:rejected-replay", outputs=("report",), budget=1)
     store.add_contract(contract)
-    claimed = claim_next_package(store, worker_id="worker")
-    assert claimed is not None
-    envelope = CandidateEnvelope(
-        contract_id=contract.id,
-        worker_id=claimed.worker_id,
-        raw_output="undeclared: rejected",
-        package_id=claimed.package.package_id,
-        claim_id=claimed.package.claim_id,
-        claim_epoch=claimed.package.claim_epoch,
+    candidate = create_runtime_record(
+        "candidate.received",
+        {
+            "candidate_id": "candidate:rejected-replay",
+            "contract_id": contract.id,
+            "raw_output": "undeclared: rejected",
+            "worker_id": "worker",
+        },
     )
-    result = submit_candidate(envelope, store, store)
+    projection = create_runtime_record(
+        "projection.decided",
+        {
+            "candidate_id": "candidate:rejected-replay",
+            "contract_id": contract.id,
+            "rejections": ({"name": "undeclared", "reject_reason": "undeclared"},),
+            "status": "rejected",
+        },
+        causal_parents=(candidate.id,),
+    )
+    store.append_runtime_record(candidate)
+    store.append_runtime_record(projection)
+    store.append_runtime_record(
+        create_runtime_record(
+            "lifecycle.terminal",
+            {"contract_id": contract.id, "terminal": "failed"},
+            causal_parents=(projection.id,),
+        )
+    )
 
-    assert result["status"] == "rejected"
     terminal_records = store.scan_runtime_records(record_type="lifecycle.terminal")
     assert terminal_records[-1][1].payload["terminal"] == "failed"
 

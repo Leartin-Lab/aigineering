@@ -14,16 +14,12 @@ from aigineering.application import (
     persistent_store as _persistent_store,
 )
 from aigineering.runtime import (
+    WorkerSubmissionCommitError,
     claim_next_package,
     submit_worker_proposal,
 )
 
 from aigineering.core.commitment import CandidateCommitter
-from aigineering.core.submit import (
-    SubmitClaimError,
-    SubmitCommitError,
-    SubmitConflictError,
-)
 from aigineering.core.worker_coordination import authenticate_worker_command
 from aigineering.protocol.candidate import (
     candidate_proposal_from_dict,
@@ -183,6 +179,8 @@ def _commit_candidate_request(body: CandidateProposalRequest):
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except WorkerSubmissionCommitError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 def _rejection_reason(decision) -> str:
@@ -472,12 +470,8 @@ def submit_worker_candidate(body: CandidateProposalRequest):
             proposal,
             store,
         )
-    except (ValueError, SubmitClaimError) as exc:
+    except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    except SubmitConflictError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except SubmitCommitError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 @app.post("/contracts/{contract_id}/run", status_code=410)

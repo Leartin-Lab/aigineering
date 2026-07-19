@@ -268,6 +268,9 @@ ordinary replacement task immediately and has no system-task completion phase.
 The raw-envelope `submit_candidate_envelope` and `_submit_claimed_method`
 committers have been deleted. A successful bare Worker invocation is closed as
 an unsigned-adapter failure; only an authenticated WorkerHost may submit work.
+The former `core/submit.py` envelope committer has also been deleted; all
+supported WorkerHost, CLI, and HTTP submissions now have one commitment owner,
+`CandidateCommitter`.
 The application uses the minimal public `CompletionPlugin`/
 `CompletionRegistry` protocol, which exposes only `handle_completion`; the old
 MethodRegistry is confined to the source-only legacy Engine compatibility path.

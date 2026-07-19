@@ -53,6 +53,10 @@ class WorkerInvocationError(RuntimeError):
     """A claimed provider call failed and was durably closed."""
 
 
+class WorkerSubmissionCommitError(RuntimeError):
+    """A valid Candidate could not be transactionally committed."""
+
+
 class _ClaimLeaseKeeper:
     """Renew one claim while its synchronous provider invocation is running."""
 
@@ -327,9 +331,16 @@ def submit_worker_proposal(
     )
     try:
         decision = CandidateCommitter(store, trace).commit(proposal)
-    except (sqlite3.Error, TypeError, ValueError) as exc:
+    except sqlite3.IntegrityError as exc:
         record_candidate_rejection(proposal, str(exc), store, trace)
         raise ValueError(str(exc)) from exc
+    except (TypeError, ValueError) as exc:
+        record_candidate_rejection(proposal, str(exc), store, trace)
+        raise
+    except sqlite3.Error as exc:
+        raise WorkerSubmissionCommitError(
+            f"Candidate commitment infrastructure failed: {exc}"
+        ) from exc
     if not decision.accepted and candidate_publishers is not None:
         process_rejected_submissions(store, candidate_publishers=candidate_publishers)
     terminal = any(

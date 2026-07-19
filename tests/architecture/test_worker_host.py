@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sqlite3
+
 import pytest
 
 from aigineering.agent.mock import MockWorker
@@ -27,6 +29,7 @@ from aigineering.protocol.envelope import CandidateEnvelope
 from aigineering.protocol.types import Contract
 from aigineering.runtime import (
     WorkerInvocationError,
+    WorkerSubmissionCommitError,
     claim_next_package,
     execute_claimed_package,
     submit_worker_proposal,
@@ -174,6 +177,77 @@ def test_claim_bound_candidate_replay_is_idempotent_after_claim_closes():
         if record.payload.get("candidate_id") == proposal.id
     ]
     assert len(committed) == 1
+
+
+def test_claim_bound_candidate_rejects_stale_epoch_before_projection():
+    store, contract, host = _runtime('/exec {"result":"done"}')
+    claimed = claim_next_package(store, worker_id=host.worker_id)
+    assert claimed is not None
+    envelope = CandidateEnvelope(
+        contract_id=contract.id,
+        worker_id=host.worker_id,
+        raw_output='/exec {"result":"done"}',
+        package_id=claimed.package.package_id,
+        claim_id=claimed.package.claim_id,
+        claim_epoch=claimed.package.claim_epoch + 1,
+        idempotency_key=f"stale-{claimed.package.package_id}",
+    )
+
+    with pytest.raises(ValueError, match="active worker claim predicate failed"):
+        submit_worker_proposal(host.sign_envelope(envelope, contract=contract), store)
+
+    assert store.get_assets_by_name("result") == []
+    assert store.get_claim(contract.id)["status"] == "active"
+
+
+def test_claim_bound_candidate_rechecks_claim_state_inside_commit():
+    store, contract, host = _runtime('/exec {"result":"done"}')
+    claimed = claim_next_package(store, worker_id=host.worker_id)
+    assert claimed is not None
+    envelope = CandidateEnvelope(
+        contract_id=contract.id,
+        worker_id=host.worker_id,
+        raw_output='/exec {"result":"done"}',
+        package_id=claimed.package.package_id,
+        claim_id=claimed.package.claim_id,
+        claim_epoch=claimed.package.claim_epoch,
+        idempotency_key=f"released-{claimed.package.package_id}",
+    )
+    proposal = host.sign_envelope(envelope, contract=contract)
+    store.mark_claim_released(claimed.package.claim_id)
+
+    with pytest.raises(ValueError, match="active worker claim predicate failed"):
+        submit_worker_proposal(proposal, store)
+
+    assert store.get_assets_by_name("result") == []
+    assert store.get_claim(contract.id)["status"] == "released"
+
+
+def test_submission_infrastructure_failure_is_not_candidate_rejection(monkeypatch):
+    store, contract, host = _runtime('/exec {"result":"done"}')
+    claimed = claim_next_package(store, worker_id=host.worker_id)
+    assert claimed is not None
+    envelope = CandidateEnvelope(
+        contract_id=contract.id,
+        worker_id=host.worker_id,
+        raw_output='/exec {"result":"done"}',
+        package_id=claimed.package.package_id,
+        claim_id=claimed.package.claim_id,
+        claim_epoch=claimed.package.claim_epoch,
+        idempotency_key=f"infra-{claimed.package.package_id}",
+    )
+    proposal = host.sign_envelope(envelope, contract=contract)
+
+    def fail_commit(*_args, **_kwargs):
+        raise sqlite3.OperationalError("storage unavailable")
+
+    monkeypatch.setattr("aigineering.runtime.CandidateCommitter.commit", fail_commit)
+
+    with pytest.raises(WorkerSubmissionCommitError, match="storage unavailable"):
+        submit_worker_proposal(proposal, store)
+
+    assert store.scan_runtime_records(record_type="candidate.rejected") == []
+    assert store.get_claim(contract.id)["status"] == "active"
 
 
 def test_claim_bound_expansion_cannot_widen_parent_tool_scope():

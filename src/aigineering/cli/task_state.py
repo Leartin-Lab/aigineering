@@ -8,7 +8,7 @@ from aigineering.core.runtime_projection import (
     RuntimeProjection,
 )
 from aigineering.core.store import require_operational_store
-from aigineering.core.submit import _all_outputs_satisfied
+from aigineering.core.output_satisfaction import all_outputs_satisfied
 from aigineering.core.worker_routing import eligible_workers
 from aigineering.protocol.immutability import deep_thaw
 from aigineering.protocol.types import Contract, TraceEntry
@@ -58,7 +58,7 @@ def project_task_status(contract: Contract, store) -> dict:
         "status": status,
         "terminal": status in TERMINAL_EVENTS or status == "completed",
         "ok": status == "completed",
-        "outputs_satisfied": _all_outputs_satisfied(contract, store),
+        "outputs_satisfied": all_outputs_satisfied(contract, store),
         "blockers": list(view.blockers),
         "budget_remaining": view.budget_remaining,
         "projection_hash": view.projection_hash,
@@ -130,7 +130,7 @@ def _status_from_entries(
         return "completed"
     if terminal:
         return terminal
-    if _all_outputs_satisfied(contract, store):
+    if all_outputs_satisfied(contract, store):
         return "completed"
     if attempt_outcome == "expanded":
         return "expanded"
@@ -172,7 +172,7 @@ def _silent_failure_risks(
         return []
     risks: list[dict[str, str]] = []
     if (
-        not _all_outputs_satisfied(contract, store)
+        not all_outputs_satisfied(contract, store)
         and _budget_remaining(contract, entries) <= 0
     ):
         risks.append(

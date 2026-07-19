@@ -296,12 +296,14 @@ def test_commitment_coordinator_does_not_own_effect_semantics():
 
 
 def test_worker_submission_uses_shared_fact_reduction_without_runtime_ingress():
-    submit = (ROOT / "src/aigineering/core/submit.py").read_text(encoding="utf-8")
+    commitment = (ROOT / "src/aigineering/core/commitment.py").read_text(
+        encoding="utf-8"
+    )
     runtime = (ROOT / "src/aigineering/runtime.py").read_text(encoding="utf-8")
     worker_cli = (ROOT / "src/aigineering/cli/worker.py").read_text(encoding="utf-8")
 
-    assert "reduce_asset_facts" in submit
-    assert "RuntimeIngress" not in submit
+    assert not (ROOT / "src/aigineering/core/submit.py").exists()
+    assert "reduce_asset_facts" in commitment
     assert "def submit_candidate_envelope" not in runtime
     assert "def _submit_claimed_method" not in runtime
     assert "CandidateCommitter(store, trace).commit(proposal)" in runtime
@@ -417,10 +419,12 @@ def test_recovery_replay_requires_authenticated_candidate_publisher():
 
 
 def test_projection_failure_terminal_is_distinct_from_recovery_progress():
-    submit = (ROOT / "src/aigineering/core/submit.py").read_text(encoding="utf-8")
+    projection = (ROOT / "src/aigineering/core/effect_projection.py").read_text(
+        encoding="utf-8"
+    )
     runtime = (ROOT / "src/aigineering/runtime.py").read_text(encoding="utf-8")
 
-    assert '"lifecycle.terminal"' in submit
+    assert '"lifecycle.terminal"' in projection
     assert '"projection_rejection.recovery_scheduled"' in runtime
     assert "recovered_projection_ids" in runtime
 

@@ -14,6 +14,7 @@ from aigineering.cli._common import (
 )
 from aigineering.cli._candidate import commit_local_effects, require_accepted
 from aigineering.runtime import (
+    WorkerSubmissionCommitError,
     _method_context_assets_for,
     claim_next_package,
     submit_worker_proposal,
@@ -22,11 +23,6 @@ from aigineering.core.disclosure import DisclosurePolicyError, compute_disclosur
 from aigineering.core.actor_facts import load_effective_actor_keys
 from aigineering.core.domain import load_genesis
 from aigineering.core.worker_routing import WorkerRegistration
-from aigineering.core.submit import (
-    SubmitClaimError,
-    SubmitCommitError,
-    SubmitConflictError,
-)
 from aigineering.protocol.candidate import ActorKey, candidate_proposal_from_dict
 from aigineering.protocol.effect_builders import (
     actor_authorization_effect,
@@ -350,13 +346,9 @@ def worker_submit(candidate_json: str, idempotency_key: Optional[str]) -> None:
             store,
             trace_store=store,
         )
-    except SubmitConflictError as e:
-        _output_json({"error": str(e), "status": "conflict"})
-        raise click.exceptions.Exit(1) from None
     except (
-        SubmitClaimError,
-        SubmitCommitError,
         DisclosurePolicyError,
+        WorkerSubmissionCommitError,
         TypeError,
         ValueError,
     ) as e:

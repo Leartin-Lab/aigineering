@@ -690,27 +690,6 @@ def test_expired_claim_cannot_be_renewed(store):
     assert store.renew_claim("expired", 3, "worker") is None
 
 
-def test_candidate_submit_rejects_stale_fencing_epoch_before_projection(store):
-    from aigineering.core.submit import SubmitClaimError, submit_candidate
-    from aigineering.protocol.envelope import CandidateEnvelope
-
-    contract = Contract(id="epoch-submit", outputs=["out"], budget=1)
-    store.add_contract(contract)
-    claim = store.claim_contract(contract.id, "worker")
-    assert claim is not None
-    envelope = CandidateEnvelope(
-        contract_id=contract.id,
-        worker_id="worker",
-        raw_output='/exec {"out": "value"}',
-        claim_id=claim["claim_id"],
-        claim_epoch=claim["epoch"] + 1,
-    )
-
-    with pytest.raises(SubmitClaimError, match="epoch mismatch"):
-        submit_candidate(envelope, store, store)
-    assert store.get_assets_by_name("out") == []
-
-
 def test_claim_contract_rejects_second_connection_active_claim(tmp_path):
     """Two SQLite connections cannot both claim the same contract as active."""
     db_path = str(tmp_path / "claims.db")
@@ -849,101 +828,6 @@ def test_method_submission_rolls_back_child_context_and_claim(store, monkeypatch
     assert store.get_runtime_record(record.id) is None
     assert store.get_idempotency("c-parent", "idem-method") is None
     assert store.get_claim("c-parent")["status"] == "active"
-
-
-def test_candidate_submission_rolls_back_when_claim_predicate_fails(store, monkeypatch):
-    """A stale claim state at commit time rejects and rolls back the submission."""
-    from aigineering.core.submit import SubmitCommitError, submit_candidate
-    from aigineering.protocol.envelope import CandidateEnvelope
-
-    contract = Contract(id="c-submit", name="submit", outputs=["out"], budget=3)
-    store.add_contract(contract)
-    store.persist_claim(
-        "claim-stale",
-        "c-submit",
-        "worker-1",
-        "2026-12-31T00:00:00+00:00",
-        "active",
-        "pkg:test",
-    )
-    store.mark_claim_released("claim-stale")
-    monkeypatch.setattr(
-        store,
-        "get_claim",
-        lambda _contract_id: {
-            "claim_id": "claim-stale",
-            "contract_id": "c-submit",
-            "worker_id": "worker-1",
-            "lease_until": "2026-12-31T00:00:00+00:00",
-            "status": "active",
-            "package_id": "pkg:test",
-            "epoch": 1,
-        },
-    )
-    envelope = CandidateEnvelope(
-        contract_id="c-submit",
-        worker_id="worker-1",
-        raw_output='/exec {"out": "value"}',
-        claim_id="claim-stale",
-        claim_epoch=1,
-        package_id="pkg:test",
-        idempotency_key="idem-stale",
-    )
-
-    with pytest.raises(SubmitCommitError):
-        submit_candidate(envelope, store, store)
-
-    assert store.get_assets_by_name("out") == []
-    assert store.get_trace_events("c-submit") == []
-    assert store.get_idempotency("c-submit", "idem-stale") is None
-
-
-def test_candidate_submission_rolls_back_when_claim_expires_at_commit(
-    store, monkeypatch
-):
-    """A claim that expires between validation and commit rejects atomically."""
-    from aigineering.core.submit import SubmitCommitError, submit_candidate
-    from aigineering.protocol.envelope import CandidateEnvelope
-
-    contract = Contract(id="c-expire", name="expire", outputs=["out"], budget=3)
-    store.add_contract(contract)
-    store.persist_claim(
-        "claim-expired",
-        "c-expire",
-        "worker-1",
-        "2000-01-01T00:00:00+00:00",
-        "active",
-        "pkg:expired",
-    )
-    monkeypatch.setattr(
-        store,
-        "get_claim",
-        lambda _contract_id: {
-            "claim_id": "claim-expired",
-            "contract_id": "c-expire",
-            "worker_id": "worker-1",
-            "lease_until": "2026-12-31T00:00:00+00:00",
-            "status": "active",
-            "package_id": "pkg:expired",
-            "epoch": 1,
-        },
-    )
-    envelope = CandidateEnvelope(
-        contract_id="c-expire",
-        worker_id="worker-1",
-        raw_output='/exec {"out": "value"}',
-        claim_id="claim-expired",
-        claim_epoch=1,
-        package_id="pkg:expired",
-        idempotency_key="idem-expired",
-    )
-
-    with pytest.raises(SubmitCommitError):
-        submit_candidate(envelope, store, store)
-
-    assert store.get_assets_by_name("out") == []
-    assert store.get_trace_events("c-expire") == []
-    assert store.get_idempotency("c-expire", "idem-expired") is None
 
 
 # ---------------------------------------------------------------------------

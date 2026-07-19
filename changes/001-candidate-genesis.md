@@ -350,6 +350,9 @@ Implementation progress:
 - Complete: public `worker_output_effect` / `task_delegation_effect` constructors
   and the old `TaskDelegationPlugin.propose/project` compatibility API were
   deleted. Claim-scoped delegation emits only ordinary `contract.declare`.
+- Complete: the 592-line `core/submit.py` raw-envelope commitment owner was
+  deleted. Candidate crash/fencing tests now target `CandidateCommitter`, and
+  recovery migration tests replay immutable historical facts directly.
 
 ## Required architecture tests
 
