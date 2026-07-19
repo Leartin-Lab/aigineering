@@ -14,6 +14,8 @@ from aigineering.core.fact_materialization import asset_committed_record
 from aigineering.core.fact_reducer import METHOD_RESULT_PREFIXES
 from aigineering.core.ids import hash_asset_content, hash_asset_definition, hash_claim
 from aigineering.core.provenance import sign_asset
+from aigineering.core.projection_context import EffectProjectionContext
+from aigineering.core.acceptance import project_asset_attestation_records
 from aigineering.core.worker_routing import (
     WorkerRegistration,
     worker_registration_payload,
@@ -71,12 +73,17 @@ def _contract_from_payload(payload: Mapping[str, Any]) -> Contract:
         origin=str(data.get("origin", "human")),
         minting_authority=tuple(data.get("minting_authority", ())),
         sensitive_input_policy=data.get("sensitive_input_policy"),
+        acceptance_policy=data.get("acceptance_policy"),
     )
 
 
 def project_contract_declaration(
-    effect: CandidateEffect, candidate: CandidateProposal, receipt_id: str
+    effect: CandidateEffect,
+    candidate: CandidateProposal,
+    receipt_id: str,
+    context: EffectProjectionContext,
 ) -> EffectProjection:
+    del context
     contract = _contract_from_payload(effect.payload)
     validate_contract_commitment(contract)
     record = create_runtime_record(
@@ -95,8 +102,12 @@ def project_contract_declaration(
 
 
 def project_asset_proposal(
-    effect: CandidateEffect, candidate: CandidateProposal, receipt_id: str
+    effect: CandidateEffect,
+    candidate: CandidateProposal,
+    receipt_id: str,
+    context: EffectProjectionContext,
 ) -> EffectProjection:
+    del context
     value = effect.payload.get("asset")
     if not isinstance(value, Mapping):
         raise ValueError("asset.propose requires an object payload.asset")
@@ -149,8 +160,12 @@ def project_asset_proposal(
 
 
 def project_worker_registration(
-    effect: CandidateEffect, candidate: CandidateProposal, receipt_id: str
+    effect: CandidateEffect,
+    candidate: CandidateProposal,
+    receipt_id: str,
+    context: EffectProjectionContext,
 ) -> EffectProjection:
+    del context
     value = effect.payload.get("registration")
     if not isinstance(value, Mapping):
         raise ValueError("worker.register requires an object payload.registration")
@@ -185,8 +200,12 @@ def project_worker_registration(
 
 
 def project_replacement_claim(
-    effect: CandidateEffect, candidate: CandidateProposal, receipt_id: str
+    effect: CandidateEffect,
+    candidate: CandidateProposal,
+    receipt_id: str,
+    context: EffectProjectionContext,
 ) -> EffectProjection:
+    del context
     value = effect.payload.get("claim")
     if not isinstance(value, Mapping):
         raise ValueError("asset.relate requires an object payload.claim")
@@ -215,8 +234,12 @@ def project_replacement_claim(
 
 
 def project_contract_cancellation(
-    effect: CandidateEffect, candidate: CandidateProposal, receipt_id: str
+    effect: CandidateEffect,
+    candidate: CandidateProposal,
+    receipt_id: str,
+    context: EffectProjectionContext,
 ) -> EffectProjection:
+    del context
     contract_id = str(effect.payload.get("contract_id", ""))
     reason = str(effect.payload.get("reason", ""))
     if not contract_id or not reason:
@@ -235,8 +258,12 @@ def project_contract_cancellation(
 
 
 def project_actor_authorization(
-    effect: CandidateEffect, candidate: CandidateProposal, receipt_id: str
+    effect: CandidateEffect,
+    candidate: CandidateProposal,
+    receipt_id: str,
+    context: EffectProjectionContext,
 ) -> EffectProjection:
+    del context
     value = effect.payload.get("actor_key")
     if not isinstance(value, Mapping):
         raise ValueError("actor.authorize requires an object payload.actor_key")
@@ -261,8 +288,12 @@ def project_actor_authorization(
 
 
 def project_actor_revocation(
-    effect: CandidateEffect, candidate: CandidateProposal, receipt_id: str
+    effect: CandidateEffect,
+    candidate: CandidateProposal,
+    receipt_id: str,
+    context: EffectProjectionContext,
 ) -> EffectProjection:
+    del context
     actor_id = str(effect.payload.get("actor_id", ""))
     key_id = str(effect.payload.get("key_id", ""))
     reason = str(effect.payload.get("reason", ""))
@@ -282,8 +313,12 @@ def project_actor_revocation(
 
 
 def project_actor_rotation(
-    effect: CandidateEffect, candidate: CandidateProposal, receipt_id: str
+    effect: CandidateEffect,
+    candidate: CandidateProposal,
+    receipt_id: str,
+    context: EffectProjectionContext,
 ) -> EffectProjection:
+    del context
     current_key_id = str(effect.payload.get("current_key_id", ""))
     reason = str(effect.payload.get("reason", ""))
     value = effect.payload.get("replacement_key")
@@ -329,7 +364,26 @@ def project_actor_rotation(
     )
 
 
-EffectProjector = Callable[[CandidateEffect, CandidateProposal, str], EffectProjection]
+def project_asset_attestation(
+    effect: CandidateEffect,
+    candidate: CandidateProposal,
+    receipt_id: str,
+    context: EffectProjectionContext,
+) -> EffectProjection:
+    projection = project_asset_attestation_records(
+        effect, candidate, receipt_id, context
+    )
+    return EffectProjection(
+        records=projection.records,
+        relation_target=projection.relation_target,
+        additional_capabilities=projection.additional_capabilities,
+    )
+
+
+EffectProjector = Callable[
+    [CandidateEffect, CandidateProposal, str, EffectProjectionContext],
+    EffectProjection,
+]
 BUILTIN_EFFECTS: Mapping[str, tuple[str, EffectProjector]] = MappingProxyType(
     {
         "asset.propose": ("asset.publish", project_asset_proposal),
@@ -340,6 +394,7 @@ BUILTIN_EFFECTS: Mapping[str, tuple[str, EffectProjector]] = MappingProxyType(
         "actor.authorize": ("actor.authorize", project_actor_authorization),
         "actor.revoke": ("actor.revoke", project_actor_revocation),
         "actor.rotate": ("actor.rotate", project_actor_rotation),
+        "asset.attest": ("asset.attest", project_asset_attestation),
     }
 )
 
@@ -348,11 +403,13 @@ def project_effect_batch(
     candidate: CandidateProposal,
     receipt_id: str,
     actor_capabilities: tuple[str, ...],
+    context: EffectProjectionContext | None = None,
 ) -> EffectBatchProjection:
     """Project one Candidate-wide atomic effect group without Store access."""
     groups = {effect.atomic_group for effect in candidate.effects}
     if len(groups) > 1:
         raise ValueError("one Candidate cannot mix different atomic_group values")
+    effective_context = context or EffectProjectionContext()
     projections: list[tuple[CandidateEffect, EffectProjection]] = []
     for effect in candidate.effects:
         handler = BUILTIN_EFFECTS.get(effect.effect_type)
@@ -361,7 +418,7 @@ def project_effect_batch(
         required_capability, projector = handler
         if required_capability not in actor_capabilities:
             raise ValueError(f"actor lacks required capability {required_capability!r}")
-        projection = projector(effect, candidate, receipt_id)
+        projection = projector(effect, candidate, receipt_id, effective_context)
         missing = tuple(
             capability
             for capability in projection.additional_capabilities

@@ -103,6 +103,7 @@ def build_control_plane_contract(
     labels: tuple[str, ...] = (),
     tool_scope: tuple[str, ...] = (),
     sensitive_input_policy: dict | None = None,
+    acceptance_policy: dict | None = None,
     allow_protected_outputs: bool = False,
 ) -> Contract:
     """Build and validate a human-origin Contract without committing it.
@@ -144,6 +145,7 @@ def build_control_plane_contract(
         labels=labels,
         origin="human",
         sensitive_input_policy=policy,
+        acceptance_policy=acceptance_policy,
     )
 
     return Contract(
@@ -157,4 +159,5 @@ def build_control_plane_contract(
         labels=labels,
         tool_scope=tool_scope,
         sensitive_input_policy=policy,
+        acceptance_policy=acceptance_policy,
     )

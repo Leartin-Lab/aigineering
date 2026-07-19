@@ -33,6 +33,7 @@ def _identity(**overrides) -> str:
         "worker_pools": ("advanced",),
         "minting_authority": (f"_sys_{CONTRACT_SELF_REFERENCE}",),
         "sensitive_input_policy": {"required_trust_tier": "human"},
+        "acceptance_policy": {"mode": "independent"},
     }
     fields.update(overrides)
     return hash_contract_v3(**fields)
@@ -43,6 +44,7 @@ def test_v3_identity_binds_authority_policy_and_routing_fields():
 
     assert _identity(minting_authority=("_sys_other",)) != reference
     assert _identity(sensitive_input_policy=None) != reference
+    assert _identity(acceptance_policy=None) != reference
     assert _identity(worker_capabilities=("vision",)) != reference
     assert _identity(worker_pools=("default",)) != reference
     assert _identity(parent_id="other-parent") != reference

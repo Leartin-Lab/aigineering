@@ -51,6 +51,7 @@ class Contract:
     origin: str = "human"
     minting_authority: tuple[str, ...] = field(default_factory=tuple)
     sensitive_input_policy: Optional[Mapping[str, Any]] = None
+    acceptance_policy: Optional[Mapping[str, Any]] = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "inputs", tuple(self.inputs))
@@ -65,6 +66,12 @@ class Contract:
                 self,
                 "sensitive_input_policy",
                 deep_freeze(self.sensitive_input_policy),
+            )
+        if self.acceptance_policy is not None:
+            object.__setattr__(
+                self,
+                "acceptance_policy",
+                deep_freeze(self.acceptance_policy),
             )
 
 

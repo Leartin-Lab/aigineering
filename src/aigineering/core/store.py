@@ -576,6 +576,7 @@ class JsonLStore(_ProjectionIndexMixin):
                     origin=data.get("origin", "human"),
                     minting_authority=data.get("minting_authority", []),
                     sensitive_input_policy=data.get("sensitive_input_policy"),
+                    acceptance_policy=data.get("acceptance_policy"),
                 )
                 existing = self.contracts.get(contract.id)
                 if existing is not None:

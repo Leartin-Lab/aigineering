@@ -40,12 +40,15 @@ authority rejection, or protected-name collision — is recorded with a
 `RejectionCategory` and a human-readable `reject_reason` in the
 `ProjectionResult.rejected_candidates` list. No rejection is silent.
 
-## 6. Methods are explicit subtasks
+## 6. Delegated behavior is ordinary task publication
 
 Planning, replanning, retry, and tool execution enter the system as method
-contracts. Method results and follow-up work are Assets and new Contracts; no
-production scheduler depends on an Engine-owned waiting/suspended state.
-Method handlers operate through `MethodRuntime`, not Engine private state.
+compatibility actions but publish ordinary Contracts through Store-free
+plugins and signed Candidates. Results and follow-up work are Assets and new
+Contracts; no production scheduler depends on an Engine-owned
+waiting/suspended/resume state. Production completion projection reconstructs
+from durable facts and does not import `MethodRuntime` or
+`ContinuationManager`.
 
 ## 7. Worker pull submission is claim-bound
 
@@ -83,3 +86,14 @@ Replay code must not skip a durable failure/rejection fact when its required
 causal Contract or raw Candidate evidence is missing. That condition is an
 explicit consistency error: silently continuing would leave the same work
 permanently unprocessed on every restart.
+
+## 11. Assertion and independent acceptance are distinct
+
+An output Asset is an authorized assertion, not automatic semantic truth. A
+Contract whose identity binds `acceptance_policy.mode=independent` remains
+unsatisfied until a different actor with every required verifier capability
+publishes an `asset.attest` Candidate for that Contract, declared output slot,
+and exact Asset ID. Producer self-attestation, wrong-slot Assets, non-task
+Assets, missing evidence, and capability gaps fail closed. Accepted
+attestation creates reconstructable `asset.attested` and `output.qualified`
+facts; terminal projection commits in the same transaction.

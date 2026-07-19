@@ -154,6 +154,7 @@ def hash_contract_v3(
     worker_pools: list[str] | tuple[str, ...] = (),
     minting_authority: list[str] | tuple[str, ...] = (),
     sensitive_input_policy: dict[str, Any] | None = None,
+    acceptance_policy: dict[str, Any] | None = None,
 ) -> str:
     """Security-complete Contract identity with normalized self references."""
     fields: dict[str, object] = {
@@ -172,6 +173,8 @@ def hash_contract_v3(
         "worker_capabilities": sorted(worker_capabilities),
         "worker_pools": sorted(worker_pools),
     }
+    if acceptance_policy is not None:
+        fields["acceptance_policy"] = deep_thaw(acceptance_policy)
     return f"task:v3:{compute_content_hash(canonical_json(fields))}"
 
 
@@ -184,6 +187,11 @@ def contract_identity_v3(contract) -> str:
     policy = (
         deep_thaw(contract.sensitive_input_policy)
         if contract.sensitive_input_policy is not None
+        else None
+    )
+    acceptance_policy = (
+        deep_thaw(contract.acceptance_policy)
+        if contract.acceptance_policy is not None
         else None
     )
     return hash_contract_v3(
@@ -201,6 +209,7 @@ def contract_identity_v3(contract) -> str:
         worker_pools=contract.worker_pools,
         minting_authority=normalized_authority,
         sensitive_input_policy=policy,
+        acceptance_policy=acceptance_policy,
     )
 
 

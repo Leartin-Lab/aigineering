@@ -114,10 +114,10 @@ Architecture tests must enforce at least:
 - fail-closed signature, domain, key, and capability checks;
 - one commitment coordinator without effect-specific branches;
 - visible rejection and independent Candidate receipt;
+- producer-separated exact-Asset attestation and qualified-output projection;
 - Memory/SQLite conformance, reconstruction, concurrent idempotency, and crash
   atomicity;
 - monotonically decreasing direct RuntimeIngress and Method exceptions.
 
 The ADR is fully realized only when the active change closes and its result is
 folded into `DESIGN.md`.
-

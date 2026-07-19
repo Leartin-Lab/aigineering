@@ -8,12 +8,36 @@ from aigineering.core.ids import validate_contract_identity
 from aigineering.protocol.types import Contract
 
 
+def validate_acceptance_policy(contract: Contract) -> None:
+    policy = contract.acceptance_policy
+    if policy is None:
+        return
+    mode = policy.get("mode")
+    if mode not in {"mechanical", "independent"}:
+        raise ValueError(
+            "Contract acceptance_policy.mode must be 'mechanical' or 'independent'"
+        )
+    required = policy.get("required_attestations", 1)
+    if required != 1 or isinstance(required, bool):
+        raise ValueError(
+            "v0.5 Contract acceptance_policy.required_attestations must equal 1"
+        )
+    capabilities = policy.get("verifier_capabilities", ())
+    if not isinstance(capabilities, (list, tuple)) or not all(
+        isinstance(value, str) and value for value in capabilities
+    ):
+        raise ValueError(
+            "Contract acceptance_policy.verifier_capabilities must be strings"
+        )
+
+
 def validate_contract_commitment(
     contract: Contract, *, require_canonical_v3: bool = True
 ) -> None:
     if require_canonical_v3 and not contract.id.startswith("task:v3:"):
         raise ValueError("Candidate contracts require a canonical task:v3 identity")
     validate_contract_identity(contract)
+    validate_acceptance_policy(contract)
     validate_execution_activation(contract.activation)
     for output_name in contract.outputs:
         prefix = matched_reserved_prefix(output_name)

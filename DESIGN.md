@@ -332,6 +332,25 @@ terminal records, current claim, routing compatibility, and allowance. “Waitin
 is therefore a query result, not a durable Contract state. A restarted or backup
 runtime can rebuild its projections from the shared Store and continue claims.
 
+## Output acceptance
+
+Contract identity optionally binds an `acceptance_policy`. The default or
+`mechanical` mode preserves declared-output projection: an authorized assertion
+can satisfy the slot. In `independent` mode, output presence alone never
+completes the Contract. A distinct actor publishes `asset.attest` for one exact
+Contract/output/Asset tuple and must hold both `asset.attest` and every
+Contract-required verifier capability. The target must have been produced for
+that Contract through its claim-bound Worker submission.
+
+An accepted verdict records `asset.attested` and `output.qualified`; a rejected
+verdict remains evidence without qualification. Qualification and the terminal
+consequence commit atomically, bind the exact Asset ID, reconstruct after
+restart, and converge under concurrent independent attestations. The 0.5
+reference policy deliberately supports one independent acceptance, not quorum,
+reputation, payment, or verifier-market semantics. `aig verify attest` uses a
+separate locally authorized verifier actor rather than the producing/root
+publication identity.
+
 The shipped package excludes the legacy in-process Engine and state serializer;
 their source remains temporarily for migration tests. The superseded startup
 checker has been deleted: expired claims and recovery are derived directly from

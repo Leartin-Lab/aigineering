@@ -5,16 +5,91 @@ from __future__ import annotations
 import click
 
 from aigineering.cli._common import _output_json, _persistent_store
+from aigineering.cli._candidate import require_accepted
 from aigineering.core.sufficiency import check_sufficiency
 from aigineering.core.verification import (
     batch_verify_definition,
     verify_replacement_claims,
 )
+from aigineering.protocol.effect_builders import asset_attestation_effect
+from aigineering.local_identity import ensure_local_plugin_publisher
 
 
 @click.group("verify")
 def verify() -> None:
     """Verify content hashes and replacement claims."""
+
+
+@verify.command("attest")
+@click.option("--contract", "contract_id", required=True, help="Contract ID.")
+@click.option("--output", "output_name", required=True, help="Declared output name.")
+@click.option("--asset", "asset_id", required=True, help="Exact Asset ID to attest.")
+@click.option(
+    "--verdict",
+    type=click.Choice(("accepted", "rejected")),
+    default="accepted",
+    show_default=True,
+)
+@click.option(
+    "--evidence-asset",
+    "evidence_asset_ids",
+    multiple=True,
+    help="Evidence Asset ID (repeatable).",
+)
+@click.option("--json", "json_output", is_flag=True)
+def verify_attest(
+    contract_id: str,
+    output_name: str,
+    asset_id: str,
+    verdict: str,
+    evidence_asset_ids: tuple[str, ...],
+    json_output: bool,
+) -> None:
+    """Publish a signed independent attestation for one exact output Asset."""
+    store = _persistent_store()
+    try:
+        publisher = ensure_local_plugin_publisher(
+            store,
+            "human.verify.v1",
+            ("asset.attest", "verify.human"),
+        )
+        decision = require_accepted(
+            publisher.publish(
+                (
+                    asset_attestation_effect(
+                        contract_id,
+                        output_name,
+                        asset_id,
+                        verdict=verdict,
+                        evidence_asset_ids=evidence_asset_ids,
+                    ),
+                ),
+                idempotency_key=(
+                    f"attest:{contract_id}:{output_name}:{asset_id}:{verdict}:"
+                    f"{','.join(evidence_asset_ids)}"
+                ),
+                causal_parents=(asset_id, *evidence_asset_ids),
+            )
+        )
+    except (LookupError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    payload = {
+        "accepted": decision.accepted,
+        "asset_id": asset_id,
+        "contract_id": contract_id,
+        "output_name": output_name,
+        "qualified": any(
+            record.record_type == "output.qualified"
+            for record in decision.runtime_records
+        ),
+        "verdict": verdict,
+    }
+    if json_output:
+        _output_json(payload)
+    else:
+        click.echo(
+            f"Attestation committed: {verdict} {contract_id}/{output_name} -> {asset_id}"
+        )
 
 
 @verify.command("hash")

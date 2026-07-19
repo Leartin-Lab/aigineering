@@ -7,6 +7,7 @@ submission must share this logic.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -51,6 +52,7 @@ def all_outputs_satisfied(
     *,
     extra_output_names: set[str] | None = None,
     require_outputs: bool = False,
+    extra_qualified_asset_ids: Mapping[tuple[str, str], set[str]] | None = None,
 ) -> bool:
     """Return True when every declared output has a valid satisfying asset.
 
@@ -63,7 +65,32 @@ def all_outputs_satisfied(
         return False
 
     extra_output_names = extra_output_names or set()
+    extra_qualified_asset_ids = extra_qualified_asset_ids or {}
     for output_name in contract.outputs:
+        policy = contract.acceptance_policy
+        if policy is not None and policy.get("mode") == "independent":
+            qualified_ids = {
+                str(record.payload.get("asset_id", ""))
+                for _, record in store.scan_runtime_records(
+                    record_type="output.qualified"
+                )
+                if record.payload.get("contract_id") == contract.id
+                and record.payload.get("output_name") == output_name
+            }
+            qualified_ids.update(
+                extra_qualified_asset_ids.get((contract.id, output_name), set())
+            )
+            if not qualified_ids:
+                return False
+            matching = store.get_assets_by_name(output_name)
+            if not any(
+                asset.id in qualified_ids
+                and asset.created_by == contract.id
+                and is_business_output(asset, output_name)
+                for asset in matching
+            ):
+                return False
+            continue
         if output_name in extra_output_names:
             continue
         matching = store.get_assets_by_name(output_name)

@@ -53,6 +53,25 @@ For deterministic local checks, use mock explicitly:
 aig run --once --worker mock --json
 ```
 
+For work that must be accepted by a different actor, bind the policy when the
+task is created and attest the exact produced Asset afterward:
+
+```bash
+aig task create \
+  --name compliance_review \
+  --output compliance_report \
+  --acceptance-policy '{"mode":"independent","required_attestations":1,"verifier_capabilities":["verify.human"]}' \
+  --json
+aig verify attest \
+  --contract <contract_id> \
+  --output compliance_report \
+  --asset <asset_id> \
+  --json
+```
+
+The producer cannot attest its own output. The target must be the Asset created
+by the task's claim-bound Worker submission, not an unrelated same-name Asset.
+
 4. Read the committed output asset.
 
 ```bash
@@ -101,6 +120,8 @@ Avoid these commands for normal agent delegation:
   or retry must create a new task.
 - Parent task completion is based on declared output satisfaction, not on all
   child tasks finishing.
+- An independent-acceptance task is incomplete until `output.qualified` binds
+  its declared slot to one exact task-produced Asset ID.
 - Remote claim and lease-renew requests are signed `worker.claim` and
   `worker.claim.renew` Candidates. Never send a self-reported `worker_id` body
   or reuse one command Candidate; submission remains a signed `worker.output`

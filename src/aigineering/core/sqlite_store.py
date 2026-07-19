@@ -59,7 +59,7 @@ from aigineering.protocol.wire import (
 
 _logger = logging.getLogger(__name__)
 
-CURRENT_SCHEMA_VERSION = 12
+CURRENT_SCHEMA_VERSION = 13
 
 # ---------------------------------------------------------------------------
 # Activation name extraction (shared with store.py)
@@ -117,7 +117,8 @@ CREATE TABLE IF NOT EXISTS contracts (
     worker_pools TEXT NOT NULL DEFAULT '[]',
     origin TEXT NOT NULL DEFAULT 'human',
     minting_authority TEXT NOT NULL DEFAULT '[]',
-    sensitive_input_policy TEXT
+    sensitive_input_policy TEXT,
+    acceptance_policy TEXT
 )
 """
 
@@ -375,6 +376,10 @@ class SQLiteStore:
             self._conn.execute(
                 "ALTER TABLE contracts ADD COLUMN worker_pools TEXT NOT NULL DEFAULT '[]'"
             )
+        if "acceptance_policy" not in existing:
+            self._conn.execute(
+                "ALTER TABLE contracts ADD COLUMN acceptance_policy TEXT"
+            )
 
     def _record_schema_version(self, version: int) -> None:
         self._conn.execute("DELETE FROM schema_version")
@@ -420,6 +425,9 @@ class SQLiteStore:
             if current < 12:
                 self._migrate_to_v12()
                 self._record_schema_version(12)
+            if current < 13:
+                self._migrate_to_v13()
+                self._record_schema_version(13)
 
     def _migrate_to_v2(self) -> None:
         """Add 040 transactional worker state and contract authority metadata."""
@@ -631,6 +639,10 @@ class SQLiteStore:
                 "ALTER TABLE worker_registrations "
                 "ADD COLUMN key_id TEXT NOT NULL DEFAULT ''"
             )
+
+    def _migrate_to_v13(self) -> None:
+        """Persist Contract-bound output acceptance policy."""
+        self._ensure_contract_columns()
 
     # ── Immutable runtime-record envelope ────────────────────────────────
 
@@ -848,6 +860,11 @@ class SQLiteStore:
                 if row["sensitive_input_policy"]
                 else None
             ),
+            acceptance_policy=(
+                json.loads(row["acceptance_policy"])
+                if row["acceptance_policy"]
+                else None
+            ),
         )
 
     # ------------------------------------------------------------------
@@ -983,12 +1000,12 @@ class SQLiteStore:
                 id, parent_id, name, description,
                 inputs, outputs, activation, budget,
                 tool_scope, labels, worker_capabilities, worker_pools,
-                origin, minting_authority, sensitive_input_policy
+                origin, minting_authority, sensitive_input_policy, acceptance_policy
             ) VALUES (
                 :id, :parent_id, :name, :description,
                 :inputs, :outputs, :activation, :budget,
                 :tool_scope, :labels, :worker_capabilities, :worker_pools,
-                :origin, :minting_authority, :sensitive_input_policy
+                :origin, :minting_authority, :sensitive_input_policy, :acceptance_policy
             )""",
                 {
                     "id": d["id"],
@@ -1008,6 +1025,11 @@ class SQLiteStore:
                     "sensitive_input_policy": (
                         json.dumps(d["sensitive_input_policy"], sort_keys=True)
                         if d["sensitive_input_policy"] is not None
+                        else None
+                    ),
+                    "acceptance_policy": (
+                        json.dumps(d["acceptance_policy"], sort_keys=True)
+                        if d["acceptance_policy"] is not None
                         else None
                     ),
                 },

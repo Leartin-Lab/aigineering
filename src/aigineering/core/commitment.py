@@ -12,7 +12,12 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 from aigineering.core.actor_facts import load_effective_actor_keys
+from aigineering.core.acceptance import materialize_qualification_facts
 from aigineering.core.effect_projection import project_effect_batch
+from aigineering.core.projection_context import (
+    EffectProjectionContext,
+    load_effect_projection_context,
+)
 from aigineering.core.fact_materialization import (
     reduce_asset_facts,
     trace_records,
@@ -139,6 +144,7 @@ def reduce_candidate(
     *,
     verifier_factory: VerifierFactory,
     actor_keys: tuple[ActorKey, ...] | None = None,
+    projection_context: EffectProjectionContext | None = None,
 ) -> CommitmentDecision:
     """Authenticate and purely decide one Candidate's complete effect batch."""
     validate_genesis_manifest(genesis)
@@ -157,6 +163,7 @@ def reduce_candidate(
             candidate,
             receipt.id,
             _actor_capabilities(candidate, effective_actor_keys),
+            projection_context,
         )
     except (TypeError, ValueError) as exc:
         return candidate_rejection_decision(candidate, receipt, str(exc))
@@ -223,6 +230,7 @@ class CandidateCommitter:
             genesis,
             verifier_factory=verifier_factory,
             actor_keys=load_effective_actor_keys(self._store, genesis),
+            projection_context=load_effect_projection_context(self._store),
         )
         if decision.assets:
             reducer_traces, reducer_records = reduce_asset_facts(
@@ -237,6 +245,15 @@ class CandidateCommitter:
                 runtime_records=decision.runtime_records
                 + reducer_records
                 + trace_records(reducer_traces),
+            )
+        qualification_traces, qualification_records = materialize_qualification_facts(
+            self._store, decision.runtime_records
+        )
+        if qualification_traces or qualification_records:
+            decision = replace(
+                decision,
+                trace_entries=decision.trace_entries + qualification_traces,
+                runtime_records=decision.runtime_records + qualification_records,
             )
         self._store.commit_ingress_batch(
             accepted_assets=list(decision.assets),

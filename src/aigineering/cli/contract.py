@@ -36,6 +36,11 @@ def contract_group() -> None:
     default=None,
     help='Sensitive input policy as JSON string (e.g. \'{"required_trust_tier":"verified"}\').',
 )
+@click.option(
+    "--acceptance-policy",
+    default=None,
+    help='Output acceptance policy as JSON, for example {"mode":"independent","verifier_capabilities":["verify.human"]}.',
+)
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON.")
 def contract_add(
     name: str,
@@ -46,6 +51,7 @@ def contract_add(
     labels: tuple[str, ...],
     tool_scope: tuple[str, ...],
     sensitive_input_policy: str | None,
+    acceptance_policy: str | None,
     as_json: bool,
 ) -> None:
     """Inject a contract into the runtime store."""
@@ -57,6 +63,12 @@ def contract_add(
             policy = json.loads(sensitive_input_policy)
         except json.JSONDecodeError as e:
             raise click.UsageError(f"--sensitive-input-policy is not valid JSON: {e}")
+    output_policy: dict | None = None
+    if acceptance_policy:
+        try:
+            output_policy = json.loads(acceptance_policy)
+        except json.JSONDecodeError as e:
+            raise click.UsageError(f"--acceptance-policy is not valid JSON: {e}")
     try:
         contract = build_control_plane_contract(
             name=name,
@@ -67,6 +79,7 @@ def contract_add(
             labels=labels,
             tool_scope=tool_scope,
             sensitive_input_policy=policy,
+            acceptance_policy=output_policy,
         )
         require_accepted(
             commit_local_effect(
@@ -118,6 +131,7 @@ def contract_show(contract_id: str, as_json: bool) -> None:
                 "outputs": list(contract.outputs),
                 "activation": contract.activation,
                 "budget": contract.budget,
+                "acceptance_policy": contract.acceptance_policy,
                 "labels": list(contract.labels),
                 "tool_scope": list(contract.tool_scope),
             }
@@ -129,6 +143,7 @@ def contract_show(contract_id: str, as_json: bool) -> None:
         click.echo(f"outputs:    {list(contract.outputs)}")
         click.echo(f"activation: {contract.activation}")
         click.echo(f"budget:     {contract.budget}")
+        click.echo(f"acceptance: {contract.acceptance_policy}")
         click.echo(f"labels:     {list(contract.labels)}")
 
 

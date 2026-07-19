@@ -79,6 +79,11 @@ def contract_to_canonical(contract: Contract) -> str:
             if contract.sensitive_input_policy is not None
             else None
         ),
+        "acceptance_policy": (
+            deep_thaw(contract.acceptance_policy)
+            if contract.acceptance_policy is not None
+            else None
+        ),
     }
     return json.dumps(d, sort_keys=True, ensure_ascii=False)
 
@@ -102,6 +107,11 @@ def contract_to_dict(contract: Contract) -> dict[str, Any]:
         "sensitive_input_policy": (
             deep_thaw(contract.sensitive_input_policy)
             if contract.sensitive_input_policy is not None
+            else None
+        ),
+        "acceptance_policy": (
+            deep_thaw(contract.acceptance_policy)
+            if contract.acceptance_policy is not None
             else None
         ),
     }

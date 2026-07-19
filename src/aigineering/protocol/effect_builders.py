@@ -37,6 +37,27 @@ def asset_proposal_effect(asset: Asset) -> CandidateEffect:
     )
 
 
+def asset_attestation_effect(
+    contract_id: str,
+    output_name: str,
+    asset_id: str,
+    *,
+    verdict: str = "accepted",
+    evidence_asset_ids: tuple[str, ...] = (),
+) -> CandidateEffect:
+    """Attest one exact output Asset without copying or replacing its content."""
+    return CandidateEffect(
+        "asset.attest",
+        {
+            "contract_id": contract_id,
+            "output_name": output_name,
+            "asset_id": asset_id,
+            "verdict": verdict,
+            "evidence_asset_ids": list(evidence_asset_ids),
+        },
+    )
+
+
 def worker_registration_effect(registration: WorkerRegistration) -> CandidateEffect:
     return CandidateEffect(
         "worker.register",

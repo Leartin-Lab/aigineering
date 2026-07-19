@@ -41,6 +41,11 @@ def task_group() -> None:
     default=None,
     help="Sensitive input policy as a JSON object.",
 )
+@click.option(
+    "--acceptance-policy",
+    default=None,
+    help="Output acceptance policy as a JSON object.",
+)
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON.")
 def task_create(
     name: str,
@@ -53,6 +58,7 @@ def task_create(
     labels: tuple[str, ...],
     tool_scope: tuple[str, ...],
     sensitive_input_policy: str | None,
+    acceptance_policy: str | None,
     as_json: bool,
 ) -> None:
     """Create a task through authenticated Candidate commitment."""
@@ -64,6 +70,12 @@ def task_create(
             policy = json.loads(sensitive_input_policy)
         except json.JSONDecodeError as e:
             raise click.UsageError(f"--sensitive-input-policy is not valid JSON: {e}")
+    output_policy = None
+    if acceptance_policy:
+        try:
+            output_policy = json.loads(acceptance_policy)
+        except json.JSONDecodeError as e:
+            raise click.UsageError(f"--acceptance-policy is not valid JSON: {e}")
 
     store = _persistent_store()
     try:
@@ -77,6 +89,7 @@ def task_create(
             labels=labels,
             tool_scope=tool_scope,
             sensitive_input_policy=policy,
+            acceptance_policy=output_policy,
         )
         require_accepted(
             commit_local_effect(

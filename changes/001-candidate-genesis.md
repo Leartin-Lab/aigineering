@@ -315,6 +315,14 @@ Implementation progress:
   proposes its ordinary continuation task through a Store-free plugin and signed
   Candidate; rejected publication is traced and terminates the parent instead of
   silently leaving suspended work.
+- Complete: Contract identity and SQLite schema v13 bind an optional output
+  acceptance policy. Independent output presence remains unsatisfied until a
+  differently signed, capability-qualified `asset.attest` Candidate binds the
+  exact task-produced Asset ID; accepted/rejected attestation,
+  `output.qualified`, terminal projection, restart, CLI, self-attestation and
+  concurrent-verifier regressions are executable gates. v0.5 intentionally
+  fixes the required attestation count at one and does not implement a quorum
+  market.
 - Pending: replace the remaining Method-named completion types with neutral
   task/plugin names, then delete the raw execution compatibility surface and
   source-only handlers.
