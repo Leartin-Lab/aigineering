@@ -194,15 +194,15 @@ def recover(
     cancelled: list[str] = []
     recreated: list[dict[str, str]] = []
 
-    if do_cancel:
-        try:
-            cancelled = _cancel_contracts(store, contract_ids)
-        except (LookupError, ValueError) as exc:
-            raise click.ClickException(str(exc)) from exc
-
     if do_recreate:
         try:
             recreated = _recreate_contracts(store, contract_ids)
+        except (LookupError, ValueError) as exc:
+            raise click.ClickException(str(exc)) from exc
+
+    if do_cancel:
+        try:
+            cancelled = _cancel_contracts(store, contract_ids)
         except (LookupError, ValueError) as exc:
             raise click.ClickException(str(exc)) from exc
 

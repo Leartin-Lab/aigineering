@@ -333,6 +333,12 @@ class MemoryStore(_ProjectionIndexMixin):
             raise TypeError(
                 "MemoryStore does not implement transactional claim fencing"
             )
+        if candidate_id and any(
+            record.record_type == "candidate.committed"
+            and record.payload.get("candidate_id") == candidate_id
+            for _, record in self.scan_runtime_records()
+        ):
+            return
         del candidate_actor_id, candidate_key_id, candidate_id
         del trace_entries
         for record in runtime_records:

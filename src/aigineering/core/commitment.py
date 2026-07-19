@@ -6,12 +6,23 @@ Effect projection is delegated; invalid effects have no direct-write fallback.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
+from aigineering.core.acceptance import materialize_qualification_facts
 from aigineering.core.actor_facts import load_effective_actor_keys
 from aigineering.core.attempt_projection import close_claim_attempt
-from aigineering.core.acceptance import materialize_qualification_facts
+from aigineering.core.candidate_decision import (
+    CommitmentDecision,
+    authentication_rejection_decision,
+    candidate_rejection_decision,
+    candidate_trace,
+    trace_record,
+)
+from aigineering.core.causal_allowance import (
+    CausalAllowanceConflict,
+    materialize_terminal_allowance,
+)
 from aigineering.core.effect_projection import project_effect_batch
 from aigineering.core.projection_context import (
     EffectProjectionContext,
@@ -21,7 +32,6 @@ from aigineering.core.fact_materialization import (
     reduce_asset_facts,
     trace_records,
 )
-from aigineering.core.trace import create_entry
 from aigineering.core.signing import create_verifier
 from aigineering.protocol.candidate import (
     CandidateProposal,
@@ -32,29 +42,10 @@ from aigineering.protocol.candidate import (
     validate_genesis_manifest,
 )
 from aigineering.protocol.runtime_record import RuntimeRecord, create_runtime_record
-from aigineering.protocol.types import Asset, Contract, TraceEntry
-from aigineering.protocol.wire import trace_entry_to_dict
 
 if TYPE_CHECKING:
     from aigineering.core.store import StoreProtocol
     from aigineering.core.trace import TraceStoreProtocol
-
-
-@dataclass(frozen=True)
-class CommitmentDecision:
-    """Pure result of reducing one authenticated Candidate."""
-
-    candidate_id: str
-    accepted: bool
-    runtime_records: tuple[RuntimeRecord, ...]
-    trace_entries: tuple[TraceEntry, ...]
-    contracts: tuple[Contract, ...] = ()
-    assets: tuple[Asset, ...] = ()
-
-    @property
-    def contract(self) -> Contract | None:
-        """Compatibility view for a Candidate declaring exactly one Contract."""
-        return self.contracts[0] if len(self.contracts) == 1 else None
 
 
 def _actor_capabilities(
@@ -66,75 +57,6 @@ def _actor_capabilities(
         if item.actor_id == candidate.actor_id and item.key_id == candidate.key_id
     )
     return key.capabilities
-
-
-def _trace_record(entry: TraceEntry) -> RuntimeRecord:
-    return create_runtime_record(
-        "trace.recorded", {"trace": trace_entry_to_dict(entry)}
-    )
-
-
-def _candidate_trace(**kwargs) -> TraceEntry:
-    """Candidate decisions are pure; commit time lives on RuntimeRecord."""
-    return replace(create_entry(**kwargs), timestamp="")
-
-
-def candidate_rejection_decision(
-    candidate: CandidateProposal,
-    receipt: RuntimeRecord,
-    reason: str,
-) -> CommitmentDecision:
-    rejection = create_runtime_record(
-        "candidate.rejected",
-        {
-            "candidate_id": candidate.id,
-            "reason": reason,
-            "effect_types": [effect.effect_type for effect in candidate.effects],
-        },
-        causal_parents=(receipt.id,),
-    )
-    trace = _candidate_trace(
-        contract_id="commitment",
-        event_type="candidate_rejected",
-        parent_id=candidate.id,
-        worker_id=candidate.actor_id,
-        authority_result="rejected",
-        rejected_fragments=[f"[candidate_rejection] {reason}"],
-    )
-    return CommitmentDecision(
-        candidate_id=candidate.id,
-        accepted=False,
-        runtime_records=(receipt, rejection, _trace_record(trace)),
-        trace_entries=(trace,),
-    )
-
-
-def authentication_rejection_decision(
-    candidate: CandidateProposal, reason: str
-) -> CommitmentDecision:
-    rejection = create_runtime_record(
-        "candidate.authentication_rejected",
-        {
-            "claimed_actor_id": candidate.actor_id,
-            "claimed_candidate_id": candidate.id,
-            "reason": reason,
-            "signature_kind": candidate.signature_kind,
-        },
-    )
-    trace = _candidate_trace(
-        contract_id="commitment",
-        event_type="candidate_authentication_rejected",
-        parent_id=candidate.id,
-        worker_id=candidate.actor_id,
-        authority_result="rejected",
-        rejected_fragments=[f"[authentication_rejection] {reason}"],
-    )
-    return CommitmentDecision(
-        candidate_id=candidate.id,
-        accepted=False,
-        runtime_records=(rejection, _trace_record(trace)),
-        trace_entries=(trace,),
-    )
 
 
 def reduce_candidate(
@@ -174,7 +96,7 @@ def reduce_candidate(
         },
         causal_parents=(receipt.id, *(record.id for record in projection.records)),
     )
-    trace = _candidate_trace(
+    trace = candidate_trace(
         contract_id="commitment",
         event_type="candidate_committed",
         parent_id=candidate.id,
@@ -197,7 +119,7 @@ def reduce_candidate(
     return CommitmentDecision(
         candidate_id=candidate.id,
         accepted=True,
-        runtime_records=(receipt, *projection.records, committed, _trace_record(trace)),
+        runtime_records=(receipt, *projection.records, committed, trace_record(trace)),
         trace_entries=(trace,),
         contracts=projection.contracts,
         assets=projection.assets,
@@ -255,16 +177,33 @@ class CandidateCommitter:
                 trace_entries=decision.trace_entries + qualification_traces,
                 runtime_records=decision.runtime_records + qualification_records,
             )
-        self._store.commit_ingress_batch(
-            accepted_assets=list(decision.assets),
-            trace_entries=list(decision.trace_entries),
-            contracts=decision.contracts,
-            runtime_records=decision.runtime_records,
-            claim_binding=candidate.claim_binding,
-            candidate_actor_id=candidate.actor_id,
-            candidate_key_id=candidate.key_id,
-            candidate_id=candidate.id,
+        decision = replace(
+            decision,
+            runtime_records=decision.runtime_records
+            + materialize_terminal_allowance(
+                self._store, decision.contracts, decision.runtime_records
+            ),
         )
+        try:
+            self._store.commit_ingress_batch(
+                accepted_assets=list(decision.assets),
+                trace_entries=list(decision.trace_entries),
+                contracts=decision.contracts,
+                runtime_records=decision.runtime_records,
+                claim_binding=candidate.claim_binding,
+                candidate_actor_id=candidate.actor_id,
+                candidate_key_id=candidate.key_id,
+                candidate_id=candidate.id,
+            )
+        except CausalAllowanceConflict as exc:
+            receipt = next(
+                record
+                for record in decision.runtime_records
+                if record.record_type == "candidate.received"
+            )
+            return record_candidate_rejection(
+                candidate, str(exc), self._store, self._trace, receipt=receipt
+            )
         if self._trace is not self._store:
             for entry in decision.trace_entries:
                 self._trace.append(entry)

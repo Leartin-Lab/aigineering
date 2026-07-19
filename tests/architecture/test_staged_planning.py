@@ -18,6 +18,7 @@ from aigineering.plugins import (
     StagedReplanningPlugin,
     TaskPlugin,
 )
+from aigineering.protocol.effect_builders import contract_declaration_effect
 from aigineering.protocol.types import Asset, Contract
 from aigineering.protocol.candidate import ActorKey, create_genesis_manifest
 
@@ -147,6 +148,16 @@ def test_staged_plan_atomic_group_commits_through_candidate_boundary():
     )
     genesis = create_genesis_manifest("staged-plan", (actor,), "policy:test")
     store = MemoryStore()
+    parent_decision = publish_effects(
+        store,
+        MemoryTraceStore(),
+        genesis,
+        actor,
+        signer,
+        (contract_declaration_effect(_parent()),),
+        idempotency_key="staged-plan-parent",
+    )
+    assert parent_decision.accepted is True
 
     decision = publish_effects(
         store,
@@ -161,5 +172,6 @@ def test_staged_plan_atomic_group_commits_through_candidate_boundary():
     assert decision.accepted is True
     assert len(decision.contracts) == 3
     assert {contract.id for contract in store.get_all_contracts()} == {
-        effect.payload["contract"]["id"] for effect in proposal.effects
+        _parent().id,
+        *(effect.payload["contract"]["id"] for effect in proposal.effects),
     }

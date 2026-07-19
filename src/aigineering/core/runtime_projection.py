@@ -10,6 +10,10 @@ from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 from aigineering.core.activation import check_activation
+from aigineering.core.causal_allowance import (
+    allowance_available,
+    allowance_is_recorded,
+)
 from aigineering.core.ids import compute_content_hash
 from aigineering.core.output_satisfaction import (
     all_outputs_satisfied,
@@ -74,7 +78,14 @@ class RuntimeProjection:
             )
             entries = self._entries_for(contract.id)
             typed_terminal_events: tuple[str, ...] = ()
-            typed_budget: int | None = None
+            allowance_records = tuple(
+                record for _, record in self._store.scan_runtime_records()
+            )
+            typed_budget = (
+                allowance_available(contract, allowance_records)
+                if allowance_is_recorded(contract.id, allowance_records)
+                else None
+            )
         else:
             asset_payloads, entries, typed_terminal_events, typed_budget = historical
             available_names = {
@@ -262,11 +273,17 @@ class RuntimeProjection:
             if record.record_type == "budget.consumed"
             and record.payload["contract_id"] == contract.id
         ]
+        selected_records = tuple(record for _, record in selected)
+        typed_budget = (
+            allowance_available(contract, selected_records)
+            if allowance_is_recorded(contract.id, selected_records)
+            else (budget_values[-1] if budget_values else None)
+        )
         return (
             asset_payloads,
             entries,
             terminal_events,
-            budget_values[-1] if budget_values else None,
+            typed_budget,
         )
 
     def _record_selected(self, revision: int, recorded_at: str) -> bool:

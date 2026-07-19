@@ -11,6 +11,7 @@ import json
 
 from typing import TYPE_CHECKING
 
+from aigineering.core.causal_allowance import resolve_causal_allowance
 from aigineering.core.labels import resolve_contract_labels
 from aigineering.core.method_runtime import MethodRuntime
 from aigineering.core.methods import method_payload
@@ -193,7 +194,14 @@ class ContinuationManager:
         with the tool observation context.
         """
         method = method_payload(source_contract).get("method", "method")
-        budget = max(1, self._budget_mgr.get_remaining(parent.id))
+        budget = max(
+            1,
+            resolve_causal_allowance(
+                self._store,
+                parent,
+                fallback=self._budget_mgr.get_remaining(parent.id),
+            ),
+        )
         from aigineering.plugins import ContinuationTaskPlugin, PluginRequest
         from aigineering.protocol.wire import contract_from_dict
 

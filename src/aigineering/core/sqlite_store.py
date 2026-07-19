@@ -2319,6 +2319,20 @@ class SQLiteStore:
         candidate_id: str = "",
     ) -> None:
         with self._conn:
+            # Conditional allowance/key/claim checks must observe the same
+            # single-writer snapshot as their inserts, even for batches that
+            # contain no Contract or Asset row to acquire the lock first.
+            self._conn.execute("BEGIN IMMEDIATE")
+            if (
+                candidate_id
+                and self._conn.execute(
+                    "SELECT 1 FROM runtime_records WHERE record_type = "
+                    "'candidate.committed' AND "
+                    "json_extract(payload_json, '$.candidate_id') = ? LIMIT 1",
+                    (candidate_id,),
+                ).fetchone()
+            ):
+                return
             if claim_binding is not None:
                 if candidate_actor_id == "" or candidate_key_id == "":
                     raise ValueError(
@@ -2365,6 +2379,23 @@ class SQLiteStore:
             )
             for declaration in declarations:
                 self._insert_contract(declaration)
+            if any(
+                record.record_type in {"allowance.reserved", "allowance.extinguished"}
+                for record in runtime_records
+            ):
+                from aigineering.core.causal_allowance import validate_allowance_commit
+
+                pending_ids = {record.id for record in runtime_records}
+                existing_records = tuple(
+                    record
+                    for _, record in self.scan_runtime_records()
+                    if record.id not in pending_ids
+                )
+                validate_allowance_commit(
+                    tuple(self.get_all_contracts()),
+                    existing_records,
+                    runtime_records,
+                )
             for asset in accepted_assets:
                 if not asset.signed_by or not verify_asset_seal(asset):
                     raise ValueError(

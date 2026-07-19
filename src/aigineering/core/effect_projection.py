@@ -7,6 +7,7 @@ from types import MappingProxyType
 from typing import Any, Callable, Mapping
 
 from aigineering.core.authority import matched_reserved_prefix
+from aigineering.core.causal_allowance import project_contract_allowance_records
 from aigineering.core.actor_facts import actor_key_payload
 from aigineering.core.asset_versions import replacement_claim_payload
 from aigineering.core.contract_admission import validate_contract_commitment
@@ -462,6 +463,12 @@ def project_effect_batch(
     )
     if claimed_parent is not None:
         _validate_claim_bound_projection(claimed_parent, contracts, assets)
+    allowance_records = project_contract_allowance_records(
+        contracts,
+        effective_context.contracts,
+        effective_context.runtime_records,
+        causal_parent=receipt_id,
+    )
     targets = tuple(
         (effect.effect_type, projection.relation_target)
         for effect, projection in projections
@@ -469,7 +476,8 @@ def project_effect_batch(
     return EffectBatchProjection(
         records=tuple(
             record for _, projection in projections for record in projection.records
-        ),
+        )
+        + allowance_records,
         relation_target=(targets[0][1] if len(targets) == 1 else candidate.id),
         projected_effects=targets,
         contracts=contracts,

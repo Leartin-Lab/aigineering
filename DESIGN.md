@@ -62,6 +62,22 @@ without either progress or a visible failure.
 - Claim and WorkerPackage: ephemeral coordination records whose transitions are
   transactionally recorded and reconstructable.
 
+### Causal allowance
+
+`Contract.budget` is the migration input to an immutable root
+`allowance.granted` fact. Publishing a child Contract atomically records an
+`allowance.reserved` fact against its parent and a grant for the child. Planning,
+execution, and verification reservations carry distinct purpose evidence. A
+terminal Contract extinguishes its unreserved remainder; no remainder becomes a
+Worker balance.
+
+Runtime views derive available allowance as grants minus reservations and
+extinguishments. Pure projection rejects an oversized batch, and SQLite repeats
+the check after acquiring the commit transaction so concurrent child publication
+and termination cannot overspend or over-extinguish the same lineage. Exact
+Candidate replay cannot reserve twice. Legacy Contracts without grant facts
+retain their declared budget only as a migration fallback.
+
 ## Commitment boundary
 
 The non-negotiable rules are specified in `docs/boundary-invariants.md` and

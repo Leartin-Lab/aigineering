@@ -329,8 +329,12 @@ Implementation progress:
   oracle. Candidate identity binds Contract/claim/package/epoch; SQLite commits
   stage declarations, `attempt.closed(expanded)`, audit, and claim transition
   atomically. Draft and dependency facts activate compile, whose accepted result
-  publishes business children through the signed planning publisher. Immutable
-  causal reservation remains pending.
+  publishes business children through the signed planning publisher.
+- Complete: root and child declarations now materialize immutable causal
+  allowance grants/reservations. Runtime views reconstruct the balance;
+  terminal facts extinguish the remainder; exact replay is stable; and SQLite
+  transaction-time validation prevents concurrent lineage overspend. The
+  legacy BudgetManager and one-shot completion callback remain deletion debt.
 - Pending: replace the remaining Method-named completion types with neutral
   task/plugin names, then delete the raw execution compatibility surface and
   source-only handlers.

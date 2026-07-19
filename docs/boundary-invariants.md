@@ -102,3 +102,13 @@ and exact Asset ID. Producer self-attestation, wrong-slot Assets, non-task
 Assets, missing evidence, and capability gaps fail closed. Accepted
 attestation creates reconstructable `asset.attested` and `output.qualified`
 facts; terminal projection commits in the same transaction.
+
+## 12. Recursive work cannot mint causal allowance
+
+Root declarations materialize an immutable allowance grant. Every newly
+published child Contract atomically reserves allowance from its causal parent
+and receives only that reserved amount. Pure projection rejects oversized
+batches; SQLite rechecks the balance in the commit transaction to arbitrate
+concurrent publishers. Terminal Contracts extinguish their remaining allowance,
+and exact Candidate replay cannot reserve it twice. Allowance is task lineage
+authority, never a Worker account or mutable process counter.

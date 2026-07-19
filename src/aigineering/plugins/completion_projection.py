@@ -11,6 +11,7 @@ import json
 from typing import TYPE_CHECKING, Protocol
 
 from aigineering.core.budget_manager import BudgetManager
+from aigineering.core.causal_allowance import resolve_causal_allowance
 from aigineering.core.disclosure import compute_disclosure
 from aigineering.core.output_satisfaction import all_outputs_satisfied
 from aigineering.core.runtime_projection import TERMINAL_EVENTS
@@ -237,7 +238,14 @@ class TaskCompletionProjector:
                 parent=parent,
                 source=source,
                 assets=tuple(assets),
-                allowance=max(1, self._budget.get_remaining(parent.id)),
+                allowance=max(
+                    1,
+                    resolve_causal_allowance(
+                        self._store,
+                        parent,
+                        fallback=self._budget.get_remaining(parent.id),
+                    ),
+                ),
             )
         )
         continuation = contract_from_dict(proposal.effects[0].payload["contract"])

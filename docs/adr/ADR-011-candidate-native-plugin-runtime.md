@@ -3,7 +3,7 @@
 Status: Accepted; migration in progress
 Date: 2026-07-15
 Scope: v0.5 commitment boundary and v1 protocol direction
-Related: ADR-005, ADR-006, ADR-007, ADR-008, ADR-009, ADR-010
+Related: ADR-005, ADR-006, ADR-007, ADR-008, ADR-009, ADR-010, ADR-013
 
 ## Context
 
@@ -75,6 +75,9 @@ inputs, outputs, authority, and acceptance evidence.
 Allowance limits how much computation a task may consume or delegate. It is not
 a persistent worker wallet. A planner may restructure work within inherited
 allowance but may not mint authority or budget.
+
+ADR-013 specifies the implemented causal accounting: immutable grants,
+reservations, and terminal extinguishment, with Store-transaction arbitration.
 
 The producer of an effect does not unilaterally validate its own work. Acceptance
 policy and independent verification are distinct effects/actors where risk

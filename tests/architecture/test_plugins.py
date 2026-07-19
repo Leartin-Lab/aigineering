@@ -31,6 +31,7 @@ from aigineering.plugins import (
 )
 from aigineering.protocol.actions import WorkerAction
 from aigineering.protocol.candidate import ActorKey, create_genesis_manifest
+from aigineering.protocol.effect_builders import contract_declaration_effect
 from aigineering.protocol.types import Asset, Contract
 
 
@@ -121,6 +122,16 @@ def test_planning_plugin_fanout_commits_through_candidate_publisher():
     genesis = create_genesis_manifest("plugin-test", (actor,), "policy:plugin-test")
     store = MemoryStore()
     trace = MemoryTraceStore()
+    parent_decision = publish_effects(
+        store,
+        trace,
+        genesis,
+        actor,
+        signer,
+        (contract_declaration_effect(_parent()),),
+        idempotency_key="planning-parent",
+    )
+    assert parent_decision.accepted is True
 
     decision = publish_effects(
         store,
@@ -135,6 +146,7 @@ def test_planning_plugin_fanout_commits_through_candidate_publisher():
     assert decision.accepted is True
     assert len(decision.contracts) == 2
     assert {contract.name for contract in store.get_all_contracts()} == {
+        "deliver_report",
         "research",
         "write",
     }
@@ -241,6 +253,11 @@ def test_continuation_plugin_proposes_one_ordinary_task_and_registry_is_explicit
     trace = MemoryTraceStore()
     publisher = CandidatePublisher(store, trace, genesis, actor, signer)
     publishers = CandidatePublisherRegistry(((plugin.plugin_id, publisher),))
+    parent_decision = publisher.publish(
+        (contract_declaration_effect(parent),),
+        idempotency_key="continuation-parent",
+    )
+    assert parent_decision.accepted is True
 
     decision = publishers.get(plugin.plugin_id).publish(
         proposal.effects,
@@ -249,7 +266,7 @@ def test_continuation_plugin_proposes_one_ordinary_task_and_registry_is_explicit
     )
 
     assert decision.accepted is True
-    assert len(store.get_all_contracts()) == 1
+    assert len(store.get_all_contracts()) == 2
 
 
 @pytest.mark.parametrize("action_type", ["plan", "replan", "tool", "fail"])
