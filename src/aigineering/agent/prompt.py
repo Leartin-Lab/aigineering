@@ -65,6 +65,7 @@ def contract_prompt(contract: Contract, assets: list[Asset]) -> str:
         "",
     ]
     lines.extend(_method_result_instructions(contract))
+    lines.extend(_planning_stage_instructions(contract))
     lines.extend(
         [
             "Behavior instructions:",
@@ -113,3 +114,43 @@ def _method_result_instructions(contract: Contract) -> list[str]:
         + '": "{\\"contracts\\":[{\\"name\\":\\"extract\\",\\"description\\":\\"extract facts\\",\\"inputs\\":[\\"input_asset\\"],\\"outputs\\":[\\"facts\\"],\\"activation\\":\\"input_asset\\",\\"budget\\":1,\\"tool_scope\\":[],\\"labels\\":[]}]}"}}',
         "",
     ]
+
+
+def _planning_stage_instructions(contract: Contract) -> list[str]:
+    stages = {
+        "plugin:plan.draft": (
+            "Planning draft protocol (required):",
+            "Return the declared output as JSON with goals, evidence_needs, "
+            "uncertainties, and proposed_steps. Do not emit Contract wire objects.",
+        ),
+        "plugin:replan.draft": (
+            "Replanning draft protocol (required):",
+            "Return the declared output as JSON with invalidated_assumptions, "
+            "reachable_evidence, uncertainties, and proposed_successors.",
+        ),
+        "plugin:plan.dependencies": (
+            "Planning dependency protocol (required):",
+            "Return JSON with producers, consumers, missing_inputs, cycles, "
+            "parallel_groups, capability_needs, authority_risks, and allowance_needs.",
+        ),
+        "plugin:replan.dependencies": (
+            "Replanning dependency protocol (required):",
+            "Return JSON with invalidated_edges, producers, consumers, missing_inputs, "
+            "cycles, capability_needs, authority_risks, and allowance_needs.",
+        ),
+        "plugin:plan.compile": (
+            "Planning compiler protocol (required):",
+            "Return the declared output as one JSON object with a contracts array. "
+            "Use only facts present in the draft and dependency analysis.",
+        ),
+        "plugin:replan.compile": (
+            "Replanning compiler protocol (required):",
+            "Return the declared output as one JSON object with a contracts array of "
+            "successors; never mutate prior Contracts.",
+        ),
+    }
+    for label in contract.labels:
+        instruction = stages.get(label)
+        if instruction is not None:
+            return [instruction[0], f"- {instruction[1]}", ""]
+    return []

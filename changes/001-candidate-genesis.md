@@ -323,6 +323,11 @@ Implementation progress:
   concurrent-verifier regressions are executable gates. v0.5 intentionally
   fixes the required attestation count at one and does not implement a quorum
   market.
+- Implementing: the staged planning constructor emits one atomic group containing
+  ordinary draft, dependency-analysis, and compile Contracts. Each stage has a
+  distinct label, output-schema prompt, protected output, and independent unit
+  oracle. Claim-bound publication and causal reservation are still pending, so
+  the one-shot compatibility planner remains the executable path for now.
 - Pending: replace the remaining Method-named completion types with neutral
   task/plugin names, then delete the raw execution compatibility surface and
   source-only handlers.

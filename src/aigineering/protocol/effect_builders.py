@@ -13,8 +13,14 @@ if TYPE_CHECKING:
     from aigineering.core.worker_routing import WorkerRegistration
 
 
-def contract_declaration_effect(contract: Contract) -> CandidateEffect:
-    return CandidateEffect("contract.declare", {"contract": contract_to_dict(contract)})
+def contract_declaration_effect(
+    contract: Contract, *, atomic_group: str = ""
+) -> CandidateEffect:
+    return CandidateEffect(
+        "contract.declare",
+        {"contract": contract_to_dict(contract)},
+        atomic_group=atomic_group,
+    )
 
 
 def asset_proposal_effect(asset: Asset) -> CandidateEffect:

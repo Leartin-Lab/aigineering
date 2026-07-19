@@ -10,6 +10,11 @@ from aigineering.plugins.continuation import ContinuationTaskPlugin
 from aigineering.plugins.delegation import DelegationProjection, TaskDelegationPlugin
 from aigineering.plugins.fail_completion import FailCompletionPlugin
 from aigineering.plugins.planning import PlanningExpansionPlugin
+from aigineering.plugins.staged_planning import (
+    PlanningStages,
+    StagedPlanningPlugin,
+    StagedReplanningPlugin,
+)
 from aigineering.plugins.planning_completion import (
     PlanningCompletionPlugin,
     ReplanningCompletionPlugin,
@@ -29,6 +34,7 @@ def default_completion_registry() -> CompletionRegistry:
 
 __all__ = (
     "PlanningExpansionPlugin",
+    "PlanningStages",
     "PlanningCompletionPlugin",
     "ContinuationTaskPlugin",
     "CompletionPlugin",
@@ -42,6 +48,8 @@ __all__ = (
     "PluginRequest",
     "ReplanningCompletionPlugin",
     "TaskPlugin",
+    "StagedPlanningPlugin",
+    "StagedReplanningPlugin",
     "ToolCompletionPlugin",
     "TaskDelegationPlugin",
 )
