@@ -76,7 +76,7 @@ def test_asset_slice_uses_candidate_commitment_and_preserves_lineage():
     assert "commit_local_effect" in body
     assert "asset_proposal_effect" in body
     assert "accept_asset" not in body
-    projection = (ROOT / "src/aigineering/core/effect_projection.py").read_text(
+    projection = (ROOT / "src/aigineering/core/effect_projectors.py").read_text(
         encoding="utf-8"
     )
     assert 'lineage_id=str(data.get("lineage_id", ""))' in projection
@@ -254,7 +254,7 @@ def test_worker_registration_cli_uses_typed_candidate_effect():
 
 
 def test_actor_authorization_is_a_capability_gated_candidate_effect():
-    projection = (ROOT / "src/aigineering/core/effect_projection.py").read_text(
+    projection = (ROOT / "src/aigineering/core/effect_projectors.py").read_text(
         encoding="utf-8"
     )
     actor_facts = (ROOT / "src/aigineering/core/actor_facts.py").read_text(
@@ -431,7 +431,7 @@ def test_recovery_replay_requires_authenticated_candidate_publisher():
 
 
 def test_projection_failure_terminal_is_distinct_from_recovery_progress():
-    projection = (ROOT / "src/aigineering/core/effect_projection.py").read_text(
+    projection = (ROOT / "src/aigineering/core/effect_projectors.py").read_text(
         encoding="utf-8"
     )
     runtime = (ROOT / "src/aigineering/runtime.py").read_text(encoding="utf-8")

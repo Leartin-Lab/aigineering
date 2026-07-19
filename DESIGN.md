@@ -278,6 +278,10 @@ migrations live in separate adapter-internal modules, so operational claim and
 commit code cannot silently become a second schema owner. Migration backfills
 still run in the existing schema transaction and reuse the facade's canonical
 row materializers.
+Candidate effect projection is similarly split by responsibility: individual
+typed-effect projectors produce immutable fact proposals, while one batch
+projector alone enforces atomic-group, capability, claim-containment and causal
+allowance rules. `CandidateCommitter` calls only that batch entry point.
 The application uses the minimal public `CompletionPlugin`/
 `CompletionRegistry` protocol, which exposes only `handle_completion`.
 Plan and replan completion now live in `plugins/planning_completion.py` and are

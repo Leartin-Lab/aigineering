@@ -366,6 +366,9 @@ Implementation progress:
 - Complete: SQLite DDL and v1-v13 historical migrations moved out of the
   operational Store facade. The public `SQLiteStore` and schema version remain
   compatible; migration and reconstruction tests exercise the same databases.
+- Complete: effect-specific pure projectors are separated from the single
+  Candidate batch policy. Atomic grouping, capability, claim containment and
+  allowance validation retain one entry point and one commitment caller.
 
 ## Required architecture tests
 
