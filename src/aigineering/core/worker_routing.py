@@ -133,6 +133,6 @@ def select_worker(
     contract: Contract,
     workers: list[WorkerRegistration] | tuple[WorkerRegistration, ...],
 ) -> WorkerRegistration | None:
-    """Select one eligible worker without embedding provider policy in Engine."""
+    """Select one eligible worker without embedding provider policy in core."""
     eligible = eligible_workers(contract, workers)
     return eligible[0] if eligible else None

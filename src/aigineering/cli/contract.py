@@ -39,7 +39,7 @@ def contract_group() -> None:
 @click.option(
     "--acceptance-policy",
     default=None,
-    help='Output acceptance policy as JSON, for example {"mode":"independent","verifier_capabilities":["verify.human"]}.',
+    help='Output acceptance policy as JSON, for example {"mode":"independent","policy_version":"review-v1","verifier_capabilities":["verify.human"]}.',
 )
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON.")
 def contract_add(

@@ -38,6 +38,11 @@ def compute_content_hash(content: str) -> str:
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
 
+def acceptance_policy_id(policy: Any) -> str:
+    """Content identity for one immutable Contract acceptance policy."""
+    return "acceptance:v1:" + compute_content_hash(canonical_json(deep_thaw(policy)))
+
+
 # ---------------------------------------------------------------------------
 # Legacy helpers (preserved for minimal call-site churn)
 # ---------------------------------------------------------------------------

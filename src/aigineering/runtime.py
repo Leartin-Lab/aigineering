@@ -29,6 +29,7 @@ from aigineering.core.commitment import CandidateCommitter, record_candidate_rej
 from aigineering.core.worker_routing import is_eligible
 from aigineering.core.trace_manager import TraceManager
 from aigineering.core.trace import create_entry
+from aigineering.protocol.candidate import CandidateClaimBinding
 from aigineering.protocol.envelope import CandidateEnvelope
 from aigineering.protocol.package import WorkerPackage
 from aigineering.protocol.runtime_record import create_runtime_record
@@ -237,9 +238,21 @@ def execute_claimed_package(
     keeper.start()
     try:
         try:
-            candidate = worker.invoke(
-                claimed.contract,
-                list(claimed.disclosed_assets + claimed.method_context_assets),
+            invocation_binding = CandidateClaimBinding(
+                contract_id=claimed.contract.id,
+                claim_id=claimed.package.claim_id,
+                claim_epoch=claimed.package.claim_epoch,
+                package_id=claimed.package.package_id,
+            )
+            disclosed = list(claimed.disclosed_assets + claimed.method_context_assets)
+            candidate = (
+                worker.invoke(
+                    claimed.contract,
+                    disclosed,
+                    claim_binding=invocation_binding,
+                )
+                if isinstance(worker, WorkerHost)
+                else worker.invoke(claimed.contract, disclosed)
             )
             envelope = CandidateEnvelope(
                 contract_id=claimed.contract.id,
@@ -768,17 +781,6 @@ def process_task_completions(
         projected.add(contract.id)
         processed.append(contract.id)
     return processed
-
-
-def process_method_completions(
-    store, completion_registry, *, candidate_publishers=None
-) -> list[str]:
-    """Compatibility alias for :func:`process_task_completions`."""
-    return process_task_completions(
-        store,
-        completion_registry,
-        candidate_publishers=candidate_publishers,
-    )
 
 
 def _method_context_assets_for(contract: Contract, store) -> tuple[Asset, ...]:

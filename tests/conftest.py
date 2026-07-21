@@ -60,6 +60,18 @@ class CandidateTestRuntime:
         self._publish(replacement_claim_effect(claim))
         return claim
 
+    def authorize_actor(self, actor_key):
+        from aigineering.protocol.effect_builders import actor_authorization_effect
+
+        self._publish(actor_authorization_effect(actor_key))
+        return actor_key
+
+    def register_worker(self, registration):
+        from aigineering.protocol.effect_builders import worker_registration_effect
+
+        self._publish(worker_registration_effect(registration))
+        return registration
+
 
 def candidate_runtime(
     store, trace=None, *, genesis=None, actor_key=None, signer=None

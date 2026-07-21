@@ -7,8 +7,12 @@ from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
 
 from aigineering.core.commitment import CandidateCommitter
+from aigineering.core.acceptance import (
+    OutputQualificationConflict,
+    validate_output_qualification_commit,
+)
 from aigineering.core.domain import initialize_genesis
-from aigineering.core.ids import hash_contract_v3
+from aigineering.core.ids import acceptance_policy_id, hash_contract_v3
 from aigineering.core.output_satisfaction import all_outputs_satisfied
 from aigineering.core.worker_routing import WorkerRegistration
 from aigineering.runtime import claim_next_package, execute_claimed_package
@@ -22,10 +26,12 @@ from aigineering.protocol.candidate import (
 )
 from aigineering.protocol.effect_builders import (
     asset_attestation_effect,
+    asset_proposal_effect,
     contract_declaration_effect,
     worker_registration_effect,
 )
-from aigineering.protocol.types import Candidate, Contract
+from aigineering.protocol.types import Asset, Candidate, Contract
+from aigineering.protocol.runtime_record import create_runtime_record
 
 
 @pytest.fixture
@@ -45,7 +51,7 @@ def acceptance_domain(tmp_path):
                 "owner-key",
                 owner.kind,
                 owner.signer_id,
-                ("contract.publish", "worker.register"),
+                ("asset.publish", "contract.publish", "worker.register"),
             ),
             ActorKey(
                 "worker:producer",
@@ -110,6 +116,22 @@ def _candidate(genesis, actor_id, key_id, signer, effect, nonce):
 
 def _publish_contract_and_output(domain):
     store, genesis, committer, owner, producer, _, _, _, _ = domain
+    rubric = Asset(id="rubric:compliance", name="review_rubric", content="be exact")
+    evidence = Asset(
+        id="evidence:source", name="review_evidence", content="source facts"
+    )
+    for item in (rubric, evidence):
+        proposed = _candidate(
+            genesis,
+            "human:owner",
+            "owner-key",
+            owner,
+            asset_proposal_effect(item),
+            f"context:{item.id}",
+        )
+        assert committer.commit(proposed, genesis).accepted
+    rubric_id = store.get_assets_by_name(rubric.name)[0].id
+    evidence_id = store.get_assets_by_name(evidence.name)[0].id
     fields = {
         "name": "independently_reviewed_report",
         "description": "Publish a report that another actor must verify.",
@@ -122,6 +144,9 @@ def _publish_contract_and_output(domain):
         "origin": "human",
         "acceptance_policy": {
             "mode": "independent",
+            "policy_version": "review-v1",
+            "rubric_asset_ids": [rubric_id],
+            "evidence_asset_ids": [evidence_id],
             "required_attestations": 1,
             "verifier_capabilities": ["verify.compliance"],
         },
@@ -178,6 +203,21 @@ def _publish_contract_and_output(domain):
     return contract, asset
 
 
+def _attestation_effect(contract, asset, *, verdict="accepted"):
+    policy = contract.acceptance_policy
+    assert policy is not None
+    return asset_attestation_effect(
+        contract.id,
+        "report",
+        asset.id,
+        policy_id=acceptance_policy_id(policy),
+        policy_version=str(policy["policy_version"]),
+        verdict=verdict,
+        rubric_asset_ids=tuple(policy.get("rubric_asset_ids", ())),
+        evidence_asset_ids=tuple(policy.get("evidence_asset_ids", ())),
+    )
+
+
 def test_producer_cannot_attest_its_own_output(acceptance_domain):
     store, genesis, committer, _, producer, _, _, _, _ = acceptance_domain
     contract, asset = _publish_contract_and_output(acceptance_domain)
@@ -186,7 +226,7 @@ def test_producer_cannot_attest_its_own_output(acceptance_domain):
         "worker:producer",
         "producer-key",
         producer,
-        asset_attestation_effect(contract.id, "report", asset.id),
+        _attestation_effect(contract, asset),
         "self-attest",
     )
     decision = committer.commit(self_attestation, genesis)
@@ -203,7 +243,7 @@ def test_verifier_capability_and_exact_asset_qualification(acceptance_domain):
         "worker:weak-verifier",
         "weak-key",
         weak_verifier,
-        asset_attestation_effect(contract.id, "report", asset.id),
+        _attestation_effect(contract, asset),
         "weak-attest",
     )
     assert not committer.commit(weak, genesis).accepted
@@ -212,7 +252,7 @@ def test_verifier_capability_and_exact_asset_qualification(acceptance_domain):
         "worker:verifier",
         "verifier-key",
         verifier,
-        asset_attestation_effect(contract.id, "report", asset.id),
+        _attestation_effect(contract, asset),
         "verified-attest",
     )
     decision = committer.commit(exact, genesis)
@@ -231,6 +271,114 @@ def test_verifier_capability_and_exact_asset_qualification(acceptance_domain):
     }
 
 
+def test_attestation_must_bind_exact_policy_rubric_and_evidence(acceptance_domain):
+    _, genesis, committer, _, _, verifier, _, _, _ = acceptance_domain
+    contract, asset = _publish_contract_and_output(acceptance_domain)
+    policy = contract.acceptance_policy
+    assert policy is not None
+    cases = (
+        asset_attestation_effect(
+            contract.id,
+            "report",
+            asset.id,
+            policy_id="acceptance:v1:wrong",
+            policy_version=str(policy["policy_version"]),
+            rubric_asset_ids=tuple(policy["rubric_asset_ids"]),
+            evidence_asset_ids=tuple(policy["evidence_asset_ids"]),
+        ),
+        asset_attestation_effect(
+            contract.id,
+            "report",
+            asset.id,
+            policy_id=acceptance_policy_id(policy),
+            policy_version=str(policy["policy_version"]),
+            rubric_asset_ids=(),
+            evidence_asset_ids=tuple(policy["evidence_asset_ids"]),
+        ),
+        asset_attestation_effect(
+            contract.id,
+            "report",
+            asset.id,
+            policy_id=acceptance_policy_id(policy),
+            policy_version=str(policy["policy_version"]),
+            rubric_asset_ids=tuple(policy["rubric_asset_ids"]),
+            evidence_asset_ids=(),
+        ),
+    )
+    for index, effect in enumerate(cases):
+        decision = committer.commit(
+            _candidate(
+                genesis,
+                "worker:verifier",
+                "verifier-key",
+                verifier,
+                effect,
+                f"bad-policy-binding:{index}",
+            ),
+            genesis,
+        )
+        assert not decision.accepted
+
+
+def test_qualification_slot_replay_allows_same_asset_and_rejects_replacement() -> None:
+    first = create_runtime_record(
+        "output.qualified",
+        {"contract_id": "task:one", "output_name": "report", "asset_id": "a1"},
+    )
+    replay = create_runtime_record(
+        "output.qualified",
+        {
+            "contract_id": "task:one",
+            "output_name": "report",
+            "asset_id": "a1",
+            "verifier_actor_ids": ["worker:two"],
+        },
+    )
+    replacement = create_runtime_record(
+        "output.qualified",
+        {"contract_id": "task:one", "output_name": "report", "asset_id": "a2"},
+    )
+
+    validate_output_qualification_commit((first,), (replay,))
+    with pytest.raises(OutputQualificationConflict, match="different immutable Asset"):
+        validate_output_qualification_commit((first,), (replacement,))
+
+
+def test_qualification_race_becomes_durable_candidate_rejection(
+    acceptance_domain, monkeypatch
+) -> None:
+    store, genesis, committer, _, _, verifier, _, _, _ = acceptance_domain
+    contract, asset = _publish_contract_and_output(acceptance_domain)
+    candidate = _candidate(
+        genesis,
+        "worker:verifier",
+        "verifier-key",
+        verifier,
+        _attestation_effect(contract, asset),
+        "qualification-race",
+    )
+    original = validate_output_qualification_commit
+
+    def race(existing_records, pending_records):
+        if any(record.record_type == "output.qualified" for record in pending_records):
+            raise OutputQualificationConflict("simulated competing output selection")
+        return original(existing_records, pending_records)
+
+    monkeypatch.setattr(
+        "aigineering.core.acceptance.validate_output_qualification_commit", race
+    )
+
+    decision = committer.commit(candidate, genesis)
+
+    assert not decision.accepted
+    assert any(
+        record.record_type == "candidate.rejected"
+        for record in decision.runtime_records
+    )
+    assert store.scan_runtime_records(record_type="output.qualified") == []
+    assert store.scan_runtime_records(record_type="lifecycle.terminal") == []
+
+
 def test_rejected_attestation_is_evidence_not_qualification(acceptance_domain):
     store, genesis, committer, _, _, verifier, _, _, _ = acceptance_domain
     contract, asset = _publish_contract_and_output(acceptance_domain)
@@ -239,7 +387,7 @@ def test_rejected_attestation_is_evidence_not_qualification(acceptance_domain):
         "worker:verifier",
         "verifier-key",
         verifier,
-        asset_attestation_effect(contract.id, "report", asset.id, verdict="rejected"),
+        _attestation_effect(contract, asset, verdict="rejected"),
         "reject-attest",
     )
     decision = committer.commit(rejected, genesis)
@@ -272,7 +420,7 @@ def test_concurrent_independent_attestations_converge_without_terminal_conflict(
             "worker:verifier",
             "verifier-key",
             verifier,
-            asset_attestation_effect(contract.id, "report", asset.id),
+            _attestation_effect(contract, asset),
             "concurrent-one",
         ),
         _candidate(
@@ -280,7 +428,7 @@ def test_concurrent_independent_attestations_converge_without_terminal_conflict(
             "worker:verifier-two",
             "verifier-two-key",
             verifier_two,
-            asset_attestation_effect(contract.id, "report", asset.id),
+            _attestation_effect(contract, asset),
             "concurrent-two",
         ),
     )

@@ -21,8 +21,9 @@ the protocol does not rely on a process-local task lock.
 
 ## Implemented runtime path
 
-1. An external root Contract is published as a signed `contract.declare`
-   Candidate; legacy Method children remain a documented transition path.
+1. An external root or child Contract is published as a signed
+   `contract.declare` Candidate. Historical Method-named facts are read only
+   for database reconstruction; they are not a publication path.
 2. Across HTTP, an eligible Worker signs a single-use `worker.claim` Candidate;
    SQLite atomically records its authenticated request and claim before returning
    a WorkerPackage. Local WorkerHost coordination uses the same fenced Store
@@ -155,7 +156,8 @@ The optional HTTP API accepts full signed CandidateProposal bodies at
 `POST /candidates`, `POST /contracts`, and `POST /assets`. Resource endpoints
 validate the effect type before commitment. Unsigned legacy request bodies fail
 schema validation and cannot mutate the Store. Slice and replacement-claim HTTP
-operations remain compatibility surfaces pending additional effect types.
+operations are convenience validation adapters over typed Candidate effects,
+not separate mutation surfaces.
 
 `POST /worker/claims` and its renewal endpoint accept signed operational
 Candidates whose actor/key matches the enabled Worker registration. Claim and
@@ -331,18 +333,23 @@ signed Candidate; EngineWorker no longer imports the legacy MethodRegistry or
 handler stack. Durable local and ephemeral nested composition share the same
 identity-neutral WorkerHost authorization primitive rather than duplicating
 registration policy.
+EngineWorker may instead receive a compatible persistent inner Store factory
+and Ed25519 key. Each outer claim/epoch creates a deterministic bridge-operation
+Asset binding the outer Contract, claim, package, policy and inner root;
+accepted inner output IDs create a completion Asset. A replacement instance
+reconstructs from those facts and may reuse accepted inner output, while the
+outer Store fences a Candidate signed for an expired claim. Human participation
+uses the same keyed Worker registration, claim and WorkerHost path, not a
+privileged mutation class.
 Authentication, claim, policy, and binding failures append Candidate rejection
 records and Trace evidence before returning an error; an invalid worker result
 cannot disappear as an API-only failure.
 
 Local CLI execution now uses `WorkerHost`. Each concrete worker adapter has a
 durable delegated Ed25519 key and Candidate registration; the local root key
-only authorizes that actor. Claims use the worker actor ID, ordinary output and
-the transitional Method path both retain authenticated Candidate receipt and
-typed output/delegation evidence, and SQLite applies the same key/claim fencing
-to both. The raw
-`execute_claimed_package(worker, ...)` form remains only as an internal test and
-Method migration compatibility surface.
+only authorizes that actor. Claims use the worker actor ID, and SQLite applies
+the same key/claim fencing to every Worker kind. A bare, unauthenticated adapter
+cannot produce a successful submission; only WorkerHost owns Candidate signing.
 
 A domain may persist exactly one `domain.genesis` RuntimeRecord. Initialization
 is idempotent, replacement fails closed, SQLite enforces uniqueness, and a
@@ -390,6 +397,13 @@ reference policy deliberately supports one independent acceptance, not quorum,
 reputation, payment, or verifier-market semantics. `aig verify attest` uses a
 separate locally authorized verifier actor rather than the producing/root
 publication identity.
+
+Independent policy is itself identity-bearing. A non-empty policy version and
+sorted unique rubric/evidence Asset IDs produce one content-addressed policy ID;
+the attestation must reproduce all of them and every referenced item must be an
+immutable committed Fact. Store commitment permits repeated qualifications of
+the same Asset but rejects a different Asset for an already selected output
+slot. ADR-015 records this rule.
 
 The legacy in-process Engine, state serializer, Method runtime/registry/handlers,
 ContinuationManager, and context-overflow controller have been deleted. The superseded startup
@@ -449,12 +463,10 @@ use the same PlanningExpansionPlugin and publish their entire child-task fan-out
 as one signed Candidate; successful tool completion publishes its continuation
 task through the continuation plugin as another signed Candidate. Publication
 rejection is traced and closes the parent instead of leaving it suspended. The
-two former near-copy handlers now share one
-implementation; direct `runtime.add_contract` remains only when compatibility
-tests deliberately omit a publisher.
-Production loops invoke the neutral `process_task_completions` entrypoint. The
-old Method-named function is only a source compatibility alias; it no longer
-defines the runtime composition surface.
+two former near-copy handlers now share one implementation. Missing Candidate
+publishers fail closed; completion cannot fall back to direct Contract
+mutation. Production and tests invoke the single neutral
+`process_task_completions` entrypoint.
 The completion consequence marker and its audit trace commit as one Store
 batch. Terminal consequence emission checks both immutable terminal facts and
 historical terminal traces, and commits a new terminal fact and trace together;
@@ -462,7 +474,7 @@ a later satisfied child cannot change a failed parent into complete.
 Plan/replan expansion commits `attempt.closed(outcome=expanded)` and an
 `expanded` audit event, not waiting or method-delegation state. Runtime
 projections and SQLite still read historical Method-named records for database
-compatibility while the remaining action adapters are removed.
+compatibility; no Method lifecycle writer or completion alias remains.
 There is no persisted waiting/task-state row. `RuntimeProjection` derives one
 enabled boolean from terminal facts, output/input/activation satisfaction,
 budget, attempt/delegation facts, and the claim lease. A staged root projects as
@@ -493,3 +505,8 @@ make unfinished migration items part of current runtime truth.
 
 Architecture constraints live in `tests/architecture/`. Release-grade evidence
 is retained in `reports/`; ordinary test output and exploratory notes are not.
+Language-neutral signed-protocol fixtures live in `conformance/`. Signed
+Candidate JSON is restricted to string-key objects, arrays, strings, booleans,
+null and safe-range integers; exact decimals use strings. Candidate signing
+bytes NFC-normalize the complete compact canonical JSON before UTF-8 encoding,
+matching Candidate identity hashing. ADR-014 records this boundary.

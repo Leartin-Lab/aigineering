@@ -49,7 +49,10 @@ def asset_attestation_effect(
     output_name: str,
     asset_id: str,
     *,
+    policy_id: str,
+    policy_version: str,
     verdict: str = "accepted",
+    rubric_asset_ids: tuple[str, ...] = (),
     evidence_asset_ids: tuple[str, ...] = (),
 ) -> CandidateEffect:
     """Attest one exact output Asset without copying or replacing its content."""
@@ -59,7 +62,10 @@ def asset_attestation_effect(
             "contract_id": contract_id,
             "output_name": output_name,
             "asset_id": asset_id,
+            "policy_id": policy_id,
+            "policy_version": policy_version,
             "verdict": verdict,
+            "rubric_asset_ids": list(rubric_asset_ids),
             "evidence_asset_ids": list(evidence_asset_ids),
         },
     )

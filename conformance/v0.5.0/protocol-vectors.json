@@ -1,0 +1,118 @@
+{
+  "format": "aigineering-conformance-v1",
+  "canonical_json": {
+    "input": {"z": "é", "a": [3, true, null]},
+    "expected": "{\"a\":[3,true,null],\"z\":\"e\u0301\"}"
+  },
+  "ed25519_test_key": {
+    "private_key_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+    "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8"
+  },
+  "genesis": {
+    "domain": "aig-conformance-v050",
+    "id": "genesis:90ec86a0588eaef47f62a24dfdf75e1b9f6ce040e92af934aa21da50036728c3",
+    "policy_hash": "policy:v050-vector",
+    "root_keys": [{
+      "actor_id": "worker:vector",
+      "capabilities": ["asset.attest", "contract.publish"],
+      "key_id": "vector-key",
+      "kind": "ed25519",
+      "public_key": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+      "revoked": false
+    }],
+    "schema_version": 1
+  },
+  "contract": {
+    "expected_id": "task:v3:9d0138c3752c43df7fb48dc74f456129904283cced1aed983c4f91ed4509afbe",
+    "value": {
+      "acceptance_policy": {
+        "evidence_asset_ids": ["content:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"],
+        "mode": "independent",
+        "policy_version": "vector-review-v1",
+        "required_attestations": 1,
+        "rubric_asset_ids": ["content:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"],
+        "verifier_capabilities": ["verify.vector"]
+      },
+      "activation": "evidence",
+      "budget": 3,
+      "description": "Cross-language conformance task.",
+      "id": "task:v3:9d0138c3752c43df7fb48dc74f456129904283cced1aed983c4f91ed4509afbe",
+      "inputs": ["evidence"],
+      "labels": ["conformance"],
+      "minting_authority": [],
+      "name": "vector_task",
+      "origin": "human",
+      "outputs": ["report"],
+      "parent_id": null,
+      "sensitive_input_policy": null,
+      "tool_scope": [],
+      "worker_capabilities": [],
+      "worker_pools": []
+    }
+  },
+  "contract_candidate": {
+    "expected_signing_utf8": "{\"actor_id\":\"worker:vector\",\"causal_parents\":[],\"domain_id\":\"genesis:90ec86a0588eaef47f62a24dfdf75e1b9f6ce040e92af934aa21da50036728c3\",\"effects\":[{\"atomic_group\":\"\",\"effect_type\":\"contract.declare\",\"payload\":{\"contract\":{\"acceptance_policy\":{\"evidence_asset_ids\":[\"content:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd\"],\"mode\":\"independent\",\"policy_version\":\"vector-review-v1\",\"required_attestations\":1,\"rubric_asset_ids\":[\"content:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\"],\"verifier_capabilities\":[\"verify.vector\"]},\"activation\":\"evidence\",\"budget\":3,\"description\":\"Cross-language conformance task.\",\"id\":\"task:v3:9d0138c3752c43df7fb48dc74f456129904283cced1aed983c4f91ed4509afbe\",\"inputs\":[\"evidence\"],\"labels\":[\"conformance\"],\"minting_authority\":[],\"name\":\"vector_task\",\"origin\":\"human\",\"outputs\":[\"report\"],\"parent_id\":null,\"sensitive_input_policy\":null,\"tool_scope\":[],\"worker_capabilities\":[],\"worker_pools\":[]}}}],\"idempotency_key\":\"vector-contract-1\",\"key_id\":\"vector-key\",\"metadata\":{\"purpose\":\"conformance\"},\"protocol_version\":1,\"signature_kind\":\"ed25519\"}",
+    "value": {
+      "actor_id": "worker:vector",
+      "causal_parents": [],
+      "domain_id": "genesis:90ec86a0588eaef47f62a24dfdf75e1b9f6ce040e92af934aa21da50036728c3",
+      "effects": [{
+        "atomic_group": "",
+        "effect_type": "contract.declare",
+        "payload": {"contract": {
+          "acceptance_policy": {"evidence_asset_ids": ["content:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"], "mode": "independent", "policy_version": "vector-review-v1", "required_attestations": 1, "rubric_asset_ids": ["content:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"], "verifier_capabilities": ["verify.vector"]},
+          "activation": "evidence", "budget": 3, "description": "Cross-language conformance task.",
+          "id": "task:v3:9d0138c3752c43df7fb48dc74f456129904283cced1aed983c4f91ed4509afbe",
+          "inputs": ["evidence"], "labels": ["conformance"], "minting_authority": [],
+          "name": "vector_task", "origin": "human", "outputs": ["report"], "parent_id": null,
+          "sensitive_input_policy": null, "tool_scope": [], "worker_capabilities": [], "worker_pools": []
+        }}
+      }],
+      "id": "candidate:v1:2127946801851e58dcc4c80186d7350ba58a0b63bd990efd11b646ce1d5d2f8f",
+      "idempotency_key": "vector-contract-1",
+      "key_id": "vector-key",
+      "metadata": {"purpose": "conformance"},
+      "protocol_version": 1,
+      "signature": "ed25519:q5O0NwQwNCk7hO/RbBxmPv9HfTaU1yiK7YVYBWxOJwhwq6rrdvZhPArV+DUghD6yPS20xTXQADgz6/oBhmJlBg==",
+      "signature_kind": "ed25519"
+    }
+  },
+  "attestation_candidate": {
+    "expected_signing_utf8": "{\"actor_id\":\"worker:vector\",\"causal_parents\":[],\"domain_id\":\"genesis:90ec86a0588eaef47f62a24dfdf75e1b9f6ce040e92af934aa21da50036728c3\",\"effects\":[{\"atomic_group\":\"\",\"effect_type\":\"asset.attest\",\"payload\":{\"asset_id\":\"content:abababababababababababababababababababababababababababababababab\",\"contract_id\":\"task:v3:9d0138c3752c43df7fb48dc74f456129904283cced1aed983c4f91ed4509afbe\",\"evidence_asset_ids\":[\"content:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd\"],\"output_name\":\"report\",\"policy_id\":\"acceptance:v1:26dc6098d9141da132ed91dc2b29a3e819ec51f34fcf7472a052f9b81e5af979\",\"policy_version\":\"vector-review-v1\",\"rubric_asset_ids\":[\"content:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\"],\"verdict\":\"accepted\"}}],\"idempotency_key\":\"vector-attest-1\",\"key_id\":\"vector-key\",\"protocol_version\":1,\"signature_kind\":\"ed25519\"}",
+    "value": {
+      "actor_id": "worker:vector", "causal_parents": [],
+      "domain_id": "genesis:90ec86a0588eaef47f62a24dfdf75e1b9f6ce040e92af934aa21da50036728c3",
+      "effects": [{"atomic_group": "", "effect_type": "asset.attest", "payload": {
+        "asset_id": "content:abababababababababababababababababababababababababababababababab",
+        "contract_id": "task:v3:9d0138c3752c43df7fb48dc74f456129904283cced1aed983c4f91ed4509afbe",
+        "evidence_asset_ids": ["content:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"],
+        "output_name": "report",
+        "policy_id": "acceptance:v1:26dc6098d9141da132ed91dc2b29a3e819ec51f34fcf7472a052f9b81e5af979",
+        "policy_version": "vector-review-v1",
+        "rubric_asset_ids": ["content:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"],
+        "verdict": "accepted"
+      }}],
+      "id": "candidate:v1:7782e25dbf93def06fa1318e32fb3e638d896d7113b41c2c5fbeffc32e3164f8",
+      "idempotency_key": "vector-attest-1", "key_id": "vector-key", "protocol_version": 1,
+      "signature": "ed25519:tM1Jjx/P1CtQgyOjPAwkAqVYWpLnZz5qyiVUMubNRrMPl5QF6mXrhHpm1NYE+3ny3rQCs0XLpKGQ4hOlTZFuAg==",
+      "signature_kind": "ed25519"
+    }
+  },
+  "allowance": {
+    "source_contract_id": "task:v3:9d0138c3752c43df7fb48dc74f456129904283cced1aed983c4f91ed4509afbe",
+    "child_contract_id": "task:v3:1212121212121212121212121212121212121212121212121212121212121212",
+    "purpose": "verification",
+    "expected_reservation_id": "reservation:eadffa7aadb342769bd5aeb032f0419348f940bcbf88678cade10b07ac5731b6",
+    "root_grant": {
+      "record_id": "record:7aaef3e5216ca80ce8bc958942c9dada533178c01fb87e44219ec156e091a7ed",
+      "record_type": "allowance.granted",
+      "payload": {
+        "amount": 3,
+        "contract_id": "task:v3:9d0138c3752c43df7fb48dc74f456129904283cced1aed983c4f91ed4509afbe",
+        "grant_id": "grant:task:v3:9d0138c3752c43df7fb48dc74f456129904283cced1aed983c4f91ed4509afbe",
+        "purpose": "root", "source_contract_id": ""
+      },
+      "causal_parents": ["candidate:v1:2127946801851e58dcc4c80186d7350ba58a0b63bd990efd11b646ce1d5d2f8f"]
+    }
+  }
+}

@@ -1630,6 +1630,17 @@ class SQLiteStore:
             declarations = ((contract,) if contract is not None else ()) + tuple(
                 contracts
             )
+            if any(
+                record.record_type == "output.qualified" for record in runtime_records
+            ):
+                from aigineering.core.acceptance import (
+                    validate_output_qualification_commit,
+                )
+
+                validate_output_qualification_commit(
+                    tuple(record for _, record in self.scan_runtime_records()),
+                    runtime_records,
+                )
             for declaration in declarations:
                 self._insert_contract(declaration)
             if any(

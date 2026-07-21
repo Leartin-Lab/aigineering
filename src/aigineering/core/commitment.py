@@ -9,7 +9,10 @@ import json
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
-from aigineering.core.acceptance import materialize_qualification_facts
+from aigineering.core.acceptance import (
+    OutputQualificationConflict,
+    materialize_qualification_facts,
+)
 from aigineering.core.actor_facts import load_effective_actor_keys
 from aigineering.core.attempt_projection import close_claim_attempt
 from aigineering.core.candidate_decision import (
@@ -195,7 +198,7 @@ class CandidateCommitter:
                 candidate_key_id=candidate.key_id,
                 candidate_id=candidate.id,
             )
-        except CausalAllowanceConflict as exc:
+        except (CausalAllowanceConflict, OutputQualificationConflict) as exc:
             receipt = next(
                 record
                 for record in decision.runtime_records

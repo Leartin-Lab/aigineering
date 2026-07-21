@@ -192,13 +192,13 @@ Implementation progress:
   construction from actor-authenticated publication. The planning expansion
   plugin turns one disclosed plan Asset into an atomic fan-out of ordinary
   `contract.declare` effects; its worker behavior and Candidate integration are
-  tested independently. It temporarily delegates to the existing containment
-  compiler while that implementation is moved out of `core.methods`.
+  tested independently. Containment compilation is owned by the Store-free
+  plugin task-semantics module.
 - Complete: WorkerHost binds a stateless execution adapter to one actor key and
   signs its claim-bound envelope. Local CLI workers persist delegated keys,
-  register by Candidate, claim as that actor, and use the signed path for both
-  ordinary output and transitional Method actions. SQLite key fencing is shared
-  by ordinary and Method submission transactions.
+  register by Candidate, claim as that actor, and use the same signed ordinary
+  effect path for every supported action. SQLite key fencing is shared by all
+  Worker kinds.
 - Complete: WorkerHost compiles every supported action to ordinary effects
   before signing. Distinct staged plan/replan invocation parameters participate
   in task identity and description, preventing semantically different requests
@@ -273,9 +273,9 @@ Implementation progress:
   ContinuationManager or MethodRuntime. A stateless TaskCompletionProjector
   reconstructs work from durable facts on each pass; both legacy lifecycle
   owners are excluded from wheel and sdist, with an architecture import gate.
-- Complete: CLI and EngineWorker completion loops use the neutral
-  `process_task_completions` API. The Method-named function remains only as a
-  forwarding source compatibility alias.
+- Complete: CLI, EngineWorker and tests use the neutral
+  `process_task_completions` API. The Method-named forwarding alias is deleted;
+  historical Method facts remain read-only database compatibility.
 - Complete: new delegation writes neutral `task.delegated` runtime facts and
   `task_delegated` trace/API status. Read projections retain old Method-named
   facts solely for log/database compatibility.
@@ -319,6 +319,10 @@ Implementation progress:
   concurrent-verifier regressions are executable gates. v0.5 intentionally
   fixes the required attestation count at one and does not implement a quorum
   market.
+- Complete: independent attestation now binds a content-addressed acceptance
+  policy ID/version and its exact committed rubric/evidence Asset IDs. The
+  Store transaction allows same-Asset qualification replay but rejects a
+  different Asset for an already selected Contract output slot.
 - Complete for the hosted plan/replan path: the staged planning constructor emits one atomic group containing
   ordinary draft, dependency-analysis, and compile Contracts. Each stage has a
   distinct label, output-schema prompt and independent unit
@@ -332,15 +336,15 @@ Implementation progress:
   allowance grants/reservations. Runtime views reconstruct the balance;
   terminal facts extinguish the remainder; exact replay is stable; and SQLite
   transaction-time validation prevents concurrent lineage overspend. The
-  legacy BudgetManager and source-only Method completion callbacks remain
-  deletion debt; staged planning no longer calls them.
+  legacy BudgetManager and source-only Method completion callbacks are deleted;
+  staged planning has no callback dependency.
 - Complete for every supported submission ingress: tool/fail/retry local plugins sign ordinary
   claim-bound child declarations instead of `task.delegate`. New procedural
   outputs use ordinary isolated names. Claim projection rejects protected
   authority self-grants and contains input/tool/pool/capability/allowance fields.
   CLI/HTTP submit use the same generic committer and reject raw wrapper effects.
-- Pending: replace the remaining Method-named completion types with neutral
-  task/plugin names and delete source-only handlers.
+- Complete: execution and completion entrypoints use neutral task/plugin names;
+  source-only Method handlers and forwarding APIs are deleted.
 - Complete: `submit_candidate_envelope` and `_submit_claimed_method` were
   deleted. Runtime execution accepts only an authenticated WorkerHost for a
   successful submission; a bare adapter closes its claim as a visible failure.
@@ -369,6 +373,13 @@ Implementation progress:
 - Complete: effect-specific pure projectors are separated from the single
   Candidate batch policy. Atomic grouping, capability, claim containment and
   allowance validation retain one entry point and one commitment caller.
+- Complete: public v0.5.0 protocol vectors are consumed by the Python reference.
+  Signed Candidate JSON rejects floats, unsafe integers, non-string keys and
+  non-JSON containers; ID and signature bytes share NFC normalization.
+- Complete: EngineWorker can reconstruct an inner fact domain through an
+  injected Store factory and persisted key. Claim-epoch bridge operation and
+  completion Assets make reuse auditable; stale outer submissions remain
+  fenced. A keyed human Worker conformance test uses the same path.
 
 ## Required architecture tests
 
@@ -378,6 +389,8 @@ Implementation progress:
 - Candidate receipt is distinct from effect acceptance.
 - Runtime modules do not import a concrete Store adapter.
 - No production or test setup API may reintroduce a claimless runtime ingress.
+- Public protocol vectors must reproduce canonical bytes, identities,
+  signatures, attestation and allowance facts.
 - Direct fact-writing call sites monotonically decrease; no new exceptions.
 
 ## Deletion ledger

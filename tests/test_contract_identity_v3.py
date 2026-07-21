@@ -33,7 +33,10 @@ def _identity(**overrides) -> str:
         "worker_pools": ("advanced",),
         "minting_authority": (f"_sys_{CONTRACT_SELF_REFERENCE}",),
         "sensitive_input_policy": {"required_trust_tier": "human"},
-        "acceptance_policy": {"mode": "independent"},
+        "acceptance_policy": {
+            "mode": "independent",
+            "policy_version": "review-v1",
+        },
     }
     fields.update(overrides)
     return hash_contract_v3(**fields)

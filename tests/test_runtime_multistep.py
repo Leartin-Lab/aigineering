@@ -27,7 +27,7 @@ from aigineering.protocol.effect_builders import (
 from aigineering.runtime import (
     claim_next_package,
     execute_claimed_package,
-    process_method_completions,
+    process_task_completions,
 )
 
 
@@ -185,7 +185,7 @@ def test_tool_completion_plugin_publishes_continuation_candidate():
     assert tool_claim is not None
     assert execute_claimed_package(tool_claim, host, store)["status"] == "accepted"
 
-    processed = process_method_completions(
+    processed = process_task_completions(
         store,
         default_completion_registry(),
         candidate_publishers=publishers,
@@ -266,7 +266,7 @@ def test_fail_completion_plugin_closes_parent_and_publishes_report_candidate():
     assert fail_claim is not None
     assert execute_claimed_package(fail_claim, host, store)["status"] == "accepted"
 
-    processed = process_method_completions(
+    processed = process_task_completions(
         store,
         default_completion_registry(),
         candidate_publishers=CandidatePublisherRegistry(

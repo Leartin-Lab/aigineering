@@ -17,18 +17,31 @@ def validate_acceptance_policy(contract: Contract) -> None:
         raise ValueError(
             "Contract acceptance_policy.mode must be 'mechanical' or 'independent'"
         )
+    if mode == "independent":
+        policy_version = policy.get("policy_version")
+        if not isinstance(policy_version, str) or not policy_version:
+            raise ValueError(
+                "independent acceptance_policy.policy_version must be a string"
+            )
     required = policy.get("required_attestations", 1)
     if required != 1 or isinstance(required, bool):
         raise ValueError(
             "v0.5 Contract acceptance_policy.required_attestations must equal 1"
         )
-    capabilities = policy.get("verifier_capabilities", ())
-    if not isinstance(capabilities, (list, tuple)) or not all(
-        isinstance(value, str) and value for value in capabilities
+    for field_name in (
+        "verifier_capabilities",
+        "rubric_asset_ids",
+        "evidence_asset_ids",
     ):
-        raise ValueError(
-            "Contract acceptance_policy.verifier_capabilities must be strings"
-        )
+        values = policy.get(field_name, ())
+        if not isinstance(values, (list, tuple)) or not all(
+            isinstance(value, str) and value for value in values
+        ):
+            raise ValueError(f"Contract acceptance_policy.{field_name} must be strings")
+        if tuple(values) != tuple(sorted(set(values))):
+            raise ValueError(
+                f"Contract acceptance_policy.{field_name} must be sorted and unique"
+            )
 
 
 def validate_contract_commitment(

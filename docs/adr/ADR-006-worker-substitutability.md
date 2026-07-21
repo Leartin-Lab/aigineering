@@ -30,6 +30,9 @@ contract + disclosed assets
 Worker internals are opaque. An LLM may deliberate through tokens, a tool worker
 may call a local function, a human worker may use a review UI, and a remote
 worker may execute elsewhere. Those differences do not change the boundary.
+A human worker is not a privileged runtime class: its UI or CLI binds a
+human-controlled actor key and Worker registration, then claims and submits
+through WorkerHost like any other adapter.
 
 Workers must not directly mutate the store, mark tasks complete, grant
 authority, or commit runtime facts.

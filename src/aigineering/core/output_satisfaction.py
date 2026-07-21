@@ -1,7 +1,7 @@
 """Declared-output satisfaction helpers.
 
 This module is the single runtime definition for whether an asset can satisfy
-a contract output.  Engine scheduling, reducer projection, recovery, and worker
+a contract output.  Ready projection, reducers, recovery, and worker
 submission must share this logic.
 """
 

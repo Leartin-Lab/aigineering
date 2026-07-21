@@ -72,6 +72,12 @@ are not visible through the outer worker boundary.  The outer domain sees
 only the worker candidate/effects, authorized output assets, declared
 provenance, and allowed summary trace.
 
+The reference bridge accepts an inner Store factory and persisted actor key.
+It records deterministic operation and completion Assets binding outer
+Contract/claim/package/epoch to the inner root and selected output Asset IDs.
+A fresh EngineWorker can reconstruct and reuse accepted inner work; the outer
+claim fence rejects a late result from an expired operation.
+
 **v0.5.0 non-goal**: Full remote orchestration, transport, discovery,
 and cross-domain consistency are not implemented in v0.5.0.  The
 black-box proof demonstrates the architectural viability, not a

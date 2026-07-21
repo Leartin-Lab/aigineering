@@ -6,6 +6,8 @@ does not make an effect a runtime fact; commitment belongs to a separate reducer
 
 from __future__ import annotations
 
+import hashlib
+import unicodedata
 from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Mapping
 
@@ -16,6 +18,34 @@ from aigineering.protocol.runtime_record import RuntimeRecord, create_runtime_re
 
 
 CANDIDATE_PROTOCOL_VERSION = 1
+MAX_SAFE_JSON_INTEGER = (1 << 53) - 1
+
+
+def _validate_signed_json(value: Any, *, path: str) -> None:
+    """Restrict signed payloads to a language-neutral I-JSON value subset."""
+    if value is None or isinstance(value, (str, bool)):
+        return
+    if isinstance(value, int):
+        if abs(value) > MAX_SAFE_JSON_INTEGER:
+            raise ValueError(f"{path} integer exceeds the interoperable JSON range")
+        return
+    if isinstance(value, Mapping):
+        for key, item in value.items():
+            if not isinstance(key, str):
+                raise ValueError(f"{path} object keys must be strings")
+            _validate_signed_json(item, path=f"{path}.{key}")
+        return
+    if isinstance(value, (list, tuple)):
+        for index, item in enumerate(value):
+            _validate_signed_json(item, path=f"{path}[{index}]")
+        return
+    if isinstance(value, float):
+        raise ValueError(
+            f"{path} floating-point values are not canonical; use a decimal string"
+        )
+    raise ValueError(
+        f"{path} contains unsupported signed JSON value {type(value).__name__}"
+    )
 
 
 @dataclass(frozen=True)
@@ -33,8 +63,13 @@ class CandidateClaimBinding:
                 raise ValueError(
                     f"CandidateClaimBinding.{field_name} must not be empty"
                 )
-        if self.claim_epoch < 1:
-            raise ValueError("CandidateClaimBinding.claim_epoch must be positive")
+        if type(self.claim_epoch) is not int or not (
+            1 <= self.claim_epoch <= MAX_SAFE_JSON_INTEGER
+        ):
+            raise ValueError(
+                "CandidateClaimBinding.claim_epoch must be a positive "
+                "interoperable JSON integer"
+            )
         if not self.package_id.startswith("pkg:"):
             raise ValueError("CandidateClaimBinding.package_id must start with 'pkg:'")
 
@@ -179,6 +214,7 @@ class CandidateEffect:
             raise ValueError(
                 "effect_type must be a namespaced value such as asset.propose"
             )
+        _validate_signed_json(self.payload, path="CandidateEffect.payload")
         object.__setattr__(self, "payload", deep_freeze(dict(self.payload)))
 
 
@@ -205,6 +241,14 @@ class CandidateProposal:
                 raise ValueError(f"CandidateProposal.{field_name} must not be empty")
         if not self.effects:
             raise ValueError("CandidateProposal.effects must not be empty")
+        if (
+            type(self.protocol_version) is not int
+            or self.protocol_version != CANDIDATE_PROTOCOL_VERSION
+        ):
+            raise ValueError(
+                f"unsupported Candidate protocol_version {self.protocol_version}"
+            )
+        _validate_signed_json(self.metadata, path="CandidateProposal.metadata")
         object.__setattr__(self, "effects", tuple(self.effects))
         object.__setattr__(self, "causal_parents", tuple(self.causal_parents))
         object.__setattr__(self, "metadata", deep_freeze(dict(self.metadata)))
@@ -242,7 +286,15 @@ def candidate_effective_payload(candidate: CandidateProposal) -> dict[str, Any]:
 
 
 def candidate_signing_bytes(candidate: CandidateProposal) -> bytes:
-    return canonical_json(candidate_effective_payload(candidate)).encode("utf-8")
+    canonical = canonical_json(candidate_effective_payload(candidate))
+    return unicodedata.normalize("NFC", canonical).encode("utf-8")
+
+
+def candidate_content_id(candidate: CandidateProposal) -> str:
+    """Return the v1 ID derived from exactly the bytes actors sign."""
+    return (
+        "candidate:v1:" + hashlib.sha256(candidate_signing_bytes(candidate)).hexdigest()
+    )
 
 
 def candidate_proposal_to_dict(candidate: CandidateProposal) -> dict[str, Any]:
@@ -270,7 +322,7 @@ def candidate_proposal_from_dict(data: Mapping[str, Any]) -> CandidateProposal:
         claim_binding = CandidateClaimBinding(
             contract_id=str(raw_claim.get("contract_id", "")),
             claim_id=str(raw_claim.get("claim_id", "")),
-            claim_epoch=int(raw_claim.get("claim_epoch", 0)),
+            claim_epoch=raw_claim.get("claim_epoch", 0),
             package_id=str(raw_claim.get("package_id", "")),
         )
     return CandidateProposal(
@@ -285,7 +337,7 @@ def candidate_proposal_from_dict(data: Mapping[str, Any]) -> CandidateProposal:
         idempotency_key=str(data.get("idempotency_key", "")),
         claim_binding=claim_binding,
         metadata=data.get("metadata", {}),
-        protocol_version=int(data.get("protocol_version", CANDIDATE_PROTOCOL_VERSION)),
+        protocol_version=data.get("protocol_version", CANDIDATE_PROTOCOL_VERSION),
     )
 
 
@@ -314,9 +366,7 @@ def create_candidate_proposal(
         claim_binding=claim_binding,
         metadata=metadata or {},
     )
-    candidate_id = "candidate:v1:" + compute_content_hash(
-        canonical_json(candidate_effective_payload(provisional))
-    )
+    candidate_id = candidate_content_id(provisional)
     identified = replace(provisional, id=candidate_id)
     return replace(
         identified, signature=signer.sign(candidate_signing_bytes(identified))
@@ -356,9 +406,7 @@ def verify_candidate_proposal(
         raise ValueError(
             "Deterministic content seals cannot authenticate Candidate actors"
         )
-    expected_id = "candidate:v1:" + compute_content_hash(
-        canonical_json(candidate_effective_payload(candidate))
-    )
+    expected_id = candidate_content_id(candidate)
     if candidate.id != expected_id:
         raise ValueError("Candidate content id does not match effective payload")
     verifier = verifier_factory(candidate.signature_kind)

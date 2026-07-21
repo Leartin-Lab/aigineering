@@ -21,6 +21,7 @@ def test_cli_independent_output_requires_separate_attestation():
         policy = json.dumps(
             {
                 "mode": "independent",
+                "policy_version": "review-v1",
                 "required_attestations": 1,
                 "verifier_capabilities": ["verify.human"],
             }

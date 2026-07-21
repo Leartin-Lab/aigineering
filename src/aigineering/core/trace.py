@@ -6,8 +6,8 @@
    ``"unreachable"`` — are **immutable**.  Once appended, they must never be
    deleted, modified, or duplicated.  Consumers (replay, state serialization,
    CLI views) rely on every terminal event being present exactly once for a
-   given contract.  Idempotency guards in ``Engine._emit_terminal_event()``
-   enforce this at the emission boundary.
+   given contract. Immutable terminal RuntimeRecords and Store uniqueness
+   enforce this at the commitment boundary.
 """
 
 from __future__ import annotations

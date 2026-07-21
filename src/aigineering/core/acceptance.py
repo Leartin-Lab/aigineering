@@ -6,6 +6,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 
 from aigineering.core.output_satisfaction import all_outputs_satisfied
+from aigineering.core.ids import acceptance_policy_id
 from aigineering.core.projection_context import EffectProjectionContext
 from aigineering.core.trace import create_entry
 from aigineering.protocol.runtime_record import RuntimeRecord, create_runtime_record
@@ -21,6 +22,10 @@ class AttestationProjection:
     additional_capabilities: tuple[str, ...]
 
 
+class OutputQualificationConflict(ValueError):
+    """A Contract output slot already selected another immutable Asset."""
+
+
 def project_asset_attestation_records(
     effect: CandidateEffect,
     candidate: CandidateProposal,
@@ -31,12 +36,19 @@ def project_asset_attestation_records(
     contract_id = str(effect.payload.get("contract_id", ""))
     output_name = str(effect.payload.get("output_name", ""))
     asset_id = str(effect.payload.get("asset_id", ""))
+    supplied_policy_id = str(effect.payload.get("policy_id", ""))
+    supplied_policy_version = str(effect.payload.get("policy_version", ""))
     verdict = str(effect.payload.get("verdict", ""))
+    rubric_value = effect.payload.get("rubric_asset_ids", ())
     evidence_value = effect.payload.get("evidence_asset_ids", ())
     if not contract_id or not output_name or not asset_id:
         raise ValueError("asset.attest requires contract_id, output_name, and asset_id")
     if verdict not in {"accepted", "rejected"}:
         raise ValueError("asset.attest verdict must be 'accepted' or 'rejected'")
+    if not isinstance(rubric_value, (list, tuple)) or not all(
+        isinstance(value, str) and value for value in rubric_value
+    ):
+        raise ValueError("asset.attest rubric_asset_ids must be strings")
     if not isinstance(evidence_value, (list, tuple)) or not all(
         isinstance(value, str) and value for value in evidence_value
     ):
@@ -58,11 +70,28 @@ def project_asset_attestation_records(
     policy = contract.acceptance_policy
     if policy is None or policy.get("mode") != "independent":
         raise ValueError("asset.attest requires independent Contract acceptance")
+    expected_policy_version = policy.get("policy_version")
+    if not isinstance(expected_policy_version, str) or not expected_policy_version:
+        raise ValueError("independent acceptance requires a policy_version")
+    expected_policy_id = acceptance_policy_id(policy)
+    if supplied_policy_id != expected_policy_id:
+        raise ValueError("asset.attest acceptance policy identity does not match")
+    if supplied_policy_version != expected_policy_version:
+        raise ValueError("asset.attest acceptance policy version does not match")
+    rubric_ids = tuple(str(value) for value in rubric_value)
     evidence_ids = tuple(str(value) for value in evidence_value)
-    missing_evidence = tuple(value for value in evidence_ids if value not in assets)
-    if missing_evidence:
+    expected_rubric_ids = tuple(policy.get("rubric_asset_ids", ()))
+    expected_evidence_ids = tuple(policy.get("evidence_asset_ids", ()))
+    if rubric_ids != expected_rubric_ids:
+        raise ValueError("asset.attest rubric Asset IDs do not match policy")
+    if evidence_ids != expected_evidence_ids:
+        raise ValueError("asset.attest evidence Asset IDs do not match policy")
+    missing_context = tuple(
+        value for value in (*rubric_ids, *evidence_ids) if value not in assets
+    )
+    if missing_context:
         raise ValueError(
-            f"asset.attest references unknown evidence Assets {missing_evidence!r}"
+            f"asset.attest references unknown rubric/evidence Assets {missing_context!r}"
         )
     committed_record_ids = {
         str(record.payload.get("asset", {}).get("id", "")): record.id
@@ -73,11 +102,21 @@ def project_asset_attestation_records(
     asset_parent_id = committed_record_ids.get(asset_id)
     evidence_parent_ids = tuple(
         committed_record_ids[value]
-        for value in evidence_ids
+        for value in (*rubric_ids, *evidence_ids)
         if value in committed_record_ids
     )
     if asset_parent_id is None:
         raise ValueError("asset.attest target has no immutable committed fact")
+    missing_context_facts = tuple(
+        value
+        for value in (*rubric_ids, *evidence_ids)
+        if value not in committed_record_ids
+    )
+    if missing_context_facts:
+        raise ValueError(
+            "asset.attest rubric/evidence has no immutable committed fact: "
+            f"{missing_context_facts!r}"
+        )
     prior_attestations = {
         str(record.payload.get("verifier_actor_id", ""))
         for record in context.runtime_records
@@ -96,6 +135,9 @@ def project_asset_attestation_records(
             "contract_id": contract_id,
             "evidence_asset_ids": list(evidence_ids),
             "output_name": output_name,
+            "policy_id": expected_policy_id,
+            "policy_version": expected_policy_version,
+            "rubric_asset_ids": list(rubric_ids),
             "verdict": verdict,
             "verifier_actor_id": candidate.actor_id,
             "verifier_key_id": candidate.key_id,
@@ -120,6 +162,7 @@ def project_asset_attestation_records(
                 "asset_id": asset_id,
                 "contract_id": contract_id,
                 "output_name": output_name,
+                "policy_id": expected_policy_id,
                 "verifier_actor_ids": sorted(accepted_verifiers),
             },
             causal_parents=(attestation.id,),
@@ -130,6 +173,27 @@ def project_asset_attestation_records(
         relation_target=f"{contract_id}:{output_name}:{asset_id}",
         additional_capabilities=tuple(policy.get("verifier_capabilities", ())),
     )
+
+
+def validate_output_qualification_commit(
+    existing_records: Sequence[RuntimeRecord],
+    pending_records: Sequence[RuntimeRecord],
+) -> None:
+    """Enforce one immutable selected Asset per Contract output slot."""
+    selected: dict[tuple[str, str], str] = {}
+    for record in (*tuple(existing_records), *tuple(pending_records)):
+        if record.record_type != "output.qualified":
+            continue
+        slot = (
+            str(record.payload.get("contract_id", "")),
+            str(record.payload.get("output_name", "")),
+        )
+        asset_id = str(record.payload.get("asset_id", ""))
+        prior = selected.setdefault(slot, asset_id)
+        if prior != asset_id:
+            raise OutputQualificationConflict(
+                "qualified output slot already selects a different immutable Asset"
+            )
 
 
 def materialize_qualification_facts(

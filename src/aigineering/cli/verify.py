@@ -7,6 +7,7 @@ import click
 from aigineering.cli._common import _output_json, _persistent_store
 from aigineering.cli._candidate import require_accepted
 from aigineering.core.sufficiency import check_sufficiency
+from aigineering.core.ids import acceptance_policy_id
 from aigineering.core.verification import (
     batch_verify_definition,
     verify_replacement_claims,
@@ -53,6 +54,19 @@ def verify_attest(
             "human.verify.v1",
             ("asset.attest", "verify.human"),
         )
+        contract = store.get_contract(contract_id)
+        if contract is None:
+            raise LookupError(f"unknown Contract {contract_id!r}")
+        policy = contract.acceptance_policy
+        if policy is None:
+            raise ValueError("Contract has no acceptance policy")
+        policy_version = str(policy.get("policy_version", ""))
+        rubric_asset_ids = tuple(policy.get("rubric_asset_ids", ()))
+        required_evidence_ids = tuple(policy.get("evidence_asset_ids", ()))
+        if evidence_asset_ids != required_evidence_ids:
+            raise ValueError(
+                "--evidence-asset values must exactly match the Contract policy"
+            )
         decision = require_accepted(
             publisher.publish(
                 (
@@ -60,7 +74,10 @@ def verify_attest(
                         contract_id,
                         output_name,
                         asset_id,
+                        policy_id=acceptance_policy_id(policy),
+                        policy_version=policy_version,
                         verdict=verdict,
+                        rubric_asset_ids=rubric_asset_ids,
                         evidence_asset_ids=evidence_asset_ids,
                     ),
                 ),

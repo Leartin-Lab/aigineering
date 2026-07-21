@@ -60,7 +60,7 @@ task is created and attest the exact produced Asset afterward:
 aig task create \
   --name compliance_review \
   --output compliance_report \
-  --acceptance-policy '{"mode":"independent","required_attestations":1,"verifier_capabilities":["verify.human"]}' \
+  --acceptance-policy '{"mode":"independent","policy_version":"review-v1","required_attestations":1,"verifier_capabilities":["verify.human"]}' \
   --json
 aig verify attest \
   --contract <contract_id> \
@@ -71,6 +71,8 @@ aig verify attest \
 
 The producer cannot attest its own output. The target must be the Asset created
 by the task's claim-bound Worker submission, not an unrelated same-name Asset.
+The policy version, rubric and evidence references are identity-bearing;
+`verify attest` rejects evidence arguments that do not exactly match the task.
 
 4. Read the committed output asset.
 
@@ -132,3 +134,9 @@ Avoid these commands for normal agent delegation:
   effects. All bind the returned Contract/claim/package/epoch and a non-empty
   idempotency key. Custom Workers must compile raw actions before signing;
   `worker.output` and `task.delegate` wrappers are rejected.
+- Custom Candidate clients must follow `conformance/README.md` and the versioned
+  public vectors. Signed effect payloads and metadata do not allow floats,
+  unsafe integers, non-string object keys, sets, bytes, NaN, or infinities;
+  encode exact decimal values as strings.
+- Human-assisted completion still requires a registered human actor key and a
+  live claim; do not inject a reviewer decision directly into the Store.

@@ -7,8 +7,12 @@ import sys
 import time
 
 import pytest
+from conftest import candidate_runtime
 
+from aigineering.core.signing import Ed25519Signer
 from aigineering.core.sqlite_store import SQLiteStore
+from aigineering.core.worker_routing import WorkerRegistration
+from aigineering.protocol.candidate import ActorKey
 from aigineering.protocol.types import Contract
 
 
@@ -35,9 +39,36 @@ store.close()
 @pytest.mark.parametrize("replica_count", [2, 10])
 def test_active_active_replicas_grant_one_invocation(tmp_path, replica_count):
     db_path = str(tmp_path / "active-active.db")
-    contract_id = f"task:active-active:{replica_count}"
     store = SQLiteStore(db_path)
-    store.add_contract(Contract(id=contract_id, outputs=("result",), budget=1))
+    runtime = candidate_runtime(store)
+    contract = runtime.accept_contract(
+        Contract(
+            id=f"task:active-active:{replica_count}",
+            outputs=("result",),
+            budget=1,
+            worker_capabilities=("active-active-test",),
+        )
+    )
+    contract_id = contract.id
+    for replica in range(replica_count):
+        worker_id = f"replica-{replica}"
+        signer = Ed25519Signer()
+        key = ActorKey(
+            worker_id,
+            f"replica-key-{replica}",
+            signer.kind,
+            signer.signer_id,
+            ("worker.submit",),
+        )
+        runtime.authorize_actor(key)
+        runtime.register_worker(
+            WorkerRegistration(
+                worker_id,
+                capabilities=("active-active-test",),
+                actor_id=worker_id,
+                key_id=key.key_id,
+            )
+        )
     store.close()
 
     start_at = time.time() + 0.5

@@ -348,13 +348,14 @@ def test_claim_bound_delegation_semantics_live_in_plugin_not_runtime_service():
 def test_production_completion_projection_has_no_direct_ingress():
     runtime = (ROOT / "src/aigineering/runtime.py").read_text(encoding="utf-8")
     completion = runtime.split("def process_task_completions", 1)[1].split(
-        "def process_method_completions", 1
+        "def _method_context_assets_for", 1
     )[0]
 
     assert "RuntimeIngress" not in completion
     assert "FactReducer" not in completion
     assert "commit_ingress_batch" in completion
     assert ".append_runtime_record(" not in completion
+    assert "def process_method_completions" not in runtime
     projector = (ROOT / "src/aigineering/plugins/completion_projection.py").read_text(
         encoding="utf-8"
     )

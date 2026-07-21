@@ -69,8 +69,19 @@ class WorkerHost:
     def worker_id(self) -> str:
         return self.actor_key.actor_id
 
-    def invoke(self, contract: Contract, disclosed_assets: list[Asset]) -> Candidate:
-        candidate = self.worker.invoke(contract, disclosed_assets)
+    def invoke(
+        self,
+        contract: Contract,
+        disclosed_assets: list[Asset],
+        *,
+        claim_binding: CandidateClaimBinding | None = None,
+    ) -> Candidate:
+        contextual_invoke = getattr(self.worker, "invoke_claimed", None)
+        candidate = (
+            contextual_invoke(contract, disclosed_assets, claim_binding)
+            if claim_binding is not None and callable(contextual_invoke)
+            else self.worker.invoke(contract, disclosed_assets)
+        )
         if candidate.worker_id != self.worker_id:
             raise WorkerExecutionError(
                 "identity_mismatch",
