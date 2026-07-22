@@ -1,5 +1,7 @@
 """Tests for WorkerPackage serialization and validation."""
 
+import json
+
 import pytest
 
 from aigineering.protocol.package import WorkerPackage
@@ -82,12 +84,37 @@ def test_worker_package_capability_requirements_defaults_to_empty():
 
 
 def test_worker_package_from_json_missing_required_field_raises():
-    """Missing required fields in from_json raise KeyError."""
-    with pytest.raises(KeyError):
+    """Missing required fields fail with a stable protocol error."""
+    with pytest.raises(ValueError, match="missing required field 'contract'"):
         WorkerPackage.from_json('{"contract_id": "c1"}')  # missing contract
 
-    with pytest.raises(KeyError):
+    with pytest.raises(ValueError, match="missing required field 'contract_id'"):
         WorkerPackage.from_json('{"contract": {"name": "t"}}')  # missing contract_id
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("contract", []),
+        ("disclosed_assets", {}),
+        ("tool_scope", [1]),
+        ("budget_remaining", True),
+        ("claim_epoch", "1"),
+    ],
+)
+def test_worker_package_from_json_rejects_invalid_field_types(field, value):
+    package = WorkerPackage(
+        contract_id="c1",
+        contract={},
+        disclosed_assets=[],
+        method_context_assets=[],
+        tool_scope=[],
+        budget_remaining=1,
+    )
+    payload = json.loads(package.to_json())
+    payload[field] = value
+    with pytest.raises(ValueError, match=field):
+        WorkerPackage.from_json(json.dumps(payload))
 
 
 def test_worker_package_multi_worker_compatibility():

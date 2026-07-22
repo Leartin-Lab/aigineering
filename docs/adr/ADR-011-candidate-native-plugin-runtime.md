@@ -70,6 +70,17 @@ Planning may use multiple explicit tasks—for example draft, dependency
 analysis, and structured publication—so each stage has independently testable
 inputs, outputs, authority, and acceptance evidence.
 
+All accepted planning wire shapes share one compile boundary. Each child must
+have executable instructions and a declared output; accepted children must form
+a reachable data flow that re-commits every parent output within allowance.
+Reachability is recomputed from accepted producers, not raw sibling promises;
+therefore rejection, self-dependency, and an ungrounded cycle cannot create a
+permanently disabled admitted task. Prompt examples must compile under the
+exact allowance and output set of the stage Contract.
+Malformed activation is a rejection, never a permanently false predicate.
+Stage labels provide exact Worker output schemas, while Plugin invocation
+parameters are recursively normalized before identity derivation.
+
 A claimed Worker signs the ordinary effects it proposes. Claim-bound
 `worker.output` and `task.delegate` wrappers are not alternate protocol paths.
 Plugin invocation parameters are immutable proposal inputs and must participate

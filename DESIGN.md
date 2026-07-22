@@ -487,6 +487,38 @@ Once a terminal fact exists, the blocker projection contains only that terminal
 explanation; historical claims or delegation facts do not appear as current
 work blockers.
 
+Operational adapters fail closed without inventing state. Session identifiers
+are validated before they become manifest or trace filenames. Malformed Worker
+packages and LLM tool arguments are protocol errors, never missing-key crashes
+or silently empty arguments. A failed claim renewal discards the Worker result
+and atomically records invocation failure, terminal failure, claim release and
+audit evidence. Planning fan-out never creates a positive child allowance once
+the parent's remaining allowance is exhausted.
+
+Planning compilation applies one contract-quality boundary to both structured
+scaffolds and the compatibility `contracts` schema. Every planned task needs a
+non-empty executable description and at least one declared output; the accepted
+fan-out must collectively re-commit every parent output, use valid monotonic
+activation syntax, and remain inside disclosed inputs and causal allowance. A
+final reachability fixed point is computed from accepted producers only, so a
+rejected sibling, an ungrounded dependency cycle, or a task that requires its
+own future output cannot leave an admitted Contract permanently disabled.
+Planning-stage labels render distinct `/exec` schemas, including exact output
+names and a Contract-specific valid compile example that fits the actual
+remaining allowance. Signed Worker usage is
+attached to the claim-bound task trace, so task audit/status can account for
+successful model calls. Recovery replay distinguishes a task that was actually
+scheduled from `recovery_unavailable`; invalid historical activation projects
+an explicit blocker instead of looking like an ordinary missing fact.
+
+The SQLite commitment facade retains one transaction owner while delegating
+claim-fence validation, allowance/acceptance validation, asset insertion and
+claim finalization to narrow internal helpers. This is responsibility
+separation, not multiple repositories or alternate commit paths.
+The optional FastAPI adapter creates one SQLiteStore per request, passes that
+same connection through validation and commitment, and closes it at request
+completion; it does not share an unlocked connection across request threads.
+
 ## Active change
 
 `changes/001-candidate-genesis.md` migrates the runtime toward signed typed

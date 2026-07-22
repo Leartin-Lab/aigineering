@@ -173,6 +173,12 @@ class TaskCompletionProjector:
         )
 
     def project(self, contract: Contract) -> bool:
+        """Project a completed subtask; return whether a plugin handled it.
+
+        ``True`` means the completion semantics were explicitly handled, not
+        that the parent succeeded. A handler may legitimately close the parent
+        with a durable failure terminal.
+        """
         parent_id = contract.parent_id
         if parent_id is None:
             return False

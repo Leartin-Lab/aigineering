@@ -14,11 +14,32 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import re
 from typing import Optional
 
 from aigineering.core.ids import now_iso
 from aigineering.protocol.types import Session
 from aigineering.protocol.wire import session_from_dict, session_to_dict
+
+
+_SESSION_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}\Z")
+
+
+def validate_session_id(session_id: str) -> str:
+    """Return a safe local session identifier or fail closed.
+
+    Session identifiers participate in local manifest and trace filenames, so
+    path separators, traversal components, and platform-specific alternates
+    are never valid protocol data.
+    """
+    if not isinstance(session_id, str) or _SESSION_ID.fullmatch(session_id) is None:
+        raise ValueError("invalid session id")
+    return session_id
+
+
+def session_trace_path(traces_dir: str | Path, session_id: str) -> Path:
+    """Resolve one validated session trace below *traces_dir*."""
+    return Path(traces_dir) / f"{validate_session_id(session_id)}.jsonl"
 
 
 class SessionStore:
@@ -34,6 +55,7 @@ class SessionStore:
             self._dir.mkdir(parents=True, exist_ok=True)
 
     def _file_path(self, session_id: str) -> Path:
+        session_id = validate_session_id(session_id)
         filename = (
             f"{session_id}.json"
             if session_id.startswith("session_")

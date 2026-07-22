@@ -7,13 +7,15 @@ from typing import Optional
 
 _MAX_DEPTH = 50
 _MAX_TOKENS = 200
+_NAME_PATTERN = re.compile(r"[a-zA-Z_][a-zA-Z0-9_.:-]*")
+_OPERATORS = frozenset({"AND", "OR", "NOT", "(", ")"})
 
 
 class NonMonotonicActivationError(ValueError):
     """Raised when an execution contract depends on fact absence."""
 
 
-def _tokenize(expression: str) -> list[str]:
+def _tokenize(expression: str, *, validate_names: bool = False) -> list[str]:
     tokens: list[str] = []
     for raw in expression.split():
         raw = raw.strip()
@@ -34,6 +36,17 @@ def _tokenize(expression: str) -> list[str]:
         raise ValueError(
             f"Activation expression too long: {len(tokens)} tokens (max {_MAX_TOKENS})"
         )
+    if validate_names:
+        invalid = [
+            token
+            for token in tokens
+            if token not in _OPERATORS and _NAME_PATTERN.fullmatch(token) is None
+        ]
+        if invalid:
+            raise ValueError(
+                f"Invalid activation token {invalid[0]!r}; use simple asset names "
+                "joined by uppercase AND/OR"
+            )
     return tokens
 
 
@@ -91,7 +104,7 @@ class _Parser:
         if self._pos >= len(self._tokens):
             raise ValueError("Expected asset name but reached end of expression")
         token = self._tokens[self._pos]
-        if token in ("AND", "OR", "NOT", "(", ")"):
+        if token in _OPERATORS:
             raise ValueError(f"Unexpected token '{token}' where asset name expected")
         self._pos += 1
         return token in self._available
@@ -106,7 +119,7 @@ class _Parser:
 def check_activation(expression: Optional[str], available_names: set[str]) -> bool:
     if not expression or not expression.strip():
         return True
-    tokens = _tokenize(expression)
+    tokens = _tokenize(expression, validate_names=True)
     if not tokens:
         return True
     parser = _Parser(tokens, available_names)
@@ -120,8 +133,7 @@ def activation_names(expression: Optional[str]) -> set[str]:
     return {
         token
         for token in _tokenize(expression)
-        if token not in {"AND", "OR", "NOT", "(", ")"}
-        and re.fullmatch(r"[a-zA-Z_][a-zA-Z0-9_-]*", token)
+        if token not in _OPERATORS and _NAME_PATTERN.fullmatch(token)
     }
 
 
@@ -139,7 +151,7 @@ def validate_execution_activation(expression: Optional[str]) -> None:
 
     if not expression or not expression.strip():
         return
-    tokens = _tokenize(expression)
+    tokens = _tokenize(expression, validate_names=True)
     if "NOT" in tokens:
         raise NonMonotonicActivationError(
             "execution activation must be monotonic: NOT/absence predicates "

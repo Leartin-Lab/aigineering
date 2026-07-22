@@ -171,13 +171,6 @@ def verify_replacements(def_hash: str | None, json_output: bool) -> None:
     if def_hash:
         claims = store.get_claims_by_definition(def_hash)
     else:
-        all_ids: set[str] = set()
-        for asset in store.get_all_assets():
-            if asset.definition_hash:
-                all_ids.update(
-                    c.id for c in store.get_claims_by_definition(asset.definition_hash)
-                )
-            all_ids.update(c.id for c in store.get_claims_for_asset(asset.id))
         claims = []
         seen: set[str] = set()
         for asset in store.get_all_assets():

@@ -370,73 +370,9 @@ def contracts_from_plan_asset(
     Returns (accepted_contracts, rejection_entries).
     """
 
-    try:
-        payload = json.loads(asset.content)
-    except json.JSONDecodeError as e:
-        return [], [
-            {
-                "child_name": "(plan_result)",
-                "field": "content",
-                "reason": f"plan result content is not valid JSON: {e}",
-                "action": "rejected",
-                "expected": "JSON object with 'contracts' or scaffold fields",
-                "actual": asset.content[:200],
-                "recoverable": True,
-            }
-        ]
-    if not isinstance(payload, dict):
-        return [], [
-            {
-                "child_name": "(plan_result)",
-                "field": "content",
-                "reason": "plan result content must be a JSON object",
-                "action": "rejected",
-                "expected": "JSON object with 'contracts' or scaffold fields",
-                "actual": type(payload).__name__,
-                "recoverable": True,
-            }
-        ]
-
-    # Try structured plan scaffold first (ADR-018 / v0.5.0)
-    scaffold = parse_plan_scaffold(asset)
-    if scaffold is not None:
-        scaffold = compile_placeholder_names(scaffold)
-        errors = validate_plan_scaffold(scaffold, parent_contract)
-        if errors:
-            return [], errors
-        raw_contracts = _scaffold_tasks_to_raw_dicts(scaffold)
-        # Append legacy final_contracts if mixed format
-        if scaffold.final_contracts:
-            raw_contracts = raw_contracts + list(scaffold.final_contracts)
-    else:
-        raw_contracts = payload.get("contracts", [])
-        if not isinstance(raw_contracts, list):
-            return [], [
-                {
-                    "child_name": "(plan_result)",
-                    "field": "contracts",
-                    "reason": "plan result 'contracts' field must be a list",
-                    "action": "rejected",
-                    "expected": "list of child contract objects",
-                    "actual": type(raw_contracts).__name__,
-                    "recoverable": True,
-                }
-            ]
-        if "contracts" not in payload:
-            return [], [
-                {
-                    "child_name": "(plan_result)",
-                    "field": "schema",
-                    "reason": (
-                        "unsupported plan result schema; expected legacy "
-                        "'contracts' list or structured scaffold fields"
-                    ),
-                    "action": "rejected",
-                    "expected": "JSON object with 'contracts' or scaffold fields",
-                    "actual": str(sorted(payload.keys())),
-                    "recoverable": True,
-                }
-            ]
+    raw_contracts, parse_errors = _raw_contracts_from_plan_asset(asset, parent_contract)
+    if parse_errors:
+        return [], parse_errors
 
     accepted: list[Contract] = []
     rejected: list[dict] = []
@@ -488,13 +424,38 @@ def contracts_from_plan_asset(
             continue
 
         description = str(raw.get("description", ""))
+        if not description.strip():
+            rejected.append(
+                {
+                    "child_name": name,
+                    "field": "description",
+                    "reason": "planned child must include executable instructions",
+                    "action": "rejected",
+                    "expected": "non-empty task description",
+                    "actual": repr(description),
+                    "recoverable": True,
+                }
+            )
+            continue
         inputs = _string_list(raw.get("inputs", []))
         outputs = _string_list(raw.get("outputs", []))
+        if not outputs:
+            rejected.append(
+                {
+                    "child_name": name,
+                    "field": "outputs",
+                    "reason": "planned child must declare at least one output",
+                    "action": "rejected",
+                    "expected": "non-empty list of asset names",
+                    "actual": repr(raw.get("outputs")),
+                    "recoverable": True,
+                }
+            )
+            continue
         activation = str(raw.get("activation", ""))
         budget = _positive_int(raw.get("budget", 1), default=1)
         tool_scope = _string_list(raw.get("tool_scope", []))
         labels = _string_list(raw.get("labels", []))
-        origin = "plan"
 
         try:
             validate_execution_activation(activation)
@@ -514,22 +475,10 @@ def contracts_from_plan_asset(
 
         if parent_contract is None:
             # Backward-compatible path: no validation
-            cid = hash_contract_v3(
-                name=name,
-                description=description,
-                inputs=inputs,
-                outputs=outputs,
-                activation=activation,
-                budget=budget,
-                tool_scope=tool_scope,
-                labels=labels,
-                origin=origin,
-                parent_id=parent_id,
-            )
             accepted.append(
-                Contract(
-                    id=cid,
+                _build_plan_contract(
                     parent_id=parent_id,
+                    parent_contract=None,
                     name=name,
                     description=description,
                     inputs=inputs,
@@ -538,192 +487,40 @@ def contracts_from_plan_asset(
                     budget=budget,
                     tool_scope=tool_scope,
                     labels=labels,
-                    worker_capabilities=(),
-                    worker_pools=(),
-                    origin=origin,
                 )
             )
             continue
 
-        # --- Input containment: child inputs must be in parent's disclosure scope
-        #     or promised by an independently accepted sibling producer in the
-        #     same plan/replan batch.  A promise grants reachability only; it
-        #     does not disclose sibling content before the asset is committed.
-        if allowed_input_names is not None:
-            child_output_set = set(outputs)
-            reachable_inputs = allowed_input_names | sibling_promises | child_output_set
-            unauthorized_inputs = [inp for inp in inputs if inp not in reachable_inputs]
-            if unauthorized_inputs:
-                rejected.append(
-                    {
-                        "child_name": name,
-                        "field": "inputs",
-                        "reason": (
-                            f"inputs {sorted(unauthorized_inputs)} are not in "
-                            f"parent disclosure scope ({sorted(allowed_input_names)}) "
-                            f"nor promised sibling outputs "
-                            f"({sorted(sibling_promises)}) nor in child outputs "
-                            f"({sorted(outputs)})"
-                        ),
-                        "action": "rejected",
-                        "expected": (
-                            f"subset of {sorted(allowed_input_names)} ∪ "
-                            f"sibling promises {sorted(sibling_promises)} ∪ "
-                            "child outputs"
-                        ),
-                        "actual": str(sorted(unauthorized_inputs)),
-                    }
-                )
-                continue
-
-        # --- Tool-scope containment: reject if not subset ---
-        if parent_tools is not None:
-            child_tools = set(tool_scope)
-            if not child_tools.issubset(parent_tools):
-                rejected.append(
-                    {
-                        "child_name": name,
-                        "field": "tool_scope",
-                        "reason": (
-                            f"tool_scope {sorted(tool_scope)} is not a subset "
-                            f"of parent {sorted(parent_tools)}"
-                        ),
-                        "action": "rejected",
-                        "expected": f"subset of {sorted(parent_tools)}",
-                        "actual": str(sorted(tool_scope)),
-                    }
-                )
-                continue
-
-        # --- Protected output check ---
-        violated_outputs = [
-            o for o in outputs if any(o.startswith(p) for p in _PLAN_RESERVED_PREFIXES)
-        ]
-        if violated_outputs:
-            rejected.append(
-                {
-                    "child_name": name,
-                    "field": "outputs",
-                    "reason": (f"outputs {violated_outputs} use reserved prefixes"),
-                    "action": "rejected",
-                    "expected": f"no prefix in {sorted(_PLAN_RESERVED_PREFIXES)}",
-                    "actual": str(violated_outputs),
-                }
-            )
-            continue
-
-        # --- Activation containment: activation refs checked against reachable names ---
-        if allowed_input_names is not None and activation:
-            activation_refs = activation_names(activation)
-            child_output_set = set(outputs)
-            reachable_activation_names = (
-                allowed_input_names | sibling_promises | child_output_set
-            )
-            unknown_activation_names = activation_refs - reachable_activation_names
-            if unknown_activation_names:
-                # Names outside allowed inputs and child outputs are likely
-                # sibling-output scheduling references — benign for containment
-                # since activation only gates scheduling, not disclosure.
-                rejected.append(
-                    {
-                        "child_name": name,
-                        "field": "activation",
-                        "reason": (
-                            f"activation refs {sorted(unknown_activation_names)} "
-                            f"are not in parent disclosure scope — may be sibling "
-                            f"scheduling references (benign)"
-                        ),
-                        "action": "noted",
-                        "expected": (
-                            f"subset of {sorted(allowed_input_names)} ∪ "
-                            f"sibling promises {sorted(sibling_promises)} ∪ "
-                            "child outputs"
-                        ),
-                        "actual": str(sorted(unknown_activation_names)),
-                    }
-                )
-
-        # --- Budget fan-out: contain to individual parent budget first ---
-        if parent_budget is not None and budget > parent_budget:
-            origin_budget = budget
-            budget = parent_budget
-            effective_budget = budget
-            remaining_budget = (
-                max(
-                    0, parent_budget_remaining - (_cumulative_budget + effective_budget)
-                )
-                if parent_budget_remaining is not None
-                else None
-            )
-            rejected.append(
-                {
-                    "child_name": name,
-                    "field": "budget",
-                    "reason": (
-                        f"budget {origin_budget} exceeds parent budget {parent_budget}"
-                    ),
-                    "action": "budget_contained",
-                    "expected": f"<= {parent_budget}",
-                    "actual": str(origin_budget),
-                    "requested": origin_budget,
-                    "effective": effective_budget,
-                    "remaining": remaining_budget,
-                }
-            )
-
-        # --- Budget fan-out: cumulative containment to parent remaining ---
-        if parent_budget_remaining is not None:
-            if _cumulative_budget + budget > parent_budget_remaining:
-                contained_budget = max(1, parent_budget_remaining - _cumulative_budget)
-                if budget != contained_budget:
-                    requested_budget = budget
-                    budget = contained_budget
-                    remaining_budget = max(
-                        0, parent_budget_remaining - (_cumulative_budget + budget)
-                    )
-                    rejected.append(
-                        {
-                            "child_name": name,
-                            "field": "budget",
-                            "reason": (
-                                f"cumulative child budgets would exceed parent "
-                                f"remaining ({parent_budget_remaining}); "
-                                f"contained from {requested_budget} to {contained_budget}"
-                            ),
-                            "action": "budget_contained",
-                            "expected": f"total <= {parent_budget_remaining}",
-                            "actual": str(requested_budget),
-                            "requested": requested_budget,
-                            "effective": budget,
-                            "remaining": remaining_budget,
-                        }
-                    )
-            _cumulative_budget += budget
-
-        policy = (
-            dict(parent_contract.sensitive_input_policy)
-            if parent_contract.sensitive_input_policy is not None
-            else None
-        )
-        cid = hash_contract_v3(
+        blocking, notes = _plan_child_scope_findings(
             name=name,
-            description=description,
             inputs=inputs,
             outputs=outputs,
             activation=activation,
-            budget=budget,
             tool_scope=tool_scope,
-            labels=labels,
-            worker_capabilities=parent_contract.worker_capabilities,
-            worker_pools=parent_contract.worker_pools,
-            origin=origin,
-            parent_id=parent_id,
-            sensitive_input_policy=policy,
+            parent_tools=parent_tools,
+            allowed_input_names=allowed_input_names,
+            sibling_promises=sibling_promises,
         )
+        rejected.extend(notes)
+        if blocking is not None:
+            rejected.append(blocking)
+            continue
+
+        budget, _cumulative_budget, budget_findings = _contain_plan_budget(
+            name=name,
+            requested=budget,
+            parent_budget=parent_budget,
+            parent_budget_remaining=parent_budget_remaining,
+            cumulative_budget=_cumulative_budget,
+        )
+        rejected.extend(budget_findings)
+        if budget is None:
+            continue
+
         accepted.append(
-            Contract(
-                id=cid,
+            _build_plan_contract(
                 parent_id=parent_id,
+                parent_contract=parent_contract,
                 name=name,
                 description=description,
                 inputs=inputs,
@@ -732,18 +529,379 @@ def contracts_from_plan_asset(
                 budget=budget,
                 tool_scope=tool_scope,
                 labels=labels,
-                worker_capabilities=parent_contract.worker_capabilities,
-                worker_pools=parent_contract.worker_pools,
-                origin=origin,
-                sensitive_input_policy=(
-                    parent_contract.sensitive_input_policy
-                    if parent_contract is not None
-                    and parent_contract.sensitive_input_policy
-                    else None
-                ),
             )
         )
+    if parent_contract is not None and allowed_input_names is not None:
+        accepted, dependency_rejections = _retain_reachable_plan_contracts(
+            accepted,
+            allowed_input_names=allowed_input_names,
+        )
+        rejected.extend(dependency_rejections)
+    if parent_contract is not None and parent_contract.outputs:
+        promised_outputs = {output for child in accepted for output in child.outputs}
+        outstanding = set(parent_contract.outputs) - promised_outputs
+        if outstanding:
+            rejected.append(
+                {
+                    "child_name": "(parent)",
+                    "field": "output_recommitment",
+                    "reason": (
+                        f"parent outputs {sorted(outstanding)} are not promised "
+                        "by any accepted child"
+                    ),
+                    "action": "rejected",
+                    "expected": (
+                        f"all parent outputs {sorted(parent_contract.outputs)} promised"
+                    ),
+                    "actual": f"missing: {sorted(outstanding)}",
+                    "recoverable": True,
+                }
+            )
     return accepted, rejected
+
+
+def _retain_reachable_plan_contracts(
+    contracts: list[Contract],
+    *,
+    allowed_input_names: set[str],
+) -> tuple[list[Contract], list[dict]]:
+    """Keep only children reachable from facts the parent can actually disclose.
+
+    Preliminary sibling promises make plan validation order-independent, but a
+    producer may later fail another containment check or run out of allowance.
+    This final fixed point is computed from accepted children only, preventing
+    those rejected promises from leaving descendants permanently blocked.
+    """
+    reachable = set(allowed_input_names)
+    pending = list(contracts)
+    retained: list[Contract] = []
+    while pending:
+        progressed = False
+        for child in tuple(pending):
+            dependencies = set(child.inputs) | activation_names(child.activation)
+            if dependencies.issubset(reachable):
+                pending.remove(child)
+                retained.append(child)
+                reachable.update(child.outputs)
+                progressed = True
+        if not progressed:
+            break
+
+    rejections = [
+        {
+            "child_name": child.name,
+            "field": "dependencies",
+            "reason": (
+                "planned child is not reachable from parent disclosure or outputs "
+                "of accepted reachable siblings"
+            ),
+            "action": "rejected",
+            "expected": f"dependencies reachable from {sorted(reachable)}",
+            "actual": str(
+                sorted(
+                    (set(child.inputs) | activation_names(child.activation)) - reachable
+                )
+            ),
+            "recoverable": True,
+        }
+        for child in pending
+    ]
+    return retained, rejections
+
+
+def _raw_contracts_from_plan_asset(
+    asset: Asset, parent_contract: Contract | None
+) -> tuple[list[object], list[dict]]:
+    """Parse legacy or staged plan output without applying child authority."""
+    try:
+        payload = json.loads(asset.content)
+    except json.JSONDecodeError as exc:
+        return [], [
+            {
+                "child_name": "(plan_result)",
+                "field": "content",
+                "reason": f"plan result content is not valid JSON: {exc}",
+                "action": "rejected",
+                "expected": "JSON object with 'contracts' or scaffold fields",
+                "actual": asset.content[:200],
+                "recoverable": True,
+            }
+        ]
+    if not isinstance(payload, dict):
+        return [], [
+            {
+                "child_name": "(plan_result)",
+                "field": "content",
+                "reason": "plan result content must be a JSON object",
+                "action": "rejected",
+                "expected": "JSON object with 'contracts' or scaffold fields",
+                "actual": type(payload).__name__,
+                "recoverable": True,
+            }
+        ]
+
+    scaffold = parse_plan_scaffold(asset)
+    if scaffold is not None:
+        scaffold = compile_placeholder_names(scaffold)
+        errors = validate_plan_scaffold(scaffold, parent_contract)
+        if errors:
+            return [], errors
+        raw_contracts: list[object] = list(_scaffold_tasks_to_raw_dicts(scaffold))
+        raw_contracts.extend(scaffold.final_contracts)
+        return raw_contracts, []
+
+    raw_contracts = payload.get("contracts", [])
+    if "contracts" not in payload:
+        return [], [
+            {
+                "child_name": "(plan_result)",
+                "field": "schema",
+                "reason": (
+                    "unsupported plan result schema; expected legacy "
+                    "'contracts' list or structured scaffold fields"
+                ),
+                "action": "rejected",
+                "expected": "JSON object with 'contracts' or scaffold fields",
+                "actual": str(sorted(payload.keys())),
+                "recoverable": True,
+            }
+        ]
+    if not isinstance(raw_contracts, list):
+        return [], [
+            {
+                "child_name": "(plan_result)",
+                "field": "contracts",
+                "reason": "plan result 'contracts' field must be a list",
+                "action": "rejected",
+                "expected": "list of child contract objects",
+                "actual": type(raw_contracts).__name__,
+                "recoverable": True,
+            }
+        ]
+    return raw_contracts, []
+
+
+def _contain_plan_budget(
+    *,
+    name: str,
+    requested: int,
+    parent_budget: int | None,
+    parent_budget_remaining: int | None,
+    cumulative_budget: int,
+) -> tuple[int | None, int, list[dict]]:
+    """Contain one child allowance without ever exceeding the parent fund."""
+    budget = requested
+    findings: list[dict] = []
+    if parent_budget is not None and budget > parent_budget:
+        budget = parent_budget
+        findings.append(
+            {
+                "child_name": name,
+                "field": "budget",
+                "reason": f"budget {requested} exceeds parent budget {parent_budget}",
+                "action": "budget_contained",
+                "expected": f"<= {parent_budget}",
+                "actual": str(requested),
+                "requested": requested,
+                "effective": budget,
+                "remaining": (
+                    max(
+                        0,
+                        parent_budget_remaining - (cumulative_budget + budget),
+                    )
+                    if parent_budget_remaining is not None
+                    else None
+                ),
+            }
+        )
+    if parent_budget_remaining is None:
+        return budget, cumulative_budget, findings
+
+    available = max(0, parent_budget_remaining - cumulative_budget)
+    if available == 0:
+        findings.append(
+            {
+                "child_name": name,
+                "field": "budget",
+                "reason": "no parent budget remains for this child",
+                "action": "rejected",
+                "expected": f"total <= {parent_budget_remaining}",
+                "actual": str(budget),
+                "requested": requested,
+                "effective": 0,
+                "remaining": 0,
+                "recoverable": True,
+            }
+        )
+        return None, cumulative_budget, findings
+    if budget > available:
+        previous = budget
+        budget = available
+        findings.append(
+            {
+                "child_name": name,
+                "field": "budget",
+                "reason": (
+                    "cumulative child budgets would exceed parent remaining "
+                    f"({parent_budget_remaining}); contained from {previous} to {budget}"
+                ),
+                "action": "budget_contained",
+                "expected": f"total <= {parent_budget_remaining}",
+                "actual": str(previous),
+                "requested": previous,
+                "effective": budget,
+                "remaining": 0,
+            }
+        )
+    return budget, cumulative_budget + budget, findings
+
+
+def _plan_child_scope_findings(
+    *,
+    name: str,
+    inputs: list[str],
+    outputs: list[str],
+    activation: str,
+    tool_scope: list[str],
+    parent_tools: set[str] | None,
+    allowed_input_names: set[str] | None,
+    sibling_promises: set[str],
+) -> tuple[dict | None, list[dict]]:
+    """Return one blocking containment finding plus non-blocking notes."""
+    child_outputs = set(outputs)
+    if allowed_input_names is not None:
+        reachable = allowed_input_names | sibling_promises | child_outputs
+        unauthorized = [name for name in inputs if name not in reachable]
+        if unauthorized:
+            return (
+                {
+                    "child_name": name,
+                    "field": "inputs",
+                    "reason": (
+                        f"inputs {sorted(unauthorized)} are not in parent disclosure "
+                        f"scope ({sorted(allowed_input_names)}) nor promised sibling "
+                        f"outputs ({sorted(sibling_promises)}) nor in child outputs "
+                        f"({sorted(outputs)})"
+                    ),
+                    "action": "rejected",
+                    "expected": (
+                        f"subset of {sorted(allowed_input_names)} ∪ sibling promises "
+                        f"{sorted(sibling_promises)} ∪ child outputs"
+                    ),
+                    "actual": str(sorted(unauthorized)),
+                },
+                [],
+            )
+    if parent_tools is not None and not set(tool_scope).issubset(parent_tools):
+        return (
+            {
+                "child_name": name,
+                "field": "tool_scope",
+                "reason": (
+                    f"tool_scope {sorted(tool_scope)} is not a subset of parent "
+                    f"{sorted(parent_tools)}"
+                ),
+                "action": "rejected",
+                "expected": f"subset of {sorted(parent_tools)}",
+                "actual": str(sorted(tool_scope)),
+            },
+            [],
+        )
+    protected_outputs = [
+        output
+        for output in outputs
+        if any(output.startswith(prefix) for prefix in _PLAN_RESERVED_PREFIXES)
+    ]
+    if protected_outputs:
+        return (
+            {
+                "child_name": name,
+                "field": "outputs",
+                "reason": f"outputs {protected_outputs} use reserved prefixes",
+                "action": "rejected",
+                "expected": f"no prefix in {sorted(_PLAN_RESERVED_PREFIXES)}",
+                "actual": str(protected_outputs),
+            },
+            [],
+        )
+    if allowed_input_names is None or not activation:
+        return None, []
+    unknown = activation_names(activation) - (
+        allowed_input_names | sibling_promises | child_outputs
+    )
+    if not unknown:
+        return None, []
+    return None, [
+        {
+            "child_name": name,
+            "field": "activation",
+            "reason": (
+                f"activation refs {sorted(unknown)} are not in parent disclosure "
+                "scope — may be sibling scheduling references (benign)"
+            ),
+            "action": "noted",
+            "expected": (
+                f"subset of {sorted(allowed_input_names)} ∪ sibling promises "
+                f"{sorted(sibling_promises)} ∪ child outputs"
+            ),
+            "actual": str(sorted(unknown)),
+        }
+    ]
+
+
+def _build_plan_contract(
+    *,
+    parent_id: str | None,
+    parent_contract: Contract | None,
+    name: str,
+    description: str,
+    inputs: list[str],
+    outputs: list[str],
+    activation: str,
+    budget: int,
+    tool_scope: list[str],
+    labels: list[str],
+) -> Contract:
+    worker_capabilities = (
+        parent_contract.worker_capabilities if parent_contract is not None else ()
+    )
+    worker_pools = parent_contract.worker_pools if parent_contract is not None else ()
+    sensitive_policy = (
+        parent_contract.sensitive_input_policy if parent_contract is not None else None
+    )
+    identity = hash_contract_v3(
+        name=name,
+        description=description,
+        inputs=inputs,
+        outputs=outputs,
+        activation=activation,
+        budget=budget,
+        tool_scope=tool_scope,
+        labels=labels,
+        worker_capabilities=worker_capabilities,
+        worker_pools=worker_pools,
+        origin="plan",
+        parent_id=parent_id,
+        sensitive_input_policy=(
+            dict(sensitive_policy) if sensitive_policy is not None else None
+        ),
+    )
+    return Contract(
+        id=identity,
+        parent_id=parent_id,
+        name=name,
+        description=description,
+        inputs=inputs,
+        outputs=outputs,
+        activation=activation,
+        budget=budget,
+        tool_scope=tool_scope,
+        labels=labels,
+        worker_capabilities=worker_capabilities,
+        worker_pools=worker_pools,
+        origin="plan",
+        sensitive_input_policy=sensitive_policy,
+    )
 
 
 def _accepted_sibling_output_promises(

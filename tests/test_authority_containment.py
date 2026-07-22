@@ -307,6 +307,144 @@ def test_valid_plan_expansion_still_works():
     assert c.outputs == ("draft_report",)
 
 
+def test_planner_rejects_child_without_declared_outputs():
+    """An ordinary planned task must have a fact it can commit."""
+    parent = _parent(outputs=["final_report"])
+    asset = _plan_asset([_basic_child(inputs=[], outputs=[])])
+
+    accepted, rejected = contracts_from_plan_asset(
+        asset,
+        parent.id,
+        parent_contract=parent,
+        allowed_input_names=set(),
+    )
+
+    assert accepted == []
+    assert any(
+        item["child_name"] == "draft" and item["field"] == "outputs"
+        for item in rejected
+    )
+
+
+def test_planner_rejects_child_without_executable_description():
+    parent = _parent(outputs=["final_report"])
+    asset = _plan_asset(
+        [_basic_child(description="", inputs=[], outputs=["final_report"])]
+    )
+
+    accepted, rejected = contracts_from_plan_asset(
+        asset,
+        parent.id,
+        parent_contract=parent,
+        allowed_input_names=set(),
+    )
+
+    assert accepted == []
+    assert any(item["field"] == "description" for item in rejected)
+
+
+def test_legacy_plan_must_recommit_every_parent_output():
+    """The legacy contracts schema has the same output coverage as scaffolds."""
+    parent = _parent(outputs=["final_report"])
+    asset = _plan_asset(
+        [_basic_child(inputs=[], outputs=["intermediate"], activation="")]
+    )
+
+    accepted, rejected = contracts_from_plan_asset(
+        asset,
+        parent.id,
+        parent_contract=parent,
+        allowed_input_names=set(),
+    )
+
+    assert len(accepted) == 1
+    assert any(item["field"] == "output_recommitment" for item in rejected)
+
+
+def test_source_child_may_have_no_inputs_when_outputs_are_declared():
+    """Source tasks remain valid; only the output side is mandatory."""
+    parent = _parent(outputs=["final_report"])
+    asset = _plan_asset(
+        [_basic_child(inputs=[], outputs=["final_report"], activation="")]
+    )
+
+    accepted, rejected = contracts_from_plan_asset(
+        asset,
+        parent.id,
+        parent_contract=parent,
+        allowed_input_names=set(),
+    )
+
+    assert len(accepted) == 1
+    assert accepted[0].inputs == ()
+    assert rejected == []
+
+
+def test_rejected_producer_cannot_leave_an_accepted_unreachable_consumer():
+    parent = _parent(outputs=["final_report"])
+    asset = _plan_asset(
+        [
+            _basic_child(
+                name="invalid_source",
+                description="",
+                inputs=[],
+                outputs=["intermediate"],
+                activation="",
+            ),
+            _basic_child(
+                name="consumer",
+                inputs=["intermediate"],
+                outputs=["final_report"],
+                activation="intermediate",
+            ),
+        ]
+    )
+
+    accepted, rejected = contracts_from_plan_asset(
+        asset,
+        parent.id,
+        parent_contract=parent,
+        allowed_input_names=set(),
+    )
+
+    assert accepted == []
+    assert any(item["child_name"] == "invalid_source" for item in rejected)
+    assert any(
+        item["child_name"] == "consumer" and item["field"] == "dependencies"
+        for item in rejected
+    )
+
+
+def test_plan_dependency_cycle_without_a_grounded_source_is_rejected():
+    parent = _parent(outputs=["final_report"])
+    asset = _plan_asset(
+        [
+            _basic_child(
+                name="left",
+                inputs=["right_output"],
+                outputs=["left_output"],
+                activation="right_output",
+            ),
+            _basic_child(
+                name="right",
+                inputs=["left_output"],
+                outputs=["right_output", "final_report"],
+                activation="left_output",
+            ),
+        ]
+    )
+
+    accepted, rejected = contracts_from_plan_asset(
+        asset,
+        parent.id,
+        parent_contract=parent,
+        allowed_input_names=set(),
+    )
+
+    assert accepted == []
+    assert {item["child_name"] for item in rejected} >= {"left", "right"}
+
+
 # ---------------------------------------------------------------------------
 # Backward compatibility (no parent_contract)
 # ---------------------------------------------------------------------------
@@ -459,8 +597,8 @@ def test_child_input_in_parent_disclosure_accepted():
     assert len(input_rejections) == 0
 
 
-def test_child_input_is_own_output_accepted():
-    """Child input that is also a child output (self-referential) → accepted."""
+def test_child_input_is_own_output_is_not_reachable():
+    """A task cannot bootstrap the fact required to activate itself."""
     parent = _parent()
     allowed: set[str] = set()
     asset = _plan_asset(
@@ -479,10 +617,8 @@ def test_child_input_is_own_output_accepted():
         allowed_input_names=allowed,
     )
 
-    assert len(accepted) == 1
-    # No input-related rejections
-    input_rejections = [r for r in rejected if r["field"] == "inputs"]
-    assert len(input_rejections) == 0
+    assert accepted == []
+    assert any(item["field"] == "dependencies" for item in rejected)
 
 
 def test_child_input_from_accepted_sibling_output_is_accepted():
@@ -721,7 +857,7 @@ def test_unsupported_plan_result_schema_is_recoverable_rejection():
 
 
 def test_budget_fanout_bounded_across_children():
-    """3 children each budget=5, parent remaining=5 → later children clamped."""
+    """Children are rejected once no positive parent allowance remains."""
     parent = _parent(budget=5)
     allowed = {"source"}
     children = [
@@ -738,15 +874,16 @@ def test_budget_fanout_bounded_across_children():
         parent_budget_remaining=5,
     )
 
-    assert len(accepted) == 3
-    # First child gets full budget (5 ≤ 5), later children are clamped.
+    assert len(accepted) == 1
     assert accepted[0].budget == 5
-    assert accepted[1].budget <= 2
-    assert accepted[2].budget <= 2
-
-    # At least 2 children have clamped budgets
-    budget_clamps = [r for r in rejected if r["field"] == "budget"]
-    assert len(budget_clamps) >= 2
+    assert sum(child.budget for child in accepted) <= 5
+    exhausted = [
+        finding
+        for finding in rejected
+        if finding["field"] == "budget" and finding["action"] == "rejected"
+    ]
+    assert len(exhausted) == 2
+    assert all(finding["effective"] == 0 for finding in exhausted)
 
 
 def test_budget_fanout_not_exceeded():
@@ -811,8 +948,8 @@ def test_reserved_prefixes_include_all_authority_prefixes():
     assert "_tool_obs_exfiltrate" in rejected[0]["actual"]
 
 
-def test_activation_containment_notes_unknown_refs():
-    """Activation refs outside allowed scope are noted (not rejected)."""
+def test_activation_containment_rejects_refs_with_no_accepted_producer():
+    """An unknown activation name must not leave a permanently blocked task."""
     parent = _parent()
     allowed = {"visible_input"}
     # Input "visible_input" is in the allowed set to pass input containment.
@@ -826,10 +963,9 @@ def test_activation_containment_notes_unknown_refs():
         allowed_input_names=allowed,
     )
 
-    # Child is still accepted (activation containment is "noted", not "rejected")
-    assert len(accepted) == 1
-    # The rejection entry should have action="noted" for benign scheduling refs
+    assert accepted == []
     activation_notes = [r for r in rejected if r["field"] == "activation"]
     assert len(activation_notes) >= 1
     assert activation_notes[0]["action"] == "noted"
     assert "sibling_output" in activation_notes[0]["actual"]
+    assert any(r["field"] == "dependencies" for r in rejected)

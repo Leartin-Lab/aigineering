@@ -31,6 +31,33 @@ and expensive or duplicated diagnostic projection work.
 - CLI descendant risk projection reuses one Contract graph and RuntimeProjection,
   avoids recursive stack growth, and removes duplicate stalled/budget risks.
 - Task loops construct the completion registry once per run.
+- Session/trace paths validate protocol identifiers before filesystem access.
+- Malformed Worker packages and model tool arguments fail with typed protocol
+  errors; invalid tool JSON is never converted into an empty invocation.
+- Claim-renewal failure now closes the attempt durably instead of leaving an
+  active claim until timeout.
+- Planning refuses later children when the parent's remaining allowance is
+  zero, preserving aggregate fan-out containment.
+- Legacy and scaffold planning share task-quality gates: non-empty descriptions
+  and outputs, valid activation grammar, accepted-child input reachability, and
+  complete parent-output recommitment.
+- Final plan reachability is derived only from accepted producers; rejected
+  sibling promises, ungrounded cycles, and self-dependent tasks cannot enter a
+  graph that will wait forever. Compile examples adapt to the actual allowance.
+- Planning labels expose exact `/exec` schemas, causal allowance, and a
+  Contract-specific valid compile example; nested invocation parameters are
+  thawed before canonical serialization.
+- Recovery replay records `recovery_unavailable` when publication is rejected,
+  never a nonexistent scheduled recovery. Stable phase/validation-field codes
+  preserve diagnostics without model or provider text.
+- Claim-bound Candidate usage metadata is projected onto the owning task trace.
+- Invalid activation punctuation is rejected at admission; historical invalid
+  expressions project an explicit blocker and descendant risk.
+- Large orchestration owners were separated without adding new ingress:
+  EngineWorker setup/bridge/loop/output collection, CLI once/target loops,
+  claim routing, and SQLite commitment substeps now have narrow helpers.
+- FastAPI uses one request-scoped Store connection for validation and commit,
+  then closes it deterministically.
 
 ## Compatibility
 
@@ -48,3 +75,5 @@ request. Worker submission wire semantics are unchanged.
 
 All exit criteria passed on 2026-07-19. Evidence is recorded in
 `reports/050-post-review-boundary-hardening-2026-07-19.md`.
+Final live acceptance additionally completed an exact 20-task serial chain and
+two nested replan cycles with no rejection, recovery, or silent-failure risk.

@@ -878,7 +878,7 @@ def test_local_worker_invocation_receives_continuation_method_context():
     store.close()
 
 
-def test_local_worker_usage_metadata_reaches_projection_trace():
+def test_local_worker_usage_metadata_reaches_candidate_receipt_and_task_trace():
     class UsageWorker:
         worker_id = "local-worker"
 
@@ -902,6 +902,16 @@ def test_local_worker_usage_metadata_reaches_projection_trace():
         1
     ]
     assert dict(candidate_record.payload["metadata"]) == {
+        "model": "test-model",
+        "total_tokens": 17,
+    }
+    usage_entries = [
+        entry
+        for entry in store.get_by_contract(contract.id)
+        if entry.usage_metadata is not None
+    ]
+    assert len(usage_entries) == 1
+    assert dict(usage_entries[0].usage_metadata or {}) == {
         "model": "test-model",
         "total_tokens": 17,
     }

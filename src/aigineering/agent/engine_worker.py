@@ -98,87 +98,29 @@ class EngineWorker:
         inner = self._inner_store_factory()
         try:
             signer = self._inner_signer
-            actor_key = ActorKey(
-                f"{self.worker_id}:runtime",
-                "inner-root",
-                signer.kind,
-                signer.signer_id,
-                (
-                    "actor.authorize",
-                    "asset.publish",
-                    "asset.publish.protected",
-                    "contract.publish",
-                    "contract.publish.protected",
-                    "worker.register",
-                ),
+            actor_key, genesis, publisher, candidate_publishers = (
+                _initialize_inner_domain(inner, self.worker_id, signer)
             )
-            genesis = create_genesis_manifest(
-                f"{self.worker_id}:invocation",
-                [actor_key],
-                "policy:engine-worker-inner-v1",
+            input_error = _publish_disclosed_inputs(
+                inner, disclosed_assets, genesis, actor_key, signer
             )
-            initialize_genesis(inner, genesis)
-            publisher = CandidatePublisher(inner, inner, genesis, actor_key, signer)
-            candidate_publishers = CandidatePublisherRegistry(
-                tuple(
-                    (plugin_id, publisher)
-                    for plugin_id in (
-                        "continuation.publish.v1",
-                        "fail.report.v1",
-                        "planning.expand.v1",
-                        "recovery.publish.v1",
-                    )
-                )
-            )
-            for asset in disclosed_assets:
-                if not verify_asset_seal(asset):
-                    return self._failure(
-                        "outer disclosure contains an invalid asset seal"
-                    )
-                decision = publish_effect(
-                    inner,
-                    inner,
-                    genesis,
-                    actor_key,
-                    signer,
-                    asset_proposal_effect(asset),
-                    idempotency_key=f"inner-asset:{asset.id}",
-                )
-                if not decision.accepted:
-                    return self._failure("inner domain rejected disclosed input")
+            if input_error is not None:
+                return self._failure(input_error)
             inner_contract = _inner_contract(contract)
             operation_id = _bridge_operation_id(
                 contract.id, claim_binding, self._bridge_policy
             )
-            operation_asset = _bridge_asset(
-                "bridge_operation",
-                operation_id,
-                {
-                    "bridge_policy": self._bridge_policy,
-                    "inner_contract_id": inner_contract.id,
-                    "outer_claim": (
-                        {
-                            "claim_epoch": claim_binding.claim_epoch,
-                            "claim_id": claim_binding.claim_id,
-                            "package_id": claim_binding.package_id,
-                        }
-                        if claim_binding is not None
-                        else None
-                    ),
-                    "outer_contract_id": contract.id,
-                    "operation_id": operation_id,
-                },
-            )
-            operation = publish_effect(
-                inner,
+            if not _publish_bridge_operation(
                 inner,
                 genesis,
                 actor_key,
                 signer,
-                asset_proposal_effect(operation_asset),
-                idempotency_key=f"bridge-operation:{operation_id}",
-            )
-            if not operation.accepted:
+                outer=contract,
+                inner_contract=inner_contract,
+                claim_binding=claim_binding,
+                operation_id=operation_id,
+                bridge_policy=self._bridge_policy,
+            ):
                 return self._failure("inner domain rejected bridge operation mapping")
             decision = publish_effect(
                 inner,
@@ -191,52 +133,19 @@ class EngineWorker:
             )
             if not decision.accepted:
                 return self._failure("inner domain rejected root contract")
-            registry = default_completion_registry()
-            worker_hosts: dict[str, tuple[ActorKey, Ed25519Signer]] = {}
-            for _ in range(self._max_steps):
-                process_rejected_submissions(
-                    inner, candidate_publishers=candidate_publishers
-                )
-                process_task_completions(
-                    inner, registry, candidate_publishers=candidate_publishers
-                )
-                selected = _claim_inner_work(
-                    inner,
-                    self._delegate,
-                    self._worker_selector,
-                    publisher,
-                    genesis,
-                    signer,
-                    worker_hosts,
-                    candidate_publishers,
-                )
-                if selected is None:
-                    break
-                claimed, worker = selected
-                try:
-                    execute_claimed_package(
-                        claimed,
-                        worker,
-                        inner,
-                        candidate_publishers=candidate_publishers,
-                    )
-                except (ValueError, WorkerInvocationError):
-                    return self._failure("inner worker produced an invalid submission")
-                process_task_completions(
-                    inner, registry, candidate_publishers=candidate_publishers
-                )
+            if not _run_inner_steps(
+                inner,
+                self._delegate,
+                self._worker_selector,
+                publisher,
+                genesis,
+                signer,
+                candidate_publishers,
+                max_steps=self._max_steps,
+            ):
+                return self._failure("inner worker produced an invalid submission")
 
-            outputs: dict[str, str] = {}
-            output_ids: dict[str, str] = {}
-            for name in contract.outputs:
-                matches = [
-                    asset
-                    for asset in inner.get_assets_by_name(name)
-                    if is_business_output(asset, name)
-                ]
-                if matches:
-                    outputs[name] = matches[-1].content
-                    output_ids[name] = matches[-1].id
+            outputs, output_ids = _collect_inner_outputs(inner, contract.outputs)
             if set(outputs) != set(contract.outputs):
                 missing = sorted(set(contract.outputs) - set(outputs))
                 return self._failure(
@@ -286,6 +195,163 @@ class EngineWorker:
             worker_id=self.worker_id,
             raw_output=f"engine_worker_failure: {reason}",
         )
+
+
+def _initialize_inner_domain(store, worker_id: str, signer: Ed25519Signer):
+    actor_key = ActorKey(
+        f"{worker_id}:runtime",
+        "inner-root",
+        signer.kind,
+        signer.signer_id,
+        (
+            "actor.authorize",
+            "asset.publish",
+            "asset.publish.protected",
+            "contract.publish",
+            "contract.publish.protected",
+            "worker.register",
+        ),
+    )
+    genesis = create_genesis_manifest(
+        f"{worker_id}:invocation",
+        [actor_key],
+        "policy:engine-worker-inner-v1",
+    )
+    initialize_genesis(store, genesis)
+    publisher = CandidatePublisher(store, store, genesis, actor_key, signer)
+    publishers = CandidatePublisherRegistry(
+        tuple(
+            (plugin_id, publisher)
+            for plugin_id in (
+                "continuation.publish.v1",
+                "fail.report.v1",
+                "planning.expand.v1",
+                "recovery.publish.v1",
+            )
+        )
+    )
+    return actor_key, genesis, publisher, publishers
+
+
+def _publish_disclosed_inputs(store, assets, genesis, actor_key, signer) -> str | None:
+    for asset in assets:
+        if not verify_asset_seal(asset):
+            return "outer disclosure contains an invalid asset seal"
+        decision = publish_effect(
+            store,
+            store,
+            genesis,
+            actor_key,
+            signer,
+            asset_proposal_effect(asset),
+            idempotency_key=f"inner-asset:{asset.id}",
+        )
+        if not decision.accepted:
+            return "inner domain rejected disclosed input"
+    return None
+
+
+def _publish_bridge_operation(
+    store,
+    genesis,
+    actor_key,
+    signer,
+    *,
+    outer: Contract,
+    inner_contract: Contract,
+    claim_binding: CandidateClaimBinding | None,
+    operation_id: str,
+    bridge_policy: str,
+) -> bool:
+    operation_asset = _bridge_asset(
+        "bridge_operation",
+        operation_id,
+        {
+            "bridge_policy": bridge_policy,
+            "inner_contract_id": inner_contract.id,
+            "outer_claim": (
+                {
+                    "claim_epoch": claim_binding.claim_epoch,
+                    "claim_id": claim_binding.claim_id,
+                    "package_id": claim_binding.package_id,
+                }
+                if claim_binding is not None
+                else None
+            ),
+            "outer_contract_id": outer.id,
+            "operation_id": operation_id,
+        },
+    )
+    return publish_effect(
+        store,
+        store,
+        genesis,
+        actor_key,
+        signer,
+        asset_proposal_effect(operation_asset),
+        idempotency_key=f"bridge-operation:{operation_id}",
+    ).accepted
+
+
+def _run_inner_steps(
+    store,
+    delegate,
+    selector,
+    publisher,
+    genesis,
+    signer,
+    candidate_publishers,
+    *,
+    max_steps: int,
+) -> bool:
+    registry = default_completion_registry()
+    worker_hosts: dict[str, tuple[ActorKey, Ed25519Signer]] = {}
+    for _ in range(max_steps):
+        process_rejected_submissions(store, candidate_publishers=candidate_publishers)
+        process_task_completions(
+            store, registry, candidate_publishers=candidate_publishers
+        )
+        selected = _claim_inner_work(
+            store,
+            delegate,
+            selector,
+            publisher,
+            genesis,
+            signer,
+            worker_hosts,
+            candidate_publishers,
+        )
+        if selected is None:
+            return True
+        claimed, worker = selected
+        try:
+            execute_claimed_package(
+                claimed,
+                worker,
+                store,
+                candidate_publishers=candidate_publishers,
+            )
+        except (ValueError, WorkerInvocationError):
+            return False
+        process_task_completions(
+            store, registry, candidate_publishers=candidate_publishers
+        )
+    return True
+
+
+def _collect_inner_outputs(store, names) -> tuple[dict[str, str], dict[str, str]]:
+    outputs: dict[str, str] = {}
+    output_ids: dict[str, str] = {}
+    for name in names:
+        matches = [
+            asset
+            for asset in store.get_assets_by_name(name)
+            if is_business_output(asset, name)
+        ]
+        if matches:
+            outputs[name] = matches[-1].content
+            output_ids[name] = matches[-1].id
+    return outputs, output_ids
 
 
 def _inner_contract(outer: Contract) -> Contract:

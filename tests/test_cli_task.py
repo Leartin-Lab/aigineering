@@ -192,6 +192,7 @@ def test_run_once_projects_completed_plan_before_claiming_expanded_child():
                 "contracts": [
                     {
                         "name": "finish",
+                        "description": "Produce the declared report.",
                         "inputs": [],
                         "outputs": ["report"],
                         "activation": "",

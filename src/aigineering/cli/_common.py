@@ -129,7 +129,7 @@ def _run_demo(
     capabilities: frozenset[str] | None = None,
     behavior_labels: tuple[str, ...] = (),
 ) -> tuple[StoreProtocol, TraceStoreProtocol, Contract]:
-    """Run the build_report hallucination containment demo."""
+    """Run a bounded quick-goal task graph through the normal Worker pool."""
     if store is None:
         store = SQLiteStore(":memory:")
     store = require_operational_store(store)
@@ -234,26 +234,56 @@ def _run_demo(
         )
 
     from aigineering.runtime import (
+        WorkerInvocationError,
         claim_next_package,
         execute_claimed_package,
+        process_rejected_submissions,
+        process_task_completions,
     )
-    from aigineering.local_identity import ensure_local_worker_host
+    from aigineering.local_identity import (
+        ensure_local_runtime_publishers,
+        ensure_local_worker_host,
+    )
+    from aigineering.cli.task_state import project_task_status
 
     host = ensure_local_worker_host(store, worker)
-
-    claimed = claim_next_package(
-        store,
-        worker_id=host.worker_id,
-        contract_id=contract.id,
-    )
-    if claimed is None:
-        raise RuntimeError(f"demo contract {contract.id!r} could not be claimed")
-    execute_claimed_package(
-        claimed,
-        host,
-        store,
-        trace_store,
-    )
+    publishers = ensure_local_runtime_publishers(store)
+    registry = default_completion_registry()
+    last_submission = "none"
+    for _ in range(64):
+        process_rejected_submissions(store, candidate_publishers=publishers)
+        process_task_completions(store, registry, candidate_publishers=publishers)
+        status = project_task_status(contract, store)
+        if status["terminal"]:
+            break
+        claimed = claim_next_package(
+            store,
+            worker_id=host.worker_id,
+            candidate_publishers=publishers,
+        )
+        if claimed is None:
+            break
+        try:
+            result = execute_claimed_package(
+                claimed,
+                host,
+                store,
+                trace_store,
+                candidate_publishers=publishers,
+            )
+        except WorkerInvocationError:
+            last_submission = "worker_failed"
+            continue
+        last_submission = str(result.get("status", "unknown"))
+    process_task_completions(store, registry, candidate_publishers=publishers)
+    status = project_task_status(contract, store)
+    if status["status"] != "completed":
+        raise RuntimeError(
+            "demo worker did not complete declared outputs: "
+            f"submission={last_submission} "
+            f"task={status['status']} "
+            f"risks={status.get('silent_failure_risks', [])}"
+        )
 
     # Session JSONL is an audit export of the durable runtime trace, not an
     # independent execution store.

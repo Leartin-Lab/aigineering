@@ -174,7 +174,7 @@ def run(
     save_config: bool,
     json_output: bool,
 ) -> None:
-    """Run a CLI worker cycle or execute the legacy quick contract demo."""
+    """Run one Worker cycle, a target task, or a quick goal task graph."""
     if worker_kind is None:
         raise click.UsageError(
             "--worker is required.  Use 'mock' for deterministic testing, "
@@ -205,19 +205,22 @@ def run(
     session_id = _session_id()
     trace_path = _get_trace_dir() / f"{session_id}.jsonl"
     jsonl_store = JsonLTraceStore(str(trace_path))
-    store, trace_store, contract = _run_demo(
-        goal,
-        trace_store=jsonl_store,
-        store=_persistent_store(),
-        worker_kind=worker_kind,
-        model=model,
-        base_url=base_url,
-        save_config=save_config,
-        timeout=timeout,
-        max_retries=max_retries,
-        capabilities=capabilities,
-        behavior_labels=behavior_labels,
-    )
+    try:
+        store, trace_store, contract = _run_demo(
+            goal,
+            trace_store=jsonl_store,
+            store=_persistent_store(),
+            worker_kind=worker_kind,
+            model=model,
+            base_url=base_url,
+            save_config=save_config,
+            timeout=timeout,
+            max_retries=max_retries,
+            capabilities=capabilities,
+            behavior_labels=behavior_labels,
+        )
+    except (RuntimeError, WorkerInvocationError) as exc:
+        raise click.ClickException(str(exc)) from exc
     entries = trace_store.get_by_contract(contract.id)
     trace_ids = [e.id for e in jsonl_store.get_all()]
 
@@ -301,168 +304,38 @@ def _run_task_pool(
             max_retries=max_retries,
             capabilities=capabilities,
         )
-        if mock_output is not None or mock_presets:
-            if worker_kind != "mock":
-                raise click.ClickException(
-                    "--mock-output/--mock-preset requires --worker mock"
-                )
-            set_output = getattr(worker, "set_output", None)
-            if set_output is not None:
-                if mock_output is not None:
-                    for contract in store.get_all_contracts():
-                        set_output(contract.name, mock_output)
-                for preset in mock_presets:
-                    name, sep, output = preset.partition("=")
-                    if sep != "=" or not name:
-                        raise click.ClickException(
-                            "--mock-preset must use contract_name=raw_output"
-                        )
-                    set_output(name, output)
-        elif worker_kind == "mock":
-            set_output = getattr(worker, "set_output", None)
-            if set_output is not None:
-                for contract in store.get_all_contracts():
-                    outputs = {
-                        name: f"Deterministic mock output for {contract.name}:{name}"
-                        for name in contract.outputs
-                    }
-                    set_output(
-                        contract.name,
-                        "/exec " + json.dumps({"outputs": outputs}, sort_keys=True),
-                    )
+        _configure_pool_worker(
+            worker,
+            store,
+            worker_kind=worker_kind,
+            mock_output=mock_output,
+            mock_presets=mock_presets,
+        )
         host = ensure_local_worker_host(store, worker)
         deadline = time.monotonic() + wait_timeout
         candidate_publishers = ensure_local_runtime_publishers(store)
         registry = _default_completion_registry()
         if target_task_id is None:
-            recovered = process_rejected_submissions(
-                store, candidate_publishers=candidate_publishers
-            )
-            processed_before = process_task_completions(
-                store, registry, candidate_publishers=candidate_publishers
-            )
-            claimed = claim_next_package(
+            _run_single_pool_cycle(
                 store,
-                worker_id=host.worker_id,
-                candidate_publishers=candidate_publishers,
-            )
-            if claimed is None:
-                _emit_run_result(
-                    {
-                        "ok": False,
-                        "status": "idle",
-                        "error": "No enabled unclaimed contract is available.",
-                        "cycles": [],
-                    },
-                    json_output,
-                )
-                raise click.exceptions.Exit(1)
-            result = execute_claimed_package(
-                claimed,
                 host,
-                store,
-                candidate_publishers=candidate_publishers,
+                candidate_publishers,
+                registry,
+                json_output=json_output,
             )
-            processed_after = process_task_completions(
-                store, registry, candidate_publishers=candidate_publishers
-            )
-            status = project_task_status(claimed.contract, store)
-            status["ok"] = status["status"] == "completed"
-            status["submission_status"] = result["status"]
-            status["cycles"] = [
-                {
-                    "contracts": [claimed.contract.id],
-                    "trace_events": len(store.get_by_contract(claimed.contract.id)),
-                    "tasks_processed": processed_before + processed_after,
-                    "rejections_recovered": recovered,
-                }
-            ]
-            _emit_run_result(status, json_output)
-            if not status["ok"]:
-                raise click.exceptions.Exit(1)
             return
 
-        while True:
-            before_trace_count = len(store.get_all())
-            recovered = process_rejected_submissions(
-                store, candidate_publishers=candidate_publishers
-            )
-            processed_before = process_task_completions(
-                store, registry, candidate_publishers=candidate_publishers
-            )
-            claimed = claim_next_package(
-                store,
-                worker_id=host.worker_id,
-                candidate_publishers=candidate_publishers,
-            )
-            submission: dict | None = None
-            if claimed is not None:
-                submission = execute_claimed_package(
-                    claimed,
-                    host,
-                    store,
-                    candidate_publishers=candidate_publishers,
-                )
-            processed_after = process_task_completions(
-                store, registry, candidate_publishers=candidate_publishers
-            )
-            after_entries = store.get_all()
-            new_entries = after_entries[before_trace_count:]
-            touched_contracts = sorted({entry.contract_id for entry in new_entries})
-            if touched_contracts:
-                cycles.append(
-                    {
-                        "contracts": touched_contracts,
-                        "trace_events": len(new_entries),
-                        "submission_status": (
-                            submission.get("status") if submission is not None else None
-                        ),
-                        "tasks_processed": processed_before + processed_after,
-                        "rejections_recovered": recovered,
-                    }
-                )
-
-            if target_task_id:
-                target = store.get_contract(target_task_id)
-                if target is None:
-                    _emit_run_result(
-                        {
-                            "ok": False,
-                            "status": "error",
-                            "error": f"Task '{target_task_id}' not found.",
-                            "cycles": cycles,
-                        },
-                        json_output,
-                    )
-                    raise click.exceptions.Exit(1)
-                status = project_task_status(target, store)
-                if status["terminal"]:
-                    status["ok"] = status["status"] == "completed"
-                    status["cycles"] = cycles
-                    _emit_run_result(status, json_output)
-                    if not status["ok"]:
-                        raise click.exceptions.Exit(1)
-                    return
-
-            if time.monotonic() >= deadline or (
-                claimed is None
-                and not processed_before
-                and not processed_after
-                and not recovered
-            ):
-                status = project_task_status(target, store)
-                status["ok"] = status["status"] == "completed"
-                if status.get("silent_failure_risks"):
-                    status["status"] = "stalled"
-                if not status["terminal"]:
-                    status["timed_out"] = time.monotonic() >= deadline
-                status["cycles"] = cycles
-                _emit_run_result(status, json_output)
-                if not status["ok"]:
-                    raise click.exceptions.Exit(1)
-                return
-            time.sleep(max(interval, 0.05))
-            store = _persistent_store()
+        _run_target_pool(
+            store,
+            host,
+            candidate_publishers,
+            registry,
+            target_task_id=target_task_id,
+            deadline=deadline,
+            interval=interval,
+            cycles=cycles,
+            json_output=json_output,
+        )
     except WorkerInvocationError as e:
         _emit_run_result(
             {
@@ -476,6 +349,194 @@ def _run_task_pool(
         raise click.exceptions.Exit(1)
     except ValueError as e:
         raise click.ClickException(str(e))
+    finally:
+        close = getattr(store, "close", None)
+        if callable(close):
+            close()
+
+
+def _configure_pool_worker(
+    worker,
+    store,
+    *,
+    worker_kind: str,
+    mock_output: str | None,
+    mock_presets: tuple[str, ...],
+) -> None:
+    set_output = getattr(worker, "set_output", None)
+    if mock_output is not None or mock_presets:
+        if worker_kind != "mock":
+            raise click.ClickException(
+                "--mock-output/--mock-preset requires --worker mock"
+            )
+        if set_output is None:
+            return
+        if mock_output is not None:
+            for contract in store.get_all_contracts():
+                set_output(contract.name, mock_output)
+        for preset in mock_presets:
+            name, sep, output = preset.partition("=")
+            if sep != "=" or not name:
+                raise click.ClickException(
+                    "--mock-preset must use contract_name=raw_output"
+                )
+            set_output(name, output)
+        return
+    if worker_kind != "mock" or set_output is None:
+        return
+    for contract in store.get_all_contracts():
+        outputs = {
+            name: f"Deterministic mock output for {contract.name}:{name}"
+            for name in contract.outputs
+        }
+        set_output(
+            contract.name,
+            "/exec " + json.dumps({"outputs": outputs}, sort_keys=True),
+        )
+
+
+def _run_single_pool_cycle(
+    store, host, candidate_publishers, registry, *, json_output: bool
+) -> None:
+    recovered = process_rejected_submissions(
+        store, candidate_publishers=candidate_publishers
+    )
+    processed_before = process_task_completions(
+        store, registry, candidate_publishers=candidate_publishers
+    )
+    claimed = claim_next_package(
+        store,
+        worker_id=host.worker_id,
+        candidate_publishers=candidate_publishers,
+    )
+    if claimed is None:
+        _emit_run_result(
+            {
+                "ok": False,
+                "status": "idle",
+                "error": "No enabled unclaimed contract is available.",
+                "cycles": [],
+            },
+            json_output,
+        )
+        raise click.exceptions.Exit(1)
+    result = execute_claimed_package(
+        claimed,
+        host,
+        store,
+        candidate_publishers=candidate_publishers,
+    )
+    processed_after = process_task_completions(
+        store, registry, candidate_publishers=candidate_publishers
+    )
+    status = project_task_status(claimed.contract, store)
+    status["ok"] = status["status"] == "completed"
+    status["submission_status"] = result["status"]
+    status["cycles"] = [
+        {
+            "contracts": [claimed.contract.id],
+            "trace_events": len(store.get_by_contract(claimed.contract.id)),
+            "tasks_processed": processed_before + processed_after,
+            "rejections_recovered": recovered,
+        }
+    ]
+    _emit_run_result(status, json_output)
+    if not status["ok"]:
+        raise click.exceptions.Exit(1)
+
+
+def _run_target_pool(
+    store,
+    host,
+    candidate_publishers,
+    registry,
+    *,
+    target_task_id: str,
+    deadline: float,
+    interval: float,
+    cycles: list[dict],
+    json_output: bool,
+) -> None:
+    while True:
+        before_trace_count = len(store.get_all())
+        recovered = process_rejected_submissions(
+            store, candidate_publishers=candidate_publishers
+        )
+        processed_before = process_task_completions(
+            store, registry, candidate_publishers=candidate_publishers
+        )
+        claimed = claim_next_package(
+            store,
+            worker_id=host.worker_id,
+            candidate_publishers=candidate_publishers,
+        )
+        submission = (
+            execute_claimed_package(
+                claimed,
+                host,
+                store,
+                candidate_publishers=candidate_publishers,
+            )
+            if claimed is not None
+            else None
+        )
+        processed_after = process_task_completions(
+            store, registry, candidate_publishers=candidate_publishers
+        )
+        new_entries = store.get_all()[before_trace_count:]
+        touched_contracts = sorted({entry.contract_id for entry in new_entries})
+        if touched_contracts:
+            cycles.append(
+                {
+                    "contracts": touched_contracts,
+                    "trace_events": len(new_entries),
+                    "submission_status": (
+                        submission.get("status") if submission is not None else None
+                    ),
+                    "tasks_processed": processed_before + processed_after,
+                    "rejections_recovered": recovered,
+                }
+            )
+
+        target = store.get_contract(target_task_id)
+        if target is None:
+            _emit_run_result(
+                {
+                    "ok": False,
+                    "status": "error",
+                    "error": f"Task '{target_task_id}' not found.",
+                    "cycles": cycles,
+                },
+                json_output,
+            )
+            raise click.exceptions.Exit(1)
+        status = project_task_status(target, store)
+        if status["terminal"]:
+            status["ok"] = status["status"] == "completed"
+            status["cycles"] = cycles
+            _emit_run_result(status, json_output)
+            if not status["ok"]:
+                raise click.exceptions.Exit(1)
+            return
+
+        timed_out = time.monotonic() >= deadline
+        idle = (
+            claimed is None
+            and not processed_before
+            and not processed_after
+            and not recovered
+        )
+        if timed_out or idle:
+            status["ok"] = status["status"] == "completed"
+            if status.get("silent_failure_risks"):
+                status["status"] = "stalled"
+            status["timed_out"] = timed_out
+            status["cycles"] = cycles
+            _emit_run_result(status, json_output)
+            if not status["ok"]:
+                raise click.exceptions.Exit(1)
+            return
+        time.sleep(max(interval, 0.05))
 
 
 def _emit_run_result(payload: dict, json_output: bool) -> None:
@@ -552,17 +613,20 @@ def demo(
 ) -> None:
     """Run a quick demo with the given goal (quickstart experience)."""
     capabilities = _parse_capabilities(capabilities_str)
-    store, trace_store, contract = _run_demo(
-        goal,
-        worker_kind=worker_kind,
-        model=model,
-        base_url=base_url,
-        save_config=save_config,
-        timeout=timeout,
-        max_retries=max_retries,
-        capabilities=capabilities,
-        behavior_labels=behavior_labels,
-    )
+    try:
+        store, trace_store, contract = _run_demo(
+            goal,
+            worker_kind=worker_kind,
+            model=model,
+            base_url=base_url,
+            save_config=save_config,
+            timeout=timeout,
+            max_retries=max_retries,
+            capabilities=capabilities,
+            behavior_labels=behavior_labels,
+        )
+    except (RuntimeError, WorkerInvocationError) as exc:
+        raise click.ClickException(str(exc)) from exc
     click.echo(f"Demo completed for goal: '{goal}'")
     click.echo(f"  Contract: {contract.name}")
     click.echo(f"  Assets: {[a.name for a in store.get_all_assets()]}")

@@ -255,12 +255,30 @@ class MemoryStore(_ProjectionIndexMixin):
             self._worker_registrations[registration.worker_id] = registration
 
     def append_runtime_record(self, record: RuntimeRecord) -> int:
+        existing = self._runtime_records.get(record.id)
+        if existing is not None:
+            revision, existing_record = existing
+            if runtime_record_effective_payload(
+                existing_record
+            ) != runtime_record_effective_payload(record):
+                raise ImmutableRecordConflict("runtime record", record.id)
+            registration = (
+                registration_from_record(existing_record)
+                if existing_record.record_type == "worker.registered"
+                else None
+            )
+            if registration is not None:
+                self._worker_registrations[registration.worker_id] = registration
+            replacement_claim = replacement_claim_from_record(existing_record)
+            if replacement_claim is not None:
+                self.add_replacement_claim(replacement_claim)
+            return revision
         validate_actor_runtime_record(record, self)
-        validate_terminal_record(
-            record,
-            self.scan_runtime_records(record_type="lifecycle.terminal"),
-        )
         if record.record_type == "lifecycle.terminal":
+            validate_terminal_record(
+                record,
+                self.scan_runtime_records(record_type="lifecycle.terminal"),
+            )
             contract_id = str(record.payload["contract_id"])
             if self.get_contract(contract_id) is None:
                 raise ValueError(
@@ -274,18 +292,6 @@ class MemoryStore(_ProjectionIndexMixin):
                 registration,
             )
         replacement_claim = replacement_claim_from_record(record)
-        existing = self._runtime_records.get(record.id)
-        if existing is not None:
-            revision, existing_record = existing
-            if runtime_record_effective_payload(
-                existing_record
-            ) == runtime_record_effective_payload(record):
-                if registration is not None:
-                    self._worker_registrations[registration.worker_id] = registration
-                if replacement_claim is not None:
-                    self.add_replacement_claim(replacement_claim)
-                return revision
-            raise ImmutableRecordConflict("runtime record", record.id)
         validate_runtime_record(record)
         self._runtime_revision += 1
         self._runtime_records[record.id] = (self._runtime_revision, record)

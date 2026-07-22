@@ -28,11 +28,16 @@ def require_accepted(decision: CommitmentDecision) -> CommitmentDecision:
     if decision.accepted:
         return decision
     rejection = next(
-        record
-        for record in decision.runtime_records
-        if record.record_type.endswith("rejected")
+        (
+            record
+            for record in decision.runtime_records
+            if record.record_type.endswith("rejected")
+        ),
+        None,
     )
-    raise ValueError(str(rejection.payload["reason"]))
+    if rejection is None:
+        raise ValueError("Candidate was not accepted and produced no rejection record")
+    raise ValueError(str(rejection.payload.get("reason", "Candidate was rejected")))
 
 
 def commit_local_effects(

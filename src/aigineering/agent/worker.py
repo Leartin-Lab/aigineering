@@ -144,29 +144,39 @@ class WorkerHost:
                 if action.type == "plan"
                 else StagedReplanningPlugin()
             )
-            effects = plugin.propose(
-                PluginRequest(
-                    parent=contract,
-                    assets=tuple(disclosed_assets),
-                    allowed_input_names=frozenset(contract.inputs),
-                    allowance=contract.budget if allowance is None else allowance,
-                    parameters=action.payload,
-                )
-            ).effects
+            try:
+                effects = plugin.propose(
+                    PluginRequest(
+                        parent=contract,
+                        assets=tuple(disclosed_assets),
+                        allowed_input_names=frozenset(contract.inputs),
+                        allowance=contract.budget if allowance is None else allowance,
+                        parameters=action.payload,
+                    )
+                ).effects
+            except ValueError as exc:
+                raise WorkerExecutionError(
+                    "planning_request_rejected", str(exc)
+                ) from exc
         elif action is not None:
             from aigineering.plugins import TaskDelegationPlugin
 
             if contract is None or contract.id != envelope.contract_id:
                 raise ValueError("task expansion requires the claimed Contract")
-            effects = (
-                TaskDelegationPlugin()
-                .propose_claimed(
-                    contract,
-                    action,
-                    allowance=contract.budget if allowance is None else allowance,
+            try:
+                effects = (
+                    TaskDelegationPlugin()
+                    .propose_claimed(
+                        contract,
+                        action,
+                        allowance=contract.budget if allowance is None else allowance,
+                    )
+                    .effects
                 )
-                .effects
-            )
+            except ValueError as exc:
+                raise WorkerExecutionError(
+                    "task_delegation_rejected", str(exc)
+                ) from exc
         else:
             parsed_envelope = envelope
             if envelope.parsed_action is None:
@@ -197,8 +207,9 @@ class WorkerHost:
                         allowance=contract.budget if allowance is None else allowance,
                     )
                 except PlanningCompileError as exc:
+                    fields = ",".join(exc.fields) or "unknown"
                     raise WorkerExecutionError(
-                        "planning_compile_rejected", str(exc)
+                        f"planning_compile_rejected:{fields}", str(exc)
                     ) from exc
             else:
                 effects = claim_bound_output_effects(parsed_envelope)
@@ -208,13 +219,16 @@ class WorkerHost:
             claim_epoch=envelope.claim_epoch,
             package_id=envelope.package_id,
         )
-        return create_candidate_proposal(
-            domain_id=self.genesis.id,
-            actor_id=self.actor_key.actor_id,
-            key_id=self.actor_key.key_id,
-            effects=effects,
-            signer=self.signer,
-            idempotency_key=envelope.idempotency_key,
-            claim_binding=binding,
-            metadata=envelope.usage_metadata,
-        )
+        try:
+            return create_candidate_proposal(
+                domain_id=self.genesis.id,
+                actor_id=self.actor_key.actor_id,
+                key_id=self.actor_key.key_id,
+                effects=effects,
+                signer=self.signer,
+                idempotency_key=envelope.idempotency_key,
+                claim_binding=binding,
+                metadata=envelope.usage_metadata,
+            )
+        except ValueError as exc:
+            raise WorkerExecutionError("candidate_encoding_rejected", str(exc)) from exc

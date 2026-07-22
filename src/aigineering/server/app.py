@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from aigineering.application import (
@@ -170,8 +171,16 @@ def _replacement_claim_response(claim) -> ReplacementClaimResponse:
     )
 
 
-def _commit_candidate_request(body: CandidateProposalRequest):
+def _request_store() -> Iterator:
+    """Own exactly one operational Store connection for one HTTP request."""
     store = _persistent_store()
+    try:
+        yield store
+    finally:
+        store.close()
+
+
+def _commit_candidate_request(body: CandidateProposalRequest, store):
     try:
         candidate = candidate_proposal_from_dict(body.model_dump())
         return CandidateCommitter(store, store).commit(candidate)
@@ -199,9 +208,9 @@ def _require_single_effect(body: CandidateProposalRequest, effect_type: str) -> 
 
 
 @app.post("/candidates")
-def commit_candidate(body: CandidateProposalRequest):
+def commit_candidate(body: CandidateProposalRequest, store=Depends(_request_store)):
     """Authenticate and commit one typed Candidate through the common boundary."""
-    decision = _commit_candidate_request(body)
+    decision = _commit_candidate_request(body, store)
     return {
         "accepted": decision.accepted,
         "assets": [_asset_response(asset).model_dump() for asset in decision.assets],
@@ -218,10 +227,10 @@ def commit_candidate(body: CandidateProposalRequest):
 
 
 @app.post("/contracts", response_model=ContractResponse, status_code=201)
-def create_contract(body: CandidateProposalRequest):
+def create_contract(body: CandidateProposalRequest, store=Depends(_request_store)):
     """Commit exactly one signed ``contract.declare`` Candidate."""
     _require_single_effect(body, "contract.declare")
-    decision = _commit_candidate_request(body)
+    decision = _commit_candidate_request(body, store)
     if not decision.accepted:
         raise HTTPException(status_code=422, detail=_rejection_reason(decision))
     if decision.contract is None or decision.assets:
@@ -234,10 +243,10 @@ def create_contract(body: CandidateProposalRequest):
 
 
 @app.post("/assets", response_model=AssetResponse, status_code=201)
-def create_asset(body: CandidateProposalRequest):
+def create_asset(body: CandidateProposalRequest, store=Depends(_request_store)):
     """Commit exactly one signed ``asset.propose`` Candidate."""
     _require_single_effect(body, "asset.propose")
-    decision = _commit_candidate_request(body)
+    decision = _commit_candidate_request(body, store)
     if not decision.accepted:
         raise HTTPException(status_code=422, detail=_rejection_reason(decision))
     if len(decision.assets) != 1 or decision.contract is not None:
@@ -250,25 +259,22 @@ def create_asset(body: CandidateProposalRequest):
 
 
 @app.get("/contracts", response_model=list[ContractResponse])
-def list_contracts():
+def list_contracts(store=Depends(_request_store)):
     """List contracts in the runtime store."""
-    store = _persistent_store()
     return [_contract_response(c) for c in store.get_all_contracts()]
 
 
 @app.get("/assets", response_model=list[AssetResponse])
-def list_assets():
+def list_assets(store=Depends(_request_store)):
     """List assets in the runtime store."""
-    store = _persistent_store()
     return [_asset_response(a) for a in store.get_all_assets()]
 
 
 @app.get("/assets/{name}/versions", response_model=list[AssetResponse])
-def get_asset_versions(name: str):
+def get_asset_versions(name: str, store=Depends(_request_store)):
     """List all versions of an asset by name."""
     from aigineering.core.asset_versions import list_versions
 
-    store = _persistent_store()
     versions = list_versions(store, name)
     if not versions:
         raise HTTPException(status_code=404, detail=f"No asset named '{name}'")
@@ -276,11 +282,14 @@ def get_asset_versions(name: str):
 
 
 @app.post("/assets/{name}/slice", response_model=AssetResponse, status_code=201)
-def slice_asset(name: str, body: AssetSliceCandidateRequest):
+def slice_asset(
+    name: str,
+    body: AssetSliceCandidateRequest,
+    store=Depends(_request_store),
+):
     """Create a new asset from a line or character slice of an existing asset."""
     from aigineering.core.asset_versions import create_slice_asset, resolve_latest
 
-    store = _persistent_store()
     source = resolve_latest(store, name)
     if source is None:
         raise HTTPException(status_code=404, detail=f"No asset named '{name}'")
@@ -302,7 +311,7 @@ def slice_asset(name: str, body: AssetSliceCandidateRequest):
             status_code=422,
             detail="signed asset.propose payload does not match the requested slice",
         )
-    decision = _commit_candidate_request(body)
+    decision = _commit_candidate_request(body, store)
     if not decision.accepted:
         raise HTTPException(status_code=403, detail=_rejection_reason(decision))
     return _asset_response(decision.assets[0])
@@ -313,13 +322,14 @@ def slice_asset(name: str, body: AssetSliceCandidateRequest):
     response_model=ReplacementClaimResponse,
     status_code=201,
 )
-def create_replacement_claim(body: CandidateProposalRequest):
+def create_replacement_claim(
+    body: CandidateProposalRequest, store=Depends(_request_store)
+):
     """Create a replacement/slice/summary/redaction claim between two assets."""
     from aigineering.core.asset_versions import (
         create_replacement_claim as make_replacement_claim,
     )
 
-    store = _persistent_store()
     _require_single_effect(body, "asset.relate")
     proposed = body.effects[0].payload.get("claim")
     if not isinstance(proposed, dict):
@@ -345,22 +355,28 @@ def create_replacement_claim(body: CandidateProposalRequest):
             status_code=422,
             detail="signed asset.relate payload does not match stored assets",
         )
-    decision = _commit_candidate_request(body)
+    decision = _commit_candidate_request(body, store)
     if not decision.accepted:
         raise HTTPException(status_code=403, detail=_rejection_reason(decision))
-    claim = next(
-        item for item in store.get_claims_for_asset(source.id) if item.id == claim.id
+    committed_claim = next(
+        (item for item in store.get_claims_for_asset(source.id) if item.id == claim.id),
+        None,
     )
-    return _replacement_claim_response(claim)
+    if committed_claim is None:
+        raise HTTPException(
+            status_code=500,
+            detail="Committed replacement claim is missing from the read model",
+        )
+    return _replacement_claim_response(committed_claim)
 
 
 @app.get("/replacement-claims", response_model=list[ReplacementClaimResponse])
 def list_replacement_claims(
     definition_hash: Optional[str] = Query(None),
     source_asset_id: Optional[str] = Query(None),
+    store=Depends(_request_store),
 ):
     """List replacement claims by definition hash or source asset."""
-    store = _persistent_store()
     claims = []
     seen: set[str] = set()
 
@@ -389,9 +405,8 @@ def list_replacement_claims(
 
 
 @app.get("/contracts/{contract_id}", response_model=ContractResponse)
-def get_contract(contract_id: str):
+def get_contract(contract_id: str, store=Depends(_request_store)):
     """Get a contract by ID."""
-    store = _persistent_store()
     contract = store.get_contract(contract_id)
     if contract is None:
         raise HTTPException(status_code=404, detail="Contract not found")
@@ -400,10 +415,9 @@ def get_contract(contract_id: str):
 
 
 @app.post("/worker/claims")
-def claim_worker_package(body: CandidateProposalRequest):
+def claim_worker_package(body: CandidateProposalRequest, store=Depends(_request_store)):
     """Authenticate and atomically claim one disclosure-bound worker package."""
     try:
-        store = _persistent_store()
         command = authenticate_worker_command(
             candidate_proposal_from_dict(body.model_dump()), "worker.claim", store
         )
@@ -430,10 +444,13 @@ def claim_worker_package(body: CandidateProposalRequest):
 
 
 @app.post("/worker/claims/{claim_id}/renew")
-def renew_worker_claim(claim_id: str, body: CandidateProposalRequest):
+def renew_worker_claim(
+    claim_id: str,
+    body: CandidateProposalRequest,
+    store=Depends(_request_store),
+):
     """Authenticate and renew one fenced claim on any replica."""
     try:
-        store = _persistent_store()
         command = authenticate_worker_command(
             candidate_proposal_from_dict(body.model_dump()),
             "worker.claim.renew",
@@ -461,11 +478,12 @@ def renew_worker_claim(claim_id: str, body: CandidateProposalRequest):
 
 
 @app.post("/worker/submissions")
-def submit_worker_candidate(body: CandidateProposalRequest):
+def submit_worker_candidate(
+    body: CandidateProposalRequest, store=Depends(_request_store)
+):
     """Commit a signed and claim-fenced worker Candidate on any replica."""
     try:
         proposal = candidate_proposal_from_dict(body.model_dump())
-        store = _persistent_store()
         return submit_worker_proposal(
             proposal,
             store,
@@ -487,6 +505,7 @@ def run_contract(contract_id: str):
 @app.get("/trace", response_model=list[TraceEntryResponse])
 def get_trace(
     session_id: Optional[str] = Query(None),
+    store=Depends(_request_store),
 ):
     """Get trace entries, optionally filtered by session ID."""
     if session_id:
@@ -496,7 +515,6 @@ def get_trace(
     else:
         from aigineering.core.trace import JsonLTraceStore
 
-        store = _persistent_store()
         entries = store.get_all()
         if entries:
             return [_trace_response(e) for e in entries]
@@ -532,9 +550,8 @@ def get_sessions():
 
 
 @app.get("/assets/{name}", response_model=list[AssetResponse])
-def get_assets(name: str):
+def get_assets(name: str, store=Depends(_request_store)):
     """Get assets by name."""
-    store = _persistent_store()
     assets = store.get_assets_by_name(name)
     if not assets:
         raise HTTPException(status_code=404, detail=f"No asset named '{name}'")

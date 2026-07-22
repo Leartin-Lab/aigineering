@@ -218,7 +218,7 @@ class TestAuthorityClamp:
         plan_asset = Asset(
             id="plan-asset",
             name="_plan_result_parent-scope",
-            content='{"contracts":[{"name":"child-task","description":"test","inputs":[],"outputs":[],"budget":5,"tool_scope":["tool_a","tool_b","tool_c"]}]}',
+            content='{"contracts":[{"name":"child-task","description":"test","inputs":[],"outputs":["result"],"budget":5,"tool_scope":["tool_a","tool_b","tool_c"]}]}',
             definition_hash="def:plan",
             content_hash="content:plan",
             origin="system",
@@ -274,7 +274,7 @@ class TestAuthorityClamp:
         plan_asset = Asset(
             id="plan-budget",
             name="_plan_result_parent-budget",
-            content='{"contracts":[{"name":"child-task","description":"test","inputs":[],"outputs":[],"budget":20}]}',
+            content='{"contracts":[{"name":"child-task","description":"test","inputs":[],"outputs":["result"],"budget":20}]}',
             definition_hash="def:plan",
             content_hash="content:plan",
             origin="system",
@@ -977,7 +977,7 @@ class TestPlanContainment:
         plan = Asset(
             id="plan-policy",
             name="_plan_result_parent-policy",
-            content='{"contracts":[{"name":"child","description":"test","inputs":[],"outputs":[],"budget":5}]}',
+            content='{"contracts":[{"name":"child","description":"test","inputs":[],"outputs":["result"],"budget":5}]}',
             definition_hash="def:plan",
             content_hash="content:plan",
             origin="plan",

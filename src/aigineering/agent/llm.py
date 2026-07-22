@@ -338,12 +338,23 @@ class LLMWorker:
             if isinstance(args_str, str):
                 try:
                     args = json.loads(args_str)
-                except json.JSONDecodeError:
-                    args = {}
+                except json.JSONDecodeError as exc:
+                    raise WorkerExecutionError(
+                        "tool_call_invalid_arguments",
+                        f"tool call {name!r} arguments are not valid JSON",
+                    ) from exc
             elif isinstance(args_str, dict):
                 args = args_str
             else:
-                args = {}
+                raise WorkerExecutionError(
+                    "tool_call_invalid_arguments",
+                    f"tool call {name!r} arguments must be a JSON object",
+                )
+            if not isinstance(args, dict):
+                raise WorkerExecutionError(
+                    "tool_call_invalid_arguments",
+                    f"tool call {name!r} arguments must decode to a JSON object",
+                )
             actions.append({"name": name, "args": args})
 
         if len(actions) == 1:
@@ -430,13 +441,14 @@ def _extract_usage(response: Mapping[str, object]) -> MappingProxyType | None:
     prompt_tokens = usage.get("prompt_tokens")
     completion_tokens = usage.get("completion_tokens")
     total_tokens = usage.get("total_tokens")
-    if not isinstance(prompt_tokens, int) and not isinstance(completion_tokens, int):
+    if type(prompt_tokens) is not int and type(completion_tokens) is not int:
         return None
-    result: dict[str, object] = {
-        "prompt_tokens": prompt_tokens,
-        "completion_tokens": completion_tokens,
-    }
-    if isinstance(total_tokens, int):
+    result: dict[str, object] = {}
+    if type(prompt_tokens) is int:
+        result["prompt_tokens"] = prompt_tokens
+    if type(completion_tokens) is int:
+        result["completion_tokens"] = completion_tokens
+    if type(total_tokens) is int:
         result["total_tokens"] = total_tokens
     return MappingProxyType(result)
 

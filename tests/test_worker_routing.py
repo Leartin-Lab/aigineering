@@ -168,6 +168,28 @@ def test_missing_capability_is_visible_in_task_projection():
     ]
 
 
+def test_invalid_descendant_activation_is_visible_from_root_projection():
+    store = SQLiteStore(":memory:")
+    root = Contract(id="task:invalid-root", outputs=("report",), budget=2)
+    child = Contract(
+        id="task:invalid-child",
+        parent_id=root.id,
+        outputs=("evidence",),
+        activation="data_file&citation_db",
+        budget=1,
+    )
+    store.add_contract(root)
+    store.add_contract(child)
+
+    status = project_task_status(root, store)
+
+    assert any(
+        risk["code"] == "descendant_invalid_activation"
+        for risk in status["silent_failure_risks"]
+    )
+    store.close()
+
+
 def test_worker_execution_rejects_store_without_transactional_port():
     store = MemoryStore()
     store.add_contract(Contract(id="task:weak-store", outputs=("out",)))
@@ -277,11 +299,42 @@ def test_renewal_failure_discards_worker_result(monkeypatch):
     assert claimed is not None
     monkeypatch.setattr(store, "renew_claim", lambda *args, **kwargs: None)
 
-    with pytest.raises(ValueError, match="result was not submitted"):
+    with pytest.raises(WorkerInvocationError, match="durably closed"):
         execute_claimed_package(claimed, host, store)
 
     assert store.get_assets_by_name("report") == []
-    assert store.get_claim(contract.id)["status"] == "active"
+    assert store.get_claim(contract.id)["status"] == "released"
+    failure = store.scan_runtime_records(record_type="worker.invocation_failed")[-1][1]
+    assert failure.payload["category"] == "worker_error:claim_renewal_failed"
+    terminal = store.scan_runtime_records(record_type="lifecycle.terminal")[-1][1]
+    assert terminal.payload == {"contract_id": contract.id, "terminal": "failed"}
+    store.close()
+
+
+def test_unexpected_worker_adapter_failure_durably_closes_claim():
+    class BrokenWorker:
+        worker_id = "broken-worker"
+
+        def invoke(self, contract, disclosed_assets):
+            del contract, disclosed_assets
+            raise RuntimeError("private adapter detail")
+
+    store = SQLiteStore(":memory:")
+    contract = Contract(id="task:broken-adapter", outputs=("report",), budget=1)
+    store.add_contract(contract)
+    host = hosted_worker(store, BrokenWorker())
+    claimed = claim_next_package(store, worker_id=host.worker_id)
+    assert claimed is not None
+
+    with pytest.raises(WorkerInvocationError, match="worker invocation failed"):
+        execute_claimed_package(claimed, host, store)
+
+    assert store.get_claim(contract.id)["status"] == "released"
+    failure = store.scan_runtime_records(record_type="worker.invocation_failed")[-1][1]
+    assert failure.payload["category"] == "worker_error:invocation_failure"
+    assert "private adapter detail" not in str(failure.payload)
+    terminal = store.scan_runtime_records(record_type="lifecycle.terminal")[-1][1]
+    assert terminal.payload["terminal"] == "failed"
     store.close()
 
 
@@ -476,6 +529,52 @@ def test_provider_failure_releases_claim_without_persisting_secret():
     )
     assert "provider-secret-must-not-be-persisted" not in persisted
     assert any(child.origin == "recovery" for child in store.get_all_contracts())
+    store.close()
+
+
+def test_provider_failure_records_when_recovery_has_no_causal_allowance():
+    """A rejected recovery publication must not be reported as scheduled."""
+
+    class FailingWorker:
+        def invoke(self, contract, disclosed_assets):
+            del contract, disclosed_assets
+            raise ProviderError(503, "unavailable")
+
+    store = SQLiteStore(":memory:")
+    parent = Contract(id="task:recovery-parent", outputs=("report",), budget=0)
+    child = Contract(
+        id="task:recovery-child",
+        parent_id=parent.id,
+        outputs=("report",),
+        budget=1,
+    )
+    store.add_contract(parent)
+    store.add_contract(child)
+    claimed = claim_next_package(store, worker_id="worker", contract_id=child.id)
+    assert claimed is not None
+    publishers = _recovery_publishers(store, "no-allowance")
+
+    with pytest.raises(WorkerInvocationError, match="recovery was evaluated"):
+        execute_claimed_package(
+            claimed,
+            FailingWorker(),
+            store,
+            candidate_publishers=publishers,
+        )
+
+    record_types = [record.record_type for _, record in store.scan_runtime_records()]
+    assert "worker_failure.recovery_unavailable" in record_types
+    assert "worker_failure.recovery_scheduled" not in record_types
+    assert (
+        process_worker_failures(
+            store,
+            candidate_publishers=publishers,
+        )
+        == []
+    )
+    assert not any(
+        contract.origin == "recovery" for contract in store.get_all_contracts()
+    )
     store.close()
 
 

@@ -19,6 +19,10 @@ _BLOCKING_REJECTION_ACTIONS = frozenset({"rejected", "scaffold_rejected"})
 class PlanningCompileError(ValueError):
     """A compile-stage blueprint cannot become contained task effects."""
 
+    def __init__(self, message: str, *, fields: tuple[str, ...] = ()) -> None:
+        super().__init__(message)
+        self.fields = tuple(sorted(set(fields)))
+
 
 def is_blocking_plan_rejection(entry: dict) -> bool:
     """Return whether one planner diagnostic invalidates the atomic fan-out."""
@@ -72,14 +76,19 @@ def compile_planning_blueprint(
     if set(outputs) != {"planning_blueprint"}:
         raise PlanningCompileError(
             "planning compile must return exactly one structured blueprint",
+            fields=("outputs",),
         )
     content = next(iter(outputs.values()))
     if not isinstance(content, str) or not content.strip():
-        raise PlanningCompileError("planning blueprint must be non-empty")
+        raise PlanningCompileError(
+            "planning blueprint must be non-empty", fields=("outputs",)
+        )
     try:
         description = json.loads(contract.description)
     except json.JSONDecodeError as exc:
-        raise PlanningCompileError("compile Contract description is invalid") from exc
+        raise PlanningCompileError(
+            "compile Contract description is invalid", fields=("description",)
+        ) from exc
     allowed_inputs = description.get("allowed_inputs", contract.inputs)
     plan_asset = Asset(
         id=hash_asset_content("planning_blueprint", content),
@@ -102,5 +111,10 @@ def compile_planning_blueprint(
             str(item.get("reason", "planning expansion rejected"))
             for item in proposal.rejections
         )
-        raise PlanningCompileError(reasons)
+        raise PlanningCompileError(
+            reasons,
+            fields=tuple(
+                str(item.get("field", "unknown")) for item in proposal.rejections
+            ),
+        )
     return proposal.effects

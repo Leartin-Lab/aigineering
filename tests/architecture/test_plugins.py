@@ -29,6 +29,10 @@ from aigineering.plugins import (
     TaskPlugin,
     ToolCompletionPlugin,
 )
+from aigineering.plugins.planning import (
+    PlanningCompileError,
+    compile_planning_blueprint,
+)
 from aigineering.protocol.actions import WorkerAction
 from aigineering.protocol.candidate import ActorKey, create_genesis_manifest
 from aigineering.protocol.effect_builders import contract_declaration_effect
@@ -57,6 +61,7 @@ def _plan_asset() -> Asset:
             "contracts": [
                 {
                     "name": "research",
+                    "description": "Extract evidence from the source.",
                     "inputs": ["source"],
                     "outputs": ["evidence"],
                     "activation": "source",
@@ -64,6 +69,7 @@ def _plan_asset() -> Asset:
                 },
                 {
                     "name": "write",
+                    "description": "Write the final report from the evidence.",
                     "inputs": ["evidence"],
                     "outputs": ["final_report"],
                     "activation": "evidence",
@@ -159,12 +165,14 @@ def test_planning_plugin_rejects_invalid_activation_as_one_atomic_fanout():
             "contracts": [
                 {
                     "name": "valid",
+                    "description": "Extract valid evidence.",
                     "inputs": ["source"],
                     "outputs": ["evidence"],
                     "activation": "source",
                 },
                 {
                     "name": "invalid",
+                    "description": "Write the report.",
                     "inputs": ["evidence", "source"],
                     "outputs": ["final_report"],
                     "activation": "evidence, source",
@@ -219,6 +227,36 @@ def test_planning_plugin_rejects_invalid_scaffold_as_one_atomic_fanout():
         rejection.get("action") == "scaffold_rejected"
         for rejection in proposal.rejections
     )
+
+
+def test_compile_error_exposes_only_stable_rejection_fields():
+    contract = replace(
+        _parent(),
+        description=json.dumps({"allowed_inputs": ["source"]}),
+        budget=2,
+    )
+    blueprint = json.dumps(
+        {
+            "contracts": [
+                {
+                    "name": "empty",
+                    "description": "",
+                    "inputs": ["source"],
+                    "outputs": [],
+                    "budget": 1,
+                }
+            ]
+        }
+    )
+
+    with pytest.raises(PlanningCompileError) as raised:
+        compile_planning_blueprint(
+            contract,
+            {"planning_blueprint": blueprint},
+            allowance=2,
+        )
+
+    assert raised.value.fields == ("description", "output_recommitment")
 
 
 def test_continuation_plugin_proposes_one_ordinary_task_and_registry_is_explicit():

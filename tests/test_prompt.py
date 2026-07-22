@@ -55,6 +55,9 @@ def test_contract_prompt_renders_declared_scope():
     assert "Declared inputs: evidence" in prompt
     assert "Declared outputs: report" in prompt
     assert "Allowed tools: search" in prompt
+    assert f"Available causal allowance: {contract.budget}" in prompt
+    assert "exact readable content" in prompt
+    assert "not as a path or handle" in prompt
     assert '/exec {"outputs": {"declared_output": "content"}}' in prompt
     assert "- evidence: observed" in prompt
 
@@ -116,3 +119,82 @@ def test_planner_prompt_requires_boolean_activation_grammar():
 
     assert "input_a AND input_b" in prompt
     assert "never use commas" in prompt
+
+
+def test_compile_prompt_exposes_schema_output_coverage_and_allowance():
+    contract = Contract(
+        id="compile-task",
+        name="root.plan.compile",
+        outputs=("final_report",),
+        labels=("plugin:plan.compile",),
+        budget=3,
+    )
+
+    prompt = contract_prompt(contract, [])
+
+    assert "non-empty executable description" in prompt
+    assert "Sum of child budgets must be at most 3" in prompt
+    assert "child outputs must collectively include: final_report" in prompt
+    assert '"outputs":["final_report"]' in prompt
+    assert '"inputs":[]' in prompt
+
+
+def test_compile_prompt_example_never_exceeds_one_remaining_allowance():
+    contract = Contract(
+        id="compile-task",
+        name="root.plan.compile",
+        outputs=("summary", "appendix"),
+        labels=("plugin:plan.compile",),
+        budget=1,
+    )
+
+    prompt = contract_prompt(contract, [])
+
+    assert "Sum of child budgets must be at most 1" in prompt
+    assert prompt.count('"budget":1') == 1
+    assert '"outputs":["summary","appendix"]' in prompt
+
+
+def test_draft_stage_prompt_requires_exec_with_exact_output_name():
+    contract = Contract(
+        id="draft-task",
+        name="root.plan.draft",
+        outputs=("plan_draft_123",),
+        labels=("plugin:plan.draft",),
+    )
+
+    prompt = contract_prompt(contract, [])
+
+    assert "exactly one output named `plan_draft_123`" in prompt
+    assert "do not return a bare JSON object" in prompt
+
+
+def test_fail_task_prompt_requires_terminal_exec_instead_of_recursive_fail():
+    contract = Contract(
+        id="fail-task",
+        name="parent.fail",
+        description='{"reason":"evidence unavailable"}',
+        outputs=("failure_result",),
+        labels=("plugin:fail",),
+        origin="system",
+    )
+
+    prompt = contract_prompt(contract, [])
+
+    assert "Failure reporting task protocol" in prompt
+    assert "do not use /fail again" in prompt
+    assert "Return /exec with exactly the declared output name" in prompt
+
+
+def test_recovery_task_prompt_requires_exact_declared_outputs():
+    contract = Contract(
+        id="recovery-task",
+        name="parent.recover",
+        outputs=("report",),
+        origin="recovery",
+    )
+
+    prompt = contract_prompt(contract, [])
+
+    assert "Recovery task protocol" in prompt
+    assert "exactly the declared output names" in prompt

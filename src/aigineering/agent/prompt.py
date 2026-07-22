@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 from aigineering.core.labels import BEHAVIOR_LABEL_PREFIX
 from aigineering.protocol.types import Asset, Contract
 
@@ -46,6 +48,7 @@ def contract_prompt(contract: Contract, assets: list[Asset]) -> str:
         "Declared inputs: " + ", ".join(contract.inputs),
         "Declared outputs: " + ", ".join(contract.outputs),
         "Allowed tools: " + ", ".join(contract.tool_scope),
+        f"Available causal allowance: {contract.budget}",
         "",
         "Return format:",
         '- /exec {"outputs": {"declared_output": "content"}}',
@@ -56,7 +59,9 @@ def contract_prompt(contract: Contract, assets: list[Asset]) -> str:
         '- /fail {"reason": "why the task cannot be completed safely"}',
         "",
         "Decision boundary:",
+        "- Every asset listed under Disclosed assets includes its exact readable content; treat that content as directly available evidence, not as a path or handle requiring another tool.",
         "- Use /plan when disclosed information is insufficient.",
+        "- /plan and /replan create three planning-stage tasks and therefore require at least 3 causal allowance units.",
         "- Use /replan only after an assumption, path, or result is invalid.",
         "- Do not use /replan for missing information.",
         "- Use /retry only for a transient execution or output failure when the same task can be attempted again.",
@@ -66,6 +71,7 @@ def contract_prompt(contract: Contract, assets: list[Asset]) -> str:
     ]
     lines.extend(_method_result_instructions(contract))
     lines.extend(_planning_stage_instructions(contract))
+    lines.extend(_generated_task_instructions(contract))
     lines.extend(
         [
             "Behavior instructions:",
@@ -141,19 +147,133 @@ def _planning_stage_instructions(contract: Contract) -> list[str]:
         "plugin:plan.compile": (
             "Planning compiler protocol (required):",
             "Return /exec with exactly one temporary output named planning_blueprint; "
-            "its content is one JSON object with a contracts array. The Worker host "
-            "compiles it to child declarations, so it is not committed as an Asset. "
-            "Use only facts present in the draft and dependency analysis.",
+            "its content is one JSON object with a contracts array. Every contract "
+            "must include a non-empty executable description and non-empty outputs; "
+            "together they must produce every required parent output, with inputs and "
+            "activation wired to preceding outputs. The Worker host compiles it to "
+            "child declarations, so it is not committed as an Asset. Use only facts "
+            "present in the draft and dependency analysis.",
         ),
         "plugin:replan.compile": (
             "Replanning compiler protocol (required):",
             "Return /exec with exactly one temporary output named planning_blueprint; "
-            "its content is one JSON object with a contracts array of successors. "
-            "The Worker host compiles it to declarations; never mutate prior Contracts.",
+            "its content is one JSON object with a contracts array of successors. Every "
+            "successor must include a non-empty executable description and non-empty "
+            "outputs; together they must re-commit all required parent outputs with "
+            "explicit input/output wiring. The Worker host compiles it to declarations; "
+            "never mutate prior Contracts.",
         ),
     }
     for label in contract.labels:
         instruction = stages.get(label)
         if instruction is not None:
-            return [instruction[0], f"- {instruction[1]}", ""]
+            lines = [instruction[0], f"- {instruction[1]}"]
+            if label in {
+                "plugin:plan.draft",
+                "plugin:replan.draft",
+                "plugin:plan.dependencies",
+                "plugin:replan.dependencies",
+            }:
+                output = contract.outputs[0] if contract.outputs else "declared_output"
+                lines.extend(
+                    [
+                        f"- Return /exec with exactly one output named `{output}`.",
+                        "- Its output content must be a JSON object serialized as a string value; do not return a bare JSON object or markdown.",
+                    ]
+                )
+            if label in {"plugin:plan.compile", "plugin:replan.compile"}:
+                lines.extend(
+                    [
+                        "- Each contract object must contain name, description, inputs, outputs, activation, budget, tool_scope, and labels.",
+                        "- name and description must be non-empty; outputs must contain at least one asset name.",
+                        f"- Sum of child budgets must be at most {contract.budget}; use budget 1 per child unless more is essential.",
+                        f"- The child outputs must collectively include: {', '.join(contract.outputs)}.",
+                        f"- Valid example for this exact Contract: {_planning_compile_example(contract)}",
+                    ]
+                )
+            lines.append("")
+            return lines
+    return []
+
+
+def _planning_compile_example(contract: Contract) -> str:
+    try:
+        description = json.loads(contract.description)
+    except json.JSONDecodeError:
+        description = {}
+    raw_inputs = description.get("allowed_inputs", contract.inputs)
+    if not isinstance(raw_inputs, (list, tuple)):
+        raw_inputs = contract.inputs
+    allowed_inputs = [name for name in raw_inputs if isinstance(name, str)]
+    required_outputs = list(contract.outputs) or ["required_output"]
+    intermediate = "grounded_findings"
+    first_activation = " AND ".join(allowed_inputs)
+    if contract.budget <= 1:
+        contracts = [
+            {
+                "name": "produce_required_output",
+                "description": "Produce the required output from the disclosed inputs.",
+                "inputs": allowed_inputs,
+                "outputs": required_outputs,
+                "activation": first_activation,
+                "budget": 1,
+                "tool_scope": [],
+                "labels": [],
+            }
+        ]
+    else:
+        contracts = [
+            {
+                "name": "extract_grounded_findings",
+                "description": "Extract only grounded findings from the disclosed inputs.",
+                "inputs": allowed_inputs,
+                "outputs": [intermediate],
+                "activation": first_activation,
+                "budget": 1,
+                "tool_scope": [],
+                "labels": [],
+            },
+            {
+                "name": "produce_required_output",
+                "description": "Produce the required output from grounded findings.",
+                "inputs": [intermediate],
+                "outputs": required_outputs,
+                "activation": intermediate,
+                "budget": 1,
+                "tool_scope": [],
+                "labels": [],
+            },
+        ]
+    return json.dumps(
+        {"contracts": contracts},
+        sort_keys=True,
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+
+
+def _generated_task_instructions(contract: Contract) -> list[str]:
+    """Give ordinary generated tasks an exact, non-recursive output contract."""
+    if "plugin:fail" in contract.labels:
+        return [
+            "Failure reporting task protocol (required):",
+            "- This task records an already-declared failure; do not use /fail again.",
+            "- Return /exec with exactly the declared output name.",
+            "- The output content must be a concise JSON failure report preserving the reason in the task description.",
+            "",
+        ]
+    if "plugin:retry" in contract.labels:
+        return [
+            "Retry task protocol (required):",
+            "- Execute the original task from the disclosed inputs and return /exec with exactly its declared outputs.",
+            "- Do not request another /retry unless a new transient failure actually occurs and allowance remains.",
+            "",
+        ]
+    if contract.origin == "recovery":
+        return [
+            "Recovery task protocol (required):",
+            "- Repair the failed candidate using the disclosed failure context.",
+            "- Return /exec with exactly the declared output names; do not request another recovery action.",
+            "",
+        ]
     return []

@@ -65,12 +65,12 @@ class FailCompletionPlugin:
                 elif decision.assets:
                     report = decision.assets[0]
             else:
-                report = runtime.mint_authorized_system_asset(
-                    contract,
-                    name=report_name,
-                    content=content,
-                    created_by=contract.id,
-                    promptable=True,
+                runtime.record_rejection(
+                    contract.id,
+                    "failure report requires an authenticated Candidate publisher",
+                    relation_type="fail",
+                    relation_target=report_name,
+                    authority_result="rejected",
                 )
 
         if parent is not None:

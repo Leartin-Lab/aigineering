@@ -36,7 +36,7 @@ from aigineering.runtime import (
 )
 
 
-def _runtime(output: str):
+def _runtime(output: str, *, budget: int = 3):
     store = SQLiteStore(":memory:")
     signer = Ed25519Signer()
     actor = ActorKey(
@@ -71,7 +71,7 @@ def _runtime(output: str):
         "inputs": (),
         "outputs": ("result",),
         "activation": "",
-        "budget": 3,
+        "budget": budget,
         "tool_scope": (),
         "labels": (),
         "origin": "human",
@@ -150,6 +150,19 @@ def test_worker_host_plan_publishes_three_claim_bound_stage_contracts():
     )
     attempt = store.scan_runtime_records(record_type="attempt.closed")[-1][1]
     assert attempt.payload["outcome"] == "expanded"
+
+
+def test_worker_host_classifies_plan_request_without_enough_allowance():
+    store, contract, host = _runtime('/plan {"reason":"split"}', budget=2)
+    claimed = claim_next_package(store, worker_id=host.worker_id)
+    assert claimed is not None
+
+    with pytest.raises(WorkerInvocationError, match="recovery was evaluated"):
+        execute_claimed_package(claimed, host, store)
+
+    failure = store.scan_runtime_records(record_type="worker.invocation_failed")[-1][1]
+    assert failure.payload["category"] == "worker_error:planning_request_rejected"
+    assert store.get_claim(contract.id)["status"] == "released"
 
 
 def test_claim_bound_candidate_replay_is_idempotent_after_claim_closes():

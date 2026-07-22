@@ -42,7 +42,12 @@ class IdempotencyStore:
                     continue
                 try:
                     data = json.loads(stripped)
-                except json.JSONDecodeError:
+                except json.JSONDecodeError as exc:
+                    _logger.warning(
+                        "skipping corrupt idempotency record in %s: %s",
+                        self._path,
+                        exc,
+                    )
                     continue
                 cid = data.get("contract_id", "")
                 key = data.get("idempotency_key", "")

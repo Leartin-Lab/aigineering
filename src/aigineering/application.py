@@ -10,7 +10,7 @@ from aigineering.agent.mock import MockWorker
 from aigineering.plugins import (
     default_completion_registry as default_completion_registry,
 )
-from aigineering.core.session import SessionStore
+from aigineering.core.session import SessionStore, session_trace_path
 from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.core.trace import JsonLTraceStore
 from aigineering.protocol.types import TraceEntry
@@ -71,7 +71,7 @@ def find_trace_for_session(
 
     trace_dir = Path(traces_dir)
     trace_ids = set(session.trace_ids)
-    direct_path = trace_dir / f"{session_id}.jsonl"
+    direct_path = session_trace_path(trace_dir, session_id)
     if direct_path.exists():
         store = JsonLTraceStore(str(direct_path))
         return store, store.get_all()

@@ -112,6 +112,10 @@ Avoid these commands for normal agent delegation:
   terminal completion and the expected output asset exists.
 - If `rejection_count` is nonzero, read `task audit` before trusting the result.
 - If `run --task` times out, report the timeout and current projected status.
+- `token_usage` is claim-bound audit evidence, not billing authority. Missing
+  usage on a provider failure does not prove that no external tokens were used.
+- Treat `invalid_activation` and `descendant_invalid_activation` as malformed
+  task definitions requiring repair, not as ordinary waiting.
 
 ## Boundary Rules
 
@@ -123,6 +127,11 @@ Avoid these commands for normal agent delegation:
 - `/plan` and `/replan` publish independently claimable draft, dependency, and
   compile tasks. Treat an `expanded` root as unfinished, not successful or
   waiting on an in-process call stack.
+- Planned children need executable descriptions and non-empty outputs; together
+  they must cover the parent outputs and remain inside visible causal allowance.
+- A planned dependency is valid only when its fact already exists or an accepted,
+  reachable sibling produces it. Self-output activation, ungrounded cycles, and
+  outputs promised only by rejected siblings are invalid plans, not waiting work.
 - Parent task completion is based on declared output satisfaction, not on all
   child tasks finishing.
 - An independent-acceptance task is incomplete until `output.qualified` binds

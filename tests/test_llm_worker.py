@@ -361,6 +361,19 @@ def test_usage_metadata_partial_tokens():
     assert "provider" in metadata
 
 
+def test_usage_metadata_drops_non_integer_partial_token_fields():
+    response = {
+        "choices": [{"message": {"content": '/exec {"result":"ok"}'}}],
+        "usage": {"prompt_tokens": 12, "completion_tokens": 3.5},
+    }
+    worker = LLMWorker(model="test-model", transport=lambda *_args: response)
+
+    metadata = dict(worker.invoke(_min_contract(), []).metadata or {})
+
+    assert metadata["prompt_tokens"] == 12
+    assert "completion_tokens" not in metadata
+
+
 def test_extract_usage_valid():
     usage = _extract_usage(
         {"usage": {"prompt_tokens": 1, "completion_tokens": 2, "total_tokens": 3}}
@@ -572,7 +585,7 @@ def test_map_tool_calls_non_string_arguments():
 
 
 def test_map_tool_calls_invalid_json_arguments():
-    """Malformed JSON in arguments defaults to empty dict."""
+    """Malformed arguments fail closed instead of changing tool semantics."""
     tc = [
         {
             "id": "call_1",
@@ -583,8 +596,21 @@ def test_map_tool_calls_invalid_json_arguments():
             },
         }
     ]
-    raw_output, parsed_action = LLMWorker._map_tool_calls_to_actions(tc)
-    assert parsed_action["payload"]["args"] == {}
+    with pytest.raises(ValueError, match="not valid JSON"):
+        LLMWorker._map_tool_calls_to_actions(tc)
+
+
+@pytest.mark.parametrize("arguments", ['["not", "an", "object"]', 1])
+def test_map_tool_calls_non_object_arguments_rejected(arguments):
+    tc = [
+        {
+            "id": "call_1",
+            "type": "function",
+            "function": {"name": "f", "arguments": arguments},
+        }
+    ]
+    with pytest.raises(ValueError, match="JSON object"):
+        LLMWorker._map_tool_calls_to_actions(tc)
 
 
 def test_provider_without_tool_calling_capability():

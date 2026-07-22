@@ -49,7 +49,7 @@ def project_task_status(contract: Contract, store) -> dict:
     status = _status_from_entries(
         contract, store, entries, terminal, view, attempt_outcome
     )
-    risks = _silent_failure_risks(contract, store, entries, status)
+    risks = _silent_failure_risks(contract, store, entries, status, view=view)
     if status not in {"completed", "failed", "cancelled", "unreachable"}:
         risks.extend(_descendant_failure_risks(contract, store))
     return {
@@ -167,10 +167,19 @@ def _silent_failure_risks(
     status: str,
     *,
     has_active_recovery: bool | None = None,
+    view: ContractView | None = None,
 ) -> list[dict[str, str]]:
     if status in {"completed", "failed", "cancelled", "unreachable", "stalled"}:
         return []
     risks: list[dict[str, str]] = []
+    effective_view = view or RuntimeProjection(store, store).contract_view(contract)
+    if "invalid_activation" in effective_view.blockers:
+        risks.append(
+            {
+                "code": "invalid_activation",
+                "message": "task activation expression is not valid executable syntax",
+            }
+        )
     if (
         not all_outputs_satisfied(contract, store)
         and _budget_remaining(contract, entries) <= 0
@@ -274,6 +283,7 @@ def _descendant_failure_risks(contract: Contract, store) -> list[dict[str, str]]
                 entries,
                 status,
                 has_active_recovery=child.id in active_recovery_for,
+                view=view,
             )
             for risk in child_risks:
                 risks.append(

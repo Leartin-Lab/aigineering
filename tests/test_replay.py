@@ -21,6 +21,33 @@ def _write_trace(path: Path, entries: list[TraceEntry]) -> None:
             f.write(json.dumps(trace_entry_to_dict(entry)) + "\n")
 
 
+@pytest.mark.parametrize("session_id", ["../escape", "session_../../escape", "a/b"])
+def test_session_paths_reject_traversal(tmp_path, session_id):
+    store = SessionStore(str(tmp_path / "sessions"))
+
+    with pytest.raises(ValueError, match="invalid session id"):
+        store.get_session(session_id)
+    with pytest.raises(ValueError, match="invalid session id"):
+        replay_session(
+            session_id,
+            sessions_dir=str(tmp_path / "sessions"),
+            traces_dir=str(tmp_path / "traces"),
+        )
+
+
+def test_replay_error_has_stable_read_model_shape(tmp_path):
+    result = replay_session(
+        "session_missing",
+        sessions_dir=str(tmp_path / "sessions"),
+        traces_dir=str(tmp_path / "traces"),
+    )
+
+    assert result["entries"] == []
+    assert result["by_event"] == {}
+    assert result["accepted_count"] == result["rejected_count"] == 0
+    assert result["consistent"] is False
+
+
 def test_replay_counts_tool_executed_assets(tmp_path):
     sessions_dir = tmp_path / "sessions"
     traces_dir = tmp_path / "traces"

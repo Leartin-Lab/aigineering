@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from aigineering.core.ids import canonical_json, compute_content_hash, hash_contract_v3
 from aigineering.plugins.base import PluginProposal, PluginRequest
 from aigineering.protocol.effect_builders import contract_declaration_effect
+from aigineering.protocol.immutability import deep_thaw
 from aigineering.protocol.types import Contract
 
 
@@ -58,7 +59,7 @@ class StagedPlanningPlugin:
             invocation=invocation,
             description={
                 "goal": parent.description,
-                "invocation": dict(request.parameters),
+                "invocation": deep_thaw(request.parameters),
                 "required_outputs": list(parent.outputs),
                 "stage": "draft",
                 "task": (
@@ -140,7 +141,7 @@ def _invocation_id(request: PluginRequest, mode: str) -> str:
                 "asset_ids": sorted(asset.id for asset in request.assets),
                 "mode": mode,
                 "parent_id": request.parent.id,
-                "parameters": dict(request.parameters),
+                "parameters": deep_thaw(request.parameters),
             }
         )
     )[:24]

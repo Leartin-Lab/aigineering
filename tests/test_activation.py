@@ -49,6 +49,12 @@ def test_execution_activation_accepts_positive_boolean_expression():
     validate_execution_activation("input_a AND (input_b OR explicit_denial)")
 
 
+@pytest.mark.parametrize("expression", ["input_a&input_b", "input_a,input_b"])
+def test_execution_activation_rejects_punctuation_as_operator(expression):
+    with pytest.raises(ValueError, match="Invalid activation token"):
+        validate_execution_activation(expression)
+
+
 def test_candidate_commitment_enforces_monotonic_activation():
     store = MemoryStore()
     trace = MemoryTraceStore()

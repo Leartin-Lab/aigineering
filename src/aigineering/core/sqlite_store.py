@@ -41,7 +41,7 @@ from aigineering.core.sqlite_migrations import (
     current_schema_version,
     initialize_sqlite_schema,
 )
-from aigineering.core.trace import trace_effective_payload
+from aigineering.core.trace import entry_references_asset, trace_effective_payload
 from aigineering.core.worker_routing import (
     registration_is_replay,
     WorkerRegistration,
@@ -63,6 +63,20 @@ from aigineering.protocol.wire import (
 )
 
 _logger = logging.getLogger(__name__)
+
+
+class WorkerBindingConflict(ValueError):
+    """The registered worker actor/key changed before Candidate commitment."""
+
+
+def _is_sqlite_contention(exc: sqlite3.OperationalError) -> bool:
+    """Return whether an OperationalError is expected writer contention."""
+    code = getattr(exc, "sqlite_errorcode", None)
+    if code in {sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED}:
+        return True
+    message = str(exc).lower()
+    return "locked" in message or "busy" in message
+
 
 # ---------------------------------------------------------------------------
 # SQLiteStore
@@ -103,12 +117,32 @@ class SQLiteStore:
 
     def _insert_runtime_record(self, record: RuntimeRecord) -> int:
         """Insert within the caller's transaction without committing it."""
+        row = self._conn.execute(
+            "SELECT * FROM runtime_records WHERE record_id = ?", (record.id,)
+        ).fetchone()
+        if row is not None:
+            existing = self._row_to_runtime_record(row)
+            if runtime_record_effective_payload(
+                existing
+            ) != runtime_record_effective_payload(record):
+                raise ImmutableRecordConflict("runtime record", record.id)
+            registration = (
+                registration_from_record(existing)
+                if existing.record_type == "worker.registered"
+                else None
+            )
+            if registration is not None:
+                self._upsert_worker_registration(registration)
+            replacement_claim = replacement_claim_from_record(existing)
+            if replacement_claim is not None:
+                self._insert_replacement_claim(replacement_claim)
+            return int(row["revision"])
         validate_actor_runtime_record(record, self)
-        validate_terminal_record(
-            record,
-            self.scan_runtime_records(record_type="lifecycle.terminal"),
-        )
         if record.record_type == "lifecycle.terminal":
+            validate_terminal_record(
+                record,
+                self.scan_runtime_records(record_type="lifecycle.terminal"),
+            )
             contract_id = str(record.payload["contract_id"])
             if self.get_contract(contract_id) is None:
                 raise ValueError(
@@ -122,20 +156,6 @@ class SQLiteStore:
                 registration,
             )
         replacement_claim = replacement_claim_from_record(record)
-        row = self._conn.execute(
-            "SELECT * FROM runtime_records WHERE record_id = ?", (record.id,)
-        ).fetchone()
-        if row is not None:
-            existing = self._row_to_runtime_record(row)
-            if runtime_record_effective_payload(
-                existing
-            ) == runtime_record_effective_payload(record):
-                if registration is not None:
-                    self._upsert_worker_registration(registration)
-                if replacement_claim is not None:
-                    self._insert_replacement_claim(replacement_claim)
-                return int(row["revision"])
-            raise ImmutableRecordConflict("runtime record", record.id)
         validate_runtime_record(record)
         try:
             cursor = self._conn.execute(
@@ -980,7 +1000,7 @@ class SQLiteStore:
         return [
             entry
             for entry in self.get_trace_events()
-            if asset_id in entry.accepted_fragments
+            if entry_references_asset(entry, asset_id)
         ]
 
     def _row_to_trace_entry(self, row: sqlite3.Row):
@@ -1250,9 +1270,14 @@ class SQLiteStore:
                 )
             )
             self._conn.commit()
-        except (sqlite3.IntegrityError, sqlite3.OperationalError):
+        except sqlite3.IntegrityError:
             self._conn.rollback()
             return None
+        except sqlite3.OperationalError as exc:
+            self._conn.rollback()
+            if _is_sqlite_contention(exc):
+                return None
+            raise
         return self.get_claim(contract_id)
 
     def renew_claim(
@@ -1465,7 +1490,7 @@ class SQLiteStore:
             or registration["actor_id"] != worker_id
             or registration["key_id"] != key_id
         ):
-            raise sqlite3.IntegrityError(
+            raise WorkerBindingConflict(
                 "worker actor-key binding changed during submit"
             )
 
@@ -1576,151 +1601,173 @@ class SQLiteStore:
             # single-writer snapshot as their inserts, even for batches that
             # contain no Contract or Asset row to acquire the lock first.
             self._conn.execute("BEGIN IMMEDIATE")
-            if (
-                candidate_id
-                and self._conn.execute(
-                    "SELECT 1 FROM runtime_records WHERE record_type = "
-                    "'candidate.committed' AND "
-                    "json_extract(payload_json, '$.candidate_id') = ? LIMIT 1",
-                    (candidate_id,),
-                ).fetchone()
+            if self._candidate_already_committed(candidate_id):
+                return
+            if claim_binding is not None and self._validate_claim_binding(
+                claim_binding,
+                candidate_actor_id,
+                candidate_key_id,
+                candidate_id,
             ):
                 return
-            if claim_binding is not None:
-                if candidate_actor_id == "" or candidate_key_id == "":
-                    raise ValueError(
-                        "claim-bound commitment requires actor key binding"
-                    )
-                self._lock_worker_key_binding(candidate_actor_id, candidate_key_id)
-                existing_claim = self._conn.execute(
-                    "SELECT contract_id, worker_id, epoch, package_id, status, lease_until "
-                    "FROM worker_claims WHERE claim_id = ?",
-                    (claim_binding.claim_id,),
-                ).fetchone()
-                if existing_claim is None:
-                    raise sqlite3.IntegrityError(
-                        "claim-bound Candidate has unknown claim"
-                    )
-                if existing_claim["status"] == "submitted":
-                    replay = next(
-                        (
-                            record
-                            for _, record in self.scan_runtime_records(
-                                record_type="claim.submitted"
-                            )
-                            if record.payload.get("claim_id") == claim_binding.claim_id
-                            and record.payload.get("candidate_id") == candidate_id
-                        ),
-                        None,
-                    )
-                    if replay is not None:
-                        return
-                now = now_iso()
-                if (
-                    existing_claim["status"] != "active"
-                    or existing_claim["contract_id"] != claim_binding.contract_id
-                    or existing_claim["worker_id"] != candidate_actor_id
-                    or int(existing_claim["epoch"]) != claim_binding.claim_epoch
-                    or existing_claim["package_id"] != claim_binding.package_id
-                    or existing_claim["lease_until"] < now
-                ):
-                    raise sqlite3.IntegrityError(
-                        "active worker claim predicate failed during Candidate commit"
-                    )
             declarations = ((contract,) if contract is not None else ()) + tuple(
                 contracts
             )
-            if any(
-                record.record_type == "output.qualified" for record in runtime_records
-            ):
-                from aigineering.core.acceptance import (
-                    validate_output_qualification_commit,
-                )
-
-                validate_output_qualification_commit(
-                    tuple(record for _, record in self.scan_runtime_records()),
-                    runtime_records,
-                )
+            self._validate_output_qualification_records(runtime_records)
             for declaration in declarations:
                 self._insert_contract(declaration)
-            if any(
-                record.record_type in {"allowance.reserved", "allowance.extinguished"}
-                for record in runtime_records
-            ):
-                from aigineering.core.causal_allowance import validate_allowance_commit
-
-                pending_ids = {record.id for record in runtime_records}
-                existing_records = tuple(
-                    record
-                    for _, record in self.scan_runtime_records()
-                    if record.id not in pending_ids
-                )
-                validate_allowance_commit(
-                    tuple(self.get_all_contracts()),
-                    existing_records,
-                    runtime_records,
-                )
-            for asset in accepted_assets:
-                if not asset.signed_by or not verify_asset_seal(asset):
-                    raise ValueError(
-                        f"G3/N-P1.6: Asset '{asset.id}' rejected — "
-                        f"missing or invalid canonical seal "
-                        f"(signed_by={asset.signed_by!r})"
-                    )
-                self._insert_asset(asset)
+            self._validate_allowance_records(runtime_records)
+            self._insert_ingress_assets(accepted_assets)
             check_crash_point("after_asset_before_trace")
             if reducer_callback is not None:
                 reducer_traces: list[TraceEntry] = reducer_callback()
                 trace_entries = list(trace_entries) + reducer_traces
             for entry in trace_entries:
                 self._insert_trace_entry(entry)
+            check_crash_point("after_trace_before_runtime_records")
             for record in runtime_records:
                 self._insert_runtime_record(record)
             if claim_binding is not None:
-                committed_at = now_iso()
-                cursor = self._conn.execute(
-                    "UPDATE worker_claims SET status = 'submitted', updated_at = ? "
-                    "WHERE claim_id = ? AND status = 'active' AND worker_id = ? "
-                    "AND contract_id = ? AND package_id = ? AND epoch = ? "
-                    "AND lease_until >= ?",
-                    (
-                        committed_at,
-                        claim_binding.claim_id,
-                        candidate_actor_id,
-                        claim_binding.contract_id,
-                        claim_binding.package_id,
-                        claim_binding.claim_epoch,
-                        committed_at,
-                    ),
+                self._finalize_claim_submission(
+                    claim_binding,
+                    candidate_actor_id,
+                    candidate_id,
+                    runtime_records,
                 )
-                if cursor.rowcount != 1:
-                    raise sqlite3.IntegrityError(
-                        "claim changed during Candidate commitment"
-                    )
-                decision_parents = [
-                    record.id
-                    for record in runtime_records
-                    if record.record_type == "candidate.committed"
-                ]
-                self._insert_runtime_record(
-                    create_runtime_record(
-                        "claim.submitted",
-                        {
-                            "candidate_id": candidate_id,
-                            "claim_id": claim_binding.claim_id,
-                            "contract_id": claim_binding.contract_id,
-                            "epoch": claim_binding.claim_epoch,
-                            "package_id": claim_binding.package_id,
-                            "worker_id": candidate_actor_id,
-                        },
-                        causal_parents=[
-                            self._claim_granted_record_id(claim_binding.claim_id)
-                        ]
-                        + decision_parents,
-                    )
+
+    def _candidate_already_committed(self, candidate_id: str) -> bool:
+        return bool(
+            candidate_id
+            and self._conn.execute(
+                "SELECT 1 FROM runtime_records WHERE record_type = "
+                "'candidate.committed' AND "
+                "json_extract(payload_json, '$.candidate_id') = ? LIMIT 1",
+                (candidate_id,),
+            ).fetchone()
+        )
+
+    def _validate_claim_binding(
+        self, claim_binding, actor_id: str, key_id: str, candidate_id: str
+    ) -> bool:
+        """Validate the claim fence; return True for an exact closed replay."""
+        if actor_id == "" or key_id == "":
+            raise ValueError("claim-bound commitment requires actor key binding")
+        self._lock_worker_key_binding(actor_id, key_id)
+        existing = self._conn.execute(
+            "SELECT contract_id, worker_id, epoch, package_id, status, lease_until "
+            "FROM worker_claims WHERE claim_id = ?",
+            (claim_binding.claim_id,),
+        ).fetchone()
+        if existing is None:
+            raise sqlite3.IntegrityError("claim-bound Candidate has unknown claim")
+        if existing["status"] == "submitted" and any(
+            record.payload.get("claim_id") == claim_binding.claim_id
+            and record.payload.get("candidate_id") == candidate_id
+            for _, record in self.scan_runtime_records(record_type="claim.submitted")
+        ):
+            return True
+        if (
+            existing["status"] != "active"
+            or existing["contract_id"] != claim_binding.contract_id
+            or existing["worker_id"] != actor_id
+            or int(existing["epoch"]) != claim_binding.claim_epoch
+            or existing["package_id"] != claim_binding.package_id
+            or existing["lease_until"] < now_iso()
+        ):
+            raise sqlite3.IntegrityError(
+                "active worker claim predicate failed during Candidate commit"
+            )
+        return False
+
+    def _validate_output_qualification_records(
+        self, runtime_records: tuple[RuntimeRecord, ...]
+    ) -> None:
+        if not any(
+            record.record_type == "output.qualified" for record in runtime_records
+        ):
+            return
+        from aigineering.core.acceptance import validate_output_qualification_commit
+
+        validate_output_qualification_commit(
+            tuple(record for _, record in self.scan_runtime_records()),
+            runtime_records,
+        )
+
+    def _validate_allowance_records(
+        self, runtime_records: tuple[RuntimeRecord, ...]
+    ) -> None:
+        if not any(
+            record.record_type in {"allowance.reserved", "allowance.extinguished"}
+            for record in runtime_records
+        ):
+            return
+        from aigineering.core.causal_allowance import validate_allowance_commit
+
+        pending_ids = {record.id for record in runtime_records}
+        existing_records = tuple(
+            record
+            for _, record in self.scan_runtime_records()
+            if record.id not in pending_ids
+        )
+        validate_allowance_commit(
+            tuple(self.get_all_contracts()), existing_records, runtime_records
+        )
+
+    def _insert_ingress_assets(self, accepted_assets: list[Asset]) -> None:
+        for asset in accepted_assets:
+            if not asset.signed_by or not verify_asset_seal(asset):
+                raise ValueError(
+                    f"G3/N-P1.6: Asset '{asset.id}' rejected — "
+                    "missing or invalid canonical seal "
+                    f"(signed_by={asset.signed_by!r})"
                 )
-            check_crash_point("after_trace_before_budget")
-            check_crash_point("after_budget_before_complete")
+            self._insert_asset(asset)
+
+    def _finalize_claim_submission(
+        self,
+        claim_binding,
+        actor_id: str,
+        candidate_id: str,
+        runtime_records: tuple[RuntimeRecord, ...],
+    ) -> None:
+        committed_at = now_iso()
+        cursor = self._conn.execute(
+            "UPDATE worker_claims SET status = 'submitted', updated_at = ? "
+            "WHERE claim_id = ? AND status = 'active' AND worker_id = ? "
+            "AND contract_id = ? AND package_id = ? AND epoch = ? "
+            "AND lease_until >= ?",
+            (
+                committed_at,
+                claim_binding.claim_id,
+                actor_id,
+                claim_binding.contract_id,
+                claim_binding.package_id,
+                claim_binding.claim_epoch,
+                committed_at,
+            ),
+        )
+        if cursor.rowcount != 1:
+            raise sqlite3.IntegrityError("claim changed during Candidate commitment")
+        decision_parents = [
+            record.id
+            for record in runtime_records
+            if record.record_type == "candidate.committed"
+        ]
+        self._insert_runtime_record(
+            create_runtime_record(
+                "claim.submitted",
+                {
+                    "candidate_id": candidate_id,
+                    "claim_id": claim_binding.claim_id,
+                    "contract_id": claim_binding.contract_id,
+                    "epoch": claim_binding.claim_epoch,
+                    "package_id": claim_binding.package_id,
+                    "worker_id": actor_id,
+                },
+                causal_parents=[self._claim_granted_record_id(claim_binding.claim_id)]
+                + decision_parents,
+            )
+        )
 
     # ------------------------------------------------------------------
     # Replacement claim persistence

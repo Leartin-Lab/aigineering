@@ -178,13 +178,23 @@ def test_check_expired_transitions_expired_claims(store: ClaimStore):
     assert c.status == "active"
 
     expired = store.check_expired()
+
+    assert [claim.claim_id for claim in expired] == [c.claim_id]
     assert len(expired) == 1
-    assert expired[0].claim_id == c.claim_id
     assert expired[0].status == "expired"
 
     retrieved = store.get_claim(c.claim_id)
     assert retrieved is not None
     assert retrieved.status == "expired"
+
+
+def test_check_expired_repairs_stale_contract_index(store: ClaimStore):
+    claim = store.claim("contract-1", "worker-A")
+    assert claim is not None
+    del store._claims[claim.claim_id]
+
+    assert store.check_expired() == []
+    assert "contract-1" not in store._active_contracts
 
 
 def test_check_expired_returns_empty_when_none_expired(store: ClaimStore):

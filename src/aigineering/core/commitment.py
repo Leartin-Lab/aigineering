@@ -100,7 +100,11 @@ def reduce_candidate(
         causal_parents=(receipt.id, *(record.id for record in projection.records)),
     )
     trace = candidate_trace(
-        contract_id="commitment",
+        contract_id=(
+            candidate.claim_binding.contract_id
+            if candidate.claim_binding is not None
+            else "commitment"
+        ),
         event_type="candidate_committed",
         parent_id=candidate.id,
         worker_id=candidate.actor_id,
@@ -118,6 +122,7 @@ def reduce_candidate(
             )
             for effect_type, relation_target in projection.projected_effects
         ],
+        usage_metadata=candidate.metadata or None,
     )
     return CommitmentDecision(
         candidate_id=candidate.id,

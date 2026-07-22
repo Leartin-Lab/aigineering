@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import json
-import re
 from dataclasses import dataclass
 from datetime import datetime
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
-from aigineering.core.activation import check_activation
+from aigineering.core.activation import (
+    activation_names,
+    check_activation,
+    validate_execution_activation,
+)
 from aigineering.core.causal_allowance import (
     allowance_available,
     allowance_is_recorded,
@@ -29,7 +32,6 @@ if TYPE_CHECKING:
 
 
 TERMINAL_EVENTS = frozenset({"complete", "failed", "cancelled", "unreachable"})
-_ACTIVATION_OPERATORS = frozenset({"AND", "OR", "NOT"})
 
 
 @dataclass(frozen=True)
@@ -107,8 +109,17 @@ class RuntimeProjection:
                 )
                 for output in contract.outputs
             )
-        activation_satisfied = check_activation(contract.activation, available_names)
-        activation_references = _activation_names(contract.activation)
+        invalid_activation = False
+        try:
+            validate_execution_activation(contract.activation)
+            activation_satisfied = check_activation(
+                contract.activation, available_names
+            )
+            activation_references = activation_names(contract.activation)
+        except (RecursionError, ValueError):
+            invalid_activation = True
+            activation_satisfied = False
+            activation_references = set()
         required_inputs = set(contract.inputs)
         missing_inputs = required_inputs - available_names
         missing_activation = activation_references - available_names
@@ -159,7 +170,9 @@ class RuntimeProjection:
                 blockers.extend(
                     f"missing_asset:{name}" for name in sorted(missing_inputs)
                 )
-            if not activation_satisfied:
+            if invalid_activation:
+                blockers.append("invalid_activation")
+            elif not activation_satisfied:
                 blockers.extend(
                     f"missing_asset:{name}"
                     for name in sorted(missing_activation)
@@ -268,17 +281,11 @@ class RuntimeProjection:
             if record.record_type == "lifecycle.terminal"
             and record.payload["contract_id"] == contract.id
         )
-        budget_values = [
-            int(record.payload["remaining"])
-            for _, record in selected
-            if record.record_type == "budget.consumed"
-            and record.payload["contract_id"] == contract.id
-        ]
         selected_records = tuple(record for _, record in selected)
         typed_budget = (
             allowance_available(contract, selected_records)
             if allowance_is_recorded(contract.id, selected_records)
-            else (budget_values[-1] if budget_values else None)
+            else None
         )
         return (
             asset_payloads,
@@ -323,14 +330,6 @@ class RuntimeProjection:
         if self._runtime_records is not None:
             return self._runtime_records
         return tuple(self._store.scan_runtime_records())
-
-
-def _activation_names(expression: str) -> set[str]:
-    names: set[str] = set()
-    for token in re.findall(r"[A-Za-z_][A-Za-z0-9_-]*", expression or ""):
-        if token.upper() not in _ACTIVATION_OPERATORS:
-            names.add(token)
-    return names
 
 
 def _budget_remaining(contract: Contract, entries: list[TraceEntry]) -> int:

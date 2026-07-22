@@ -144,11 +144,11 @@ class ClaimStore:
         expired_claims: list[Claim] = []
         now = datetime.now(timezone.utc)
 
-        for claim_id in list(self._active_contracts.values()):
+        for contract_id, claim_id in list(self._active_contracts.items()):
             claim = self._claims.get(claim_id)
             if claim is None:
                 # Clean up stale index entry
-                del self._active_contracts[claim_id]  # pragma: no cover
+                del self._active_contracts[contract_id]
                 continue
             if claim.status == "active" and _parse_iso(claim.lease_until) < now:
                 expired = replace(claim, status="expired")

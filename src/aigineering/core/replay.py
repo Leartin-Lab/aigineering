@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Optional
 
 from aigineering.core.provenance import verify_asset_seal
-from aigineering.core.session import SessionStore
+from aigineering.core.session import SessionStore, session_trace_path
 from aigineering.core.store import JsonLStore
 from aigineering.core.trace import JsonLTraceStore
 from aigineering.protocol.types import Session, TraceEntry
@@ -35,10 +35,9 @@ def replay_session(
     session_store = SessionStore(sessions_dir=sessions_dir)
     session: Optional[Session] = session_store.get_session(session_id)
     if session is None:
-        return {
-            "session": None,
-            "error": f"Session '{session_id}' not found in {sessions_dir}",
-        }
+        return _replay_error(
+            None, f"Session '{session_id}' not found in {sessions_dir}"
+        )
 
     # 2. Find the matching trace file
     trace_dir = Path(traces_dir)
@@ -46,7 +45,7 @@ def replay_session(
     entries: list[TraceEntry] = []
 
     # Try direct match: traces_dir/{session_id}.jsonl
-    direct_path = trace_dir / f"{session_id}.jsonl"
+    direct_path = session_trace_path(trace_dir, session_id)
     if direct_path.exists():
         trace_store = JsonLTraceStore(str(direct_path))
         entries = trace_store.get_all()
@@ -68,10 +67,9 @@ def replay_session(
                     break
 
     if trace_store is None or not entries:
-        return {
-            "session": session,
-            "error": f"No matching trace file found for session '{session_id}'",
-        }
+        return _replay_error(
+            session, f"No matching trace file found for session '{session_id}'"
+        )
 
     # 3. Group entries by event_type
     by_event: dict[str, list[TraceEntry]] = {}
@@ -120,6 +118,21 @@ def replay_session(
         "consistent": consistent,
         "duplicate_ids": duplicates if duplicates else None,
         "seal_mismatches": (seal_mismatches if seal_mismatches else None),
+    }
+
+
+def _replay_error(session: Session | None, error: str) -> dict:
+    """Keep replay's read-model response shape stable on failure."""
+    return {
+        "session": session,
+        "entries": [],
+        "by_event": {},
+        "accepted_count": 0,
+        "rejected_count": 0,
+        "consistent": False,
+        "duplicate_ids": None,
+        "seal_mismatches": None,
+        "error": error,
     }
 
 

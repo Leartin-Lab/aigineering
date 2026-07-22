@@ -144,17 +144,7 @@ def claim_next_package(
 
         remaining_budget = view.budget_remaining
 
-        # Compatibility remains available for legacy unconstrained contracts,
-        # but a constrained contract is never claimed by an unknown or
-        # ineligible worker. Routing labels are not disclosed prompt assets.
-        if contract.worker_capabilities or contract.worker_pools:
-            if registered_worker is None or not is_eligible(
-                contract, registered_worker
-            ):
-                continue
-        elif registered_worker is not None and not is_eligible(
-            contract, registered_worker
-        ):
+        if not _worker_can_claim(contract, registered_worker):
             continue
 
         try:
@@ -169,22 +159,12 @@ def claim_next_package(
             )
             continue
         method_context_assets = _method_context_assets_for(contract, store)
-        package = WorkerPackage(
-            contract_id=contract.id,
-            contract=contract_to_dict(contract),
-            disclosed_assets=tuple(asset_to_dict(a) for a in disclosed),
-            method_context_assets=tuple(
-                asset_to_dict(asset) for asset in method_context_assets
-            ),
-            tool_scope=contract.tool_scope,
-            budget_remaining=remaining_budget,
-            capability_requirements=contract.worker_capabilities,
-            worker_profile_id=(
-                registered_worker.profile_id if registered_worker else ""
-            ),
-            worker_registration_version=(
-                registered_worker.version if registered_worker else ""
-            ),
+        package = _build_worker_package(
+            contract,
+            disclosed,
+            method_context_assets,
+            registered_worker,
+            remaining_budget,
         )
         claim = store.claim_contract(
             contract.id,
@@ -198,23 +178,14 @@ def claim_next_package(
         )
         if claim is None:
             continue
-        package = replace(
+        package = _record_worker_route(
+            store,
+            contract,
             package,
-            claim_id=claim["claim_id"],
-            claim_epoch=claim["epoch"],
-            lease_until=claim["lease_until"],
-        )
-        store.new_entry(
-            contract.id,
-            "worker_routed",
-            worker_id=worker_id,
-            relation_type="worker_profile",
-            relation_target=(
-                f"{registered_worker.profile_id}@{registered_worker.version}"
-                if registered_worker
-                else "legacy"
-            ),
-            budget_remaining=remaining_budget,
+            claim,
+            worker_id,
+            registered_worker,
+            remaining_budget,
         )
         return ClaimedPackage(
             contract, disclosed, method_context_assets, package, worker_id
@@ -223,6 +194,65 @@ def claim_next_package(
         reasons = [reason for exc in policy_blockers for reason in exc.reasons]
         raise DisclosurePolicyError(policy_blockers[0].contract_id, reasons)
     return None
+
+
+def _worker_can_claim(contract: Contract, registration) -> bool:
+    """Apply capability routing without turning labels into authority."""
+    if contract.worker_capabilities or contract.worker_pools:
+        return registration is not None and is_eligible(contract, registration)
+    return registration is None or is_eligible(contract, registration)
+
+
+def _build_worker_package(
+    contract: Contract,
+    disclosed: tuple[Asset, ...],
+    method_context_assets: tuple[Asset, ...],
+    registration,
+    remaining_budget: int,
+) -> WorkerPackage:
+    return WorkerPackage(
+        contract_id=contract.id,
+        contract=contract_to_dict(contract),
+        disclosed_assets=tuple(asset_to_dict(asset) for asset in disclosed),
+        method_context_assets=tuple(
+            asset_to_dict(asset) for asset in method_context_assets
+        ),
+        tool_scope=contract.tool_scope,
+        budget_remaining=remaining_budget,
+        capability_requirements=contract.worker_capabilities,
+        worker_profile_id=registration.profile_id if registration else "",
+        worker_registration_version=registration.version if registration else "",
+    )
+
+
+def _record_worker_route(
+    store,
+    contract: Contract,
+    package: WorkerPackage,
+    claim: dict,
+    worker_id: str,
+    registration,
+    remaining_budget: int,
+) -> WorkerPackage:
+    routed = replace(
+        package,
+        claim_id=claim["claim_id"],
+        claim_epoch=claim["epoch"],
+        lease_until=claim["lease_until"],
+    )
+    store.new_entry(
+        contract.id,
+        "worker_routed",
+        worker_id=worker_id,
+        relation_type="worker_profile",
+        relation_target=(
+            f"{registration.profile_id}@{registration.version}"
+            if registration
+            else "legacy"
+        ),
+        budget_remaining=remaining_budget,
+    )
+    return routed
 
 
 def execute_claimed_package(
@@ -237,6 +267,7 @@ def execute_claimed_package(
     keeper = _ClaimLeaseKeeper(claimed, store)
     keeper.start()
     try:
+        phase = "invocation"
         try:
             invocation_binding = CandidateClaimBinding(
                 contract_id=claimed.contract.id,
@@ -254,6 +285,7 @@ def execute_claimed_package(
                 if isinstance(worker, WorkerHost)
                 else worker.invoke(claimed.contract, disclosed)
             )
+            phase = "envelope"
             envelope = CandidateEnvelope(
                 contract_id=claimed.contract.id,
                 worker_id=claimed.worker_id,
@@ -269,6 +301,7 @@ def execute_claimed_package(
                 idempotency_key=f"run-{claimed.package.package_id}",
                 usage_metadata=candidate.metadata,
             )
+            phase = "candidate_encoding"
             proposal = (
                 worker.sign_envelope(
                     envelope,
@@ -301,14 +334,44 @@ def execute_claimed_package(
                 )
             raise WorkerInvocationError(
                 f"worker invocation failed with status {status_code}; "
-                "claim was released and recovery was scheduled"
+                "claim was released and recovery was evaluated"
+            ) from None
+        except (RuntimeError, TypeError, ValueError):
+            _record_worker_invocation_failure(
+                claimed,
+                store,
+                status_code=0,
+                retryable=False,
+                category=f"worker_error:{phase}_failure",
+            )
+            if candidate_publishers is not None:
+                process_worker_failures(
+                    store, candidate_publishers=candidate_publishers
+                )
+            raise WorkerInvocationError(
+                f"worker {phase} failed; claim was released and recovery was evaluated"
             ) from None
     finally:
         keeper.stop()
     if keeper.failed:
-        raise ValueError(
+        try:
+            _record_worker_invocation_failure(
+                claimed,
+                store,
+                status_code=0,
+                retryable=True,
+                category="worker_error:claim_renewal_failed",
+            )
+        except sqlite3.Error as exc:
+            raise WorkerSubmissionCommitError(
+                "claim lease renewal failed and its terminal fact could not be "
+                f"committed: {exc}"
+            ) from exc
+        if candidate_publishers is not None:
+            process_worker_failures(store, candidate_publishers=candidate_publishers)
+        raise WorkerInvocationError(
             f"claim lease renewal failed for {claimed.package.claim_id!r}; "
-            "worker result was not submitted"
+            "worker result was discarded and the claim was durably closed"
         )
     if proposal is None:
         _record_worker_invocation_failure(
@@ -322,7 +385,7 @@ def execute_claimed_package(
             process_worker_failures(store, candidate_publishers=candidate_publishers)
         raise WorkerInvocationError(
             "claimed execution requires an authenticated WorkerHost; "
-            "claim was released and recovery was scheduled"
+            "claim was released and recovery was evaluated"
         )
     return submit_worker_proposal(
         proposal,
@@ -404,7 +467,7 @@ def _schedule_rejected_recovery(
     *,
     record_terminal: bool = True,
     candidate_publishers=None,
-) -> None:
+) -> Contract | None:
     if candidate_publishers is None:
         raise RuntimeError(
             "recovery replay requires an authenticated recovery Candidate publisher"
@@ -435,6 +498,7 @@ def _schedule_rejected_recovery(
                 {"contract_id": contract.id, "terminal": "failed"},
             )
         )
+    return recovery
 
 
 def process_rejected_submissions(store, *, candidate_publishers=None) -> list[str]:
@@ -455,7 +519,11 @@ def process_rejected_submissions(store, *, candidate_publishers=None) -> list[st
     recovered_projection_ids = {
         str(record.payload["projection_id"])
         for record in records
-        if record.record_type == "projection_rejection.recovery_scheduled"
+        if record.record_type
+        in {
+            "projection_rejection.recovery_scheduled",
+            "projection_rejection.recovery_unavailable",
+        }
     }
     for record in records:
         if record.record_type != "projection.decided":
@@ -477,7 +545,7 @@ def process_rejected_submissions(store, *, candidate_publishers=None) -> list[st
                 f"rejected projection {record.id!r} has no replayable raw "
                 f"Candidate evidence for {candidate_id!r}"
             )
-        _schedule_rejected_recovery(
+        recovery = _schedule_rejected_recovery(
             contract,
             str(candidate.payload["raw_output"]),
             [dict(rejection) for rejection in payload["rejections"]],
@@ -487,7 +555,11 @@ def process_rejected_submissions(store, *, candidate_publishers=None) -> list[st
             candidate_publishers=candidate_publishers,
         )
         marker = create_runtime_record(
-            "projection_rejection.recovery_scheduled",
+            (
+                "projection_rejection.recovery_scheduled"
+                if recovery is not None
+                else "projection_rejection.recovery_unavailable"
+            ),
             {"contract_id": contract_id, "projection_id": record.id},
             causal_parents=[record.id],
         )
@@ -585,7 +657,11 @@ def process_expired_claims(store, *, candidate_publishers=None) -> list[str]:
     processed_expiration_ids = {
         str(record.payload["expiration_id"])
         for record in records
-        if record.record_type == "claim_expiration.recovery_scheduled"
+        if record.record_type
+        in {
+            "claim_expiration.recovery_scheduled",
+            "claim_expiration.recovery_unavailable",
+        }
     }
     processed: list[str] = []
     for expiration in records:
@@ -601,7 +677,7 @@ def process_expired_claims(store, *, candidate_publishers=None) -> list[str]:
                 f"claim expiration {expiration.id!r} references missing "
                 f"Contract {contract_id!r}"
             )
-        _schedule_rejected_recovery(
+        recovery = _schedule_rejected_recovery(
             contract,
             "worker claim expired before Candidate submission",
             [
@@ -619,7 +695,11 @@ def process_expired_claims(store, *, candidate_publishers=None) -> list[str]:
             candidate_publishers=candidate_publishers,
         )
         marker = create_runtime_record(
-            "claim_expiration.recovery_scheduled",
+            (
+                "claim_expiration.recovery_scheduled"
+                if recovery is not None
+                else "claim_expiration.recovery_unavailable"
+            ),
             {"contract_id": contract_id, "expiration_id": expiration.id},
             causal_parents=[expiration.id],
         )
@@ -686,7 +766,11 @@ def process_worker_failures(store, *, candidate_publishers=None) -> list[str]:
     processed_failure_ids = {
         str(record.payload["failure_id"])
         for record in records
-        if record.record_type == "worker_failure.recovery_scheduled"
+        if record.record_type
+        in {
+            "worker_failure.recovery_scheduled",
+            "worker_failure.recovery_unavailable",
+        }
     }
     processed: list[str] = []
     for failure in records:
@@ -702,7 +786,7 @@ def process_worker_failures(store, *, candidate_publishers=None) -> list[str]:
                 f"worker failure {failure.id!r} references missing "
                 f"Contract {contract_id!r}"
             )
-        _schedule_rejected_recovery(
+        recovery = _schedule_rejected_recovery(
             contract,
             "provider invocation failed before Candidate production",
             [
@@ -721,7 +805,11 @@ def process_worker_failures(store, *, candidate_publishers=None) -> list[str]:
             candidate_publishers=candidate_publishers,
         )
         marker = create_runtime_record(
-            "worker_failure.recovery_scheduled",
+            (
+                "worker_failure.recovery_scheduled"
+                if recovery is not None
+                else "worker_failure.recovery_unavailable"
+            ),
             {"contract_id": contract_id, "failure_id": failure.id},
             causal_parents=[failure.id],
         )

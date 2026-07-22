@@ -51,6 +51,18 @@ def test_declared_input_is_a_natural_blocker_without_activation_expression():
     assert view.blockers == ("missing_asset:evidence",)
 
 
+def test_historical_invalid_activation_is_an_explicit_blocker():
+    store = MemoryStore()
+    contract = Contract(id="task:bad-activation", activation="input_a&input_b")
+    store.add_contract(contract)
+
+    view = RuntimeProjection(store, MemoryTraceStore()).contract_view(contract)
+
+    assert view.enabled is False
+    assert view.activation_satisfied is False
+    assert view.blockers == ("invalid_activation",)
+
+
 def test_projection_is_reconstructable_across_store_adapters():
     memory = MemoryStore()
     memory_trace = MemoryTraceStore()

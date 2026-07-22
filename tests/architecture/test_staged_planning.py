@@ -138,6 +138,38 @@ def test_staged_plan_rejects_insufficient_allowance_before_partial_proposal():
         StagedPlanningPlugin().propose(PluginRequest(parent=_parent(), allowance=2))
 
 
+def test_nested_invocation_parameters_are_canonical_and_affect_stage_identity():
+    parent = _parent()
+    first = StagedPlanningPlugin().stages(
+        PluginRequest(
+            parent=parent,
+            allowance=8,
+            parameters={"reason": "split", "constraints": ["grounded", {"n": 2}]},
+        )
+    )
+    replay = StagedPlanningPlugin().stages(
+        PluginRequest(
+            parent=parent,
+            allowance=8,
+            parameters={"constraints": ["grounded", {"n": 2}], "reason": "split"},
+        )
+    )
+    changed = StagedPlanningPlugin().stages(
+        PluginRequest(
+            parent=parent,
+            allowance=8,
+            parameters={"reason": "split", "constraints": ["grounded", {"n": 3}]},
+        )
+    )
+
+    assert [item.id for item in first.contracts] == [
+        item.id for item in replay.contracts
+    ]
+    assert [item.id for item in first.contracts] != [
+        item.id for item in changed.contracts
+    ]
+
+
 def test_staged_plan_atomic_group_commits_through_candidate_boundary():
     proposal = StagedPlanningPlugin().propose(
         PluginRequest(parent=_parent(), allowance=8)

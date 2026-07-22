@@ -8,7 +8,7 @@ from click.testing import CliRunner
 from aigineering.cli.main import cli
 from aigineering.core.methods import retry_contract
 from aigineering.core.sqlite_store import SQLiteStore
-from aigineering.protocol.types import TraceEntry
+from aigineering.protocol.types import Candidate, TraceEntry
 from aigineering.protocol.wire import trace_entry_to_dict
 
 
@@ -285,6 +285,26 @@ def test_demo_command_exists():
 
         assert result.exit_code == 0
         assert "Demo completed" in result.output
+
+
+def test_demo_does_not_claim_completion_without_declared_output(monkeypatch):
+    class InvalidWorker:
+        worker_id = "invalid-demo-worker"
+
+        def invoke(self, contract, disclosed_assets):
+            del contract, disclosed_assets
+            return Candidate(worker_id=self.worker_id, raw_output="wrong: value")
+
+    monkeypatch.setattr(
+        "aigineering.cli._common.build_worker", lambda *args, **kwargs: InvalidWorker()
+    )
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        result = runner.invoke(cli, ["demo", "test"])
+
+    assert result.exit_code != 0
+    assert "did not complete declared outputs" in result.output
+    assert "Demo completed" not in result.output
 
 
 def test_run_llm_worker_requires_model():

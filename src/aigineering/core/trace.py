@@ -158,7 +158,7 @@ class MemoryTraceStore:
 
     def get_reverse_lineage(self, asset_id: str) -> list[TraceEntry]:
         return [
-            entry for entry in self.entries if _entry_references_asset(entry, asset_id)
+            entry for entry in self.entries if entry_references_asset(entry, asset_id)
         ]
 
 
@@ -258,7 +258,7 @@ class JsonLTraceStore:
 
     def get_reverse_lineage(self, asset_id: str) -> list[TraceEntry]:
         return [
-            entry for entry in self._entries if _entry_references_asset(entry, asset_id)
+            entry for entry in self._entries if entry_references_asset(entry, asset_id)
         ]
 
 
@@ -266,7 +266,8 @@ class JsonLTraceStore:
 TraceStore = MemoryTraceStore
 
 
-def _entry_references_asset(entry: TraceEntry, asset_id: str) -> bool:
+def entry_references_asset(entry: TraceEntry, asset_id: str) -> bool:
+    """Return whether a trace event carries a direct or encoded asset edge."""
     if asset_id in entry.accepted_fragments:
         return True
     if entry.parent_id == asset_id or entry.relation_target == asset_id:

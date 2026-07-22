@@ -54,12 +54,17 @@ def candidate_rejection_decision(
         causal_parents=(receipt.id,),
     )
     trace = candidate_trace(
-        contract_id="commitment",
+        contract_id=(
+            candidate.claim_binding.contract_id
+            if candidate.claim_binding is not None
+            else "commitment"
+        ),
         event_type="candidate_rejected",
         parent_id=candidate.id,
         worker_id=candidate.actor_id,
         authority_result="rejected",
         rejected_fragments=[f"[candidate_rejection] {reason}"],
+        usage_metadata=candidate.metadata or None,
     )
     return CommitmentDecision(
         candidate_id=candidate.id,

@@ -134,6 +134,39 @@ class WorkerPackage:
             raise ValueError(
                 f"Unsupported protocol version {version} (current: {CURRENT_PROTOCOL_VERSION})"
             )
+        required = {
+            "contract_id": str,
+            "contract": dict,
+            "disclosed_assets": list,
+            "method_context_assets": list,
+            "tool_scope": list,
+            "budget_remaining": int,
+        }
+        for field, expected_type in required.items():
+            if field not in d:
+                raise ValueError(f"worker package missing required field {field!r}")
+            value = d[field]
+            if not isinstance(value, expected_type) or (
+                expected_type is int and isinstance(value, bool)
+            ):
+                raise ValueError(
+                    f"worker package field {field!r} must be {expected_type.__name__}"
+                )
+        for field in (
+            "disclosed_assets",
+            "method_context_assets",
+        ):
+            if not all(isinstance(item, dict) for item in d[field]):
+                raise ValueError(f"worker package field {field!r} must contain objects")
+        for field in ("tool_scope", "capability_requirements"):
+            value = d.get(field, [])
+            if not isinstance(value, list) or not all(
+                isinstance(item, str) for item in value
+            ):
+                raise ValueError(f"worker package field {field!r} must contain strings")
+        claim_epoch = d.get("claim_epoch", 0)
+        if not isinstance(claim_epoch, int) or isinstance(claim_epoch, bool):
+            raise ValueError("worker package field 'claim_epoch' must be int")
         return cls(
             contract_id=d["contract_id"],
             contract=d["contract"],
@@ -144,7 +177,7 @@ class WorkerPackage:
             protocol_version=version,
             package_id=d.get("package_id", ""),
             claim_id=d.get("claim_id", ""),
-            claim_epoch=int(d.get("claim_epoch", 0)),
+            claim_epoch=claim_epoch,
             lease_until=d.get("lease_until", ""),
             capability_requirements=tuple(d.get("capability_requirements", ())),
             worker_profile_id=d.get("worker_profile_id", ""),

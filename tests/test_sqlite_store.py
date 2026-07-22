@@ -725,6 +725,35 @@ def test_claim_contract_rejects_reclaim_after_expired_claim(store):
     assert claim is None
 
 
+def test_claim_contract_does_not_mask_operational_schema_errors(store):
+    with store._conn:
+        store._conn.execute("DROP TABLE worker_claims")
+
+    with pytest.raises(sqlite3.OperationalError, match="no such table"):
+        store.claim_contract("c1", "worker")
+
+
+def test_sqlite_reverse_lineage_matches_other_trace_stores(store):
+    direct = create_entry(
+        "c-direct", "projection", relation_target="asset:target", sequence=0
+    )
+    encoded = create_entry(
+        "c-encoded",
+        "projection",
+        accepted_fragments=['{"relation_target":"asset:target"}'],
+        sequence=1,
+    )
+    store.append(direct)
+    store.append(encoded)
+
+    assert {
+        entry.contract_id for entry in store.get_reverse_lineage("asset:target")
+    } == {
+        "c-direct",
+        "c-encoded",
+    }
+
+
 def test_trace_usage_metadata_round_trips(store):
     """SQLite trace persistence keeps LLM token/cost metadata."""
     entry = create_entry(

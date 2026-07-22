@@ -36,6 +36,26 @@ def test_contract_terminal_is_single_assignment_and_exact_replay_is_idempotent(k
         store.close()
 
 
+@pytest.mark.parametrize("kind", ["memory", "sqlite"])
+def test_non_terminal_insert_does_not_scan_terminal_history(kind, monkeypatch):
+    store = MemoryStore() if kind == "memory" else SQLiteStore(":memory:")
+    original_scan = store.scan_runtime_records
+
+    def guarded_scan(*, after_revision=0, record_type=None):
+        if record_type == "lifecycle.terminal":
+            raise AssertionError("non-terminal append scanned terminal history")
+        return original_scan(after_revision=after_revision, record_type=record_type)
+
+    monkeypatch.setattr(store, "scan_runtime_records", guarded_scan)
+    record = create_runtime_record("test.observed", {"value": "ok"})
+
+    assert store.append_runtime_record(record) == 1
+    assert store.append_runtime_record(record) == 1
+
+    if isinstance(store, SQLiteStore):
+        store.close()
+
+
 def test_sqlite_terminal_uniqueness_arbitrates_competing_replicas(tmp_path):
     path = str(tmp_path / "terminal.db")
     initial = SQLiteStore(path)

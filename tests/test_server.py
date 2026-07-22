@@ -49,6 +49,25 @@ from aigineering.protocol.envelope import CandidateEnvelope
 from aigineering.server.app import app
 
 
+def test_request_store_dependency_closes_connection(monkeypatch):
+    class TrackingStore:
+        closed = False
+
+        def get_all_contracts(self):
+            return []
+
+        def close(self):
+            self.closed = True
+
+    store = TrackingStore()
+    monkeypatch.setattr("aigineering.server.app._persistent_store", lambda: store)
+
+    response = TestClient(app).get("/contracts")
+
+    assert response.status_code == 200
+    assert store.closed is True
+
+
 def _signed_client():
     signer = Ed25519Signer()
     genesis = create_genesis_manifest(
