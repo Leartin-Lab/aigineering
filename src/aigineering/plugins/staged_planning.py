@@ -9,7 +9,11 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 
-from aigineering.core.ids import canonical_json, compute_content_hash, hash_contract_v3
+from aigineering.core.ids import (
+    canonical_json,
+    compute_content_hash,
+    hash_contract_current,
+)
 from aigineering.plugins.base import PluginProposal, PluginRequest
 from aigineering.protocol.effect_builders import contract_declaration_effect
 from aigineering.protocol.immutability import deep_thaw
@@ -184,6 +188,7 @@ def _stage_contract(
             else None
         ),
         "acceptance_policy": acceptance_policy,
+        "context_asset_ids": parent.context_asset_ids,
     }
-    contract_id = hash_contract_v3(**fields)
+    contract_id = hash_contract_current(**fields)
     return Contract(id=contract_id, **fields)

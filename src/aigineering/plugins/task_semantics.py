@@ -14,7 +14,7 @@ from aigineering.core.ids import (
     CONTRACT_SELF_REFERENCE,
     hash_asset_content,
     hash_asset_definition,
-    hash_contract_v3,
+    hash_contract_current,
 )
 from aigineering.core.plan_scaffold import (
     _scaffold_tasks_to_raw_dicts,
@@ -105,7 +105,7 @@ def method_contract(parent: Contract, action: WorkerAction) -> Contract:
             context_name,
             f"{call_prefix}{CONTRACT_SELF_REFERENCE}",
         )
-    contract_id = hash_contract_v3(
+    contract_id = hash_contract_current(
         name=contract_name,
         description=description,
         inputs=inputs,
@@ -124,6 +124,7 @@ def method_contract(parent: Contract, action: WorkerAction) -> Contract:
             if parent.sensitive_input_policy is not None
             else None
         ),
+        context_asset_ids=parent.context_asset_ids,
     )
 
     # Expand minting_authority for method-type-specific system assets.
@@ -147,6 +148,7 @@ def method_contract(parent: Contract, action: WorkerAction) -> Contract:
         budget=1,
         tool_scope=tool_scope,
         labels=labels,
+        context_asset_ids=parent.context_asset_ids,
         worker_capabilities=worker_capabilities,
         worker_pools=parent.worker_pools,
         origin="system",
@@ -169,7 +171,7 @@ def retry_contract(parent: Contract) -> Contract:
         if parent.sensitive_input_policy is not None
         else None
     )
-    contract_id = hash_contract_v3(
+    contract_id = hash_contract_current(
         name=name,
         description=parent.description,
         inputs=parent.inputs,
@@ -184,6 +186,7 @@ def retry_contract(parent: Contract) -> Contract:
         parent_id=parent.parent_id,
         minting_authority=authority,
         sensitive_input_policy=policy,
+        context_asset_ids=parent.context_asset_ids,
     )
     return Contract(
         id=contract_id,
@@ -196,6 +199,7 @@ def retry_contract(parent: Contract) -> Contract:
         budget=parent.budget,
         tool_scope=parent.tool_scope,
         labels=parent.labels,
+        context_asset_ids=parent.context_asset_ids,
         worker_capabilities=parent.worker_capabilities,
         worker_pools=parent.worker_pools,
         origin="retry",
@@ -222,7 +226,7 @@ def continuation_contract(
         if parent.sensitive_input_policy is not None
         else None
     )
-    contract_id = hash_contract_v3(
+    contract_id = hash_contract_current(
         name=name,
         description=parent.description,
         inputs=[],
@@ -237,6 +241,7 @@ def continuation_contract(
         parent_id=parent.id,
         minting_authority=authority,
         sensitive_input_policy=policy,
+        context_asset_ids=parent.context_asset_ids,
     )
     return Contract(
         id=contract_id,
@@ -248,6 +253,7 @@ def continuation_contract(
         budget=effective_budget,
         tool_scope=parent.tool_scope,
         labels=parent.labels,
+        context_asset_ids=parent.context_asset_ids,
         worker_capabilities=parent.worker_capabilities,
         worker_pools=parent.worker_pools,
         origin="continuation",
@@ -869,7 +875,10 @@ def _build_plan_contract(
     sensitive_policy = (
         parent_contract.sensitive_input_policy if parent_contract is not None else None
     )
-    identity = hash_contract_v3(
+    context_asset_ids = (
+        parent_contract.context_asset_ids if parent_contract is not None else ()
+    )
+    identity = hash_contract_current(
         name=name,
         description=description,
         inputs=inputs,
@@ -885,6 +894,7 @@ def _build_plan_contract(
         sensitive_input_policy=(
             dict(sensitive_policy) if sensitive_policy is not None else None
         ),
+        context_asset_ids=context_asset_ids,
     )
     return Contract(
         id=identity,
@@ -897,6 +907,7 @@ def _build_plan_contract(
         budget=budget,
         tool_scope=tool_scope,
         labels=labels,
+        context_asset_ids=context_asset_ids,
         worker_capabilities=worker_capabilities,
         worker_pools=worker_pools,
         origin="plan",

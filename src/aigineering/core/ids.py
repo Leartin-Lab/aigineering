@@ -211,6 +211,14 @@ def hash_contract_v4(
     return f"task:v4:{compute_content_hash(canonical_json(values))}"
 
 
+def hash_contract_current(**fields: Any) -> str:
+    """Select v4 only when exact context references are present."""
+    context_asset_ids = fields.pop("context_asset_ids", ())
+    if context_asset_ids:
+        return hash_contract_v4(**fields, context_asset_ids=context_asset_ids)
+    return hash_contract_v3(**fields)
+
+
 def contract_identity_v3(contract) -> str:
     """Recompute a v3 identity from one materialized Contract entity."""
     normalized_authority = [
@@ -249,6 +257,10 @@ def contract_identity_v3(contract) -> str:
 def validate_contract_identity(contract) -> None:
     """Fail closed when a v3 ID does not bind its complete effective entity."""
     if contract.id.startswith("task:v4:"):
+        normalized_authority = [
+            value.replace(contract.id, CONTRACT_SELF_REFERENCE)
+            for value in contract.minting_authority
+        ]
         expected = hash_contract_v4(
             name=contract.name,
             description=contract.description,
@@ -262,7 +274,7 @@ def validate_contract_identity(contract) -> None:
             parent_id=contract.parent_id,
             worker_capabilities=contract.worker_capabilities,
             worker_pools=contract.worker_pools,
-            minting_authority=contract.minting_authority,
+            minting_authority=normalized_authority,
             sensitive_input_policy=contract.sensitive_input_policy,
             acceptance_policy=contract.acceptance_policy,
             context_asset_ids=contract.context_asset_ids,

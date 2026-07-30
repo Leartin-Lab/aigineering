@@ -26,7 +26,7 @@ from aigineering.core.ids import (
     canonical_json,
     compute_content_hash,
     hash_asset_content,
-    hash_contract_v3,
+    hash_contract_current,
 )
 from aigineering.core.output_satisfaction import is_business_output
 from aigineering.core.provenance import verify_asset_seal
@@ -360,7 +360,7 @@ def _inner_contract(outer: Contract) -> Contract:
         if outer.sensitive_input_policy is not None
         else None
     )
-    identity = hash_contract_v3(
+    identity = hash_contract_current(
         name=outer.name,
         description=outer.description,
         inputs=list(outer.inputs),
@@ -373,6 +373,7 @@ def _inner_contract(outer: Contract) -> Contract:
         worker_pools=[],
         origin="engine_worker",
         sensitive_input_policy=policy,
+        context_asset_ids=outer.context_asset_ids,
     )
     return Contract(
         id=identity,
@@ -384,6 +385,7 @@ def _inner_contract(outer: Contract) -> Contract:
         budget=outer.budget,
         tool_scope=outer.tool_scope,
         labels=outer.labels,
+        context_asset_ids=outer.context_asset_ids,
         origin="engine_worker",
         sensitive_input_policy=outer.sensitive_input_policy,
     )

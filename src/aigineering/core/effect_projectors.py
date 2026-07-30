@@ -89,11 +89,8 @@ def project_contract_declaration(
         if missing:
             raise ValueError("v4 Contract references unknown context Assets")
         bound_names = {assets[asset_id].name for asset_id in contract.context_asset_ids}
-        required_labels = {
-            label for label in contract.labels if not label.startswith("plugin:")
-        }
-        if not required_labels <= bound_names:
-            raise ValueError("v4 Contract labels lack exact context Asset bindings")
+        if not bound_names <= set(contract.labels):
+            raise ValueError("v4 Contract context Asset bindings do not match labels")
     record = create_runtime_record(
         "contract.declared",
         {"candidate_id": candidate.id, "contract": contract_to_dict(contract)},

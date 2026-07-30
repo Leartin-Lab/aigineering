@@ -11,7 +11,7 @@ import click
 
 from aigineering.cli._common import _output_json, _persistent_store
 from aigineering.cli._candidate import commit_local_effect, require_accepted
-from aigineering.core.ids import hash_contract_v3
+from aigineering.core.ids import hash_contract_current
 from aigineering.protocol.effect_builders import (
     contract_cancellation_effect,
     contract_declaration_effect,
@@ -99,7 +99,7 @@ def _recreate_contracts(store, contract_ids: list[str]) -> list[dict[str, str]]:
             else None
         )
         new_contract = Contract(
-            id=hash_contract_v3(
+            id=hash_contract_current(
                 name=original.name,
                 description=original.description,
                 inputs=list(original.inputs),
@@ -114,6 +114,7 @@ def _recreate_contracts(store, contract_ids: list[str]) -> list[dict[str, str]]:
                 parent_id=original.id,
                 minting_authority=authority,
                 sensitive_input_policy=policy,
+                context_asset_ids=original.context_asset_ids,
             ),
             parent_id=original.id,
             name=original.name,
@@ -124,6 +125,7 @@ def _recreate_contracts(store, contract_ids: list[str]) -> list[dict[str, str]]:
             budget=original.budget,
             tool_scope=original.tool_scope,
             labels=original.labels,
+            context_asset_ids=original.context_asset_ids,
             worker_capabilities=original.worker_capabilities,
             worker_pools=original.worker_pools,
             origin="recovery",

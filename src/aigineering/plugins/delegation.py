@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from aigineering.core.ids import compute_content_hash, hash_contract_v3
+from aigineering.core.ids import compute_content_hash, hash_contract_current
 from aigineering.plugins.task_semantics import method_contract
 from aigineering.protocol.actions import WorkerAction
 from aigineering.protocol.effect_builders import contract_declaration_effect
@@ -67,8 +67,9 @@ def _claimed_method_contract(parent: Contract, action: WorkerAction) -> Contract
             if parent.sensitive_input_policy is not None
             else None
         ),
+        "context_asset_ids": parent.context_asset_ids,
     }
-    return Contract(id=hash_contract_v3(**fields), **fields)
+    return Contract(id=hash_contract_current(**fields), **fields)
 
 
 def _claimed_retry_contract(parent: Contract, allowance: int) -> Contract:
@@ -101,5 +102,6 @@ def _claimed_retry_contract(parent: Contract, allowance: int) -> Contract:
         "minting_authority": authority,
         "sensitive_input_policy": policy,
         "acceptance_policy": acceptance,
+        "context_asset_ids": parent.context_asset_ids,
     }
-    return Contract(id=hash_contract_v3(**fields), **fields)
+    return Contract(id=hash_contract_current(**fields), **fields)
