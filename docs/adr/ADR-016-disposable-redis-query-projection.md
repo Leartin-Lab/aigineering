@@ -1,6 +1,6 @@
 # ADR-016: Disposable Redis query projection
 
-Status: Proposed
+Status: Accepted
 Date: 2026-07-31
 Related: ADR-003, ADR-010, ADR-011, ADR-013
 
@@ -42,8 +42,9 @@ extra. A language implementing the protocol does not need Redis.
 - SQLite query paths required for rebuild and fallback remain supported;
 - this decision does not provide distributed execution or consensus.
 
-## Acceptance
+## Evidence
 
-The decision becomes Accepted only when an empty Redis instance can be rebuilt
-from SQLite to an equal semantic query digest and stale/unavailable Redis tests
-prove protocol decisions are unchanged.
+- `tests/test_redis_query_projection.py`
+- `tests/test_cli_cache.py`
+- `tests/architecture/test_governance.py`
+- `reports/051-redis-query-projection-2026-07-31.md`

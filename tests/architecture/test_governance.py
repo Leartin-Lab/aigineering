@@ -81,12 +81,12 @@ def test_next_changes_are_ordered_without_changing_current_design_truth():
     design = (ROOT / "DESIGN.md").read_text(encoding="utf-8")
 
     assert roadmap.index("v0.5.1") < roadmap.index("v0.5.2")
-    assert "Status: In progress" in redis_change
-    assert "implementation begins after Change 003 closes" in identity_change
-    assert "Status: Proposed" in redis_adr
+    assert "Status: Implemented and verified" in redis_change
+    assert "Change 003 is closed" in identity_change
+    assert "Status: Accepted" in redis_adr
     assert "Status: Proposed" in identity_adr
-    assert "Status: implemented truth for v0.5.0" in design
-    assert "Redis query projection" not in design
+    assert "Status: implemented truth for v0.5.1" in design
+    assert "Redis projection" in design
 
 
 def test_redis_adapter_cannot_enter_correctness_owners():

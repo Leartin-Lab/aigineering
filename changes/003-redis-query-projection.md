@@ -1,6 +1,6 @@
 # Change 003: Redis query projection
 
-Status: In progress
+Status: Implemented and verified
 Target: 0.5.1
 Public decision: `docs/adr/ADR-016-disposable-redis-query-projection.md`
 Depends on: v0.5.0 Candidate commitment and runtime reconstruction
@@ -16,7 +16,7 @@ Adding a cache naively would create a second source of truth, a dual-write
 transaction, or a hidden task-state owner. Each would break restart and
 active-active guarantees.
 
-## Intended change
+## Implemented change
 
 Add an optional Redis-backed query projection with these boundaries:
 
@@ -32,20 +32,17 @@ Add an optional Redis-backed query projection with these boundaries:
 - The first slice accelerates read-only entity, relationship, and task-view
   queries. Correctness-sensitive Store transactions continue to query SQLite.
 
-## Ordered implementation
+The implementation provides:
 
-1. Define a small `QueryProjection` interface and one semantic snapshot format.
-2. Add deterministic SQLite export and semantic-digest tests.
-3. Add the optional Redis adapter and configuration without making Redis a base
-   dependency.
-4. Rebuild an empty Redis instance from SQLite and verify equal results.
-5. Add incremental catch-up from RuntimeRecords and a versioned watermark.
-6. Route CLI/server read views through the projection while preserving
-   authoritative fallback.
-7. Exercise Redis loss, stale generation, partial refresh, restart, and two
-   reader processes.
-8. Update public use instructions and release evidence only after the adapter
-   passes all gates.
+- a small Store-independent query snapshot and fallback read port;
+- an optional redis-py adapter under the `redis` extra;
+- domain/schema-scoped generations and atomic activation;
+- deterministic full rebuild from SQLite;
+- idempotent RuntimeRecord catch-up with a monotonic Redis watermark;
+- revision-bound JSON task-view memoization;
+- Asset, Contract, capability, task, CLI, and HTTP read integration;
+- `aig cache status` and `aig cache rebuild` observability;
+- visible SQLite fallback when Redis is unavailable.
 
 ## Non-goals
 
@@ -65,3 +62,9 @@ Add an optional Redis-backed query projection with these boundaries:
 - MemoryStore and SQLite behavior remain conformant;
 - focused, architecture, restart, concurrency, full-suite, build, and
   installed-artifact checks pass.
+
+All criteria passed. Real integration used redis-py against `redis:alpine` and
+covered flush/rebuild, stopped Redis, stale catch-up, corrupt/partial
+generations, two SQLite connections, concurrent rebuild, process restart, and
+domain isolation. Evidence is recorded in
+`reports/051-redis-query-projection-2026-07-31.md`.

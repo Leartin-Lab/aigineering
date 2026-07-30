@@ -95,6 +95,8 @@ Prefer these commands:
 - `aig run --once --worker <mock|llm> --json`
 - `aig run --task <contract_id> --worker <mock|llm> --json`
 - `aig worker next/submit --json` only when implementing a custom worker loop.
+- `aig cache status/rebuild --json` when the optional Redis read projection is
+  configured.
 
 Avoid these commands for normal agent delegation:
 
@@ -149,3 +151,6 @@ Avoid these commands for normal agent delegation:
   encode exact decimal values as strings.
 - Human-assisted completion still requires a registered human actor key and a
   live claim; do not inject a reviewer decision directly into the Store.
+- Redis is a disposable read projection. Set `AIGINEERING_REDIS_URL` only after
+  installing `aigineering[redis]`; a cache outage must not be interpreted as
+  task or fact loss.

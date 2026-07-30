@@ -2,9 +2,9 @@
 
 ## Current release
 
-Version: **v0.5.0**
+Version: **v0.5.1**
 
-v0.5.0 is the stable single-machine reference release. “Stable” applies to the
+v0.5.1 is the stable single-machine reference release. “Stable” applies to the
 documented local runtime and protocol surface; it is not a claim of external
 security audit or public-network deployment hardening.
 
@@ -23,9 +23,12 @@ Implemented:
 - mock and OpenAI-compatible LLM Workers;
 - optional FastAPI transport;
 - language-neutral signed protocol conformance vectors.
+- optional Redis query projection with revision fencing, rebuild, and SQLite
+  fallback.
 
 Release evidence is recorded in
-`reports/050-post-review-boundary-hardening-2026-07-19.md`.
+`reports/050-post-review-boundary-hardening-2026-07-19.md` and
+`reports/051-redis-query-projection-2026-07-31.md`.
 
 ## Release gates
 
@@ -44,11 +47,8 @@ Every stable release must pass:
 
 ## Planned directions
 
-The next two changes are ordered and independently releasable:
+The next change is:
 
-- **v0.5.1 — Redis query projection:** add an optional disposable Redis read
-  projection. SQLite remains the sole source of truth and transaction arbiter;
-  deleting Redis must be recoverable by deterministic rebuild.
 - **v0.5.2 — signed definition/content graph:** separate pure content identity
   from signed definition identity and represent their association explicitly
   as a many-to-many relation. Semantic matching may propose relations but may

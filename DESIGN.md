@@ -1,8 +1,8 @@
 # Aigineering Design
 
-Status: implemented truth for v0.5.0
+Status: implemented truth for v0.5.1
 
-This document describes the code shipped in the v0.5.0 reference release.
+This document describes the code shipped in the v0.5.1 reference release.
 Future designs do not belong here until their implementation, tests, migration,
 and release evidence are complete.
 
@@ -278,6 +278,28 @@ outer claim cannot submit a late result.
 CLI and optional HTTP endpoints are adapters over the same Candidate and Worker
 protocols. They do not own alternate mutation semantics.
 
+SQLite remains the authoritative query fallback. When
+`AIGINEERING_REDIS_URL` is configured, read-only Asset, Contract, capability,
+and task-status views may use a Redis projection:
+
+```text
+SQLite RuntimeRecords
+→ domain/schema-scoped Redis generation
+→ monotonic authoritative revision watermark
+→ read-only CLI/API view
+```
+
+A complete generation is published atomically. Later immutable Asset and
+Contract records catch up idempotently, and the watermark advances
+monotonically in the same Redis transaction. A current read compares the Redis
+watermark with SQLite before using the projection. Missing, stale, partial, or
+unavailable cache state rebuilds or falls back to SQLite.
+
+Redis is not a Store implementation. Commitment, authority, allowance,
+acceptance, claims, fencing, idempotency, and terminal decisions do not import
+or query the Redis adapter. Cache namespaces bind the Genesis domain and
+projection schema, so independent Stores cannot share a generation.
+
 The CLI provides domain initialization, task and Asset publication, Worker
 execution, trace, audit, replay, recovery, and status views. The optional
 FastAPI adapter creates one Store connection per request and closes it
@@ -321,7 +343,7 @@ terminal, or replay owner.
 
 ## Release limits
 
-v0.5.0 is a stable local reference release, not:
+v0.5.1 is a stable local reference release, not:
 
 - a cross-machine distributed Store;
 - a consensus implementation;

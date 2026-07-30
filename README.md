@@ -54,9 +54,9 @@ aig run "build a report with citations" \
   --base-url https://provider.example/v1
 ```
 
-## v0.5.0 scope
+## v0.5.1 scope
 
-v0.5.0 is the stable single-machine reference release. It provides:
+v0.5.1 is the stable single-machine reference release. It provides:
 
 - actor-signed Candidate publication;
 - one Candidate commitment boundary for CLI, Worker, Plugin, and HTTP surfaces;
@@ -71,14 +71,30 @@ v0.5.0 is the stable single-machine reference release. It provides:
 - same-machine active-active Worker arbitration over one SQLite domain;
 - mock and OpenAI-compatible LLM Workers;
 - optional FastAPI integration through the `api` extra.
+- an optional Redis read projection that is disposable and reconstructable from
+  SQLite.
 
 The release has deterministic boundary, reconstruction, concurrency, artifact,
 and real-LLM acceptance evidence. See
 [`reports/050-post-review-boundary-hardening-2026-07-19.md`](reports/050-post-review-boundary-hardening-2026-07-19.md).
 
+For read-heavy CLI or API use, install and configure the optional projection:
+
+```bash
+pip install "aigineering[redis]"
+export AIGINEERING_REDIS_URL="redis://127.0.0.1:6379/0"
+aig cache status --json
+aig cache rebuild --json
+```
+
+Redis never stores authoritative Candidates, facts, claims, allowance,
+acceptance, or terminal state. If it is unavailable, supported read views fall
+back to SQLite. Release evidence for this adapter is recorded in
+[`reports/051-redis-query-projection-2026-07-31.md`](reports/051-redis-query-projection-2026-07-31.md).
+
 ## Non-goals
 
-v0.5.0 does not claim:
+v0.5.1 does not claim:
 
 - cross-machine consensus or distributed Store semantics;
 - public-network deployment hardening;

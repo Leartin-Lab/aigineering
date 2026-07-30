@@ -1,6 +1,6 @@
 # Change 004: Signed definition/content graph
 
-Status: Proposed; implementation begins after Change 003 closes
+Status: Proposed; Change 003 is closed
 Target: 0.5.2
 Public decision: `docs/adr/ADR-017-signed-definition-content-graph.md`
 Depends on: v0.5.1 disposable query projection
