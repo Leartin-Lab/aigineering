@@ -406,8 +406,9 @@ def test_real_redis_flush_rebuild_and_stale_catchup(temp_sqlite_store):
         first.id,
         second.id,
     }
-    assert client.get(projection.active_key) == initial.digest
-    generation = projection._generation_root(initial.digest)
+    active = client.get(projection.active_key)
+    assert active and active != initial.digest
+    generation = projection._generation_root(active)
     meta = client.hgetall(f"{generation}:meta")
     assert int(meta["revision"]) == temp_sqlite_store.get_runtime_revision()
 

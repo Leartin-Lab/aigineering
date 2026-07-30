@@ -63,8 +63,8 @@ def _definition(signer, actor_id: str = "human:owner", **overrides):
 
 
 def test_content_identity_uses_normalized_content_only() -> None:
-    first = create_content_object("café", content_type="text/plain")
-    second = create_content_object("café", content_type="text/markdown")
+    first = create_content_object("café")
+    second = create_content_object("café")
     assert first.id == second.id
     assert first.content == second.content == "café"
     assert content_object_from_dict(content_object_to_dict(first)) == first
@@ -287,9 +287,7 @@ def test_unknown_or_unsigned_graph_edges_are_rejected(temp_sqlite_store) -> None
     assert not temp_sqlite_store.scan_runtime_records(
         record_type="asset.definition-content.asserted"
     )
-    rejected = temp_sqlite_store.scan_runtime_records(
-        record_type="candidate.rejected"
-    )
+    rejected = temp_sqlite_store.scan_runtime_records(record_type="candidate.rejected")
     assert len(rejected) == 1
     assert "unknown signed definition" in rejected[0][1].payload["reason"]
 

@@ -23,7 +23,6 @@
   "content": {
     "value": {
       "content": "café",
-      "content_type": "text/markdown",
       "id": "content:v1:850f7dc43910ff890f8879c0ed26fe697c93a067ad93a7d50f466a7028a9bf4e",
       "schema_version": 1
     }

@@ -25,7 +25,6 @@ class ContentObject:
 
     id: str
     content: str
-    content_type: str = "text"
     schema_version: int = ASSET_GRAPH_SCHEMA_VERSION
 
     def __post_init__(self) -> None:
@@ -33,19 +32,16 @@ class ContentObject:
             raise ValueError(
                 f"unsupported ContentObject schema_version {self.schema_version}"
             )
-        if not self.content_type:
-            raise ValueError("ContentObject.content_type must not be empty")
 
 
 def content_object_id(content: str) -> str:
     return f"content:v1:{compute_content_hash(content)}"
 
 
-def create_content_object(content: str, *, content_type: str = "text") -> ContentObject:
+def create_content_object(content: str) -> ContentObject:
     return ContentObject(
         id=content_object_id(content),
         content=unicodedata.normalize("NFC", content),
-        content_type=content_type,
     )
 
 
@@ -314,7 +310,6 @@ def verify_definition_content_assertion(
 def content_object_to_dict(value: ContentObject) -> dict[str, Any]:
     return {
         "content": value.content,
-        "content_type": value.content_type,
         "id": value.id,
         "schema_version": value.schema_version,
     }
@@ -324,7 +319,6 @@ def content_object_from_dict(value: Mapping[str, Any]) -> ContentObject:
     result = ContentObject(
         id=str(value.get("id", "")),
         content=str(value.get("content", "")),
-        content_type=str(value.get("content_type", "")),
         schema_version=value.get("schema_version", ASSET_GRAPH_SCHEMA_VERSION),
     )
     validate_content_object(result)

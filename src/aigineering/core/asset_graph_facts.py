@@ -98,7 +98,6 @@ def legacy_asset_graph_record(
     """Describe one historical Asset without pretending it had a v1 signature."""
     content = {
         "content": asset.content,
-        "content_type": asset.content_type,
         "id": f"content:v1:{compute_content_hash(asset.content)}",
         "schema_version": 1,
     }
@@ -194,7 +193,7 @@ def project_graph_assets(store) -> tuple[Asset, ...]:
                 id="asset:v1:" + compute_content_hash(str(assertion["id"])),
                 name=str(definition["name"]),
                 content=str(content["content"]),
-                content_type=str(content["content_type"]),
+                content_type=str(definition["content_type"]),
                 created_by=str(definition["source_uri"]),
                 origin="definition-content-assertion",
                 trust_tier="observed",

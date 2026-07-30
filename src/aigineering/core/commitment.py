@@ -73,6 +73,9 @@ def reduce_candidate(
     """Authenticate and purely decide one Candidate's complete effect batch."""
     validate_genesis_manifest(genesis)
     effective_actor_keys = actor_keys or genesis.root_keys
+    effective_context = projection_context or EffectProjectionContext()
+    if not effective_context.actor_keys:
+        effective_context = replace(effective_context, actor_keys=effective_actor_keys)
     try:
         receipt = candidate_received_record(
             candidate,
@@ -87,7 +90,7 @@ def reduce_candidate(
             candidate,
             receipt.id,
             _actor_capabilities(candidate, effective_actor_keys),
-            projection_context,
+            effective_context,
         )
     except (TypeError, ValueError) as exc:
         return candidate_rejection_decision(candidate, receipt, str(exc))

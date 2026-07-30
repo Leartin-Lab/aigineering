@@ -21,7 +21,7 @@ def graph_contents(as_json: bool) -> None:
         _output_json(values)
         return
     for value in values:
-        click.echo(f"{value['id']}  {value.get('content_type', '')}")
+        click.echo(str(value["id"]))
 
 
 @graph_group.command("definitions")
