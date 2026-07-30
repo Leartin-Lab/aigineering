@@ -64,6 +64,31 @@ def test_public_sources_do_not_reference_private_workspaces():
                 )
 
 
+def test_next_changes_are_ordered_without_changing_current_design_truth():
+    roadmap = (ROOT / "ROADMAP.md").read_text(encoding="utf-8")
+    redis_change = (ROOT / "changes/003-redis-query-projection.md").read_text(
+        encoding="utf-8"
+    )
+    identity_change = (
+        ROOT / "changes/004-signed-definition-content-graph.md"
+    ).read_text(encoding="utf-8")
+    redis_adr = (
+        ROOT / "docs/adr/ADR-016-disposable-redis-query-projection.md"
+    ).read_text(encoding="utf-8")
+    identity_adr = (
+        ROOT / "docs/adr/ADR-017-signed-definition-content-graph.md"
+    ).read_text(encoding="utf-8")
+    design = (ROOT / "DESIGN.md").read_text(encoding="utf-8")
+
+    assert roadmap.index("v0.5.1") < roadmap.index("v0.5.2")
+    assert "Status: In progress" in redis_change
+    assert "implementation begins after Change 003 closes" in identity_change
+    assert "Status: Proposed" in redis_adr
+    assert "Status: Proposed" in identity_adr
+    assert "Status: implemented truth for v0.5.0" in design
+    assert "Redis query projection" not in design
+
+
 def test_legacy_runtime_files_stay_out_of_release_artifacts():
     project = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
 

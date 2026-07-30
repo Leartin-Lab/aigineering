@@ -44,17 +44,24 @@ Every stable release must pass:
 
 ## Planned directions
 
-Future releases may extend the reference implementation in separately reviewed
-changes. Work is not part of the supported release until its design, migration,
-tests, reconstruction proof, and public evidence are complete.
+The next two changes are ordered and independently releasable:
 
-Candidate directions include:
+- **v0.5.1 — Redis query projection:** add an optional disposable Redis read
+  projection. SQLite remains the sole source of truth and transaction arbiter;
+  deleting Redis must be recoverable by deterministic rebuild.
+- **v0.5.2 — signed definition/content graph:** separate pure content identity
+  from signed definition identity and represent their association explicitly
+  as a many-to-many relation. Semantic matching may propose relations but may
+  not become authority by itself.
 
-- replace repeated query scans with disposable read projections;
-- richer Asset definition, provenance, and semantic indexing;
+Later candidate directions include:
+
 - cross-machine Store and Worker discovery;
 - deployment security profiles;
 - reproducible productivity and quality benchmarks.
+
+Work is not part of the supported release until its design, migration, tests,
+reconstruction proof, and public evidence are complete.
 
 ## Non-goals
 
