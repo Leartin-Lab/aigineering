@@ -64,7 +64,7 @@ def test_public_sources_do_not_reference_private_workspaces():
                 )
 
 
-def test_next_changes_are_ordered_without_changing_current_design_truth():
+def test_released_changes_are_ordered_and_current_design_is_v052():
     roadmap = (ROOT / "ROADMAP.md").read_text(encoding="utf-8")
     redis_change = (ROOT / "changes/003-redis-query-projection.md").read_text(
         encoding="utf-8"
@@ -80,13 +80,15 @@ def test_next_changes_are_ordered_without_changing_current_design_truth():
     ).read_text(encoding="utf-8")
     design = (ROOT / "DESIGN.md").read_text(encoding="utf-8")
 
-    assert roadmap.index("v0.5.1") < roadmap.index("v0.5.2")
+    assert roadmap.index("v0.5.2") < roadmap.index("Future candidate directions")
     assert "Status: Implemented and verified" in redis_change
     assert "Change 003 is closed" in identity_change
     assert "Status: Accepted" in redis_adr
-    assert "Status: Proposed" in identity_adr
-    assert "Status: implemented truth for v0.5.1" in design
+    assert "Status: Implemented and verified" in identity_change
+    assert "Status: Accepted" in identity_adr
+    assert "Status: implemented truth for v0.5.2" in design
     assert "Redis projection" in design
+    assert "## Asset identity graph" in design
 
 
 def test_redis_adapter_cannot_enter_correctness_owners():

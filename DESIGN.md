@@ -1,8 +1,8 @@
 # Aigineering Design
 
-Status: implemented truth for v0.5.1
+Status: implemented truth for v0.5.2
 
-This document describes the code shipped in the v0.5.1 reference release.
+This document describes the code shipped in the v0.5.2 reference release.
 Future designs do not belong here until their implementation, tests, migration,
 and release evidence are complete.
 
@@ -70,11 +70,38 @@ Signed JSON uses a language-neutral canonical subset:
 Contract identity binds every field that changes execution authority, including
 parent, inputs, outputs, activation, allowance declaration, tools, labels,
 Worker requirements, origin, minting authority, sensitive-input policy, and
-acceptance policy.
+acceptance policy. Current v4 Contracts also bind the exact Asset IDs resolved
+from label syntax at construction time. Replay and recursive task publication
+reuse those IDs instead of consulting a changed label catalog.
 
 The public conformance vectors in `conformance/v0.5.0/` cover canonical bytes,
 Candidate identity and signature, Genesis, Contract identity, effects,
-attestation, and allowance.
+attestation, and allowance. The vectors in `conformance/v0.5.2/` cover content
+identity, signed definitions, and signed definition-content assertions.
+
+## Asset identity graph
+
+Content identity, definition identity, and their association are separate:
+
+- a content object hashes only NFC-normalized content;
+- a signed definition binds its name, media type, description, source
+  semantics, domain, actor key, and Ed25519 signature;
+- a signed assertion links one definition to one content object and carries
+  relation-specific evidence.
+
+The association is many-to-many. The same content may satisfy independently
+authorized definitions, and one definition may have multiple content versions.
+Neither case overwrites history or transfers authority between signers.
+
+The three graph fact types enter through ordinary typed Candidate effects.
+Endpoint existence, domain binding, actor keys, and signatures are validated
+before commitment. Accepted assertions project to compatibility Asset views;
+legacy Assets retain their IDs and receive explicit schema-0 migration records
+without being presented as newly signed facts.
+
+Semantic matchers are advisory adapters. They may publish a typed, signed
+relation Candidate with model, version, threshold, score, and evidence, but
+similarity never changes an identity or bypasses commitment.
 
 ## Candidates and effects
 
@@ -280,7 +307,7 @@ protocols. They do not own alternate mutation semantics.
 
 SQLite remains the authoritative query fallback. When
 `AIGINEERING_REDIS_URL` is configured, read-only Asset, Contract, capability,
-and task-status views may use a Redis projection:
+task-status, and asset-graph views may use a Redis projection:
 
 ```text
 SQLite RuntimeRecords
@@ -292,8 +319,9 @@ SQLite RuntimeRecords
 A complete generation is published atomically. Later immutable Asset and
 Contract records catch up idempotently, and the watermark advances
 monotonically in the same Redis transaction. A current read compares the Redis
-watermark with SQLite before using the projection. Missing, stale, partial, or
-unavailable cache state rebuilds or falls back to SQLite.
+watermark with SQLite before using the projection. Missing, stale, partial,
+graph-incompatible, or unavailable cache state rebuilds or falls back to
+SQLite.
 
 Redis is not a Store implementation. Commitment, authority, allowance,
 acceptance, claims, fencing, idempotency, and terminal decisions do not import
@@ -343,7 +371,7 @@ terminal, or replay owner.
 
 ## Release limits
 
-v0.5.1 is a stable local reference release, not:
+v0.5.2 is a stable local reference release, not:
 
 - a cross-machine distributed Store;
 - a consensus implementation;

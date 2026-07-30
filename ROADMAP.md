@@ -2,9 +2,9 @@
 
 ## Current release
 
-Version: **v0.5.1**
+Version: **v0.5.2**
 
-v0.5.1 is the stable single-machine reference release. “Stable” applies to the
+v0.5.2 is the stable single-machine reference release. “Stable” applies to the
 documented local runtime and protocol surface; it is not a claim of external
 security audit or public-network deployment hardening.
 
@@ -22,13 +22,17 @@ Implemented:
 - CLI audit, replay, lineage, recovery, and task projections;
 - mock and OpenAI-compatible LLM Workers;
 - optional FastAPI transport;
-- language-neutral signed protocol conformance vectors.
+- language-neutral signed protocol conformance vectors;
 - optional Redis query projection with revision fencing, rebuild, and SQLite
-  fallback.
+  fallback;
+- a signed many-to-many definition/content graph with legacy reconstruction;
+- exact label-context binding in v4 Contract identity;
+- advisory semantic relation publication through the Candidate boundary.
 
 Release evidence is recorded in
 `reports/050-post-review-boundary-hardening-2026-07-19.md` and
-`reports/051-redis-query-projection-2026-07-31.md`.
+`reports/051-redis-query-projection-2026-07-31.md`, and
+`reports/052-signed-definition-content-graph-2026-07-31.md`.
 
 ## Release gates
 
@@ -45,16 +49,9 @@ Every stable release must pass:
 9. installation-state CLI and database-reopen smoke tests;
 10. bounded real-LLM system, Worker, and end-to-end scenarios.
 
-## Planned directions
+## Candidate directions
 
-The next change is:
-
-- **v0.5.2 — signed definition/content graph:** separate pure content identity
-  from signed definition identity and represent their association explicitly
-  as a many-to-many relation. Semantic matching may propose relations but may
-  not become authority by itself.
-
-Later candidate directions include:
+Future candidate directions include:
 
 - cross-machine Store and Worker discovery;
 - deployment security profiles;

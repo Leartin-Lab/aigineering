@@ -1,6 +1,6 @@
 # ADR-017: Signed definition/content graph
 
-Status: Proposed
+Status: Accepted
 Date: 2026-07-31
 Related: ADR-002, ADR-007, ADR-014, ADR-016
 
@@ -47,6 +47,6 @@ control.
 
 ## Acceptance
 
-This decision remains Proposed until schema migration, canonical vectors,
-legacy reconstruction, explicit-label replay, signature rejection, and
-many-to-many conformance tests pass.
+Accepted in v0.5.2 after schema migration, canonical vectors, legacy
+reconstruction, exact-label replay, signature rejection, many-to-many
+conformance, real Redis rebuild, and release-artifact verification passed.

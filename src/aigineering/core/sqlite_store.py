@@ -262,10 +262,7 @@ class SQLiteStore:
                 f"WHERE {id_column} = ?",
                 (object_id,),
             ).fetchone()
-            if (
-                row is not None
-                and json.loads(row["payload_json"]) == payload
-            ):
+            if row is not None and json.loads(row["payload_json"]) == payload:
                 return
             raise ImmutableRecordConflict(table, object_id) from None
 

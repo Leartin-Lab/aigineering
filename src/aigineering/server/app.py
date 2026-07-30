@@ -32,7 +32,7 @@ from aigineering.protocol.effect_builders import (
 )
 from aigineering.protocol.immutability import deep_thaw
 
-app = FastAPI(title="Aigineering API", version="0.5.0")
+app = FastAPI(title="Aigineering API", version="0.5.2")
 
 
 # ── Request / response models ────────────────────────────────────────────────

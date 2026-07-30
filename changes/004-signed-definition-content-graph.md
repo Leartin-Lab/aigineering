@@ -1,6 +1,6 @@
 # Change 004: Signed definition/content graph
 
-Status: Proposed; Change 003 is closed
+Status: Implemented and verified; Change 003 is closed
 Target: 0.5.2
 Public decision: `docs/adr/ADR-017-signed-definition-content-graph.md`
 Depends on: v0.5.1 disposable query projection
@@ -76,3 +76,24 @@ disclosure or execution during replay.
   catalog changes;
 - language-neutral canonical vectors, full tests, build, and artifact gates
   pass.
+
+## Implementation
+
+- schema-v1 content, signed-definition, and signed-assertion protocol values
+  have canonical wire forms and Ed25519 verification;
+- the three typed effects are projected and committed only as one accepted
+  Candidate decision;
+- SQLite schema v15 materializes the graph from RuntimeRecords and reconstructs
+  legacy Assets through explicit schema-0 migration facts;
+- Redis query projection schema v2 rebuilds graph indexes and compatibility
+  Asset views from SQLite;
+- v4 Contract identity binds construction-time label context to exact Asset
+  IDs and preserves it across recursive task publication;
+- CLI and HTTP read surfaces expose contents, definitions, and assertions;
+- the semantic relation adapter publishes only signed assertion Candidates.
+
+## Closure
+
+All exit criteria are covered by protocol, migration, reconstruction, label
+replay, real Redis, conformance, and release-artifact tests. Acceptance evidence
+is recorded in `reports/052-signed-definition-content-graph-2026-07-31.md`.

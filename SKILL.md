@@ -97,6 +97,8 @@ Prefer these commands:
 - `aig worker next/submit --json` only when implementing a custom worker loop.
 - `aig cache status/rebuild --json` when the optional Redis read projection is
   configured.
+- `aig graph contents/definitions/assertions --json` to inspect the immutable
+  definition-content graph.
 
 Avoid these commands for normal agent delegation:
 
@@ -154,3 +156,8 @@ Avoid these commands for normal agent delegation:
 - Redis is a disposable read projection. Set `AIGINEERING_REDIS_URL` only after
   installing `aigineering[redis]`; a cache outage must not be interpreted as
   task or fact loss.
+- Content IDs hash normalized content only. Definition identity binds source and
+  signer authority; an accepted signed assertion links the two. Do not infer
+  authority from a shared content ID or a semantic similarity score.
+- Current v4 tasks bind label-selected context to exact Asset IDs. Labels remain
+  audit metadata after commitment and must not be resolved again during replay.
