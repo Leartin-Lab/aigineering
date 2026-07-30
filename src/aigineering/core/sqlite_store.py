@@ -265,7 +265,6 @@ class SQLiteStore:
             if (
                 row is not None
                 and json.loads(row["payload_json"]) == payload
-                and row["source_record_id"] == source_record_id
             ):
                 return
             raise ImmutableRecordConflict(table, object_id) from None
@@ -887,6 +886,11 @@ class SQLiteStore:
             for row in self._conn.execute("SELECT * FROM claims ORDER BY id").fetchall()
         ]
         payload = {
+            "asset_graph": {
+                "assertions": self.get_definition_content_assertions(),
+                "contents": self.get_content_objects(),
+                "definitions": self.get_asset_definitions(),
+            },
             "assets": sorted(
                 (asset_to_dict(asset) for asset in self.get_all_assets()),
                 key=lambda row: row["id"],

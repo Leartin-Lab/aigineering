@@ -287,6 +287,11 @@ def test_unknown_or_unsigned_graph_edges_are_rejected(temp_sqlite_store) -> None
     assert not temp_sqlite_store.scan_runtime_records(
         record_type="asset.definition-content.asserted"
     )
+    rejected = temp_sqlite_store.scan_runtime_records(
+        record_type="candidate.rejected"
+    )
+    assert len(rejected) == 1
+    assert "unknown signed definition" in rejected[0][1].payload["reason"]
 
     forged = create_runtime_record(
         "asset.content.published",
@@ -407,5 +412,7 @@ def test_v13_legacy_assets_migrate_without_changing_asset_identity(tmp_path) -> 
         assert definitions[0]["legacy_asset_id"] == legacy.id
         assert assertions[0]["id"].startswith("assertion:legacy:")
         assert assertions[0]["legacy_asset_id"] == legacy.id
+        before = reopened.runtime_materialization_digest()
+        assert reopened.rebuild_runtime_materializations() == before
     finally:
         reopened.close()
