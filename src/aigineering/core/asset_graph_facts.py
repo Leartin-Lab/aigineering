@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from aigineering.core.actor_facts import load_effective_actor_keys
 from aigineering.core.domain import load_genesis
+from aigineering.core.ids import canonical_json, compute_content_hash
 from aigineering.protocol.asset_graph import (
     content_object_from_dict,
     definition_content_assertion_from_dict,
@@ -13,6 +14,9 @@ from aigineering.protocol.asset_graph import (
     verify_signed_definition,
 )
 from aigineering.protocol.runtime_record import RuntimeRecord
+from aigineering.protocol.runtime_record import create_runtime_record
+from aigineering.protocol.immutability import deep_thaw
+from aigineering.protocol.types import Asset
 
 ASSET_GRAPH_RECORD_TYPES = frozenset(
     {
@@ -21,6 +25,8 @@ ASSET_GRAPH_RECORD_TYPES = frozenset(
         "asset.definition-content.asserted",
     }
 )
+
+LEGACY_GRAPH_RECORD_TYPE = "asset.legacy-graph.migrated"
 
 
 def _require_candidate_receipt(record: RuntimeRecord, store) -> None:
@@ -84,3 +90,80 @@ def validate_asset_graph_record(record: RuntimeRecord, store) -> None:
         raise ValueError("assertion fact references an unknown definition")
     if assertion.content_id not in contents:
         raise ValueError("assertion fact references unknown content")
+
+
+def legacy_asset_graph_record(
+    asset: Asset, *, domain_id: str, causal_parent: str = ""
+) -> RuntimeRecord:
+    """Describe one historical Asset without pretending it had a v1 signature."""
+    content = {
+        "content": asset.content,
+        "content_type": asset.content_type,
+        "id": f"content:v1:{compute_content_hash(asset.content)}",
+        "schema_version": 1,
+    }
+    definition_payload = {
+        "content_type": asset.content_type,
+        "created_by": asset.created_by,
+        "domain_id": domain_id,
+        "legacy_asset_id": asset.id,
+        "legacy_definition_hash": asset.definition_hash,
+        "minted_by": asset.minted_by,
+        "name": asset.name,
+        "origin": asset.origin,
+        "provenance_seal": asset.provenance_seal,
+        "signed_by": asset.signed_by,
+        "signer_kind": asset.signer_kind,
+        "source_uri": asset.source_uri,
+        "trust_tier": asset.trust_tier,
+    }
+    definition = {
+        **definition_payload,
+        "id": "definition:legacy:"
+        + compute_content_hash(canonical_json(definition_payload)),
+        "schema_version": 0,
+    }
+    assertion_payload = {
+        "content_id": content["id"],
+        "definition_id": definition["id"],
+        "domain_id": domain_id,
+        "legacy_asset_id": asset.id,
+        "legacy_content_hash": asset.content_hash,
+        "provenance_seal": asset.provenance_seal,
+        "relation_type": "legacy-materialization",
+        "signed_by": asset.signed_by,
+    }
+    assertion = {
+        **assertion_payload,
+        "id": "assertion:legacy:"
+        + compute_content_hash(canonical_json(assertion_payload)),
+        "schema_version": 0,
+    }
+    return create_runtime_record(
+        LEGACY_GRAPH_RECORD_TYPE,
+        {
+            "assertion": assertion,
+            "content": content,
+            "definition": definition,
+        },
+        causal_parents=((causal_parent,) if causal_parent else ()),
+    )
+
+
+def graph_rows_from_record(
+    record: RuntimeRecord,
+) -> tuple[dict | None, dict | None, dict | None]:
+    """Return content, definition, and assertion rows carried by one fact."""
+    if record.record_type == "asset.content.published":
+        return deep_thaw(record.payload["content"]), None, None
+    if record.record_type == "asset.definition.published":
+        return None, deep_thaw(record.payload["definition"]), None
+    if record.record_type == "asset.definition-content.asserted":
+        return None, None, deep_thaw(record.payload["assertion"])
+    if record.record_type == LEGACY_GRAPH_RECORD_TYPE:
+        return (
+            deep_thaw(record.payload["content"]),
+            deep_thaw(record.payload["definition"]),
+            deep_thaw(record.payload["assertion"]),
+        )
+    return None, None, None

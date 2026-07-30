@@ -28,7 +28,10 @@ from aigineering.core.ids import (
     validate_contract_identity,
 )
 from aigineering.core.actor_facts import validate_actor_runtime_record
-from aigineering.core.asset_graph_facts import validate_asset_graph_record
+from aigineering.core.asset_graph_facts import (
+    graph_rows_from_record,
+    validate_asset_graph_record,
+)
 from aigineering.core.lifecycle_facts import validate_terminal_record
 from aigineering.core.provenance import verify_asset_seal
 from aigineering.core.record_conflict import ImmutableRecordConflict
@@ -137,6 +140,7 @@ class SQLiteStore:
             replacement_claim = replacement_claim_from_record(existing)
             if replacement_claim is not None:
                 self._insert_replacement_claim(replacement_claim)
+            self._materialize_asset_graph_record(existing)
             return int(row["revision"])
         validate_actor_runtime_record(record, self)
         validate_asset_graph_record(record, self)
@@ -190,7 +194,119 @@ class SQLiteStore:
             self._upsert_worker_registration(registration)
         if replacement_claim is not None:
             self._insert_replacement_claim(replacement_claim)
+        self._materialize_asset_graph_record(record)
         return int(cursor.lastrowid)
+
+    def _materialize_asset_graph_record(self, record: RuntimeRecord) -> None:
+        content, definition, assertion = graph_rows_from_record(record)
+        if content is not None:
+            self._insert_graph_row(
+                "asset_contents",
+                "content_id",
+                str(content["id"]),
+                content,
+                record.id,
+            )
+        if definition is not None:
+            self._insert_graph_row(
+                "asset_definitions",
+                "definition_id",
+                str(definition["id"]),
+                definition,
+                record.id,
+                actor_id=str(
+                    definition.get("actor_id", definition.get("signed_by", "legacy"))
+                ),
+                key_id=str(definition.get("key_id", "")),
+            )
+        if assertion is not None:
+            self._insert_graph_row(
+                "asset_definition_content_assertions",
+                "assertion_id",
+                str(assertion["id"]),
+                assertion,
+                record.id,
+                definition_id=str(assertion["definition_id"]),
+                content_id=str(assertion["content_id"]),
+                actor_id=str(
+                    assertion.get("actor_id", assertion.get("signed_by", "legacy"))
+                ),
+                key_id=str(assertion.get("key_id", "")),
+            )
+
+    def _insert_graph_row(
+        self,
+        table: str,
+        id_column: str,
+        object_id: str,
+        payload: dict,
+        source_record_id: str,
+        **columns: str,
+    ) -> None:
+        names = (id_column, *columns, "payload_json", "source_record_id")
+        values = (
+            object_id,
+            *columns.values(),
+            json.dumps(payload, sort_keys=True),
+            source_record_id,
+        )
+        placeholders = ", ".join("?" for _ in names)
+        try:
+            self._conn.execute(
+                f"INSERT INTO {table} ({', '.join(names)}) VALUES ({placeholders})",
+                values,
+            )
+        except sqlite3.IntegrityError:
+            row = self._conn.execute(
+                f"SELECT payload_json, source_record_id FROM {table} "
+                f"WHERE {id_column} = ?",
+                (object_id,),
+            ).fetchone()
+            if (
+                row is not None
+                and json.loads(row["payload_json"]) == payload
+                and row["source_record_id"] == source_record_id
+            ):
+                return
+            raise ImmutableRecordConflict(table, object_id) from None
+
+    def get_content_objects(self) -> list[dict]:
+        rows = self._conn.execute(
+            "SELECT payload_json FROM asset_contents ORDER BY content_id"
+        ).fetchall()
+        return [json.loads(row["payload_json"]) for row in rows]
+
+    def get_asset_definitions(self) -> list[dict]:
+        rows = self._conn.execute(
+            "SELECT payload_json FROM asset_definitions ORDER BY definition_id"
+        ).fetchall()
+        return [json.loads(row["payload_json"]) for row in rows]
+
+    def get_definition_content_assertions(
+        self, *, definition_id: str = "", content_id: str = ""
+    ) -> list[dict]:
+        where: list[str] = []
+        values: list[str] = []
+        if definition_id:
+            where.append("definition_id = ?")
+            values.append(definition_id)
+        if content_id:
+            where.append("content_id = ?")
+            values.append(content_id)
+        query = "SELECT payload_json FROM asset_definition_content_assertions"
+        if where:
+            query += " WHERE " + " AND ".join(where)
+        query += " ORDER BY assertion_id"
+        rows = self._conn.execute(query, values).fetchall()
+        return [json.loads(row["payload_json"]) for row in rows]
+
+    def rebuild_asset_graph_projection(self) -> None:
+        with self._conn:
+            self._conn.execute("DELETE FROM asset_definition_content_assertions")
+            self._conn.execute("DELETE FROM asset_definitions")
+            self._conn.execute("DELETE FROM asset_contents")
+            for _, record in self.scan_runtime_records():
+                self._materialize_asset_graph_record(record)
 
     def get_runtime_record(self, record_id: str) -> RuntimeRecord | None:
         row = self._conn.execute(
@@ -893,6 +1009,7 @@ class SQLiteStore:
                 self._insert_replacement_claim(ReplacementClaim(**payload))
         self.rebuild_worker_registration_projection()
         self.rebuild_claim_projection()
+        self.rebuild_asset_graph_projection()
         return self.runtime_materialization_digest()
 
     # ------------------------------------------------------------------

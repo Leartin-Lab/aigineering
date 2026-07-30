@@ -56,6 +56,11 @@ class StoreProtocol(Protocol):
     def get_assets_by_contract(self, contract_id: str) -> list[Asset]: ...
     def get_assets_by_definition(self, def_hash: str) -> list[Asset]: ...
     def get_latest_asset(self, def_hash: str) -> Optional[Asset]: ...
+    def get_content_objects(self) -> list[dict]: ...
+    def get_asset_definitions(self) -> list[dict]: ...
+    def get_definition_content_assertions(
+        self, *, definition_id: str = "", content_id: str = ""
+    ) -> list[dict]: ...
     def add_replacement_claim(self, claim) -> None: ...
     def get_claims_by_definition(self, definition_hash: str) -> list: ...
     def get_claims_for_asset(self, asset_id: str) -> list: ...
@@ -319,6 +324,32 @@ class MemoryStore(_ProjectionIndexMixin):
 
     def get_runtime_revision(self) -> int:
         return self._runtime_revision
+
+    def _graph_payloads(self, position: int) -> list[dict]:
+        from aigineering.core.asset_graph_facts import graph_rows_from_record
+
+        values = {
+            str(payload["id"]): payload
+            for _, record in self.scan_runtime_records()
+            if (payload := graph_rows_from_record(record)[position]) is not None
+        }
+        return [values[key] for key in sorted(values)]
+
+    def get_content_objects(self) -> list[dict]:
+        return self._graph_payloads(0)
+
+    def get_asset_definitions(self) -> list[dict]:
+        return self._graph_payloads(1)
+
+    def get_definition_content_assertions(
+        self, *, definition_id: str = "", content_id: str = ""
+    ) -> list[dict]:
+        return [
+            assertion
+            for assertion in self._graph_payloads(2)
+            if (not definition_id or assertion["definition_id"] == definition_id)
+            and (not content_id or assertion["content_id"] == content_id)
+        ]
 
     def commit_ingress_batch(
         self,

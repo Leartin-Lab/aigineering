@@ -191,6 +191,36 @@ CREATE TABLE IF NOT EXISTS runtime_records (
 )
 """
 
+DDL_CREATE_ASSET_CONTENTS = """
+CREATE TABLE IF NOT EXISTS asset_contents (
+    content_id TEXT PRIMARY KEY,
+    payload_json TEXT NOT NULL,
+    source_record_id TEXT NOT NULL
+)
+"""
+
+DDL_CREATE_ASSET_DEFINITIONS = """
+CREATE TABLE IF NOT EXISTS asset_definitions (
+    definition_id TEXT PRIMARY KEY,
+    actor_id TEXT NOT NULL,
+    key_id TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    source_record_id TEXT NOT NULL
+)
+"""
+
+DDL_CREATE_DEFINITION_CONTENT_ASSERTIONS = """
+CREATE TABLE IF NOT EXISTS asset_definition_content_assertions (
+    assertion_id TEXT PRIMARY KEY,
+    definition_id TEXT NOT NULL,
+    content_id TEXT NOT NULL,
+    actor_id TEXT NOT NULL,
+    key_id TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    source_record_id TEXT NOT NULL
+)
+"""
+
 DDL_INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_assets_definition_hash ON assets(definition_hash)",
     "CREATE INDEX IF NOT EXISTS idx_assets_content_hash ON assets(content_hash)",
@@ -212,6 +242,8 @@ DDL_INDEXES = [
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_runtime_records_one_terminal_per_contract ON runtime_records(json_extract(payload_json, '$.contract_id')) WHERE record_type = 'lifecycle.terminal'",
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_runtime_records_one_actor_key ON runtime_records(json_extract(payload_json, '$.actor_id'), json_extract(payload_json, '$.key_id')) WHERE record_type = 'actor.authorized'",
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_runtime_records_one_actor_revocation ON runtime_records(json_extract(payload_json, '$.actor_id'), json_extract(payload_json, '$.key_id')) WHERE record_type = 'actor.revoked'",
+    "CREATE INDEX IF NOT EXISTS idx_asset_assertions_definition ON asset_definition_content_assertions(definition_id)",
+    "CREATE INDEX IF NOT EXISTS idx_asset_assertions_content ON asset_definition_content_assertions(content_id)",
 ]
 TABLE_DDL = (
     DDL_CREATE_SCHEMA_VERSION,
@@ -228,4 +260,7 @@ TABLE_DDL = (
     DDL_CREATE_RUNTIME_LIFECYCLE,
     DDL_CREATE_WORKER_REGISTRATIONS,
     DDL_CREATE_RUNTIME_RECORDS,
+    DDL_CREATE_ASSET_CONTENTS,
+    DDL_CREATE_ASSET_DEFINITIONS,
+    DDL_CREATE_DEFINITION_CONTENT_ASSERTIONS,
 )

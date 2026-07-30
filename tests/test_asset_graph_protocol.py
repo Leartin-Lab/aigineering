@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import sqlite3
 
 import pytest
 from conftest import candidate_runtime
 
+from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.protocol.candidate import CandidateEffect
 from aigineering.protocol.effect_builders import (
     content_publication_effect,
@@ -12,6 +14,7 @@ from aigineering.protocol.effect_builders import (
     definition_publication_effect,
 )
 from aigineering.protocol.runtime_record import create_runtime_record
+from aigineering.protocol.types import Asset
 from aigineering.core.signing import Ed25519Signer
 from aigineering.protocol.asset_graph import (
     assertion_signing_bytes,
@@ -236,6 +239,18 @@ def test_graph_facts_enter_through_candidate_commitment(temp_sqlite_store) -> No
         )
         == 1
     )
+    assert [item["id"] for item in temp_sqlite_store.get_content_objects()] == [
+        content.id
+    ]
+    assert [item["id"] for item in temp_sqlite_store.get_asset_definitions()] == [
+        definition.id
+    ]
+    assert [
+        item["id"]
+        for item in temp_sqlite_store.get_definition_content_assertions(
+            definition_id=definition.id
+        )
+    ] == [assertion.id]
 
 
 def test_unknown_or_unsigned_graph_edges_are_rejected(temp_sqlite_store) -> None:
@@ -287,3 +302,68 @@ def test_unknown_or_unsigned_graph_edges_are_rejected(temp_sqlite_store) -> None
         idempotency_key="invalid-definition-signature",
     )
     assert not malformed.accepted
+
+
+def test_graph_projection_rebuilds_on_reopen(tmp_path) -> None:
+    db_path = tmp_path / "graph.db"
+    store = SQLiteStore(str(db_path))
+    runtime = candidate_runtime(store)
+    content = create_content_object("rebuild")
+    runtime._publish(content_publication_effect(content))
+    store.close()
+
+    connection = sqlite3.connect(db_path)
+    with connection:
+        connection.execute("DELETE FROM asset_contents")
+    connection.close()
+
+    reopened = SQLiteStore(str(db_path))
+    try:
+        assert [item["id"] for item in reopened.get_content_objects()] == [content.id]
+    finally:
+        reopened.close()
+
+
+def test_v13_legacy_assets_migrate_without_changing_asset_identity(tmp_path) -> None:
+    db_path = tmp_path / "legacy.db"
+    store = SQLiteStore(str(db_path))
+    runtime = candidate_runtime(store)
+    legacy = runtime.accept_asset(
+        Asset(
+            id="ignored",
+            name="legacy-report",
+            content="same bytes",
+            source_uri="file:///legacy",
+        )
+    )
+    store.close()
+
+    connection = sqlite3.connect(db_path)
+    with connection:
+        connection.execute(
+            "DELETE FROM runtime_records "
+            "WHERE record_type = 'asset.legacy-graph.migrated'"
+        )
+        connection.execute("DROP TABLE asset_definition_content_assertions")
+        connection.execute("DROP TABLE asset_definitions")
+        connection.execute("DROP TABLE asset_contents")
+        connection.execute("DELETE FROM schema_version")
+        connection.execute(
+            "INSERT INTO schema_version(version, applied_at) VALUES (13, 'legacy')"
+        )
+    connection.close()
+
+    reopened = SQLiteStore(str(db_path))
+    try:
+        assert reopened.schema_version == 14
+        assert reopened.get_asset(legacy.id) == legacy
+        contents = reopened.get_content_objects()
+        definitions = reopened.get_asset_definitions()
+        assertions = reopened.get_definition_content_assertions()
+        assert contents[0]["id"].startswith("content:v1:")
+        assert definitions[0]["id"].startswith("definition:legacy:")
+        assert definitions[0]["legacy_asset_id"] == legacy.id
+        assert assertions[0]["id"].startswith("assertion:legacy:")
+        assert assertions[0]["legacy_asset_id"] == legacy.id
+    finally:
+        reopened.close()

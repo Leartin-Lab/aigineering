@@ -17,9 +17,13 @@ from aigineering.core.sqlite_schema import (
     DDL_CREATE_SCHEMA_VERSION,
     DDL_CREATE_WORKER_CLAIMS,
     DDL_CREATE_WORKER_REGISTRATIONS,
+    DDL_CREATE_ASSET_CONTENTS,
+    DDL_CREATE_ASSET_DEFINITIONS,
+    DDL_CREATE_DEFINITION_CONTENT_ASSERTIONS,
     DDL_INDEXES,
     TABLE_DDL,
 )
+from aigineering.core.asset_graph_facts import legacy_asset_graph_record
 from aigineering.core.worker_routing import worker_registration_record
 from aigineering.protocol.runtime_record import create_runtime_record
 from aigineering.protocol.wire import (
@@ -28,7 +32,7 @@ from aigineering.protocol.wire import (
     trace_entry_to_dict,
 )
 
-CURRENT_SCHEMA_VERSION = 13
+CURRENT_SCHEMA_VERSION = 14
 
 
 class SQLiteMigrator:
@@ -123,6 +127,9 @@ class SQLiteMigrator:
             if current < 13:
                 self._migrate_to_v13()
                 self._record_schema_version(13)
+            if current < 14:
+                self._migrate_to_v14()
+                self._record_schema_version(14)
 
     def _migrate_to_v2(self) -> None:
         """Add 040 transactional worker state and contract authority metadata."""
@@ -339,6 +346,37 @@ class SQLiteMigrator:
         """Persist Contract-bound output acceptance policy."""
         self._ensure_contract_columns()
 
+    def _migrate_to_v14(self) -> None:
+        """Add rebuildable definition/content graph indexes and legacy facts."""
+        for ddl in (
+            DDL_CREATE_ASSET_CONTENTS,
+            DDL_CREATE_ASSET_DEFINITIONS,
+            DDL_CREATE_DEFINITION_CONTENT_ASSERTIONS,
+        ):
+            self._conn.execute(ddl)
+        for index in DDL_INDEXES:
+            self._conn.execute(index)
+
+        genesis_records = self._store.scan_runtime_records(record_type="domain.genesis")
+        domain_id = (
+            str(genesis_records[0][1].payload["manifest"]["id"])
+            if genesis_records
+            else "legacy:unbound"
+        )
+        asset_records = {
+            str(record.payload["asset"]["id"]): record.id
+            for _, record in self._store.scan_runtime_records(
+                record_type="asset.committed"
+            )
+        }
+        for asset in self._store.get_all_assets():
+            record = legacy_asset_graph_record(
+                asset,
+                domain_id=domain_id,
+                causal_parent=asset_records.get(asset.id, ""),
+            )
+            self._store._insert_runtime_record(record)
+
 
 def initialize_sqlite_schema(connection: sqlite3.Connection, store) -> None:
     """Create current tables and transactionally migrate historical rows."""
@@ -354,6 +392,7 @@ def initialize_sqlite_schema(connection: sqlite3.Connection, store) -> None:
         )
     migrator.create_tables()
     migrator.run_migrations(current)
+    store.rebuild_asset_graph_projection()
 
 
 def current_schema_version(connection: sqlite3.Connection) -> int:
