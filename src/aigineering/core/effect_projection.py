@@ -67,6 +67,8 @@ def project_effect_batch(
             raise ValueError(f"actor lacks required capabilities {missing!r}")
         projections.append((effect, projection))
 
+    _validate_graph_batch(projections, effective_context)
+
     contracts = tuple(
         projection.contract
         for _, projection in projections
@@ -88,10 +90,7 @@ def project_effect_batch(
         for effect, projection in projections
     )
     return EffectBatchProjection(
-        records=tuple(
-            record for _, projection in projections for record in projection.records
-        )
-        + allowance_records,
+        records=_ordered_projection_records(projections) + allowance_records,
         relation_target=(targets[0][1] if len(targets) == 1 else candidate.id),
         projected_effects=targets,
         contracts=contracts,
@@ -101,6 +100,53 @@ def project_effect_batch(
             for _, projection in projections
             for name in projection.accepted_asset_names
         ),
+    )
+
+
+def _validate_graph_batch(
+    projections: list[tuple[CandidateEffect, EffectProjection]],
+    context: EffectProjectionContext,
+) -> None:
+    records = tuple(
+        record for _, projection in projections for record in projection.records
+    )
+    definition_ids = {
+        str(record.payload["definition"]["id"])
+        for record in (*context.runtime_records, *records)
+        if record.record_type == "asset.definition.published"
+    }
+    content_ids = {
+        str(record.payload["content"]["id"])
+        for record in (*context.runtime_records, *records)
+        if record.record_type == "asset.content.published"
+    }
+    for record in records:
+        if record.record_type != "asset.definition-content.asserted":
+            continue
+        assertion = record.payload["assertion"]
+        if assertion["definition_id"] not in definition_ids:
+            raise ValueError("assertion references an unknown signed definition")
+        if assertion["content_id"] not in content_ids:
+            raise ValueError("assertion references an unknown content object")
+
+
+def _ordered_projection_records(
+    projections: list[tuple[CandidateEffect, EffectProjection]],
+) -> tuple[RuntimeRecord, ...]:
+    records = tuple(
+        record for _, projection in projections for record in projection.records
+    )
+    graph_order = {
+        "asset.content.published": 0,
+        "asset.definition.published": 1,
+        "asset.definition-content.asserted": 2,
+    }
+    graph = tuple(record for record in records if record.record_type in graph_order)
+    non_graph = tuple(
+        record for record in records if record.record_type not in graph_order
+    )
+    return non_graph + tuple(
+        sorted(graph, key=lambda record: graph_order[record.record_type])
     )
 
 

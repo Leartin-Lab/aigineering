@@ -13,6 +13,7 @@ from aigineering.application import (
     find_trace_for_session as _find_trace_for_session,
     latest_session_file as _latest_session_file,
     persistent_store as _persistent_store,
+    query_projection,
 )
 from aigineering.runtime import (
     WorkerSubmissionCommitError,
@@ -419,6 +420,30 @@ def get_contract(contract_id: str, store=Depends(_request_store)):
         raise HTTPException(status_code=404, detail="Contract not found")
 
     return _contract_response(contract)
+
+
+@app.get("/graph/contents")
+def list_graph_contents(store=Depends(_request_store)):
+    """List normalized content objects from the disposable query projection."""
+    return query_projection(store).get_content_objects()
+
+
+@app.get("/graph/definitions")
+def list_graph_definitions(store=Depends(_request_store)):
+    """List signed and explicitly migrated Asset definitions."""
+    return query_projection(store).get_asset_definitions()
+
+
+@app.get("/graph/assertions")
+def list_graph_assertions(
+    definition_id: str = Query(""),
+    content_id: str = Query(""),
+    store=Depends(_request_store),
+):
+    """List immutable definition-content assertions."""
+    return query_projection(store).get_definition_content_assertions(
+        definition_id=definition_id, content_id=content_id
+    )
 
 
 @app.post("/worker/claims")

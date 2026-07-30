@@ -264,6 +264,17 @@ class RedisQueryProjection:
         records = self._store.scan_runtime_records(after_revision=after_revision)
         if not records:
             return after_revision
+        if any(
+            record.record_type
+            in {
+                "asset.content.published",
+                "asset.definition.published",
+                "asset.definition-content.asserted",
+                "asset.legacy-graph.migrated",
+            }
+            for _, record in records
+        ):
+            return -1
         pipeline = self._client.pipeline(transaction=True)
         for _, record in records:
             payload = self._record_payload(record)

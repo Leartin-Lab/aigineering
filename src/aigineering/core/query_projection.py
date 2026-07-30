@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 from aigineering.core.ids import canonical_json, compute_content_hash
+from aigineering.core.asset_graph_facts import project_graph_assets
 from aigineering.protocol.types import Asset, Contract
 from aigineering.protocol.wire import (
     asset_to_dict,
@@ -52,16 +53,29 @@ class StoreQueryProjection:
         self._reason = reason
 
     def get_asset(self, asset_id: str) -> Asset | None:
-        return self._store.get_asset(asset_id)
+        return next(
+            (asset for asset in self.get_all_assets() if asset.id == asset_id), None
+        )
 
     def get_assets_by_name(self, name: str) -> list[Asset]:
-        return self._store.get_assets_by_name(name)
+        return [asset for asset in self.get_all_assets() if asset.name == name]
 
     def get_assets_by_definition(self, definition_hash: str) -> list[Asset]:
-        return self._store.get_assets_by_definition(definition_hash)
+        return [
+            asset
+            for asset in self.get_all_assets()
+            if asset.definition_hash == definition_hash
+        ]
 
     def get_all_assets(self) -> list[Asset]:
-        return self._store.get_all_assets()
+        values = {
+            asset.id: asset
+            for asset in (
+                *self._store.get_all_assets(),
+                *project_graph_assets(self._store),
+            )
+        }
+        return [values[asset_id] for asset_id in sorted(values)]
 
     def get_contract(self, contract_id: str) -> Contract | None:
         return self._store.get_contract(contract_id)
@@ -126,7 +140,7 @@ def _wire_json(value: dict[str, object]) -> str:
 
 def build_query_snapshot(store, *, domain_id: str) -> QuerySnapshot:
     """Build one deterministic read snapshot from authoritative Store facts."""
-    assets = sorted(store.get_all_assets(), key=lambda asset: asset.id)
+    assets = StoreQueryProjection(store).get_all_assets()
     contracts = sorted(store.get_all_contracts(), key=lambda contract: contract.id)
     asset_rows = tuple((asset.id, _wire_json(asset_to_dict(asset))) for asset in assets)
     contract_rows = tuple(

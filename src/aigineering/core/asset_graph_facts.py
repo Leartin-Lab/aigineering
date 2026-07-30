@@ -167,3 +167,43 @@ def graph_rows_from_record(
             deep_thaw(record.payload["assertion"]),
         )
     return None, None, None
+
+
+def project_graph_assets(store) -> tuple[Asset, ...]:
+    """Build legacy-shaped read views from accepted v1 assertions."""
+    contents = {
+        str(value["id"]): value
+        for value in store.get_content_objects()
+        if value.get("schema_version") == 1
+    }
+    definitions = {
+        str(value["id"]): value
+        for value in store.get_asset_definitions()
+        if value.get("schema_version") == 1
+    }
+    assets: list[Asset] = []
+    for assertion in store.get_definition_content_assertions():
+        if assertion.get("schema_version") != 1:
+            continue
+        definition = definitions.get(str(assertion["definition_id"]))
+        content = contents.get(str(assertion["content_id"]))
+        if definition is None or content is None:
+            continue
+        assets.append(
+            Asset(
+                id="asset:v1:" + compute_content_hash(str(assertion["id"])),
+                name=str(definition["name"]),
+                content=str(content["content"]),
+                content_type=str(content["content_type"]),
+                created_by=str(definition["source_uri"]),
+                origin="definition-content-assertion",
+                trust_tier="observed",
+                source_uri=str(definition["source_uri"]),
+                signed_by=str(assertion["actor_id"]),
+                signer_kind=str(assertion["signature_kind"]),
+                provenance_seal=str(assertion["signature"]),
+                definition_hash=str(definition["id"]),
+                content_hash=str(content["id"]),
+            )
+        )
+    return tuple(sorted(assets, key=lambda asset: asset.id))

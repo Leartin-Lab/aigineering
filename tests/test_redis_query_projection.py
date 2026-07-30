@@ -215,8 +215,9 @@ def test_current_read_detects_stale_revision_and_rebuilds(temp_sqlite_store):
     assets = projection.get_all_assets()
 
     assert {asset.id for asset in assets} == {first.id, second.id}
-    assert client.get(projection.active_key) == old.digest
-    generation = projection._generation_root(old.digest)
+    active = client.get(projection.active_key)
+    assert active and active != old.digest
+    generation = projection._generation_root(active)
     assert int(client.hgetall(f"{generation}:meta")["revision"]) == (
         temp_sqlite_store.get_runtime_revision()
     )

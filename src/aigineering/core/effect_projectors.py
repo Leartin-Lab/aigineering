@@ -9,6 +9,7 @@ from typing import Any, Callable, Mapping
 from aigineering.core.acceptance import project_asset_attestation_records
 from aigineering.core.actor_facts import actor_key_payload
 from aigineering.core.asset_versions import replacement_claim_payload
+from aigineering.core.asset_graph_facts import legacy_asset_graph_record
 from aigineering.core.authority import matched_reserved_prefix
 from aigineering.core.contract_admission import validate_contract_commitment
 from aigineering.core.fact_materialization import asset_committed_record
@@ -169,8 +170,11 @@ def project_asset_proposal(
         signed_by=candidate.actor_id,
     )
     record = asset_committed_record(asset, causal_parents=(receipt_id,))
+    graph_record = legacy_asset_graph_record(
+        asset, domain_id=candidate.domain_id, causal_parent=receipt_id
+    )
     return EffectProjection(
-        records=(record,),
+        records=(record, graph_record),
         relation_target=asset.id,
         assets=(asset,),
         accepted_asset_names=(asset.name,),
@@ -249,20 +253,6 @@ def project_definition_content_assertion(
         raise ValueError("assertion domain does not match Candidate domain")
     key = _authorized_graph_key(assertion.actor_id, assertion.key_id, context)
     verify_definition_content_assertion(assertion, key)
-    known_definition_ids = {
-        str(record.payload["definition"]["id"])
-        for record in context.runtime_records
-        if record.record_type == "asset.definition.published"
-    }
-    known_content_ids = {
-        str(record.payload["content"]["id"])
-        for record in context.runtime_records
-        if record.record_type == "asset.content.published"
-    }
-    if assertion.definition_id not in known_definition_ids:
-        raise ValueError("assertion references an unknown signed definition")
-    if assertion.content_id not in known_content_ids:
-        raise ValueError("assertion references an unknown content object")
     record = create_runtime_record(
         "asset.definition-content.asserted",
         {"assertion": definition_content_assertion_to_dict(assertion)},

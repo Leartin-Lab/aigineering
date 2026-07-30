@@ -7,6 +7,7 @@ import pytest
 from conftest import candidate_runtime
 
 from aigineering.core.sqlite_store import SQLiteStore
+from aigineering.core.query_projection import StoreQueryProjection
 from aigineering.protocol.candidate import CandidateEffect
 from aigineering.protocol.effect_builders import (
     content_publication_effect,
@@ -251,6 +252,13 @@ def test_graph_facts_enter_through_candidate_commitment(temp_sqlite_store) -> No
             definition_id=definition.id
         )
     ] == [assertion.id]
+    asset_view = StoreQueryProjection(temp_sqlite_store).get_assets_by_definition(
+        definition.id
+    )
+    assert len(asset_view) == 1
+    assert asset_view[0].name == definition.name
+    assert asset_view[0].content == content.content
+    assert asset_view[0].content_hash == content.id
 
 
 def test_unknown_or_unsigned_graph_edges_are_rejected(temp_sqlite_store) -> None:
@@ -302,6 +310,40 @@ def test_unknown_or_unsigned_graph_edges_are_rejected(temp_sqlite_store) -> None
         idempotency_key="invalid-definition-signature",
     )
     assert not malformed.accepted
+
+
+def test_graph_endpoints_and_edge_commit_atomically_in_any_effect_order(
+    temp_sqlite_store,
+) -> None:
+    runtime = candidate_runtime(temp_sqlite_store)
+    content = create_content_object("atomic")
+    definition = _definition(
+        runtime.signer,
+        actor_id=runtime.actor_key.actor_id,
+        domain_id=runtime.genesis.id,
+        key_id=runtime.actor_key.key_id,
+    )
+    assertion = create_definition_content_assertion(
+        domain_id=runtime.genesis.id,
+        definition_id=definition.id,
+        content_id=content.id,
+        relation_type="satisfies",
+        actor_id=runtime.actor_key.actor_id,
+        key_id=runtime.actor_key.key_id,
+        signer=runtime.signer,
+    )
+    decision = runtime.publisher.publish(
+        (
+            definition_content_assertion_effect(assertion),
+            definition_publication_effect(definition),
+            content_publication_effect(content),
+        ),
+        idempotency_key="atomic-graph",
+    )
+    assert decision.accepted
+    assert (
+        temp_sqlite_store.get_definition_content_assertions()[0]["id"] == assertion.id
+    )
 
 
 def test_graph_projection_rebuilds_on_reopen(tmp_path) -> None:

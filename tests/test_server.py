@@ -271,6 +271,26 @@ def test_create_and_get_asset(tmp_path, monkeypatch):
     assert rows[0]["id"] == body["id"]
 
 
+def test_asset_graph_read_endpoints_project_committed_assets(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    client, actor = _signed_client()
+    created = _post_asset(client, actor, name="graph_doc", content="same")
+    assert created.status_code == 201, created.text
+
+    contents = client.get("/graph/contents")
+    definitions = client.get("/graph/definitions")
+    assertions = client.get("/graph/assertions")
+
+    assert (
+        contents.status_code == definitions.status_code == assertions.status_code == 200
+    )
+    assert (
+        len(contents.json()) == len(definitions.json()) == len(assertions.json()) == 1
+    )
+    assert assertions.json()[0]["content_id"] == contents.json()[0]["id"]
+    assert assertions.json()[0]["definition_id"] == definitions.json()[0]["id"]
+
+
 def test_create_protected_asset_rejected(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     client, actor = _signed_client()
