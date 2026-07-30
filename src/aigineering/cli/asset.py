@@ -7,7 +7,7 @@ from pathlib import Path
 
 import click
 
-from aigineering.cli._common import _output_json, _persistent_store
+from aigineering.cli._common import _output_json, _persistent_store, _query_projection
 from aigineering.cli._candidate import commit_local_effect, require_accepted
 from aigineering.core.asset_versions import (
     create_replacement_claim,
@@ -126,7 +126,7 @@ def asset_add(
 def asset_list(as_json: bool) -> None:
     """List injected (control-plane) assets in the store."""
     store = _persistent_store()
-    all_assets = store.get_all_assets()
+    all_assets = _query_projection(store).get_all_assets()
     if as_json:
         result = [
             {
@@ -151,7 +151,7 @@ def asset_list(as_json: bool) -> None:
 def asset_show(name: str, as_json: bool) -> None:
     """Show asset content and metadata by name."""
     store = _persistent_store()
-    matches = store.get_assets_by_name(name)
+    matches = _query_projection(store).get_assets_by_name(name)
     if not matches:
         raise click.ClickException(f"No asset named '{name}'")
 

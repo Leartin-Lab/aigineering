@@ -8,7 +8,7 @@ from typing import Any
 
 import click
 
-from aigineering.cli._common import _output_json, _persistent_store
+from aigineering.cli._common import _output_json, _persistent_store, _query_projection
 from aigineering.cli._candidate import commit_local_effect, require_accepted
 from aigineering.core.capability_descriptors import (
     create_mcp_descriptor,
@@ -123,7 +123,11 @@ def mcp_add(
 def mcp_list(as_json: bool) -> None:
     """List MCP descriptor assets."""
     store = _persistent_store()
-    descriptors = [a for a in store.get_all_assets() if a.name.startswith(MCP_PREFIX)]
+    descriptors = [
+        a
+        for a in _query_projection(store).get_all_assets()
+        if a.name.startswith(MCP_PREFIX)
+    ]
 
     if as_json:
         _output_json(
@@ -158,7 +162,7 @@ def mcp_show(name: str, as_json: bool) -> None:
         name = f"{MCP_PREFIX}{name}"
 
     store = _persistent_store()
-    matches = store.get_assets_by_name(name)
+    matches = _query_projection(store).get_assets_by_name(name)
     if not matches:
         raise click.ClickException(f"No MCP descriptor named '{name}'")
 

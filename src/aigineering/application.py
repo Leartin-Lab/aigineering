@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -11,6 +12,7 @@ from aigineering.plugins import (
     default_completion_registry as default_completion_registry,
 )
 from aigineering.core.session import SessionStore, session_trace_path
+from aigineering.core.query_projection import StoreQueryProjection
 from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.core.trace import JsonLTraceStore
 from aigineering.protocol.types import TraceEntry
@@ -19,6 +21,28 @@ from aigineering.protocol.types import TraceEntry
 def persistent_store(db_path: str = ".aig/store.db") -> SQLiteStore:
     """Open the default local operational StorePort."""
     return SQLiteStore(db_path=db_path)
+
+
+def query_projection(store, *, redis_url: str | None = None):
+    """Build the optional disposable read projection for one Store."""
+    effective_url = (
+        redis_url if redis_url is not None else os.getenv("AIGINEERING_REDIS_URL", "")
+    )
+    if not effective_url:
+        return StoreQueryProjection(store)
+
+    from aigineering.adapters.redis_query import RedisQueryProjection
+    from aigineering.core.domain import load_genesis
+
+    try:
+        genesis = load_genesis(store)
+    except (AttributeError, LookupError):
+        return StoreQueryProjection(store)
+    return RedisQueryProjection.from_url(
+        store,
+        domain_id=genesis.id,
+        redis_url=effective_url,
+    )
 
 
 def build_worker(

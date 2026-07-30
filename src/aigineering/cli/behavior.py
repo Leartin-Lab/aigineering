@@ -11,7 +11,7 @@ from pathlib import Path
 
 import click
 
-from aigineering.cli._common import _output_json, _persistent_store
+from aigineering.cli._common import _output_json, _persistent_store, _query_projection
 from aigineering.cli._candidate import commit_local_effect, require_accepted
 from aigineering.core.control_plane import build_control_plane_asset
 from aigineering.protocol.effect_builders import asset_proposal_effect
@@ -96,7 +96,7 @@ def behavior_add(
 def behavior_list(as_json: bool) -> None:
     """List all behaviour prompt assets in the store."""
     store = _persistent_store()
-    all_assets = store.get_all_assets()
+    all_assets = _query_projection(store).get_all_assets()
     behavior_assets = [a for a in all_assets if a.name.startswith(BEHAVIOR_PREFIX)]
 
     if as_json:
@@ -131,7 +131,7 @@ def behavior_show(name: str, as_json: bool) -> None:
         name = f"{BEHAVIOR_PREFIX}{name}"
 
     store = _persistent_store()
-    matches = store.get_assets_by_name(name)
+    matches = _query_projection(store).get_assets_by_name(name)
     if not matches:
         raise click.ClickException(f"No behaviour asset named '{name}'")
 

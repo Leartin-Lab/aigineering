@@ -6,7 +6,7 @@ import json
 
 import click
 
-from aigineering.cli._common import _output_json, _persistent_store
+from aigineering.cli._common import _output_json, _persistent_store, _query_projection
 from aigineering.cli._candidate import commit_local_effect, require_accepted
 from aigineering.core.skill_loader import SkillLoader
 from aigineering.protocol.effect_builders import asset_proposal_effect
@@ -59,7 +59,9 @@ def skill_list(as_json: bool) -> None:
     """List skill capability descriptors in the local store."""
     store = _persistent_store()
     skills = [
-        a for a in store.get_all_assets() if a.name.startswith("_skill_capability_")
+        a
+        for a in _query_projection(store).get_all_assets()
+        if a.name.startswith("_skill_capability_")
     ]
     result = []
     for asset in skills:

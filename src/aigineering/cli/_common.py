@@ -20,6 +20,7 @@ from aigineering.application import (
     find_trace_for_session,
     latest_session_file,
     persistent_store,
+    query_projection,
 )
 from aigineering.cli._candidate import commit_local_effect, require_accepted
 from aigineering.local_identity import ensure_local_domain
@@ -52,6 +53,11 @@ def _get_store_dir() -> Path:
 def _persistent_store() -> SQLiteStore:
     """Create the default local persistent store (SQLite-backed)."""
     return persistent_store()
+
+
+def _query_projection(store: StoreProtocol):
+    """Return the configured read-only query projection."""
+    return query_projection(store)
 
 
 def _default_completion_registry() -> CompletionRegistry:

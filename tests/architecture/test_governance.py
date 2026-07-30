@@ -89,6 +89,23 @@ def test_next_changes_are_ordered_without_changing_current_design_truth():
     assert "Redis query projection" not in design
 
 
+def test_redis_adapter_cannot_enter_correctness_owners():
+    forbidden = (
+        "src/aigineering/core/commitment.py",
+        "src/aigineering/core/authority.py",
+        "src/aigineering/core/causal_allowance.py",
+        "src/aigineering/core/claims.py",
+        "src/aigineering/core/acceptance.py",
+        "src/aigineering/core/lifecycle_facts.py",
+        "src/aigineering/core/fact_reducer.py",
+    )
+
+    for relative in forbidden:
+        source = (ROOT / relative).read_text(encoding="utf-8")
+        assert "redis" not in source.lower()
+        assert "query_projection" not in source
+
+
 def test_legacy_runtime_files_stay_out_of_release_artifacts():
     project = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
 

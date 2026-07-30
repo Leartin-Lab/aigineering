@@ -261,21 +261,28 @@ def create_asset(body: CandidateProposalRequest, store=Depends(_request_store)):
 @app.get("/contracts", response_model=list[ContractResponse])
 def list_contracts(store=Depends(_request_store)):
     """List contracts in the runtime store."""
-    return [_contract_response(c) for c in store.get_all_contracts()]
+    from aigineering.application import query_projection
+
+    return [_contract_response(c) for c in query_projection(store).get_all_contracts()]
 
 
 @app.get("/assets", response_model=list[AssetResponse])
 def list_assets(store=Depends(_request_store)):
     """List assets in the runtime store."""
-    return [_asset_response(a) for a in store.get_all_assets()]
+    from aigineering.application import query_projection
+
+    return [_asset_response(a) for a in query_projection(store).get_all_assets()]
 
 
 @app.get("/assets/{name}/versions", response_model=list[AssetResponse])
 def get_asset_versions(name: str, store=Depends(_request_store)):
     """List all versions of an asset by name."""
-    from aigineering.core.asset_versions import list_versions
+    from aigineering.application import query_projection
 
-    versions = list_versions(store, name)
+    versions = sorted(
+        query_projection(store).get_assets_by_name(name),
+        key=lambda asset: asset.content_hash,
+    )
     if not versions:
         raise HTTPException(status_code=404, detail=f"No asset named '{name}'")
     return [_asset_response(a) for a in versions]
@@ -552,7 +559,9 @@ def get_sessions():
 @app.get("/assets/{name}", response_model=list[AssetResponse])
 def get_assets(name: str, store=Depends(_request_store)):
     """Get assets by name."""
-    assets = store.get_assets_by_name(name)
+    from aigineering.application import query_projection
+
+    assets = query_projection(store).get_assets_by_name(name)
     if not assets:
         raise HTTPException(status_code=404, detail=f"No asset named '{name}'")
 

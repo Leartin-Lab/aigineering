@@ -6,7 +6,7 @@ import json
 
 import click
 
-from aigineering.cli._common import _persistent_store, _output_json
+from aigineering.cli._common import _output_json, _persistent_store, _query_projection
 from aigineering.cli._candidate import commit_local_effect, require_accepted
 from aigineering.core.control_plane import build_control_plane_contract
 from aigineering.protocol.effect_builders import contract_declaration_effect
@@ -102,7 +102,7 @@ def contract_add(
 def contract_list(as_json: bool) -> None:
     """List contracts in the store."""
     store = _persistent_store()
-    all_contracts = store.get_all_contracts()
+    all_contracts = _query_projection(store).get_all_contracts()
     if as_json:
         _output_json([{"id": c.id, "name": c.name} for c in all_contracts])
     else:
@@ -118,7 +118,7 @@ def contract_list(as_json: bool) -> None:
 def contract_show(contract_id: str, as_json: bool) -> None:
     """Show contract details by ID."""
     store = _persistent_store()
-    contract = store.get_contract(contract_id)
+    contract = _query_projection(store).get_contract(contract_id)
     if contract is None:
         raise click.ClickException(f"No contract with id '{contract_id}'")
 

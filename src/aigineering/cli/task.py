@@ -8,7 +8,7 @@ from pathlib import Path
 
 import click
 
-from aigineering.cli._common import _output_json, _persistent_store
+from aigineering.cli._common import _output_json, _persistent_store, _query_projection
 from aigineering.cli._candidate import commit_local_effect, require_accepted
 from aigineering.cli.task_state import project_task_status
 from aigineering.core.control_plane import build_control_plane_contract
@@ -119,11 +119,16 @@ def task_create(
 def task_status(contract_id: str, as_json: bool) -> None:
     """Show a projected task status."""
     store = _persistent_store()
-    contract = store.get_contract(contract_id)
+    query = _query_projection(store)
+    contract = query.get_contract(contract_id)
     if contract is None:
         _emit_error(f"Task '{contract_id}' not found.", as_json)
         return
-    status = project_task_status(contract, store)
+    status = query.memoize_json(
+        "task.status",
+        contract.id,
+        lambda: project_task_status(contract, store),
+    )
     if as_json:
         _output_json(status)
         return
@@ -155,11 +160,16 @@ def task_wait(
     last_status: dict | None = None
     while True:
         store = _persistent_store()
-        contract = store.get_contract(contract_id)
+        query = _query_projection(store)
+        contract = query.get_contract(contract_id)
         if contract is None:
             _emit_error(f"Task '{contract_id}' not found.", as_json)
             return
-        last_status = project_task_status(contract, store)
+        last_status = query.memoize_json(
+            "task.status",
+            contract.id,
+            lambda: project_task_status(contract, store),
+        )
         if last_status["terminal"]:
             if as_json:
                 _output_json(last_status)
@@ -183,12 +193,17 @@ def task_wait(
 def task_audit(contract_id: str, as_json: bool) -> None:
     """Show an audit projection for a task."""
     store = _persistent_store()
-    contract = store.get_contract(contract_id)
+    query = _query_projection(store)
+    contract = query.get_contract(contract_id)
     if contract is None:
         _emit_error(f"Task '{contract_id}' not found.", as_json)
         return
     entries = store.get_by_contract(contract.id)
-    status = project_task_status(contract, store)
+    status = query.memoize_json(
+        "task.status",
+        contract.id,
+        lambda: project_task_status(contract, store),
+    )
     payload = {
         "task": status,
         "inputs": list(contract.inputs),

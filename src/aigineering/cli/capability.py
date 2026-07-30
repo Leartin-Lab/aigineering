@@ -8,7 +8,7 @@ from typing import Any
 
 import click
 
-from aigineering.cli._common import _output_json, _persistent_store
+from aigineering.cli._common import _output_json, _persistent_store, _query_projection
 from aigineering.cli._candidate import commit_local_effect, require_accepted
 from aigineering.core.capability_descriptors import (
     create_memory_descriptor,
@@ -168,7 +168,7 @@ def list_capabilities(as_json: bool) -> None:
     store = _persistent_store()
     descriptors = [
         asset
-        for asset in store.get_all_assets()
+        for asset in _query_projection(store).get_all_assets()
         if any(asset.name.startswith(prefix) for prefix in _PREFIXES)
     ]
 
@@ -188,7 +188,7 @@ def list_capabilities(as_json: bool) -> None:
 def show_capability(name: str, as_json: bool) -> None:
     """Show a capability descriptor by exact asset name."""
     store = _persistent_store()
-    matches = store.get_assets_by_name(name)
+    matches = _query_projection(store).get_assets_by_name(name)
     if not matches or not any(name.startswith(prefix) for prefix in _PREFIXES):
         raise click.ClickException(f"No capability descriptor named '{name}'")
     _emit_descriptor(matches[0], as_json)
