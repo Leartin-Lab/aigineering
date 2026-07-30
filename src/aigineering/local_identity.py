@@ -52,14 +52,19 @@ def write_actor_key(path: Path, signer: Ed25519Signer) -> None:
         stream.write(signer.private_key_hex + "\n")
 
 
+def _posix_private_modes_supported() -> bool:
+    return os.name != "nt"
+
+
 def load_actor_signer(path: Path | None = None) -> Ed25519Signer:
     selected = path or actor_key_path()
     try:
-        mode = selected.stat().st_mode & 0o777
-        if mode & 0o077:
-            raise ValueError(
-                f"actor key {selected} permissions are too broad; require mode 0600"
-            )
+        if _posix_private_modes_supported():
+            mode = selected.stat().st_mode & 0o777
+            if mode & 0o077:
+                raise ValueError(
+                    f"actor key {selected} permissions are too broad; require mode 0600"
+                )
         encoded = selected.read_text(encoding="ascii").strip()
     except FileNotFoundError as exc:
         raise ValueError(
