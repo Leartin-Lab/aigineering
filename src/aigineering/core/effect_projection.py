@@ -212,3 +212,5 @@ def _validate_claim_bound_projection(
         }
         if not non_plugin_labels <= set(parent.labels):
             raise ValueError("claim-bound child widens parent labels")
+        if not set(contract.context_asset_ids) <= set(parent.context_asset_ids):
+            raise ValueError("claim-bound child widens exact context Asset references")

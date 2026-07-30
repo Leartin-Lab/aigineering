@@ -632,6 +632,7 @@ class JsonLStore(_ProjectionIndexMixin):
                     budget=data.get("budget", 0),
                     tool_scope=data.get("tool_scope", []),
                     labels=data.get("labels", []),
+                    context_asset_ids=data.get("context_asset_ids", []),
                     worker_capabilities=data.get("worker_capabilities", []),
                     worker_pools=data.get("worker_pools", []),
                     origin=data.get("origin", "human"),

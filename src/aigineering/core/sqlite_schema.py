@@ -46,6 +46,7 @@ CREATE TABLE IF NOT EXISTS contracts (
     budget INTEGER NOT NULL DEFAULT 0,
     tool_scope TEXT NOT NULL DEFAULT '[]',
     labels TEXT NOT NULL DEFAULT '[]',
+    context_asset_ids TEXT NOT NULL DEFAULT '[]',
     worker_capabilities TEXT NOT NULL DEFAULT '[]',
     worker_pools TEXT NOT NULL DEFAULT '[]',
     origin TEXT NOT NULL DEFAULT 'human',

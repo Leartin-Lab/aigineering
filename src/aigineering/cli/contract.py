@@ -8,7 +8,10 @@ import click
 
 from aigineering.cli._common import _output_json, _persistent_store, _query_projection
 from aigineering.cli._candidate import commit_local_effect, require_accepted
-from aigineering.core.control_plane import build_control_plane_contract
+from aigineering.core.control_plane import (
+    bind_contract_label_assets,
+    build_control_plane_contract,
+)
 from aigineering.protocol.effect_builders import contract_declaration_effect
 
 
@@ -81,6 +84,7 @@ def contract_add(
             sensitive_input_policy=policy,
             acceptance_policy=output_policy,
         )
+        contract = bind_contract_label_assets(contract, store)
         require_accepted(
             commit_local_effect(
                 store,

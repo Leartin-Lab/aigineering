@@ -183,6 +183,34 @@ def hash_contract_v3(
     return f"task:v3:{compute_content_hash(canonical_json(fields))}"
 
 
+def hash_contract_v4(
+    *,
+    context_asset_ids: list[str] | tuple[str, ...],
+    **fields: Any,
+) -> str:
+    """Contract identity with exact construction-time context references."""
+    values = {
+        "activation": fields["activation"],
+        "budget": fields["budget"],
+        "context_asset_ids": sorted(context_asset_ids),
+        "description": fields["description"],
+        "inputs": sorted(fields["inputs"]),
+        "labels": sorted(fields["labels"]),
+        "minting_authority": sorted(fields.get("minting_authority", ())),
+        "name": fields["name"],
+        "origin": fields["origin"],
+        "outputs": sorted(fields["outputs"]),
+        "parent_id": fields.get("parent_id"),
+        "sensitive_input_policy": deep_thaw(fields.get("sensitive_input_policy")),
+        "tool_scope": sorted(fields["tool_scope"]),
+        "worker_capabilities": sorted(fields.get("worker_capabilities", ())),
+        "worker_pools": sorted(fields.get("worker_pools", ())),
+    }
+    if fields.get("acceptance_policy") is not None:
+        values["acceptance_policy"] = deep_thaw(fields["acceptance_policy"])
+    return f"task:v4:{compute_content_hash(canonical_json(values))}"
+
+
 def contract_identity_v3(contract) -> str:
     """Recompute a v3 identity from one materialized Contract entity."""
     normalized_authority = [
@@ -220,8 +248,35 @@ def contract_identity_v3(contract) -> str:
 
 def validate_contract_identity(contract) -> None:
     """Fail closed when a v3 ID does not bind its complete effective entity."""
+    if contract.id.startswith("task:v4:"):
+        expected = hash_contract_v4(
+            name=contract.name,
+            description=contract.description,
+            inputs=contract.inputs,
+            outputs=contract.outputs,
+            activation=contract.activation,
+            budget=contract.budget,
+            tool_scope=contract.tool_scope,
+            labels=contract.labels,
+            origin=contract.origin,
+            parent_id=contract.parent_id,
+            worker_capabilities=contract.worker_capabilities,
+            worker_pools=contract.worker_pools,
+            minting_authority=contract.minting_authority,
+            sensitive_input_policy=contract.sensitive_input_policy,
+            acceptance_policy=contract.acceptance_policy,
+            context_asset_ids=contract.context_asset_ids,
+        )
+        if contract.id != expected:
+            raise ValueError(
+                f"Contract '{contract.id}' does not match canonical v4 identity "
+                f"'{expected}'"
+            )
+        return
     if not contract.id.startswith("task:v3:"):
         return
+    if contract.context_asset_ids:
+        raise ValueError("task:v3 Contract cannot carry v4 context_asset_ids")
     expected = contract_identity_v3(contract)
     if contract.id != expected:
         raise ValueError(

@@ -440,6 +440,7 @@ class SQLiteStore:
             budget=row["budget"],
             tool_scope=tuple(json.loads(row["tool_scope"])),
             labels=tuple(json.loads(row["labels"])),
+            context_asset_ids=tuple(json.loads(row["context_asset_ids"])),
             worker_capabilities=tuple(json.loads(row["worker_capabilities"] or "[]")),
             worker_pools=tuple(json.loads(row["worker_pools"] or "[]")),
             origin=row["origin"],
@@ -588,12 +589,12 @@ class SQLiteStore:
                 """INSERT INTO contracts (
                 id, parent_id, name, description,
                 inputs, outputs, activation, budget,
-                tool_scope, labels, worker_capabilities, worker_pools,
+                tool_scope, labels, context_asset_ids, worker_capabilities, worker_pools,
                 origin, minting_authority, sensitive_input_policy, acceptance_policy
             ) VALUES (
                 :id, :parent_id, :name, :description,
                 :inputs, :outputs, :activation, :budget,
-                :tool_scope, :labels, :worker_capabilities, :worker_pools,
+                :tool_scope, :labels, :context_asset_ids, :worker_capabilities, :worker_pools,
                 :origin, :minting_authority, :sensitive_input_policy, :acceptance_policy
             )""",
                 {
@@ -607,6 +608,7 @@ class SQLiteStore:
                     "budget": d["budget"],
                     "tool_scope": json.dumps(list(d["tool_scope"])),
                     "labels": json.dumps(list(d["labels"])),
+                    "context_asset_ids": json.dumps(list(d["context_asset_ids"])),
                     "worker_capabilities": json.dumps(list(d["worker_capabilities"])),
                     "worker_pools": json.dumps(list(d["worker_pools"])),
                     "origin": d["origin"],

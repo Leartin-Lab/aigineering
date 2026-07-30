@@ -64,6 +64,7 @@ def _contract_from_payload(payload: Mapping[str, Any]) -> Contract:
         budget=int(data.get("budget", 0)),
         tool_scope=tuple(data.get("tool_scope", ())),
         labels=tuple(data.get("labels", ())),
+        context_asset_ids=tuple(data.get("context_asset_ids", ())),
         worker_capabilities=tuple(data.get("worker_capabilities", ())),
         worker_pools=tuple(data.get("worker_pools", ())),
         origin=str(data.get("origin", "human")),
@@ -79,9 +80,19 @@ def project_contract_declaration(
     receipt_id: str,
     context: EffectProjectionContext,
 ) -> EffectProjection:
-    del context
     contract = _contract_from_payload(effect.payload)
     validate_contract_commitment(contract)
+    if contract.id.startswith("task:v4:"):
+        assets = {asset.id: asset for asset in context.assets}
+        missing = set(contract.context_asset_ids) - assets.keys()
+        if missing:
+            raise ValueError("v4 Contract references unknown context Assets")
+        bound_names = {assets[asset_id].name for asset_id in contract.context_asset_ids}
+        required_labels = {
+            label for label in contract.labels if not label.startswith("plugin:")
+        }
+        if not required_labels <= bound_names:
+            raise ValueError("v4 Contract labels lack exact context Asset bindings")
     record = create_runtime_record(
         "contract.declared",
         {"candidate_id": candidate.id, "contract": contract_to_dict(contract)},

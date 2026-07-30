@@ -3,6 +3,10 @@
 import pytest
 
 from aigineering.core.disclosure import DisclosurePolicyError, compute_disclosure
+from aigineering.core.control_plane import (
+    bind_contract_label_assets,
+    build_control_plane_contract,
+)
 from aigineering.core.ids import hash_asset_content, hash_contract
 from aigineering.core.provenance import sign_asset
 from aigineering.core.store import MemoryStore
@@ -88,6 +92,26 @@ def test_disclosure_includes_configured_behavior_asset():
     )
 
     assert compute_disclosure(contract, store) == [behavior]
+
+
+def test_v4_label_context_does_not_change_when_catalog_changes():
+    store = MemoryStore()
+    original = _asset("behavior:concise", "first", trust_tier="configured")
+    store.add_asset(original)
+    contract = bind_contract_label_assets(
+        build_control_plane_contract(
+            name="task",
+            labels=("behavior:concise",),
+            outputs=("result",),
+        ),
+        store,
+    )
+    assert contract.id.startswith("task:v4:")
+    assert contract.context_asset_ids == (original.id,)
+
+    later = _asset("behavior:concise", "later", trust_tier="configured")
+    store.add_asset(later)
+    assert compute_disclosure(contract, store) == [original]
 
 
 def test_sensitive_input_policy_blocks_low_trust_asset_before_disclosure():

@@ -32,7 +32,7 @@ from aigineering.protocol.wire import (
     trace_entry_to_dict,
 )
 
-CURRENT_SCHEMA_VERSION = 14
+CURRENT_SCHEMA_VERSION = 15
 
 
 class SQLiteMigrator:
@@ -78,6 +78,11 @@ class SQLiteMigrator:
         if "acceptance_policy" not in existing:
             self._conn.execute(
                 "ALTER TABLE contracts ADD COLUMN acceptance_policy TEXT"
+            )
+        if "context_asset_ids" not in existing:
+            self._conn.execute(
+                "ALTER TABLE contracts "
+                "ADD COLUMN context_asset_ids TEXT NOT NULL DEFAULT '[]'"
             )
 
     def _record_schema_version(self, version: int) -> None:
@@ -130,6 +135,9 @@ class SQLiteMigrator:
             if current < 14:
                 self._migrate_to_v14()
                 self._record_schema_version(14)
+            if current < 15:
+                self._migrate_to_v15()
+                self._record_schema_version(15)
 
     def _migrate_to_v2(self) -> None:
         """Add 040 transactional worker state and contract authority metadata."""
@@ -376,6 +384,10 @@ class SQLiteMigrator:
                 causal_parent=asset_records.get(asset.id, ""),
             )
             self._store._insert_runtime_record(record)
+
+    def _migrate_to_v15(self) -> None:
+        """Bind exact context Asset references into v4 Contracts."""
+        self._ensure_contract_columns()
 
 
 def initialize_sqlite_schema(connection: sqlite3.Connection, store) -> None:

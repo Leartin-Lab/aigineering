@@ -11,11 +11,13 @@ Protected runtime namespaces (``_sys_``, ``_tool_obs_``, ``_mcp_``,
 
 from __future__ import annotations
 
+from dataclasses import replace
 from aigineering.core.authority import _is_protected_name
 from aigineering.core.ids import (
     hash_asset_definition,
     hash_asset_content,
     hash_contract_v3,
+    hash_contract_v4,
 )
 from aigineering.protocol.types import Asset, Contract
 
@@ -101,6 +103,7 @@ def build_control_plane_contract(
     budget: int = 5,
     description: str = "",
     labels: tuple[str, ...] = (),
+    context_asset_ids: tuple[str, ...] = (),
     tool_scope: tuple[str, ...] = (),
     sensitive_input_policy: dict | None = None,
     acceptance_policy: dict | None = None,
@@ -134,7 +137,7 @@ def build_control_plane_contract(
         )
 
     policy = sensitive_input_policy if sensitive_input_policy is not None else None
-    identity = hash_contract_v3(
+    identity_fields = dict(
         name=name,
         description=description,
         inputs=inputs,
@@ -147,6 +150,11 @@ def build_control_plane_contract(
         sensitive_input_policy=policy,
         acceptance_policy=acceptance_policy,
     )
+    identity = (
+        hash_contract_v4(**identity_fields, context_asset_ids=context_asset_ids)
+        if context_asset_ids
+        else hash_contract_v3(**identity_fields)
+    )
 
     return Contract(
         id=identity,
@@ -157,7 +165,44 @@ def build_control_plane_contract(
         activation=activation,
         budget=budget,
         labels=labels,
+        context_asset_ids=context_asset_ids,
         tool_scope=tool_scope,
         sensitive_input_policy=policy,
         acceptance_policy=acceptance_policy,
     )
+
+
+def bind_contract_label_assets(contract: Contract, store) -> Contract:
+    """Resolve label syntax once and bind exact Asset IDs into a v4 identity."""
+    asset_ids = tuple(
+        sorted(
+            {
+                asset.id
+                for label in contract.labels
+                if not label.startswith("plugin:")
+                for asset in store.get_assets_by_name(label)
+                if asset.promptable
+            }
+        )
+    )
+    if not asset_ids:
+        return contract
+    identity = hash_contract_v4(
+        name=contract.name,
+        description=contract.description,
+        inputs=contract.inputs,
+        outputs=contract.outputs,
+        activation=contract.activation,
+        budget=contract.budget,
+        tool_scope=contract.tool_scope,
+        labels=contract.labels,
+        origin=contract.origin,
+        parent_id=contract.parent_id,
+        worker_capabilities=contract.worker_capabilities,
+        worker_pools=contract.worker_pools,
+        minting_authority=contract.minting_authority,
+        sensitive_input_policy=contract.sensitive_input_policy,
+        acceptance_policy=contract.acceptance_policy,
+        context_asset_ids=asset_ids,
+    )
+    return replace(contract, id=identity, context_asset_ids=asset_ids)

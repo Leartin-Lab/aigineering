@@ -16,6 +16,7 @@ REDACTED_CONTENT = "[redacted]"
 class StoreLike(Protocol):
     def get_all_assets(self) -> list[Asset]: ...
     def get_assets_by_name(self, name: str) -> list[Asset]: ...
+    def get_asset(self, asset_id: str) -> Asset | None: ...
 
 
 class DisclosurePolicyError(ValueError):
@@ -58,18 +59,28 @@ def compute_disclosure(contract: Contract, store: StoreLike) -> list[Asset]:
 
     _enforce_sensitive_input_policy(contract, input_assets)
 
-    # Include label-referenced assets (e.g. behavior:* labels) so that
-    # promptable behaviour assets are disclosed alongside declared inputs.
-    for label_name in contract.labels:
-        for asset in store.get_assets_by_name(label_name):
-            if asset.name.startswith(BEHAVIOR_LABEL_PREFIX):
-                if not is_behavior_asset_allowed(asset):
-                    continue
-            if not asset.promptable:
+    if contract.id.startswith("task:v4:"):
+        label_assets = tuple(
+            asset
+            for asset_id in contract.context_asset_ids
+            if (asset := store.get_asset(asset_id)) is not None
+        )
+    else:
+        # Historical v3 Contracts retain their original name-resolved behavior.
+        label_assets = tuple(
+            asset
+            for label_name in contract.labels
+            for asset in store.get_assets_by_name(label_name)
+        )
+    for asset in label_assets:
+        if asset.name.startswith(BEHAVIOR_LABEL_PREFIX):
+            if not is_behavior_asset_allowed(asset):
                 continue
-            if asset.id not in seen:
-                seen.add(asset.id)
-                result.append(asset)
+        if not asset.promptable:
+            continue
+        if asset.id not in seen:
+            seen.add(asset.id)
+            result.append(asset)
 
     return [redact_for_disclosure(asset) for asset in result]
 
