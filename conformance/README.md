@@ -34,3 +34,10 @@ inside the signed envelope, including `claim_epoch`, obey the same safe range.
 Ed25519 test key, Genesis identity, Contract v3 identity, signed
 `contract.declare`, signed `asset.attest`, and causal-allowance identities. The
 private key is test material only and must never be authorized in a real domain.
+
+## v0.5.2 Asset graph vector
+
+`v0.5.2/asset-graph-vectors.json` covers normalized content identity, signed
+definition bytes and identity, and signed definition-content assertion bytes
+and identity. Decimal similarity values are strings; no language-specific
+floating-point serialization participates in signatures.

@@ -28,3 +28,4 @@ def test_all_release_artifacts_exclude_legacy_stateful_engine_modules():
     assert "tests/**" in sdist_excluded
     assert Path("conformance/README.md").is_file()
     assert Path("conformance/v0.5.0/protocol-vectors.json").is_file()
+    assert Path("conformance/v0.5.2/asset-graph-vectors.json").is_file()

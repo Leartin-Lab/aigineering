@@ -1,0 +1,53 @@
+{
+  "assertion": {
+    "expected_signing_utf8": "{\"actor_id\":\"worker:vector\",\"content_id\":\"content:v1:850f7dc43910ff890f8879c0ed26fe697c93a067ad93a7d50f466a7028a9bf4e\",\"definition_id\":\"definition:v1:f3c0bd223a319879eccd09094326a3250de4ef6edb364e9de9b22855e44b08fc\",\"domain_id\":\"genesis:90ec86a0588eaef47f62a24dfdf75e1b9f6ce040e92af934aa21da50036728c3\",\"evidence\":{\"model\":\"embedding-v1\",\"model_version\":\"2026-07\",\"score\":\"0.981\",\"threshold\":\"0.950\"},\"key_id\":\"vector-key\",\"relation_type\":\"semantic-equivalent\",\"schema_version\":1,\"signature_kind\":\"ed25519\"}",
+    "value": {
+      "actor_id": "worker:vector",
+      "content_id": "content:v1:850f7dc43910ff890f8879c0ed26fe697c93a067ad93a7d50f466a7028a9bf4e",
+      "definition_id": "definition:v1:f3c0bd223a319879eccd09094326a3250de4ef6edb364e9de9b22855e44b08fc",
+      "domain_id": "genesis:90ec86a0588eaef47f62a24dfdf75e1b9f6ce040e92af934aa21da50036728c3",
+      "evidence": {
+        "model": "embedding-v1",
+        "model_version": "2026-07",
+        "score": "0.981",
+        "threshold": "0.950"
+      },
+      "id": "assertion:v1:49ad17bc49169e35e01a1cc1fdec20bd84dd805ab64a361f5814ce721800ee34",
+      "key_id": "vector-key",
+      "relation_type": "semantic-equivalent",
+      "schema_version": 1,
+      "signature": "ed25519:MZ+zYvzvfIgNcOj9b/DbLMFFnFvmVEpzDgIgMUN3GT9OM5vNYzuxA7zWYbgtFEGnF9SURcn8cWoq3bZFJY45CQ==",
+      "signature_kind": "ed25519"
+    }
+  },
+  "content": {
+    "value": {
+      "content": "café",
+      "content_type": "text/markdown",
+      "id": "content:v1:850f7dc43910ff890f8879c0ed26fe697c93a067ad93a7d50f466a7028a9bf4e",
+      "schema_version": 1
+    }
+  },
+  "definition": {
+    "expected_signing_utf8": "{\"actor_id\":\"worker:vector\",\"content_type\":\"text/markdown\",\"description\":\"Audited report\",\"domain_id\":\"genesis:90ec86a0588eaef47f62a24dfdf75e1b9f6ce040e92af934aa21da50036728c3\",\"key_id\":\"vector-key\",\"name\":\"report\",\"schema_version\":1,\"signature_kind\":\"ed25519\",\"source_kind\":\"contract-output\",\"source_uri\":\"task:v3:vector\"}",
+    "value": {
+      "actor_id": "worker:vector",
+      "content_type": "text/markdown",
+      "description": "Audited report",
+      "domain_id": "genesis:90ec86a0588eaef47f62a24dfdf75e1b9f6ce040e92af934aa21da50036728c3",
+      "id": "definition:v1:f3c0bd223a319879eccd09094326a3250de4ef6edb364e9de9b22855e44b08fc",
+      "key_id": "vector-key",
+      "name": "report",
+      "schema_version": 1,
+      "signature": "ed25519:LEwBr+k34kLfaIOrcbmnYuv5STmPZVzDjwDlW+Jz13cGR8szK4++HZ/Hu+PoBBsEzzBpKeNg9FqmAoOBajAOAA==",
+      "signature_kind": "ed25519",
+      "source_kind": "contract-output",
+      "source_uri": "task:v3:vector"
+    }
+  },
+  "ed25519_test_key": {
+    "private_key_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+    "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8"
+  },
+  "schema": "aigineering.asset-graph.v1"
+}
