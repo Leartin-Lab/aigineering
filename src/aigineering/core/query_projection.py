@@ -15,7 +15,7 @@ from aigineering.protocol.wire import (
     contract_to_dict,
 )
 
-QUERY_PROJECTION_SCHEMA = "v1"
+QUERY_PROJECTION_SCHEMA = "v2"
 
 
 class QueryProjection(Protocol):
@@ -27,6 +27,11 @@ class QueryProjection(Protocol):
     def get_all_assets(self) -> list[Asset]: ...
     def get_contract(self, contract_id: str) -> Contract | None: ...
     def get_all_contracts(self) -> list[Contract]: ...
+    def get_content_objects(self) -> list[dict]: ...
+    def get_asset_definitions(self) -> list[dict]: ...
+    def get_definition_content_assertions(
+        self, *, definition_id: str = "", content_id: str = ""
+    ) -> list[dict]: ...
     def memoize_json(
         self, view_name: str, identity: str, build: Callable[[], dict[str, Any]]
     ) -> dict[str, Any]: ...
@@ -64,6 +69,19 @@ class StoreQueryProjection:
     def get_all_contracts(self) -> list[Contract]:
         return self._store.get_all_contracts()
 
+    def get_content_objects(self) -> list[dict]:
+        return self._store.get_content_objects()
+
+    def get_asset_definitions(self) -> list[dict]:
+        return self._store.get_asset_definitions()
+
+    def get_definition_content_assertions(
+        self, *, definition_id: str = "", content_id: str = ""
+    ) -> list[dict]:
+        return self._store.get_definition_content_assertions(
+            definition_id=definition_id, content_id=content_id
+        )
+
     def memoize_json(
         self, view_name: str, identity: str, build: Callable[[], dict[str, Any]]
     ) -> dict[str, Any]:
@@ -96,6 +114,9 @@ class QuerySnapshot:
     contracts: tuple[tuple[str, str], ...]
     asset_names: tuple[tuple[str, tuple[str, ...]], ...]
     asset_definitions: tuple[tuple[str, tuple[str, ...]], ...]
+    contents: tuple[tuple[str, str], ...]
+    signed_definitions: tuple[tuple[str, str], ...]
+    assertions: tuple[tuple[str, str], ...]
     digest: str
 
 
@@ -110,6 +131,16 @@ def build_query_snapshot(store, *, domain_id: str) -> QuerySnapshot:
     asset_rows = tuple((asset.id, _wire_json(asset_to_dict(asset))) for asset in assets)
     contract_rows = tuple(
         (contract.id, _wire_json(contract_to_dict(contract))) for contract in contracts
+    )
+    content_rows = tuple(
+        (str(value["id"]), _wire_json(value)) for value in store.get_content_objects()
+    )
+    signed_definition_rows = tuple(
+        (str(value["id"]), _wire_json(value)) for value in store.get_asset_definitions()
+    )
+    assertion_rows = tuple(
+        (str(value["id"]), _wire_json(value))
+        for value in store.get_definition_content_assertions()
     )
 
     names: dict[str, list[str]] = {}
@@ -130,6 +161,9 @@ def build_query_snapshot(store, *, domain_id: str) -> QuerySnapshot:
         "asset_names": name_rows,
         "assets": asset_rows,
         "contracts": contract_rows,
+        "contents": content_rows,
+        "signed_definitions": signed_definition_rows,
+        "assertions": assertion_rows,
         "domain_id": domain_id,
         "revision": revision,
         "schema": QUERY_PROJECTION_SCHEMA,
@@ -141,6 +175,9 @@ def build_query_snapshot(store, *, domain_id: str) -> QuerySnapshot:
         contracts=contract_rows,
         asset_names=name_rows,
         asset_definitions=definition_rows,
+        contents=content_rows,
+        signed_definitions=signed_definition_rows,
+        assertions=assertion_rows,
         digest=compute_content_hash(canonical_json(payload)),
     )
 

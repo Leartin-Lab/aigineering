@@ -14,8 +14,19 @@ from aigineering.core.control_plane import (
     build_control_plane_contract,
 )
 from aigineering.core.query_projection import build_query_snapshot
+from aigineering.core.query_projection import QUERY_PROJECTION_SCHEMA
 from aigineering.core.sqlite_store import SQLiteStore
 from conftest import candidate_runtime
+from aigineering.protocol.asset_graph import (
+    create_content_object,
+    create_definition_content_assertion,
+    create_signed_definition,
+)
+from aigineering.protocol.effect_builders import (
+    content_publication_effect,
+    definition_content_assertion_effect,
+    definition_publication_effect,
+)
 
 
 class FakeRedisError(Exception):
@@ -75,6 +86,9 @@ class FakeRedis:
         key: str,
         assets_key: str,
         contracts_key: str,
+        contents_key: str,
+        definitions_key: str,
+        assertions_key: str,
         target: str,
     ):
         self._check()
@@ -84,6 +98,9 @@ class FakeRedis:
             meta["revision"] = str(target)
             meta["asset_count"] = str(len(self.sets.get(assets_key, set())))
             meta["contract_count"] = str(len(self.sets.get(contracts_key, set())))
+            meta["content_count"] = str(len(self.sets.get(contents_key, set())))
+            meta["definition_count"] = str(len(self.sets.get(definitions_key, set())))
+            meta["assertion_count"] = str(len(self.sets.get(assertions_key, set())))
             return 1
         return 0
 
@@ -218,7 +235,7 @@ def test_flushed_or_partial_cache_is_rebuilt_before_read(temp_sqlite_store):
         mapping={
             "domain_id": runtime.genesis.id,
             "revision": str(temp_sqlite_store.get_runtime_revision()),
-            "schema": "v1",
+            "schema": QUERY_PROJECTION_SCHEMA,
             "status": "building",
         },
     )
@@ -257,6 +274,55 @@ def test_json_views_are_memoized_only_for_one_authoritative_revision(
     assert projection.memoize_json("task.status", contract.id, build)["call"] == 1
     runtime.accept_asset(build_control_plane_asset(name="second", content="new"))
     assert projection.memoize_json("task.status", contract.id, build)["call"] == 2
+
+
+def test_redis_graph_rebuild_and_incremental_catchup(temp_sqlite_store):
+    runtime, _, _ = _facts(temp_sqlite_store)
+    client = FakeRedis()
+    projection = _projection(temp_sqlite_store, runtime, client)
+    projection.rebuild()
+
+    content = create_content_object("graph")
+    definition = create_signed_definition(
+        domain_id=runtime.genesis.id,
+        name="graph-report",
+        description="Graph report",
+        content_type="text",
+        source_kind="contract-output",
+        source_uri="task:v3:graph",
+        actor_id=runtime.actor_key.actor_id,
+        key_id=runtime.actor_key.key_id,
+        signer=runtime.signer,
+    )
+    runtime._publish(content_publication_effect(content))
+    runtime._publish(definition_publication_effect(definition))
+    assertion = create_definition_content_assertion(
+        domain_id=runtime.genesis.id,
+        definition_id=definition.id,
+        content_id=content.id,
+        relation_type="satisfies",
+        actor_id=runtime.actor_key.actor_id,
+        key_id=runtime.actor_key.key_id,
+        signer=runtime.signer,
+    )
+    runtime._publish(definition_content_assertion_effect(assertion))
+
+    assert content.id in {value["id"] for value in projection.get_content_objects()}
+    assert definition.id in {
+        value["id"] for value in projection.get_asset_definitions()
+    }
+    assert projection.get_definition_content_assertions(
+        definition_id=definition.id
+    ) == temp_sqlite_store.get_definition_content_assertions(
+        definition_id=definition.id
+    )
+
+    client.flushall()
+    rebuilt = projection.rebuild()
+    assert (
+        rebuilt.digest
+        == build_query_snapshot(temp_sqlite_store, domain_id=runtime.genesis.id).digest
+    )
 
 
 def test_store_domains_use_disjoint_redis_namespaces():

@@ -26,6 +26,9 @@ if current <= target then
     redis.call('HSET', KEYS[1], 'revision', ARGV[1])
     redis.call('HSET', KEYS[1], 'asset_count', redis.call('SCARD', KEYS[2]))
     redis.call('HSET', KEYS[1], 'contract_count', redis.call('SCARD', KEYS[3]))
+    redis.call('HSET', KEYS[1], 'content_count', redis.call('SCARD', KEYS[4]))
+    redis.call('HSET', KEYS[1], 'definition_count', redis.call('SCARD', KEYS[5]))
+    redis.call('HSET', KEYS[1], 'assertion_count', redis.call('SCARD', KEYS[6]))
     return 1
 end
 return 0
@@ -128,6 +131,26 @@ class RedisQueryProjection:
         for contract_id, payload in snapshot.contracts:
             pipeline.set(f"{generation}:contract:{contract_id}", payload)
             pipeline.sadd(f"{generation}:contracts", contract_id)
+        for content_id, payload in snapshot.contents:
+            pipeline.set(f"{generation}:content:{content_id}", payload)
+            pipeline.sadd(f"{generation}:contents", content_id)
+        for definition_id, payload in snapshot.signed_definitions:
+            pipeline.set(f"{generation}:definition:{definition_id}", payload)
+            pipeline.sadd(f"{generation}:definitions", definition_id)
+        for assertion_id, payload in snapshot.assertions:
+            assertion = json.loads(payload)
+            pipeline.set(f"{generation}:assertion:{assertion_id}", payload)
+            pipeline.sadd(f"{generation}:assertions", assertion_id)
+            pipeline.sadd(
+                f"{generation}:assertion-definition:"
+                f"{self._index_token(str(assertion['definition_id']))}",
+                assertion_id,
+            )
+            pipeline.sadd(
+                f"{generation}:assertion-content:"
+                f"{self._index_token(str(assertion['content_id']))}",
+                assertion_id,
+            )
         pipeline.hset(
             f"{generation}:meta",
             mapping={
@@ -135,6 +158,9 @@ class RedisQueryProjection:
                 "domain_id": snapshot.domain_id,
                 "asset_count": str(len(snapshot.assets)),
                 "contract_count": str(len(snapshot.contracts)),
+                "content_count": str(len(snapshot.contents)),
+                "definition_count": str(len(snapshot.signed_definitions)),
+                "assertion_count": str(len(snapshot.assertions)),
                 "revision": str(snapshot.revision),
                 "schema": QUERY_PROJECTION_SCHEMA,
                 "status": "ready",
@@ -203,6 +229,36 @@ class RedisQueryProjection:
         )
         pipeline.sadd(f"{generation}:contracts", contract_id)
 
+    def _queue_graph_payload(
+        self,
+        pipeline,
+        generation: str,
+        kind: str,
+        value: dict[str, Any],
+    ) -> None:
+        object_id = str(value["id"])
+        pipeline.set(
+            f"{generation}:{kind}:{object_id}",
+            json.dumps(
+                value,
+                sort_keys=True,
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ),
+        )
+        pipeline.sadd(f"{generation}:{kind}s", object_id)
+        if kind == "assertion":
+            pipeline.sadd(
+                f"{generation}:assertion-definition:"
+                f"{self._index_token(str(value['definition_id']))}",
+                object_id,
+            )
+            pipeline.sadd(
+                f"{generation}:assertion-content:"
+                f"{self._index_token(str(value['content_id']))}",
+                object_id,
+            )
+
     def catch_up(self, generation: str, *, after_revision: int) -> int:
         """Apply immutable entity records and advance one monotonic watermark."""
         records = self._store.scan_runtime_records(after_revision=after_revision)
@@ -221,13 +277,31 @@ class RedisQueryProjection:
                 if isinstance(contract, dict):
                     contract_from_query_json(json.dumps(contract))
                     self._queue_contract(pipeline, generation, contract)
+            elif record.record_type == "asset.content.published":
+                self._queue_graph_payload(
+                    pipeline, generation, "content", payload["content"]
+                )
+            elif record.record_type == "asset.definition.published":
+                self._queue_graph_payload(
+                    pipeline, generation, "definition", payload["definition"]
+                )
+            elif record.record_type == "asset.definition-content.asserted":
+                self._queue_graph_payload(
+                    pipeline, generation, "assertion", payload["assertion"]
+                )
+            elif record.record_type == "asset.legacy-graph.migrated":
+                for kind in ("content", "definition", "assertion"):
+                    self._queue_graph_payload(pipeline, generation, kind, payload[kind])
         target_revision = int(records[-1][0])
         pipeline.eval(
             _ADVANCE_REVISION,
-            3,
+            6,
             f"{generation}:meta",
             f"{generation}:assets",
             f"{generation}:contracts",
+            f"{generation}:contents",
+            f"{generation}:definitions",
+            f"{generation}:assertions",
             str(target_revision),
         )
         pipeline.execute()
@@ -364,6 +438,57 @@ class RedisQueryProjection:
                 raise CorruptQueryProjection("invalid cached Contract") from exc
 
         return self._cached(read, self._fallback.get_all_contracts)
+
+    def _graph_values(self, generation: str, kind: str) -> list[dict]:
+        ids = sorted(self._client.smembers(f"{generation}:{kind}s"))
+        meta = self._client.hgetall(f"{generation}:meta")
+        if len(ids) != int(meta.get(f"{kind}_count", "-1")):
+            raise CorruptQueryProjection(f"{kind} index count mismatch")
+        if not ids:
+            return []
+        payloads = self._client.mget(
+            [f"{generation}:{kind}:{object_id}" for object_id in ids]
+        )
+        if any(payload is None for payload in payloads):
+            raise CorruptQueryProjection(f"{kind} index references a missing payload")
+        try:
+            values = [json.loads(payload) for payload in payloads]
+        except (TypeError, ValueError) as exc:
+            raise CorruptQueryProjection(f"invalid cached {kind}") from exc
+        if not all(isinstance(value, dict) for value in values):
+            raise CorruptQueryProjection(f"cached {kind} must be an object")
+        return values
+
+    def get_content_objects(self) -> list[dict]:
+        return self._cached(
+            lambda generation: self._graph_values(generation, "content"),
+            self._fallback.get_content_objects,
+        )
+
+    def get_asset_definitions(self) -> list[dict]:
+        return self._cached(
+            lambda generation: self._graph_values(generation, "definition"),
+            self._fallback.get_asset_definitions,
+        )
+
+    def get_definition_content_assertions(
+        self, *, definition_id: str = "", content_id: str = ""
+    ) -> list[dict]:
+        def read(generation: str):
+            values = self._graph_values(generation, "assertion")
+            return [
+                value
+                for value in values
+                if (not definition_id or value["definition_id"] == definition_id)
+                and (not content_id or value["content_id"] == content_id)
+            ]
+
+        return self._cached(
+            read,
+            lambda: self._fallback.get_definition_content_assertions(
+                definition_id=definition_id, content_id=content_id
+            ),
+        )
 
     def memoize_json(
         self,
