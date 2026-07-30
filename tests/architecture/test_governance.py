@@ -6,26 +6,62 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def test_design_truth_and_active_change_are_present():
+def test_stable_design_change_and_adr_are_current():
     design = (ROOT / "DESIGN.md").read_text(encoding="utf-8")
     change = (ROOT / "changes/001-candidate-genesis.md").read_text(encoding="utf-8")
 
-    assert "Implemented runtime path" in design
-    assert "Known transition boundaries".lower() in design.lower()
+    for section in (
+        "## Implemented runtime path",
+        "## Known transition boundaries",
+        "## Release limits",
+    ):
+        assert section in design
     for section in (
         "## Problem",
         "## Resulting design",
-        "## Compatibility sequence",
-        "## Required architecture tests",
-        "## Deletion ledger",
-        "## Exit criteria",
+        "## Public compatibility",
+        "## Required verification",
+        "## Closure",
     ):
         assert section in change
     adr = (ROOT / "docs/adr/ADR-011-candidate-native-plugin-runtime.md").read_text(
         encoding="utf-8"
     )
-    assert "Status: Accepted; migration in progress" in adr
+    assert "Status: Accepted" in adr
+    assert "migration in progress" not in adr
     assert "current implemented truth" in adr
+
+
+def test_public_sources_do_not_reference_private_workspaces():
+    roots = (
+        "README.md",
+        "DESIGN.md",
+        "ROADMAP.md",
+        "CONTRIBUTING.md",
+        "SKILL.md",
+        "docs",
+        "changes",
+        "reports",
+        "src",
+        "tests",
+    )
+    forbidden = ("." + "omo/", "." + "internal-docs", "internal " + "ADR")
+
+    for relative in roots:
+        path = ROOT / relative
+        files = (path,) if path.is_file() else tuple(path.rglob("*"))
+        for file in files:
+            if (
+                not file.is_file()
+                or file.name == "AGENTS.md"
+                or file.suffix not in {".md", ".py", ".toml"}
+            ):
+                continue
+            content = file.read_text(encoding="utf-8")
+            for marker in forbidden:
+                assert marker not in content, (
+                    f"{file.relative_to(ROOT)} contains {marker}"
+                )
 
 
 def test_legacy_runtime_files_stay_out_of_release_artifacts():

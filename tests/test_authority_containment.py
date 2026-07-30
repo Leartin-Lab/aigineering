@@ -242,7 +242,7 @@ def test_budget_within_bounds_accepted():
 
 
 def test_planner_cannot_set_minting_authority():
-    """Planner sets minting_authority → accepted but ignored (N-P2.14: field removed from protected set).
+    """Planner-provided minting authority is ignored.
 
     minting_authority is no longer in _PLAN_PROTECTED_FIELDS — plans can include it
     but the Contract constructor default (empty tuple) still applies. The child is

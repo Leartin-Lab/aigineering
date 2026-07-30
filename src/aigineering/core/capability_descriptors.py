@@ -321,7 +321,7 @@ def create_provider_config_snapshot(
     return sign_asset(asset)
 
 
-# Minimum trust tier required for capability descriptors (040 gate)
+# Minimum trust tier required for capability descriptors.
 _MINIMUM_TRUST_TIER = "configured"
 
 _ORIGIN_PREFIX_MAP: dict[str, str] = {

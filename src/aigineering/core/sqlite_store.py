@@ -345,7 +345,7 @@ class SQLiteStore:
     def add_asset(self, asset: Asset) -> None:
         if not asset.signed_by or not verify_asset_seal(asset):
             raise ValueError(
-                f"G3/N-P1.6: Asset '{asset.id}' rejected — missing or invalid canonical seal "
+                f"Asset '{asset.id}' rejected — missing or invalid canonical seal "
                 f"(signed_by={asset.signed_by!r})"
             )
         if _is_protected_name(asset.name):
@@ -357,7 +357,7 @@ class SQLiteStore:
     def _add_system_asset(self, asset: Asset) -> None:
         if not asset.signed_by or not verify_asset_seal(asset):
             raise ValueError(
-                f"G3/N-P1.6: Asset '{asset.id}' rejected — missing or invalid canonical seal "
+                f"Asset '{asset.id}' rejected — missing or invalid canonical seal "
                 f"(signed_by={asset.signed_by!r})"
             )
         with self._conn:
@@ -1717,7 +1717,7 @@ class SQLiteStore:
         for asset in accepted_assets:
             if not asset.signed_by or not verify_asset_seal(asset):
                 raise ValueError(
-                    f"G3/N-P1.6: Asset '{asset.id}' rejected — "
+                    f"Asset '{asset.id}' rejected — "
                     "missing or invalid canonical seal "
                     f"(signed_by={asset.signed_by!r})"
                 )

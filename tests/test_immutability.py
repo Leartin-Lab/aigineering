@@ -1,7 +1,4 @@
-"""Immutability tests for v0.3.1 — every mutable field must reject in-place mutation.
-
-These tests are RED until the v0.3.1a container migration is implemented.
-"""
+"""Every immutable protocol collection rejects in-place mutation."""
 
 import pytest
 

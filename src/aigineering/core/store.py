@@ -401,7 +401,7 @@ class MemoryStore(_ProjectionIndexMixin):
     def add_asset(self, asset: Asset) -> None:
         if not asset.signed_by or not verify_asset_seal(asset):
             raise ValueError(
-                f"G3/N-P1.6: Asset '{asset.id}' rejected — missing or invalid canonical seal "
+                f"Asset '{asset.id}' rejected — missing or invalid canonical seal "
                 f"(signed_by={asset.signed_by!r})"
             )
         if _is_protected_name(asset.name):
@@ -417,7 +417,7 @@ class MemoryStore(_ProjectionIndexMixin):
     def _add_system_asset(self, asset: Asset) -> None:
         if not asset.signed_by or not verify_asset_seal(asset):
             raise ValueError(
-                f"G3/N-P1.6: Asset '{asset.id}' rejected — missing or invalid canonical seal "
+                f"Asset '{asset.id}' rejected — missing or invalid canonical seal "
                 f"(signed_by={asset.signed_by!r})"
             )
         self._persist_asset(asset)
@@ -626,7 +626,7 @@ class JsonLStore(_ProjectionIndexMixin):
     def add_asset(self, asset: Asset) -> None:
         if not asset.signed_by or not verify_asset_seal(asset):
             raise ValueError(
-                f"G3/N-P1.6: Asset '{asset.id}' rejected — missing or invalid canonical seal "
+                f"Asset '{asset.id}' rejected — missing or invalid canonical seal "
                 f"(signed_by={asset.signed_by!r})"
             )
         if _is_protected_name(asset.name):
@@ -637,7 +637,7 @@ class JsonLStore(_ProjectionIndexMixin):
     def _add_system_asset(self, asset: Asset) -> None:
         if not asset.signed_by or not verify_asset_seal(asset):
             raise ValueError(
-                f"G3/N-P1.6: Asset '{asset.id}' rejected — missing or invalid canonical seal "
+                f"Asset '{asset.id}' rejected — missing or invalid canonical seal "
                 f"(signed_by={asset.signed_by!r})"
             )
         self._persist_asset(asset)

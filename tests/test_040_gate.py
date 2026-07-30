@@ -1,16 +1,4 @@
-"""040 Production Kernel Gate Tests.
-
-These tests encode the non-negotiable invariants from 040-production-kernel-gate.md
-(G1-G11). All tests must FAIL against current code (pre-repair baseline) and PASS
-after each gate is repaired.
-
-Each test docstring maps to a specific gate and documented debt item.
-
-Gate test convention:
-- Test name encodes: what_surface_under_test + expected_behavior
-- Assertion messages reference the gate number + debt ID
-- Tests use the public Engine/store API, never _private members (G7)
-"""
+"""Regression tests for the runtime's security and durability invariants."""
 
 import pytest
 
@@ -19,7 +7,7 @@ from aigineering.core.store import MemoryStore
 
 
 # ============================================================================
-# Phase A Gate Tests — P0 Leaks (G10, G9)
+# Sealed configuration and boundary integrity
 # ============================================================================
 
 
@@ -30,7 +18,6 @@ class TestSessionSealedConfig:
         """session show text output must not print raw config_snapshot values.
 
         Gate: G10 (Trust, Signatures, and Sealed Config Policy)
-        Debt: N-P0.1 (cli/session.py:53-54)
         """
         from aigineering.core.session import SessionStore, Session
         import tempfile
@@ -73,7 +60,6 @@ class TestSessionSealedConfig:
         """Verify session_show text output does not contain sensitive config values.
 
         Gate: G10
-        Debt: N-P0.1
         """
         from aigineering.cli.session import session_show
         from aigineering.core.session import SessionStore, Session
@@ -111,7 +97,6 @@ class TestCLIRetryBypass:
         """aig retry must go through method ingress, not direct store.add_contract().
 
         Gate: G1 (Single Runtime Ingress)
-        Debt: D-P0.1 (cli/retry.py:22-47)
         """
         import ast
         import os
@@ -200,7 +185,6 @@ class TestAuthorityClamp:
         """Tool scope widening must reject the child contract entirely.
 
         Gate: G6 (Deny-By-Default Capability Containment)
-        Debt: D-P0.4 (methods.py:275-294)
         """
         # Behavior: rejects child (action="rejected"), child skipped entirely
         from aigineering.core.methods import contracts_from_plan_asset
@@ -256,7 +240,6 @@ class TestAuthorityClamp:
         """Budget containment must trace requested/effective/remaining.
 
         Gate: G6 (Deny-By-Default Capability Containment)
-        Debt: D-P0.4 (methods.py:358-395)
         """
         # Budget containment: child is accepted with reduced budget, but the trace
         # MUST record requested, effective, and remaining budget fields.
@@ -339,7 +322,6 @@ class TestProtectedMintingAuthority:
         """Protected output must require exact minting authority, not just origin==system.
 
         Gate: G5 (Exact Protected-Asset Minting Authority)
-        Debt: D-P0.6 (authority.py:63-68)
         """
         from aigineering.core.authority import check_authority
 
@@ -361,8 +343,6 @@ class TestProtectedMintingAuthority:
         candidate_assets = [{"name": "_sys_test_output", "content": "test"}]
         accepted, rejected, policy = check_authority(contract, candidate_assets)
 
-        # This test MUST FAIL pre-repair (current code allows it based on origin=="system")
-        # After repair: _sys_test_output should be rejected without exact minting_authority
         assert len(rejected) > 0, (
             f"G5/D-P0.6: Protected output '_sys_test_output' allowed without "
             f"exact minting_authority. Accepted: {accepted}"
@@ -380,7 +360,6 @@ class TestProtectedMintingAuthority:
         """_persona_ must be in RESERVED_PREFIXES.
 
         Gate: G5 (Exact Protected-Asset Minting Authority)
-        Debt: N-P1.14 (authority.py:7-24)
         """
         from aigineering.core.authority import RESERVED_PREFIXES
 
@@ -393,7 +372,6 @@ class TestProtectedMintingAuthority:
         """Asset created without explicit origin must not default to 'system'.
 
         Gate: G5 (Exact Protected-Asset Minting Authority)
-        Debt: N-P1.15 (store.py:112), N-P2.17 (types.py:18)
         """
 
         # Create Asset with default parameters — origin should NOT be "system"
@@ -419,7 +397,6 @@ class TestTransactionalSubmit:
         """Store implementations must enforce canonical seal on asset write.
 
         Gate: G3, G4, G10
-        Debt: N-P1.6 (store.py:39,173; sqlite_store.py:255)
         """
         from aigineering.protocol.types import Asset
 
@@ -447,7 +424,6 @@ class TestTransactionalSubmit:
         """Asset definition_hash must start with 'def:' and content_hash with 'content:'.
 
         Gate: G3
-        Debt: C1 (Phase C dual-hash requirement)
         """
         from aigineering.core.ids import hash_asset_definition, hash_asset_content
 
@@ -471,7 +447,6 @@ class TestTransactionalSubmit:
         """SQLite store must support migration from v0 schema.
 
         Gate: G3
-        Debt: C1 (Schema version requirement)
         """
         import sqlite3
         import tempfile
@@ -498,7 +473,6 @@ class TestTransactionalSubmit:
         """SQLite store must fail closed on unknown schema version.
 
         Gate: G3
-        Debt: C1 (Unknown version requirement)
         """
         import sqlite3
         import tempfile
@@ -528,7 +502,6 @@ class TestTransactionalSubmit:
         """Store must verify canonical seal (not just non-empty check).
 
         Gate: G3, G4, G10
-        Debt: N-P1.6
         """
         from aigineering.core.provenance import sign_asset, verify_asset_seal
         from aigineering.protocol.types import Asset
@@ -562,7 +535,6 @@ class TestTransactionalSubmit:
         """IdempotencyStore must persist across process restarts.
 
         Gate: G3
-        Debt: N-P1.16 (idempotency_store.py:56)
         """
         import tempfile
         import os
@@ -585,7 +557,7 @@ class TestTransactionalSubmit:
 
 
 # ============================================================================
-# Phase C Gate Tests — Crash Recovery (G3, G9)
+# Crash recovery
 # ============================================================================
 
 
@@ -596,7 +568,6 @@ class TestClaimPersistence:
         """Claim must persist in SQLite and be recoverable after restart.
 
         Gate: G8 (Claim/Lease Worker Pull Semantics)
-        Debt: N-P1.8 (claims.py:49-177)
         """
         from aigineering.core.sqlite_store import SQLiteStore
         import tempfile
@@ -618,7 +589,7 @@ class TestClaimPersistence:
 
 
 # ============================================================================
-# Phase D Gate Tests — Trust & Sealed Config (G4, G10)
+# Trust and sealed configuration
 # ============================================================================
 
 
@@ -629,7 +600,6 @@ class TestDisclosureRedaction:
         """Prompt must render [redacted] when disclosure_view != 'original'.
 
         Gate: G10 (Trust, Signatures, and Sealed Config Policy)
-        Debt: N-P1.7 (prompt.py:42)
         """
         from aigineering.core.disclosure import redact_for_disclosure
         from aigineering.protocol.types import Asset
@@ -656,7 +626,6 @@ class TestDisclosureRedaction:
         """Sensitive policy must check only contract inputs, not get_all_assets().
 
         Gate: G10
-        Debt: D-P1.3 (verification.py:203,226)
         """
         from aigineering.core.verification import check_sensitive_input_policy
         from aigineering.core.store import MemoryStore
@@ -717,7 +686,6 @@ class TestDisclosureRedaction:
         """Sealed config must never appear in trace, JSON CLI, prompt, or replay exports.
 
         Gate: G10
-        Debt: N-P0.1 (Phase D3 verification)
         """
         import json
         from aigineering.cli._common import _redact_sealed
@@ -769,7 +737,6 @@ class TestDisclosureRedaction:
         """Projection origin must derive from worker type (llm/tool/mcp/mock).
 
         Gate: G4 (Strong Worker Protocol)
-        Debt: N-P1.9 (projection.py:83)
         """
         from aigineering.core.projection import _derive_worker_origin
 
@@ -790,7 +757,6 @@ class TestDisclosureRedaction:
         """Asset.origin default must not be 'system'.
 
         Gate: G5
-        Debt: N-P1.15, N-P2.17
         """
 
         # Test that Asset created without explicit origin does not default to "system"
@@ -802,7 +768,6 @@ class TestDisclosureRedaction:
             content_hash="content:test",
         )
 
-        # After repair: origin should be "" (unset)
         assert asset.origin != "system", (
             f"G5/N-P2.17: Asset.origin default must not be 'system'. Got: '{asset.origin}'"
         )
@@ -811,7 +776,6 @@ class TestDisclosureRedaction:
         """Tool execution must be blocked when descriptor is missing/unsigned/low-trust.
 
         Gate: G10
-        Debt: D6 (Minimum capability descriptor trust gate)
         """
         from aigineering.core.capability_descriptors import (
             verify_descriptor,
@@ -871,7 +835,7 @@ class TestDisclosureRedaction:
 
 
 # ============================================================================
-# Phase E Gate Tests — Worker Protocol Hashing (G4)
+# Worker protocol hashing
 # ============================================================================
 
 
@@ -882,7 +846,6 @@ class TestWorkerProtocolHashing:
         """WorkerPackage hash must detect tampered disclosure.
 
         Gate: G4 (Strong Worker Protocol)
-        Debt: D-P1.1 (package.py:10-53)
         """
         from aigineering.protocol.package import WorkerPackage, CURRENT_PROTOCOL_VERSION
         import pytest
@@ -918,7 +881,6 @@ class TestWorkerProtocolHashing:
         """CandidateEnvelope must fail closed on unknown protocol version.
 
         Gate: G4
-        Debt: N-P2.5, N-P2.11
         """
         from aigineering.protocol.envelope import (
             CandidateEnvelope,
@@ -949,7 +911,7 @@ class TestWorkerProtocolHashing:
 
 
 # ============================================================================
-# Phase F Gate Tests — Protocol Integrity (G4, G6, G9)
+# Protocol integrity
 # ============================================================================
 
 
@@ -960,7 +922,6 @@ class TestPlanContainment:
         """Plan-expanded children must retain parent's sensitive_input_policy.
 
         Gate: G6
-        Debt: N-P2.13 (methods.py:234-422)
         """
         from aigineering.core.methods import contracts_from_plan_asset
         from aigineering.protocol.types import Asset, Contract
@@ -997,7 +958,6 @@ class TestPlanContainment:
         """Plan must reject child contracts with empty name.
 
         Gate: G6
-        Debt: N-P2.16 (methods.py:195)
         """
         from aigineering.core.methods import contracts_from_plan_asset
         from aigineering.protocol.types import Asset, Contract
@@ -1036,7 +996,6 @@ class TestWorkerProtocolFixes:
         """Real Workers (MockWorker, LLMWorker) must accept (contract, disclosed_assets).
 
         Gate: G4
-        Debt: N-P1.12 (ADR-006 Worker substitutability)
         """
         import inspect
         from aigineering.agent.mock import MockWorker
@@ -1055,7 +1014,6 @@ class TestWorkerProtocolFixes:
         """ToolExecutor and MCPExecutor are NOT Workers — they have custom signatures.
 
         Gate: G4 (ADR-006 enforcement — executors ≠ workers)
-        Debt: N-P1.12 (tool_executor.py, mcp_executor.py)
         """
         import inspect
         from aigineering.agent.tool_executor import ToolExecutor
@@ -1087,7 +1045,6 @@ class TestWorkerProtocolFixes:
         """MockWorker.worker_id must be immutable after construction.
 
         Gate: G4
-        Debt: N-P1.11 (mock.py:10-12)
         """
         from aigineering.agent.mock import MockWorker
 
@@ -1113,12 +1070,10 @@ class TestReplayIntegrity:
         """Replay must use exact trace file matching, not loose intersection.
 
         Gate: G9
-        Debt: N-P2.8 (replay.py:41-60)
         """
         from aigineering.core.replay import replay_session
 
         # Verify replay_session only uses direct path or subset match
-        # (intersection fallback was removed in N-P2.8)
         import inspect
 
         source = inspect.getsource(replay_session)
@@ -1131,7 +1086,6 @@ class TestReplayIntegrity:
         """Replay must validate causal chain (parent references, event ordering).
 
         Gate: G9
-        Debt: N-P2.9 (replay.py:93-101)
         """
         import inspect
         from aigineering.core.replay import replay_session
@@ -1146,7 +1100,6 @@ class TestReplayIntegrity:
         """Idempotency JSONL must have HMAC/checksum integrity check.
 
         Gate: G3
-        Debt: N-P2.10 (idempotency_store.py:35-51)
         """
         import inspect
         from aigineering.core.idempotency_store import IdempotencyStore
@@ -1160,19 +1113,15 @@ class TestReplayIntegrity:
 
 
 # ============================================================================
-# Phase G Gate Tests — Public Docs (G11)
+# Public documentation
 # ============================================================================
 
 
 class TestPublicDocs:
     """G11: Public docs must match reality."""
 
-    def test_public_docs_match_040_release_scope(self):
-        """README and ROADMAP may claim 040 kernel infrastructure, not production security.
-
-        Gate: G11 (Public Claims Match Reality)
-        Debt: G11-D1 (README.md:55-96), G11-D2 (ROADMAP.md:3-13)
-        """
+    def test_public_docs_match_release_scope(self):
+        """README and ROADMAP describe the release without overclaiming."""
         import os
 
         repo_root = os.path.join(os.path.dirname(__file__), "..")
@@ -1186,16 +1135,16 @@ class TestPublicDocs:
         forbidden_claims = [
             "production-grade",
             "distributed runtime is complete",
-            "v0.5 is complete",
+            "security audited",
         ]
         for claim in forbidden_claims:
             assert claim not in readme.lower(), (
-                f"G11: README claims '{claim}' which is not yet true under 040 gate."
+                f"G11: README makes unsupported claim: {claim!r}"
             )
-        assert "not a security-audited production release" in readme.lower()
         assert "v0.5.0" in readme.lower()
-        assert "local productivity formal release" in readme.lower()
-        assert "transactional worker candidate submission" in readme.lower()
+        assert "candidate" in readme.lower()
+        assert "transaction" in readme.lower()
+        assert "single-machine" in readme.lower()
 
         # Check ROADMAP
         roadmap_path = os.path.join(repo_root, "ROADMAP.md")
@@ -1203,13 +1152,10 @@ class TestPublicDocs:
             roadmap = f.read()
 
         roadmap_lower = roadmap.lower()
-        assert "local productivity formal release" in roadmap_lower
         assert "v0.5" in roadmap_lower
-        assert "[x] transactional candidate submission" in roadmap_lower
-        assert (
-            "pre-release" in roadmap_lower or "not a security-audited" in roadmap_lower
-        )
-        assert "[x] release packaging and distribution checks" in roadmap_lower
+        assert "actor-signed candidate commitment" in roadmap_lower
+        assert "single-machine" in roadmap_lower
+        assert "release gates" in roadmap_lower
 
         # G11: must NOT claim "stable kernel" in status descriptions
         rejected_stable_claims = [
@@ -1225,7 +1171,7 @@ class TestPublicDocs:
         for claim in rejected_stable_claims:
             assert claim not in roadmap_lower, (
                 f"G11: ROADMAP contains '{claim}' which implies production stability "
-                f"that 040 does not guarantee."
+                "that this release does not guarantee."
             )
 
 
@@ -1241,7 +1187,6 @@ class TestSQLiteTrace:
         """append_trace_entry() must write; get_trace_events() must return matching entries.
 
         Gate: G3
-        Debt: C3 (SQLite trace operations)
         """
         from aigineering.core.sqlite_store import SQLiteStore
         from aigineering.core.trace import create_entry

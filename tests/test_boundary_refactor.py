@@ -1,13 +1,4 @@
-"""Phase A: Failing tests for 050 runtime boundary refactoring.
-
-These tests document the semantic drift that must be repaired before
-v0.5.0 can ship.  Every test marked ``xfail(strict=True)`` asserts the
-DESIRED post-refactor behavior — it currently FAILS because the runtime
-does not yet enforce the invariant, and will turn GREEN as Phases B–G
-repair the boundary.
-
-Plan reference: .omo/plans/050-runtime-boundary-refactor-plan.md
-"""
+"""Regression tests for the v0.5 runtime boundary."""
 
 from __future__ import annotations
 
@@ -15,7 +6,7 @@ from aigineering.core.ids import hash_contract
 from aigineering.protocol.types import Contract
 
 # ============================================================================
-# W1 — Asset-driven parent completion (Plan §2.1, §4 Phase A item 1)
+# Asset-driven parent completion
 # ============================================================================
 
 
@@ -56,7 +47,7 @@ class TestTaskIdentityParentCollision:
             "hash_contract_v2 must be deterministic for same parent"
         )
 
-        # Without parent_id (None), same params → same ID (legacy behavior)
+        # Root definitions remain deterministic without a parent.
         cid_no_parent_1 = hash_contract_v2(**kwargs, parent_id=None)
         cid_no_parent_2 = hash_contract_v2(**kwargs, parent_id=None)
         assert cid_no_parent_1 == cid_no_parent_2, (
@@ -92,7 +83,7 @@ class TestTaskIdentityParentCollision:
 
 
 # ============================================================================
-# W6 — Claim lifecycle monotonicity (Plan §2.4, §4 Phase A item 4)
+# Claim lifecycle monotonicity
 # ============================================================================
 
 
@@ -143,7 +134,7 @@ class TestClaimLifecycleMonotonicity:
 
 
 # ============================================================================
-# W8 — Protected asset minting (Plan §2.5, §4 Phase A item 5)
+# Protected asset minting
 # ============================================================================
 
 

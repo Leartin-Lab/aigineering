@@ -154,7 +154,7 @@ def test_replay_detects_asset_signature_mismatch(tmp_path):
     _write_trace(traces_dir / "session_test.jsonl", [entry])
     # Store rejects tampered assets at write time (G3 enforcement)
     assert not verify_asset_seal(tampered), (
-        "G3/N-P1.6: Tampered asset must fail signature verification"
+        "Tampered asset must fail signature verification"
     )
     with pytest.raises(ValueError, match="missing or invalid canonical seal"):
         JsonLStore(

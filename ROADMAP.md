@@ -1,178 +1,68 @@
 # Aigineering Roadmap
 
-## Current Status
+## Current release
 
-**Version:** `v0.5.0` (single-machine formal release)
+Version: **v0.5.0**
 
-This is not a security-audited production release. The formal designation
-refers to the supported single-machine local-productivity scope only.
+v0.5.0 is the stable single-machine reference release. “Stable” applies to the
+documented local runtime and protocol surface; it is not a claim of external
+security audit or public-network deployment hardening.
 
-Aigineering is a Zero Trust Agent Runtime. The current milestone is the **050
-local productivity formal release**: a traceable CLI/control-plane surface on top of the
-v0.4 single-node kernel, with authenticated Candidate commitment as the sole
-production fact-creation gate, plugin-published ordinary tasks, reactive
-declared-output completion, and output satisfaction that filters out
-observation/context assets.
+Implemented:
 
-The v0.4 kernel provides SQLite-backed transactional submission, reconstructable
-runtime projections, capability containment, and a worker pull/submit protocol. The
-transactional candidate submission guarantees apply through the `aig worker
-next` / `aig worker submit` protocol path: worker packages are claim-bound,
-submitted candidates are idempotency-bound, and accepted assets plus trace
-records commit atomically through the SQLite runtime store.
+- one actor-signed Candidate commitment boundary;
+- SQLite-backed atomic claims, fencing, submission, facts, and trace;
+- append-only runtime records and deterministic materialization rebuild;
+- stateless Worker pull/package/submit protocol;
+- staged planning and replanning as ordinary tasks;
+- recursive causal allowance containment;
+- independent output attestation;
+- same-machine active-active Worker arbitration;
+- Engine-as-Worker isolation and restart;
+- CLI audit, replay, lineage, recovery, and task projections;
+- mock and OpenAI-compatible LLM Workers;
+- optional FastAPI transport;
+- language-neutral signed protocol conformance vectors.
 
-**What's working today:**
-- Candidate-to-fact boundary with declared-output authority checks
-- SQLite-backed durable store with schema versioning and migration
-- Worker claim/idempotency tables with single-active-claim enforcement
-- Append-only runtime records with deterministic materialized-view rebuild
-- Same-machine active-active claim arbitration with epoch fencing and renewal
-- Candidate-native task delegation and completion plugins
-- Engine-as-Worker isolation through authenticated WorkerHost Candidates
-- OpenAI-compatible LLM worker with retry, usage metadata, multi-tool-call
-- Control-plane asset/contract/behavior injection via CLI
-- Additive asset slicing, replacement claims, version lists, lineage views
-- Capability, MCP, skill, tool, memory, and persona descriptors as signed assets
-- Stable MCP function call to method/tool contract expansion
-- Experimental REPL (`aig repl`) and optional FastAPI surface (`aig serve`)
-- CLI trace timeline, tree, and DAG views
-- Replay, audit, and session commands for persisted runs
+Release evidence is recorded in
+`reports/050-post-review-boundary-hardening-2026-07-19.md`.
 
-**What's not done yet:**
-- PyPI publish (API stability gate)
-- Universal cryptographic provenance for committed Assets (Candidate actors
-  already use Ed25519; deterministic Asset seals remain integrity checks)
-- Universal trust-policy enforcement over signer, origin, trust tier, labels
-- Distributed runtime across shared stores
-- External security audit and deployment hardening
-- Cross-machine distributed Store implementation and consensus
-- External real-LLM release evidence in unrestricted CI
+## Release gates
 
-```text
-Contract -> Worker/Plugin -> signed Candidate -> Commitment -> Asset/Contract/Trace
-```
+Every stable release must pass:
 
-The project has completed Waves 0–5 of its development plan. It is not
-externally audited or deployment-hardened.
+1. candidate/fact, authority, disclosure, claim, and terminal regression tests;
+2. Memory/SQLite conformance and crash-atomicity tests;
+3. materialization deletion and rebuild with matching semantic digest;
+4. concurrent Worker and stale-claim fencing tests;
+5. canonical signed JSON and protocol-vector verification;
+6. Ruff check and format;
+7. full deterministic test suite;
+8. wheel and sdist build plus metadata validation;
+9. installation-state CLI and database-reopen smoke tests;
+10. bounded real-LLM system, Worker, and end-to-end scenarios.
 
-## v0.1 - Hallucination Containment MVP
+## Planned directions
 
-- [x] Deterministic SHA-256 content-addressed IDs
-- [x] Asset / Contract / Candidate / TraceEntry data models
-- [x] Candidate-to-fact boundary
-- [x] Declared-output authority gate
-- [x] Reserved runtime name rejection
-- [x] Rejected candidate recording in trace
-- [x] Mock worker demo
-- [x] `aig run`, `aig trace`, `aig audit` CLI
+Future releases may extend the reference implementation in separately reviewed
+changes. Work is not part of the supported release until its design, migration,
+tests, reconstruction proof, and public evidence are complete.
 
-## v0.2 - Persistence, Replay, and Provenance
+Candidate directions include:
 
-- [x] JSONL persistent trace (`.aig/traces/session_*.jsonl`)
-- [x] Persistent asset/contract store (`.aig/store/*.jsonl`)
-- [x] Session manifest (`.aig/sessions/*.json`)
-- [x] `aig replay` from persisted sessions
-- [x] Projection/commit separation with pure `ProjectionResult`
-- [x] Structured rejection categories and projection status
-- [x] Boundary regression pack
-- [x] Label-based asset injection with placeholder assets
-- [x] Asset disclosure policy for non-promptable assets
-- [x] Asset provenance metadata (`origin`, `trust_tier`, `minted_by`, `source_uri`)
-- [x] Deterministic provenance signatures (`signed_by`, `signature`)
-- [x] Replay-time verification for deterministic provenance signatures
-- [x] Worker protocol interface
-- [x] Worker-origin provenance for projected assets
+- replace repeated query scans with disposable read projections;
+- richer Asset definition, provenance, and semantic indexing;
+- cross-machine Store and Worker discovery;
+- deployment security profiles;
+- reproducible productivity and quality benchmarks.
 
-## v0.3 - Real Worker and Structured Protocol
+## Non-goals
 
-- [x] OpenAI-compatible LLM worker
-- [x] CLI worker selection for mock and LLM workers
-- [x] Prompt builder aligned with structured actions
-- [x] `/exec` / `/plan` / `/replan` / `/tool` parsing
-- [x] Method actions as system sub-contracts
-- [x] Method context assets for scheduled sub-contracts
-- [x] System authority for declared reserved method outputs
-- [x] Tool execution through `_tool_call_*` and `_tool_obs_*` assets
-- [x] Parent resume from method observations
-- [x] Planner result expansion into non-system child contracts
-- [x] End-to-end fake-LLM protocol boundary tests
-- [x] CLI trace rendering for method scheduling, tool execution, resume, and expansion
+Aigineering is not intended to become:
 
-## v0.4 - Kernel Infrastructure
-
-Focus: make the single-node runtime durable, resumable, protocolized, and safer.
-
-- [x] SQLiteStore or equivalent single-file durable store
-- [x] Schema-versioned SQLite substrate with v1 -> v2 migration
-- [x] Contract authority metadata persistence (`minting_authority`, `sensitive_input_policy`)
-- [x] SQLite trace store operations for replay and recovery
-- [x] Worker claim and idempotency tables
-- [x] Transactional candidate submission across accepted assets, trace, idempotency, and claim transition
-- [x] Database-enforced single active worker claim per contract
-- [x] Worker package and candidate envelope claim/package binding
-- [x] Claim-bound SQLite worker submission via `aig worker next` / `aig worker submit`
-- [x] Reconstructable scheduling views for terminal, budget, delegation, and method context facts
-- [x] Crash recovery from persisted assets/contracts/traces without process-local task state
-- [x] `aig trace --tree` / `aig trace --dag` as views, not runtime truth
-- [x] CLI split into smaller command modules
-- [x] Explicit `/plan`, `/replan`, `/retry`, and `/tool` delegation as ordinary child tasks
-- [x] 040 gate test suite for boundary, persistence, recovery, claim, and public-claim checks
-- [x] Release packaging and distribution checks
-
-### Deferred beyond the local reference runtime
-
-- [ ] Real cryptographic signer/verifier interface
-- [ ] Trust policy over signer, origin, trust tier, labels, tool scope, and reserved prefixes
-- [x] Crash-injection and concurrent-worker stress tests for local SQLite
-
-## v0.5 - Local Productivity Formal Release
-
-Focus: make the single-node runtime useful for local work without weakening the
-candidate/fact boundary.
-
-- [x] Control-plane asset injection (`aig asset add/list/show`)
-- [x] Control-plane contract/task injection (`aig contract add/list/show/run`)
-- [x] Asset slicing, replacement claims, versions, and lineage views
-- [x] Behavior prompt assets (`aig behavior add/list/show`)
-- [x] LLM worker retry, provider capabilities, usage metadata, and multi-tool-call envelope
-- [x] Experimental REPL (`aig repl`)
-- [x] Optional experimental API/server surface (`aig serve`, `api` extra)
-- [x] Stable MCP function call -> method/tool contract expansion
-- [x] Stable MCP descriptor assets (`aig mcp add/list/show`)
-- [x] Stable skill loading as assets (`aig skill load/list`)
-- [x] Stable label-injected skill assets
-- [x] Capability assets for tools, MCP, memory, and persona modules
-- [x] Immutable RuntimeRecord log and deterministic projection reconstruction
-- [x] Transactional claim/renew/package/submit protocol with fencing epochs
-- [x] Same-machine active-active worker processes over one SQLite domain
-- [x] Candidate-native completion/recovery plugins with separated actor keys
-- [x] Neutral `task.delegated` facts with historical Method-fact compatibility
-- [x] Engine-as-Worker adapter with isolated inner fact domain and signed delegates
-- [ ] PyPI publish after API stabilizes
-
-## v0.6 - Asset Management and Evaluation
-
-- [ ] Semantic asset catalog
-- [ ] Prefix search and tag filtering
-- [ ] Lineage bundles
-- [ ] GC: audit closure, keep flags, reflog, tombstones
-- [x] Replacement claims instead of asset mutation
-- [ ] Real-world LLM benchmarks
-- [ ] Reproducible benchmark suite for output quality evaluation
-
-## v0.7+ - Cross-Machine Distribution and Production Hardening
-
-- [x] Full-hash v3 Contract identity for current runtime security fields
-- [x] Versioned local worker registry
-- [x] Local worker leases, renewal, fencing, and stale-claim recovery
-- [x] Same-machine concurrent execution and SQLite transaction guarantees
-- [ ] Remote Store adapter, discovery, consensus, and cross-machine leases
-- [ ] Fuzz tests for protocol, authority, and replay
-- [ ] Deployment docs and security model
-
-## Non-Goals for Early Releases
-
-- A generic prompt harness
-- A static DAG workflow engine
-- A hidden multi-agent swarm scheduler
-- Direct mutation of runtime facts by workers, tools, or sub-agents
+- a generic prompt harness;
+- a static DAG workflow engine;
+- a hidden multi-agent swarm scheduler;
+- a mutable conversational state container;
+- a system in which Workers or tools directly write runtime facts;
+- a system whose correctness depends on one Engine process remaining alive.

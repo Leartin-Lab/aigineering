@@ -15,8 +15,8 @@ and two publishers can both pass the same preflight balance.
 A root Contract declaration creates `allowance.granted`. Publishing a child
 creates one `allowance.reserved` against its parent and a matching grant for the
 child. A terminal Contract creates `allowance.extinguished` for its remaining
-amount. These content-addressed RuntimeRecords are the authority; `budget` is a
-migration input and fallback for older declarations.
+amount. These content-addressed RuntimeRecords are the runtime authority;
+`Contract.budget` supplies the root declaration.
 
 Projection rejects a Candidate batch whose total reservation exceeds the fact
 snapshot. SQLite repeats reservation and terminal-extinguishment validation
@@ -34,8 +34,6 @@ transferable balances, or a compute market.
 - Concurrent SQLite publishers have one transactionally ordered result.
 - Cancellation consumes the unreserved remainder; recovery that needs work must
   reserve its replacement before extinguishing the source.
-- Legacy budget counters remain compatibility debt and must be deleted after
-  migration evidence is complete.
 
 ## Evidence
 

@@ -9,9 +9,6 @@ cancellation.
 The reducer is **pure** — it never mutates store, trace, budget, or any
 other shared state.  It only reads the store and returns events.  The
 caller materializes those events as atomic runtime facts.
-
-References: W1 (Fact Ingress And Reactive Reducer) of
-``.omo/plans/050-runtime-boundary-refactor-plan.md``.
 """
 
 from __future__ import annotations

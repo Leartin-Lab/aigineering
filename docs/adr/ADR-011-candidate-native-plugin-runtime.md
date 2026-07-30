@@ -1,17 +1,15 @@
 # ADR-011: Candidate-native plugin runtime
 
-Status: Accepted; migration in progress
+Status: Accepted
 Date: 2026-07-15
 Scope: v0.5 commitment boundary and v1 protocol direction
 Related: ADR-005, ADR-006, ADR-007, ADR-008, ADR-009, ADR-010, ADR-013
 
 ## Context
 
-The v0.5 boundary correctly treats LLM output as a Candidate, but trusted
-control-plane calls, feature-specific Methods, and process identity still create
-multiple classes of mutation. That split makes the kernel larger, makes human,
-script, LLM, plugin, and nested-engine actors behave differently, and weakens
-reconstruction across runtimes.
+Human, script, LLM, Plugin, and nested-Engine actors require one proposal and
+commitment model. Caller-specific mutation paths weaken authority, audit, and
+reconstruction.
 
 The protocol needs one answer to two questions:
 
@@ -120,23 +118,14 @@ Positive:
 Costs:
 
 - actor key lifecycle and policy evolution become explicit protocol concerns;
-- existing RuntimeIngress and Method APIs require staged migration or deletion;
 - adapters must preserve atomic append, uniqueness, and reconstruction rules;
-- external clients must sign Candidates rather than rely on server-side trust.
+- external clients must sign Candidates rather than rely on server-side trust;
 - custom Worker adapters must compile raw model actions into ordinary effects
   before signing.
 
-## Boundaries
-
-This ADR does not define a token market, worker accounts, consensus protocol,
-remote discovery system, or general workflow DSL. Economic analogies remain
-internal design lenses. The public protocol exposes allowance, authority,
-effects, and evidence—not financial metaphors.
-
-## Migration and verification
+## Verification
 
 `DESIGN.md` remains the current implemented truth.
-`changes/001-candidate-genesis.md` owns migration order and deletion criteria.
 Architecture tests must enforce at least:
 
 - canonical and deeply immutable Candidate/Genesis values;
@@ -146,7 +135,4 @@ Architecture tests must enforce at least:
 - producer-separated exact-Asset attestation and qualified-output projection;
 - Memory/SQLite conformance, reconstruction, concurrent idempotency, and crash
   atomicity;
-- monotonically decreasing direct RuntimeIngress and Method exceptions.
-
-The ADR is fully realized only when the active change closes and its result is
-folded into `DESIGN.md`.
+- no direct-write fallback from rejected Candidate effects.
