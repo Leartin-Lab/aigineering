@@ -37,7 +37,11 @@ def query_projection(store, *, redis_url: str | None = None):
     try:
         genesis = load_genesis(store)
     except (AttributeError, LookupError):
-        return StoreQueryProjection(store)
+        return StoreQueryProjection(
+            store,
+            redis_configured=True,
+            reason="domain_uninitialized",
+        )
     return RedisQueryProjection.from_url(
         store,
         domain_id=genesis.id,

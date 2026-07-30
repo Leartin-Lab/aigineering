@@ -259,6 +259,31 @@ def test_json_views_are_memoized_only_for_one_authoritative_revision(
     assert projection.memoize_json("task.status", contract.id, build)["call"] == 2
 
 
+def test_store_domains_use_disjoint_redis_namespaces():
+    first_store = SQLiteStore(":memory:")
+    second_store = SQLiteStore(":memory:")
+    first_runtime = candidate_runtime(first_store)
+    second_runtime = candidate_runtime(second_store)
+    first = first_runtime.accept_asset(
+        build_control_plane_asset(name="source", content="first")
+    )
+    second = second_runtime.accept_asset(
+        build_control_plane_asset(name="source", content="second")
+    )
+    client = FakeRedis()
+    first_projection = _projection(first_store, first_runtime, client)
+    second_projection = _projection(second_store, second_runtime, client)
+
+    first_projection.rebuild()
+    second_projection.rebuild()
+
+    assert first_projection.active_key != second_projection.active_key
+    assert first_projection.get_assets_by_name("source") == [first]
+    assert second_projection.get_assets_by_name("source") == [second]
+    first_store.close()
+    second_store.close()
+
+
 def test_redis_outage_falls_back_without_changing_results(temp_sqlite_store):
     runtime, asset, contract = _facts(temp_sqlite_store)
     client = FakeRedis()
@@ -274,6 +299,14 @@ def test_redis_outage_falls_back_without_changing_results(temp_sqlite_store):
     assert projection.get_asset(asset.id) == asset
     assert projection.get_all_contracts() == [contract]
     assert failures == ["unavailable", "unavailable"]
+    assert projection.status() == {
+        "authoritative_revision": temp_sqlite_store.get_runtime_revision(),
+        "available": False,
+        "backend": "redis",
+        "configured": True,
+        "current": False,
+        "reason": "unavailable",
+    }
 
 
 def test_real_redis_flush_rebuild_and_stale_catchup(temp_sqlite_store):

@@ -32,7 +32,9 @@ from aigineering.cli.skill import skill_group  # noqa: E402
 from aigineering.cli.mcp import mcp_group  # noqa: E402
 from aigineering.cli.capability import capability_group  # noqa: E402
 from aigineering.cli.domain import domain_group  # noqa: E402
+from aigineering.cli.cache import cache_group  # noqa: E402
 
+cli.add_command(cache_group)
 cli.add_command(serve)
 cli.add_command(repl)
 cli.add_command(capability_group)

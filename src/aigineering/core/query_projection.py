@@ -35,8 +35,16 @@ class QueryProjection(Protocol):
 class StoreQueryProjection:
     """Authoritative fallback using the Store's existing read surface."""
 
-    def __init__(self, store) -> None:
+    def __init__(
+        self,
+        store,
+        *,
+        redis_configured: bool = False,
+        reason: str = "",
+    ) -> None:
         self._store = store
+        self._redis_configured = redis_configured
+        self._reason = reason
 
     def get_asset(self, asset_id: str) -> Asset | None:
         return self._store.get_asset(asset_id)
@@ -61,6 +69,21 @@ class StoreQueryProjection:
     ) -> dict[str, Any]:
         del view_name, identity
         return build()
+
+    def status(self) -> dict[str, object]:
+        revision = (
+            int(self._store.get_runtime_revision())
+            if hasattr(self._store, "get_runtime_revision")
+            else 0
+        )
+        return {
+            "authoritative_revision": revision,
+            "available": True,
+            "backend": "sqlite",
+            "configured": self._redis_configured,
+            "current": True,
+            "reason": self._reason,
+        }
 
 
 @dataclass(frozen=True)

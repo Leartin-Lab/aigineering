@@ -38,6 +38,10 @@ class CorruptQueryProjection(ValueError):
     """A cache generation is structurally incomplete or invalid."""
 
 
+class QueryProjectionUnavailable(RuntimeError):
+    """The configured Redis query projection cannot be reached."""
+
+
 @lru_cache(maxsize=8)
 def _client_from_url(redis_url: str):
     import redis
@@ -98,6 +102,13 @@ class RedisQueryProjection:
         return compute_content_hash(value)
 
     def rebuild(self) -> QuerySnapshot:
+        """Rebuild a generation or raise one stable adapter error."""
+        try:
+            return self._rebuild()
+        except self._redis_errors as exc:
+            raise QueryProjectionUnavailable(str(exc)) from exc
+
+    def _rebuild(self) -> QuerySnapshot:
         """Atomically publish a complete generation derived from SQLite."""
         snapshot = build_query_snapshot(self._store, domain_id=self._domain_id)
         generation = self._generation_root(snapshot.digest)
@@ -241,7 +252,7 @@ class RedisQueryProjection:
                     and int(refreshed.get("revision", "-1")) == authoritative_revision
                 ):
                     return generation
-        return self._generation_root(self.rebuild().digest)
+        return self._generation_root(self._rebuild().digest)
 
     def _cached(self, operation: Callable[[str], Any], fallback: Callable[[], Any]):
         try:
@@ -251,7 +262,7 @@ class RedisQueryProjection:
             return fallback()
         except CorruptQueryProjection:
             try:
-                generation = self._generation_root(self.rebuild().digest)
+                generation = self._generation_root(self._rebuild().digest)
                 return operation(generation)
             except self._redis_errors as exc:
                 self._on_degraded(exc)
@@ -391,3 +402,40 @@ class RedisQueryProjection:
             return value
 
         return self._cached(read, build)
+
+    def status(self) -> dict[str, object]:
+        """Return observable cache state without triggering rebuild."""
+        authoritative_revision = self._store.get_runtime_revision()
+        try:
+            active = self._active_metadata()
+        except self._redis_errors as exc:
+            return {
+                "authoritative_revision": authoritative_revision,
+                "available": False,
+                "backend": "redis",
+                "configured": True,
+                "current": False,
+                "reason": str(exc),
+            }
+        if active is None:
+            return {
+                "authoritative_revision": authoritative_revision,
+                "available": True,
+                "backend": "redis",
+                "configured": True,
+                "current": False,
+                "reason": "projection_missing_or_invalid",
+            }
+        generation, meta = active
+        projection_revision = int(meta["revision"])
+        return {
+            "active_generation": generation.rsplit(":", 1)[-1],
+            "authoritative_revision": authoritative_revision,
+            "available": True,
+            "backend": "redis",
+            "configured": True,
+            "current": projection_revision == authoritative_revision,
+            "projection_revision": projection_revision,
+            "reason": "",
+            "schema": QUERY_PROJECTION_SCHEMA,
+        }
