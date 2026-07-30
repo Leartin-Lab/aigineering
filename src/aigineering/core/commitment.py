@@ -154,12 +154,15 @@ class CandidateCommitter:
             from aigineering.core.domain import load_genesis
 
             genesis = load_genesis(self._store)
+        actor_keys = load_effective_actor_keys(self._store, genesis)
         decision = reduce_candidate(
             candidate,
             genesis,
             verifier_factory=verifier_factory,
-            actor_keys=load_effective_actor_keys(self._store, genesis),
-            projection_context=load_effect_projection_context(self._store),
+            actor_keys=actor_keys,
+            projection_context=load_effect_projection_context(
+                self._store, actor_keys=actor_keys
+            ),
         )
         decision = close_claim_attempt(candidate, decision)
         if decision.assets:

@@ -14,6 +14,7 @@ from aigineering.core.authority import (
     matched_reserved_prefix,
 )
 from aigineering.core.actor_facts import validate_actor_runtime_record
+from aigineering.core.asset_graph_facts import validate_asset_graph_record
 from aigineering.core.activation import activation_names
 from aigineering.core.asset_versions import (
     replacement_claim_from_record,
@@ -274,6 +275,7 @@ class MemoryStore(_ProjectionIndexMixin):
                 self.add_replacement_claim(replacement_claim)
             return revision
         validate_actor_runtime_record(record, self)
+        validate_asset_graph_record(record, self)
         if record.record_type == "lifecycle.terminal":
             validate_terminal_record(
                 record,

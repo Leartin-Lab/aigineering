@@ -28,6 +28,7 @@ from aigineering.core.ids import (
     validate_contract_identity,
 )
 from aigineering.core.actor_facts import validate_actor_runtime_record
+from aigineering.core.asset_graph_facts import validate_asset_graph_record
 from aigineering.core.lifecycle_facts import validate_terminal_record
 from aigineering.core.provenance import verify_asset_seal
 from aigineering.core.record_conflict import ImmutableRecordConflict
@@ -138,6 +139,7 @@ class SQLiteStore:
                 self._insert_replacement_claim(replacement_claim)
             return int(row["revision"])
         validate_actor_runtime_record(record, self)
+        validate_asset_graph_record(record, self)
         if record.record_type == "lifecycle.terminal":
             validate_terminal_record(
                 record,

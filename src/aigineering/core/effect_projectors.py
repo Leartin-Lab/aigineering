@@ -21,6 +21,17 @@ from aigineering.core.worker_routing import (
     worker_registration_payload,
 )
 from aigineering.protocol.candidate import ActorKey, CandidateEffect, CandidateProposal
+from aigineering.protocol.asset_graph import (
+    content_object_from_dict,
+    content_object_to_dict,
+    definition_content_assertion_from_dict,
+    definition_content_assertion_to_dict,
+    signed_definition_from_dict,
+    signed_definition_to_dict,
+    validate_content_object,
+    verify_definition_content_assertion,
+    verify_signed_definition,
+)
 from aigineering.protocol.immutability import deep_thaw
 from aigineering.protocol.runtime_record import RuntimeRecord, create_runtime_record
 from aigineering.protocol.types import Asset, Contract, ReplacementClaim
@@ -156,6 +167,97 @@ def project_asset_proposal(
             ("asset.publish.protected",) if prefix is not None else ()
         ),
     )
+
+
+def _authorized_graph_key(
+    actor_id: str, key_id: str, context: EffectProjectionContext
+) -> ActorKey:
+    matches = tuple(
+        key
+        for key in context.actor_keys
+        if key.actor_id == actor_id and key.key_id == key_id
+    )
+    if len(matches) != 1:
+        raise ValueError("asset graph object references an unauthorized actor key")
+    return matches[0]
+
+
+def project_content_publication(
+    effect: CandidateEffect,
+    candidate: CandidateProposal,
+    receipt_id: str,
+    context: EffectProjectionContext,
+) -> EffectProjection:
+    del candidate, context
+    value = effect.payload.get("content")
+    if not isinstance(value, Mapping):
+        raise ValueError("asset.content.publish requires object payload.content")
+    content = content_object_from_dict(value)
+    validate_content_object(content)
+    record = create_runtime_record(
+        "asset.content.published",
+        {"content": content_object_to_dict(content)},
+        causal_parents=(receipt_id,),
+    )
+    return EffectProjection(records=(record,), relation_target=content.id)
+
+
+def project_definition_publication(
+    effect: CandidateEffect,
+    candidate: CandidateProposal,
+    receipt_id: str,
+    context: EffectProjectionContext,
+) -> EffectProjection:
+    value = effect.payload.get("definition")
+    if not isinstance(value, Mapping):
+        raise ValueError("asset.definition.publish requires object payload.definition")
+    definition = signed_definition_from_dict(value)
+    if definition.domain_id != candidate.domain_id:
+        raise ValueError("definition domain does not match Candidate domain")
+    key = _authorized_graph_key(definition.actor_id, definition.key_id, context)
+    verify_signed_definition(definition, key)
+    record = create_runtime_record(
+        "asset.definition.published",
+        {"definition": signed_definition_to_dict(definition)},
+        causal_parents=(receipt_id,),
+    )
+    return EffectProjection(records=(record,), relation_target=definition.id)
+
+
+def project_definition_content_assertion(
+    effect: CandidateEffect,
+    candidate: CandidateProposal,
+    receipt_id: str,
+    context: EffectProjectionContext,
+) -> EffectProjection:
+    value = effect.payload.get("assertion")
+    if not isinstance(value, Mapping):
+        raise ValueError("asset.assert requires object payload.assertion")
+    assertion = definition_content_assertion_from_dict(value)
+    if assertion.domain_id != candidate.domain_id:
+        raise ValueError("assertion domain does not match Candidate domain")
+    key = _authorized_graph_key(assertion.actor_id, assertion.key_id, context)
+    verify_definition_content_assertion(assertion, key)
+    known_definition_ids = {
+        str(record.payload["definition"]["id"])
+        for record in context.runtime_records
+        if record.record_type == "asset.definition.published"
+    }
+    known_content_ids = {
+        str(record.payload["content"]["id"])
+        for record in context.runtime_records
+        if record.record_type == "asset.content.published"
+    }
+    if assertion.definition_id not in known_definition_ids:
+        raise ValueError("assertion references an unknown signed definition")
+    if assertion.content_id not in known_content_ids:
+        raise ValueError("assertion references an unknown content object")
+    record = create_runtime_record(
+        "asset.definition-content.asserted",
+        {"assertion": definition_content_assertion_to_dict(assertion)},
+        causal_parents=(receipt_id,),
+    )
+    return EffectProjection(records=(record,), relation_target=assertion.id)
 
 
 def project_worker_registration(
@@ -386,6 +488,12 @@ EffectProjector = Callable[
 BUILTIN_EFFECTS: Mapping[str, tuple[str, EffectProjector]] = MappingProxyType(
     {
         "asset.propose": ("asset.publish", project_asset_proposal),
+        "asset.content.publish": ("asset.publish", project_content_publication),
+        "asset.definition.publish": (
+            "asset.publish",
+            project_definition_publication,
+        ),
+        "asset.assert": ("asset.relate", project_definition_content_assertion),
         "contract.declare": ("contract.publish", project_contract_declaration),
         "worker.register": ("worker.register", project_worker_registration),
         "asset.relate": ("asset.relate", project_replacement_claim),

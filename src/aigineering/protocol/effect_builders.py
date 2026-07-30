@@ -6,6 +6,14 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 from aigineering.protocol.candidate import ActorKey, CandidateEffect
+from aigineering.protocol.asset_graph import (
+    ContentObject,
+    DefinitionContentAssertion,
+    SignedAssetDefinition,
+    content_object_to_dict,
+    definition_content_assertion_to_dict,
+    signed_definition_to_dict,
+)
 from aigineering.protocol.envelope import CandidateEnvelope
 from aigineering.protocol.types import Asset, Contract, ReplacementClaim
 from aigineering.protocol.wire import contract_to_dict
@@ -41,6 +49,30 @@ def asset_proposal_effect(asset: Asset) -> CandidateEffect:
                 "trust_tier": asset.trust_tier,
             }
         },
+    )
+
+
+def content_publication_effect(content: ContentObject) -> CandidateEffect:
+    return CandidateEffect(
+        "asset.content.publish", {"content": content_object_to_dict(content)}
+    )
+
+
+def definition_publication_effect(
+    definition: SignedAssetDefinition,
+) -> CandidateEffect:
+    return CandidateEffect(
+        "asset.definition.publish",
+        {"definition": signed_definition_to_dict(definition)},
+    )
+
+
+def definition_content_assertion_effect(
+    assertion: DefinitionContentAssertion,
+) -> CandidateEffect:
+    return CandidateEffect(
+        "asset.assert",
+        {"assertion": definition_content_assertion_to_dict(assertion)},
     )
 
 
