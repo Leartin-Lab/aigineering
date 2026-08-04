@@ -112,36 +112,18 @@ def schedule_method_result_recovery(
         created_by=failed_contract.id,
         promptable=True,
     )
-    if runtime.can_publish_candidates("recovery.publish.v1"):
-        decision = runtime.publish_task_effects(
-            "recovery.publish.v1",
-            (
-                contract_declaration_effect(recovery),
-                asset_proposal_effect(context_template),
-            ),
-            idempotency_key=f"method-recovery:{failed_contract.id}:{result_asset.id}",
-            causal_parents=(result_asset.id,),
-        )
-        if decision is None or not decision.accepted:
-            runtime.record_rejection(
-                parent_id,
-                "method recovery Candidate publication was rejected",
-                relation_type=method_type,
-                relation_target=recovery.id,
-                authority_result="rejected",
-            )
-            return None
-        recovery = decision.contracts[0]
-        context_asset = decision.assets[0]
-    else:
-        runtime.add_contract(recovery)
-        context_asset = runtime.mint_authorized_system_asset(
-            recovery,
-            name=context_name,
-            content=context_template.content,
-            created_by=failed_contract.id,
-            promptable=True,
-        )
+    published = _publish_recovery(
+        runtime,
+        recovery=recovery,
+        context_template=context_template,
+        idempotency_key=f"method-recovery:{failed_contract.id}:{result_asset.id}",
+        causal_parents=(result_asset.id,),
+        rejection_contract_id=parent_id,
+        relation_type=method_type,
+    )
+    if published is None:
+        return None
+    recovery, context_asset = published
     runtime.append_trace(
         parent_id,
         "method_recovery_scheduled",
@@ -255,36 +237,18 @@ def schedule_projection_recovery(
         created_by=failed_contract.id,
         promptable=True,
     )
-    if runtime.can_publish_candidates("recovery.publish.v1"):
-        decision = runtime.publish_task_effects(
-            "recovery.publish.v1",
-            (
-                contract_declaration_effect(recovery),
-                asset_proposal_effect(context_template),
-            ),
-            idempotency_key=f"projection-recovery:{failed_contract.id}",
-            causal_parents=(failed_contract.id,),
-        )
-        if decision is None or not decision.accepted:
-            runtime.record_rejection(
-                failed_contract.id,
-                "projection recovery Candidate publication was rejected",
-                relation_type="projection",
-                relation_target=recovery.id,
-                authority_result="rejected",
-            )
-            return None
-        recovery = decision.contracts[0]
-        context_asset = decision.assets[0]
-    else:
-        runtime.add_contract(recovery)
-        context_asset = runtime.mint_authorized_system_asset(
-            recovery,
-            name=context_name,
-            content=context_template.content,
-            created_by=failed_contract.id,
-            promptable=True,
-        )
+    published = _publish_recovery(
+        runtime,
+        recovery=recovery,
+        context_template=context_template,
+        idempotency_key=f"projection-recovery:{failed_contract.id}",
+        causal_parents=(failed_contract.id,),
+        rejection_contract_id=failed_contract.id,
+        relation_type="projection",
+    )
+    if published is None:
+        return None
+    recovery, context_asset = published
     runtime.append_trace(
         failed_contract.id,
         "recovery_scheduled",
@@ -304,6 +268,40 @@ def schedule_projection_recovery(
 
 def has_recoverable_method_result_rejection(rejections: list[dict]) -> bool:
     return any(bool(entry.get("recoverable")) for entry in rejections)
+
+
+def _publish_recovery(
+    runtime: TaskCompletionContext,
+    *,
+    recovery: Contract,
+    context_template: Asset,
+    idempotency_key: str,
+    causal_parents: tuple[str, ...],
+    rejection_contract_id: str,
+    relation_type: str,
+) -> tuple[Contract, Asset] | None:
+    reason = f"{relation_type} recovery Candidate publisher unavailable"
+    if runtime.can_publish_candidates("recovery.publish.v1"):
+        decision = runtime.publish_task_effects(
+            "recovery.publish.v1",
+            (
+                contract_declaration_effect(recovery),
+                asset_proposal_effect(context_template),
+            ),
+            idempotency_key=idempotency_key,
+            causal_parents=causal_parents,
+        )
+        if decision is not None and decision.accepted:
+            return decision.contracts[0], decision.assets[0]
+        reason = f"{relation_type} recovery Candidate publication was rejected"
+    runtime.record_rejection(
+        rejection_contract_id,
+        reason,
+        relation_type=relation_type,
+        relation_target=recovery.id,
+        authority_result="rejected",
+    )
+    return None
 
 
 def _method_result_output_name(method_type: str, parent_id: str) -> str:

@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 
 from aigineering.core.activation import activation_names as extract_activation_names
 from aigineering.core.authority import RESERVED_PREFIXES
-from aigineering.protocol.immutability import deep_freeze, deep_thaw
+from aigineering.protocol.immutability import deep_freeze
 
 if TYPE_CHECKING:
     from aigineering.protocol.types import Asset, Contract
@@ -35,9 +35,6 @@ _SCAFFOLD_STRUCTURAL_FIELDS: frozenset[str] = frozenset(
 
 # Plan-specific reserved prefixes (superset of authority.RESERVED_PREFIXES).
 _PLAN_RESERVED_PREFIXES: frozenset[str] = RESERVED_PREFIXES | frozenset({"_persona_"})
-
-# Fields the planner must not set.
-_PLAN_PROTECTED_FIELDS: frozenset[str] = frozenset({"trust_tier", "created_by"})
 
 # ---------------------------------------------------------------------------
 # Models
@@ -499,60 +496,6 @@ def _scaffold_tasks_to_raw_dicts(scaffold: PlanScaffold) -> list[dict]:
             }
         )
     return raw_list
-
-
-# ---------------------------------------------------------------------------
-# contracts_from_scaffold — standalone derivation with containment
-# ---------------------------------------------------------------------------
-
-
-def contracts_from_scaffold(
-    scaffold: PlanScaffold,
-    parent_id: str | None,
-    parent_contract: Contract | None = None,
-) -> tuple[list, list[dict]]:
-    """Derive concrete ``Contract`` objects from a validated scaffold.
-
-    Builds raw contract dicts from scaffold tasks + data_flow + activation,
-    then delegates to ``contracts_from_plan_asset`` for containment checks
-    and ``Contract`` construction.
-
-    Falls through to the legacy ``final_contracts`` path if the scaffold
-    has no task definitions but contains ``final_contracts``.
-    """
-    from aigineering.plugins.task_semantics import contracts_from_plan_asset
-
-    # If there are no scaffold tasks, fall through to legacy final_contracts
-    if not scaffold.step_1_tasks:
-        if scaffold.final_contracts:
-            temp_content = json.dumps(
-                {"contracts": deep_thaw(scaffold.final_contracts)}, sort_keys=True
-            )
-            temp_asset = _temp_asset(temp_content)
-            return contracts_from_plan_asset(temp_asset, parent_id, parent_contract)
-        return [], []
-
-    # Build raw contract dicts from scaffold tasks
-    raw_contracts = _scaffold_tasks_to_raw_dicts(scaffold)
-
-    # Append legacy final_contracts if mixed format
-    if scaffold.final_contracts:
-        raw_contracts = raw_contracts + list(scaffold.final_contracts)
-
-    temp_content = json.dumps({"contracts": raw_contracts}, sort_keys=True)
-    temp_asset = _temp_asset(temp_content)
-    return contracts_from_plan_asset(temp_asset, parent_id, parent_contract)
-
-
-def _temp_asset(content: str) -> Asset:
-    """Create a minimal temporary Asset for passing to contracts_from_plan_asset."""
-    from aigineering.protocol.types import Asset as AssetT
-
-    return AssetT(
-        id="scaffold_temp",
-        name="_plan_result_scaffold",
-        content=content,
-    )
 
 
 # ---------------------------------------------------------------------------

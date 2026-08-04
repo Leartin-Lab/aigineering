@@ -506,6 +506,9 @@ def test_recovery_replay_requires_authenticated_candidate_publisher():
     )[0]
 
     assert "authenticated recovery Candidate publisher" in replay
+    assert ".append_runtime_record(" not in runtime
+    assert "def _commit_recovery_outcome" in runtime
+    assert "store.commit_ingress_batch(" in runtime
     assert "candidate_publishers is None" in replay
     assert "RuntimeIngress" not in runtime
     assert "FactReducer" not in runtime
@@ -534,7 +537,22 @@ def test_local_recovery_replay_publishes_contract_and_context_as_candidate():
     assert '"recovery.publish.v1"' in identity
     assert '"contract.publish.protected"' in identity
     assert '"asset.publish.protected"' in identity
+    assert "runtime.add_contract" not in recovery
+    assert "mint_authorized_system_asset" not in recovery
     assert not (ROOT / "src/aigineering/core/method_handlers/recovery.py").exists()
+
+
+def test_completion_plugins_have_no_direct_contract_mutation_fallback():
+    completion = (ROOT / "src/aigineering/plugins/completion_projection.py").read_text(
+        encoding="utf-8"
+    )
+    planning = (ROOT / "src/aigineering/plugins/planning_completion.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "def add_contract" not in completion
+    assert "mint_authorized_system_asset" not in completion
+    assert "runtime.add_contract" not in planning
 
 
 def test_http_worker_ingress_never_provisions_local_private_keys_or_direct_recovery():
@@ -593,6 +611,14 @@ def test_task_projection_semantics_live_with_plugins_not_core_compatibility():
     assert "def continuation_contract" in semantics
     assert "aigineering.core.methods" not in production
     assert len(compatibility.splitlines()) < 30
+
+    core_plugin_imports = {
+        path.name
+        for path in (ROOT / "src/aigineering/core").glob("*.py")
+        if path.name != "methods.py"
+        and "aigineering.plugins" in path.read_text(encoding="utf-8")
+    }
+    assert core_plugin_imports == set()
 
 
 def test_retry_delegation_does_not_ship_as_completion_registry_semantics():

@@ -140,16 +140,6 @@ class TaskCompletionContext:
             reason=reason,
         )
 
-    # These names intentionally fail closed for source-only legacy callers.
-    # Production completion plugins must publish signed Candidate effects.
-    def add_contract(self, contract: Contract) -> None:
-        del contract
-        raise RuntimeError("completion plugins must publish signed Candidate effects")
-
-    def mint_authorized_system_asset(self, *args, **kwargs) -> Asset:
-        del args, kwargs
-        raise RuntimeError("completion plugins must publish signed Candidate effects")
-
 
 class TaskCompletionProjector:
     """Derive consequences of one completed delegated task without local state."""

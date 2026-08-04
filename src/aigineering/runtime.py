@@ -465,7 +465,6 @@ def _schedule_rejected_recovery(
     store,
     trace,
     *,
-    record_terminal: bool = True,
     candidate_publishers=None,
 ) -> Contract | None:
     if candidate_publishers is None:
@@ -483,22 +482,56 @@ def _schedule_rejected_recovery(
         candidate_raw=candidate_raw,
         rejections=rejections,
     )
-    trace_manager.record(
+    return recovery
+
+
+def _commit_recovery_outcome(
+    store,
+    contract: Contract,
+    recovery: Contract | None,
+    *,
+    source_record,
+    record_prefix: str,
+    source_field: str,
+    record_terminal: bool,
+) -> None:
+    entry = create_entry(
         contract.id,
         "failed",
         relation_type="projection",
         relation_target=recovery.id if recovery is not None else "unrecoverable",
         authority_result="rejected",
-        budget_remaining=budget.get_remaining(contract.id),
+        budget_remaining=contract.budget,
     )
+    records = []
     if record_terminal:
-        store.append_runtime_record(
+        records.append(
             create_runtime_record(
                 "lifecycle.terminal",
                 {"contract_id": contract.id, "terminal": "failed"},
+                causal_parents=[source_record.id],
             )
         )
-    return recovery
+    records.extend(
+        (
+            create_runtime_record(
+                "trace.recorded",
+                {"trace": trace_entry_to_dict(entry)},
+                causal_parents=[source_record.id],
+            ),
+            create_runtime_record(
+                f"{record_prefix}.recovery_"
+                f"{'scheduled' if recovery is not None else 'unavailable'}",
+                {"contract_id": contract.id, source_field: source_record.id},
+                causal_parents=[source_record.id],
+            ),
+        )
+    )
+    store.commit_ingress_batch(
+        accepted_assets=[],
+        trace_entries=[entry],
+        runtime_records=tuple(records),
+    )
 
 
 def process_rejected_submissions(store, *, candidate_publishers=None) -> list[str]:
@@ -551,19 +584,17 @@ def process_rejected_submissions(store, *, candidate_publishers=None) -> list[st
             [dict(rejection) for rejection in payload["rejections"]],
             store,
             store,
-            record_terminal=contract_id not in terminal_contracts,
             candidate_publishers=candidate_publishers,
         )
-        marker = create_runtime_record(
-            (
-                "projection_rejection.recovery_scheduled"
-                if recovery is not None
-                else "projection_rejection.recovery_unavailable"
-            ),
-            {"contract_id": contract_id, "projection_id": record.id},
-            causal_parents=[record.id],
+        _commit_recovery_outcome(
+            store,
+            contract,
+            recovery,
+            source_record=record,
+            record_prefix="projection_rejection",
+            source_field="projection_id",
+            record_terminal=contract_id not in terminal_contracts,
         )
-        store.append_runtime_record(marker)
         recovered_projection_ids.add(record.id)
         terminal_contracts.add(contract_id)
         processed.append(contract_id)
@@ -691,19 +722,17 @@ def process_expired_claims(store, *, candidate_publishers=None) -> list[str]:
             ],
             store,
             store,
-            record_terminal=False,
             candidate_publishers=candidate_publishers,
         )
-        marker = create_runtime_record(
-            (
-                "claim_expiration.recovery_scheduled"
-                if recovery is not None
-                else "claim_expiration.recovery_unavailable"
-            ),
-            {"contract_id": contract_id, "expiration_id": expiration.id},
-            causal_parents=[expiration.id],
+        _commit_recovery_outcome(
+            store,
+            contract,
+            recovery,
+            source_record=expiration,
+            record_prefix="claim_expiration",
+            source_field="expiration_id",
+            record_terminal=False,
         )
-        store.append_runtime_record(marker)
         processed_expiration_ids.add(expiration.id)
         processed.append(contract_id)
     return processed
@@ -801,19 +830,17 @@ def process_worker_failures(store, *, candidate_publishers=None) -> list[str]:
             ],
             store,
             store,
-            record_terminal=False,
             candidate_publishers=candidate_publishers,
         )
-        marker = create_runtime_record(
-            (
-                "worker_failure.recovery_scheduled"
-                if recovery is not None
-                else "worker_failure.recovery_unavailable"
-            ),
-            {"contract_id": contract_id, "failure_id": failure.id},
-            causal_parents=[failure.id],
+        _commit_recovery_outcome(
+            store,
+            contract,
+            recovery,
+            source_record=failure,
+            record_prefix="worker_failure",
+            source_field="failure_id",
+            record_terminal=False,
         )
-        store.append_runtime_record(marker)
         processed_failure_ids.add(failure.id)
         processed.append(contract_id)
     return processed

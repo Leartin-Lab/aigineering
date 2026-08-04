@@ -8,7 +8,7 @@ from aigineering.plugins.recovery import (
     has_recoverable_method_result_rejection,
     schedule_method_result_recovery,
 )
-from aigineering.plugins.task_semantics import contracts_from_plan_asset, method_payload
+from aigineering.plugins.task_semantics import method_payload
 from aigineering.plugins.planning import (
     PlanningExpansionPlugin,
     is_blocking_plan_rejection,
@@ -45,7 +45,6 @@ class PlanningCompletionPlugin:
         parent_id = contract.parent_id
         if parent_id is None:
             return False
-        parent_contract: Contract | None = None
         parent_contract = runtime.get_contract(parent_id)
         if parent_contract is None:
             runtime.append_trace(
@@ -63,66 +62,50 @@ class PlanningCompletionPlugin:
             )
             return True
 
-        allowed_input_names: set[str] | None = None
-        parent_budget_remaining: int | None = None
         scope = runtime.compute_disclosure(parent_contract)
         allowed_input_names = {asset.name for asset in scope}
         parent_budget_remaining = runtime.resolve_budget(parent_contract.id)
+        expansion = PlanningExpansionPlugin()
 
         created: list[str] = []
         recovery_scheduled = False
         for asset in method_assets:
             if not asset.name.startswith(self.result_prefix):
                 continue
+            proposal = expansion.propose(
+                PluginRequest(
+                    parent=parent_contract,
+                    assets=(asset,),
+                    allowed_input_names=frozenset(allowed_input_names),
+                    allowance=parent_budget_remaining,
+                )
+            )
+            rejections = [dict(item) for item in proposal.rejections]
             decision = None
-            published = False
-            rejections: list[dict] = []
-            if parent_contract is not None:
-                plugin_proposal = PlanningExpansionPlugin().propose(
-                    PluginRequest(
-                        parent=parent_contract,
-                        assets=(asset,),
-                        allowed_input_names=frozenset(allowed_input_names or ()),
-                        allowance=parent_budget_remaining or 0,
-                    )
+            if not runtime.can_publish_candidates(expansion.plugin_id):
+                rejections.append(
+                    {
+                        "child_name": "(candidate)",
+                        "field": "publication",
+                        "reason": "planning expansion Candidate publisher unavailable",
+                        "action": "rejected",
+                        "recoverable": True,
+                    }
                 )
-                rejections = [dict(item) for item in plugin_proposal.rejections]
-                plugin_id = PlanningExpansionPlugin.plugin_id
-                if runtime.can_publish_candidates(plugin_id):
-                    published = True
-                    if plugin_proposal.effects:
-                        decision = runtime.publish_task_effects(
-                            plugin_id,
-                            plugin_proposal.effects,
-                            idempotency_key=(
-                                f"planning:{self.action_type}:{contract.id}:{asset.id}"
-                            ),
-                            causal_parents=(asset.id,),
-                        )
-            if not published:
-                children, rejections = contracts_from_plan_asset(
-                    asset,
-                    parent_id,
-                    parent_contract=parent_contract,
-                    allowed_input_names=allowed_input_names,
-                    parent_budget_remaining=parent_budget_remaining,
+            elif proposal.effects:
+                decision = runtime.publish_task_effects(
+                    expansion.plugin_id,
+                    proposal.effects,
+                    idempotency_key=(
+                        f"planning:{self.action_type}:{contract.id}:{asset.id}"
+                    ),
+                    causal_parents=(asset.id,),
                 )
-                blocking_rejections = [
-                    entry for entry in rejections if is_blocking_plan_rejection(entry)
-                ]
-                if blocking_rejections:
-                    children = []
-                for child in children:
-                    if runtime.get_contract(child.id) is None:
-                        runtime.add_contract(child)
-                        created.append(child.id)
-            elif decision is None:
-                children = []
-            elif decision.accepted:
+            children: list[Contract] = []
+            if decision is not None and decision.accepted:
                 children = list(decision.contracts)
                 created.extend(child.id for child in children)
-            else:
-                children = []
+            elif decision is not None:
                 rejection = next(
                     record
                     for record in decision.runtime_records

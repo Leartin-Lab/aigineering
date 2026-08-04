@@ -28,6 +28,7 @@ _NAME_PREFIX: dict[str, str] = {
     "skill": "_skill_capability_",
     "memory": "_memory_capability_",
     "persona": "_persona_capability_",
+    "provider": "_provider_config_",
 }
 
 
@@ -251,9 +252,6 @@ def create_persona_descriptor(
     return _build_descriptor_asset("persona", name, disclosed, trust_tier)
 
 
-_PROVIDER_NAME_PREFIX = "_provider_config_"
-
-
 def create_provider_config_snapshot(
     provider_name: str,
     base_url: str,
@@ -291,8 +289,6 @@ def create_provider_config_snapshot(
     Asset
         Signed descriptor Asset named ``_provider_config_{provider_name}``.
     """
-    asset_name = f"{_PROVIDER_NAME_PREFIX}{provider_name}"
-
     disclosed_content: dict[str, Any] = {
         "provider_name": provider_name,
         "base_url": base_url,
@@ -303,34 +299,17 @@ def create_provider_config_snapshot(
         "sealed_config_ref": "",
     }
 
-    content_str = json.dumps(disclosed_content, sort_keys=True, ensure_ascii=False)
-    c_hash = compute_content_hash(content_str)
-
-    asset = Asset(
-        id=f"cap:{c_hash}",
-        name=asset_name,
-        content=content_str,
-        content_type="application/json",
-        definition_hash=hash_asset_definition(asset_name),
-        content_hash=hash_asset_content(asset_name, content_str),
-        origin="capability_registry",
-        trust_tier=trust_tier,
-        minted_by="capability_registry",
-        source_uri=f"provider://{provider_name}",
+    return _build_descriptor_asset(
+        "provider",
+        provider_name,
+        disclosed_content,
+        trust_tier,
+        f"provider://{provider_name}",
     )
-    return sign_asset(asset)
 
 
 # Minimum trust tier required for capability descriptors.
 _MINIMUM_TRUST_TIER = "configured"
-
-_ORIGIN_PREFIX_MAP: dict[str, str] = {
-    "tool": "_tool_capability_",
-    "mcp": "_mcp_",
-    "skill": "_skill_capability_",
-    "memory": "_memory_capability_",
-    "persona": "_persona_capability_",
-}
 
 
 def verify_descriptor(
@@ -367,9 +346,9 @@ def verify_descriptor(
             return False
 
     if kind is not None:
-        if kind not in _ORIGIN_PREFIX_MAP:
+        if kind not in CAPABILITY_KINDS:
             return False
-        expected_prefix = _ORIGIN_PREFIX_MAP[kind]
+        expected_prefix = _NAME_PREFIX[kind]
         if not descriptor.name.startswith(expected_prefix):
             return False
 

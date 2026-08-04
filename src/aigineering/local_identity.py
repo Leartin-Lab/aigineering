@@ -9,7 +9,6 @@ from aigineering.core.actor_facts import load_effective_actor_keys
 from aigineering.core.candidate_publisher import (
     CandidatePublisher,
     CandidatePublisherRegistry,
-    publish_effects,
 )
 from aigineering.core.domain import initialize_genesis, load_genesis
 from aigineering.core.ids import compute_content_hash
@@ -73,17 +72,21 @@ def load_actor_signer(path: Path | None = None) -> Ed25519Signer:
     return Ed25519Signer.from_private_key_hex(encoded)
 
 
+def _load_or_create_signer(path: Path) -> Ed25519Signer:
+    if path.exists():
+        return load_actor_signer(path)
+    signer = Ed25519Signer()
+    write_actor_key(path, signer)
+    return signer
+
+
 def ensure_local_domain(store) -> GenesisManifest:
     """Create the sole local bootstrap on first use, otherwise load it."""
     try:
         return load_genesis(store)
     except LookupError:
         path = actor_key_path()
-        if path.exists():
-            signer = load_actor_signer(path)
-        else:
-            signer = Ed25519Signer()
-            write_actor_key(path, signer)
+        signer = _load_or_create_signer(path)
         manifest = create_genesis_manifest(
             "local",
             [
@@ -100,28 +103,28 @@ def ensure_local_domain(store) -> GenesisManifest:
         return initialize_genesis(store, manifest)
 
 
-def ensure_local_worker_host(store, worker):
-    """Bind a local execution adapter to one durable delegated actor key."""
+def _local_root_publisher(store) -> tuple[GenesisManifest, CandidatePublisher]:
     genesis = ensure_local_domain(store)
-    root_signer = load_actor_signer()
+    signer = load_actor_signer()
     try:
-        root_key = next(
+        actor_key = next(
             key
             for key in genesis.root_keys
-            if key.public_key == root_signer.signer_id and not key.revoked
+            if key.public_key == signer.signer_id and not key.revoked
         )
     except StopIteration as exc:
         raise ValueError("local root signer is not authorized by Genesis") from exc
+    return genesis, CandidatePublisher(store, store, genesis, actor_key, signer)
 
+
+def ensure_local_worker_host(store, worker):
+    """Bind a local execution adapter to one durable delegated actor key."""
+    genesis, authority = _local_root_publisher(store)
     worker_id = str(worker.worker_id)
     key_suffix = compute_content_hash(worker_id)[:16]
     key_id = f"worker-{key_suffix}"
     path = actor_key_path().parent / f"{key_id}.ed25519"
-    if path.exists():
-        worker_signer = load_actor_signer(path)
-    else:
-        worker_signer = Ed25519Signer()
-        write_actor_key(path, worker_signer)
+    worker_signer = _load_or_create_signer(path)
     actor_key = ActorKey(
         worker_id,
         key_id,
@@ -130,7 +133,6 @@ def ensure_local_worker_host(store, worker):
         ("worker.submit",),
     )
 
-    authority = CandidatePublisher(store, store, genesis, root_key, root_signer)
     return authorize_worker_host(worker, genesis, actor_key, worker_signer, authority)
 
 
@@ -140,22 +142,12 @@ def ensure_local_plugin_publisher(
     capabilities: tuple[str, ...],
 ) -> CandidatePublisher:
     """Provision one durable plugin actor and return its explicit publisher."""
-    genesis = ensure_local_domain(store)
-    root_signer = load_actor_signer()
-    root_key = next(
-        key
-        for key in genesis.root_keys
-        if key.public_key == root_signer.signer_id and not key.revoked
-    )
+    genesis, authority = _local_root_publisher(store)
     actor_id = f"plugin:{plugin_id}"
     key_suffix = compute_content_hash(actor_id)[:16]
     key_id = f"plugin-{key_suffix}"
     path = actor_key_path().parent / f"{key_id}.ed25519"
-    if path.exists():
-        signer = load_actor_signer(path)
-    else:
-        signer = Ed25519Signer()
-        write_actor_key(path, signer)
+    signer = _load_or_create_signer(path)
     actor_key = ActorKey(
         actor_id,
         key_id,
@@ -172,12 +164,7 @@ def ensure_local_plugin_publisher(
         None,
     )
     if current is None:
-        decision = publish_effects(
-            store,
-            store,
-            genesis,
-            root_key,
-            root_signer,
+        decision = authority.publish(
             (actor_authorization_effect(actor_key),),
             idempotency_key=f"plugin-key:{actor_id}:{key_id}",
         )
