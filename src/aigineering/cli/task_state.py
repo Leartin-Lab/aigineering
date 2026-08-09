@@ -182,7 +182,7 @@ def _silent_failure_risks(
         )
     if (
         not all_outputs_satisfied(contract, store)
-        and _budget_remaining(contract, entries) <= 0
+        and effective_view.budget_remaining <= 0
     ):
         risks.append(
             {
@@ -210,14 +210,6 @@ def _silent_failure_risks(
             }
         )
     return risks
-
-
-def _budget_remaining(contract: Contract, entries: list[TraceEntry]) -> int:
-    remaining = max(contract.budget, 1)
-    for entry in entries:
-        if entry.event_type in {"budget_initialized", "budget_consumed"}:
-            remaining = entry.budget_remaining
-    return remaining
 
 
 def _has_active_recovery(contract: Contract, store) -> bool:

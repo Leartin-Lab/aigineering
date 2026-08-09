@@ -10,7 +10,6 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Protocol
 
-from aigineering.core.budget_manager import BudgetManager
 from aigineering.core.causal_allowance import resolve_causal_allowance
 from aigineering.core.disclosure import compute_disclosure
 from aigineering.core.output_satisfaction import all_outputs_satisfied
@@ -43,12 +42,10 @@ class TaskCompletionContext:
         self,
         store: CompletionStoreProtocol,
         trace: TraceManager,
-        budget: BudgetManager,
         candidate_publishers: CandidatePublisherRegistry | None,
     ) -> None:
         self._store = store
         self._trace = trace
-        self._budget = budget
         self._candidate_publishers = candidate_publishers
 
     def get_contract(self, contract_id: str) -> Contract | None:
@@ -61,7 +58,14 @@ class TaskCompletionContext:
         return compute_disclosure(contract, self._store)
 
     def resolve_budget(self, contract_id: str) -> int:
-        return self._budget.get_remaining(contract_id)
+        contract = self._store.get_contract(contract_id)
+        if contract is None:
+            return 0
+        return resolve_causal_allowance(
+            self._store,
+            contract,
+            fallback=contract.budget,
+        )
 
     def can_publish_candidates(self, plugin_id: str) -> bool:
         return (
@@ -89,9 +93,6 @@ class TaskCompletionContext:
             idempotency_key=idempotency_key,
             causal_parents=causal_parents,
         )
-        if decision.accepted:
-            for contract in decision.contracts:
-                self._budget.initialize(contract.id, contract.budget)
         return decision
 
     def append_trace(self, contract_id: str, event_type: str, **kwargs: object) -> None:
@@ -132,7 +133,6 @@ class TaskCompletionContext:
         return _commit_terminal(
             self._store,
             self._trace,
-            self._budget,
             contract,
             event_type,
             relation_type=relation_type,
@@ -153,14 +153,9 @@ class TaskCompletionProjector:
     ) -> None:
         self._store = store
         self._trace = TraceManager(store)
-        self._budget = BudgetManager()
-        for contract in store.get_all_contracts():
-            self._budget.initialize(contract.id, contract.budget)
         self._registry = completion_registry
         self._publishers = candidate_publishers
-        self._context = TaskCompletionContext(
-            store, self._trace, self._budget, candidate_publishers
-        )
+        self._context = TaskCompletionContext(store, self._trace, candidate_publishers)
 
     def project(self, contract: Contract) -> bool:
         """Project a completed subtask; return whether a plugin handled it.
@@ -215,7 +210,7 @@ class TaskCompletionProjector:
                 "[rejected] task_completion_plugin_missing: "
                 f"no completion plugin registered for {action_type!r}"
             ],
-            budget_remaining=self._budget.get_remaining(parent_id),
+            budget_remaining=self._context.resolve_budget(parent_id),
         )
         return False
 
@@ -230,14 +225,7 @@ class TaskCompletionProjector:
                 parent=parent,
                 source=source,
                 assets=tuple(assets),
-                allowance=max(
-                    1,
-                    resolve_causal_allowance(
-                        self._store,
-                        parent,
-                        fallback=self._budget.get_remaining(parent.id),
-                    ),
-                ),
+                allowance=max(1, self._context.resolve_budget(parent.id)),
             )
         )
         continuation = contract_from_dict(proposal.effects[0].payload["contract"])
@@ -254,7 +242,7 @@ class TaskCompletionProjector:
                 relation_target=continuation.id,
                 authority_result="rejected",
                 rejected_fragments=["[rejected] continuation publisher unavailable"],
-                budget_remaining=self._budget.get_remaining(parent.id),
+                budget_remaining=self._context.resolve_budget(parent.id),
             )
             self._record_terminal(parent, "failed")
             return
@@ -271,7 +259,7 @@ class TaskCompletionProjector:
                 relation_target=continuation.id,
                 authority_result="rejected",
                 rejected_fragments=["[rejected] continuation publication was rejected"],
-                budget_remaining=self._budget.get_remaining(parent.id),
+                budget_remaining=self._context.resolve_budget(parent.id),
             )
             self._record_terminal(parent, "failed")
             return
@@ -281,7 +269,7 @@ class TaskCompletionProjector:
             disclosed_assets=[asset.id for asset in assets],
             relation_type="tool",
             relation_target=continuation.id,
-            budget_remaining=self._budget.get_remaining(parent.id),
+            budget_remaining=self._context.resolve_budget(parent.id),
         )
 
     def _complete_contract(self, contract: Contract) -> None:
@@ -300,7 +288,6 @@ class TaskCompletionProjector:
         _commit_terminal(
             self._store,
             self._trace,
-            self._budget,
             contract,
             event_type,
         )
@@ -320,7 +307,6 @@ def _tool_observation_succeeded(assets: list[Asset]) -> bool:
 def _commit_terminal(
     store: CompletionStoreProtocol,
     trace: TraceManager,
-    budget: BudgetManager,
     contract: Contract,
     event_type: str,
     *,
@@ -345,13 +331,17 @@ def _commit_terminal(
             relation_type=relation_type,
             relation_target=relation_target or contract.id,
             rejected_fragments=[f"[{event_type}] {relation_type}: {reason}"],
-            budget_remaining=budget.get_remaining(contract.id),
+            budget_remaining=resolve_causal_allowance(
+                store, contract, fallback=contract.budget
+            ),
         )
     else:
         entry = create_entry(
             contract.id,
             event_type,
-            budget_remaining=budget.get_remaining(contract.id),
+            budget_remaining=resolve_causal_allowance(
+                store, contract, fallback=contract.budget
+            ),
         )
     terminal = create_runtime_record(
         "lifecycle.terminal",

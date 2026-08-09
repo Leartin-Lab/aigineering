@@ -265,6 +265,11 @@ Pure projection rejects an oversized batch. SQLite repeats the balance check in
 the commitment transaction so concurrent publishers cannot overspend the same
 grant.
 
+Completion, recovery, continuation, task status, and audit traces read the same
+allowance projection. There is no process-local budget owner. Historical
+Contracts without allowance facts fall back to their declared budget only for
+compatibility.
+
 ## Independent acceptance
 
 An authorized output assertion is not automatically semantic truth. A Contract

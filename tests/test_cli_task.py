@@ -494,5 +494,5 @@ def test_task_status_reports_submitted_without_recovery_risk():
         assert data["status"] == "submitted"
         assert data["ok"] is False
         codes = {risk["code"] for risk in data["silent_failure_risks"]}
-        assert "budget_exhausted" in codes
         assert "submitted_without_recovery" in codes
+        assert "budget_exhausted" not in codes

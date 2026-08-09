@@ -11,7 +11,6 @@ from aigineering.agent.llm import LLMWorker, ProviderError
 from aigineering.agent.mock import MockWorker
 from aigineering.agent.worker import WorkerExecutionError, WorkerHost
 from aigineering.core.activation import check_activation
-from aigineering.core.budget_manager import BudgetManager
 from aigineering.core.disclosure import (
     DisclosurePolicyError,
     compute_disclosure,
@@ -477,11 +476,8 @@ def _schedule_rejected_recovery(
         raise RuntimeError(
             "recovery replay requires an authenticated recovery Candidate publisher"
         )
-    budget = BudgetManager()
-    for current in store.get_all_contracts():
-        budget.initialize(current.id, current.budget)
     trace_manager = TraceManager(trace)
-    runtime = TaskCompletionContext(store, trace_manager, budget, candidate_publishers)
+    runtime = TaskCompletionContext(store, trace_manager, candidate_publishers)
     recovery = schedule_projection_recovery(
         runtime,
         failed_contract=contract,

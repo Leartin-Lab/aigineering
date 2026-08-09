@@ -138,6 +138,8 @@ Avoid these commands for normal agent delegation:
   outputs promised only by rejected siblings are invalid plans, not waiting work.
 - Parent task completion is based on declared output satisfaction, not on all
   child tasks finishing.
+- Treat `budget_remaining` as a projection of causal allowance facts. Trace
+  counters and process-local objects are not allowance authority.
 - An independent-acceptance task is incomplete until `output.qualified` binds
   its declared slot to one exact task-produced Asset ID.
 - Remote claim and lease-renew requests are signed `worker.claim` and
