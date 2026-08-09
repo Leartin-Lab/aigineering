@@ -13,7 +13,6 @@ from aigineering.core.commitment import CandidateCommitter, reduce_candidate
 from aigineering.core.actor_facts import load_authorized_actor_keys
 from aigineering.core.domain import initialize_genesis
 from aigineering.core.ids import hash_contract_v3
-from aigineering.core.record_conflict import ImmutableRecordConflict
 from aigineering.core.signing import Ed25519Signer, Signer, Verifier
 from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.core.store import MemoryStore
@@ -642,8 +641,13 @@ def test_actor_identity_cannot_be_rebound_to_another_public_key(store):
         if not store.scan_runtime_records(record_type="actor.authorized"):
             assert committer.commit(candidate, genesis).accepted
         else:
-            with pytest.raises(ImmutableRecordConflict, match="actor key"):
-                committer.commit(candidate, genesis)
+            decision = committer.commit(candidate, genesis)
+            assert decision.accepted is False
+            assert "actor key" in next(
+                record.payload["reason"]
+                for record in decision.runtime_records
+                if record.record_type == "candidate.rejected"
+            )
 
 
 def test_asset_relation_candidate_materializes_authenticated_claim(store):
@@ -837,6 +841,57 @@ def test_asset_effect_commits_fact_and_reduces_contract_completion(store):
         and record.payload["terminal"] == "complete"
         for _, record in store.scan_runtime_records()
     )
+
+
+def test_commit_conflict_rolls_back_effects_and_records_durable_rejection():
+    genesis, contract_candidate = _proposal(
+        capabilities=("asset.publish", "contract.cancel", "contract.publish")
+    )
+    store = SQLiteStore(":memory:")
+    committer = CandidateCommitter(store, store)
+    assert committer.commit(
+        contract_candidate,
+        genesis,
+        verifier_factory=_verifier_factory,
+    ).accepted
+    candidate = create_candidate_proposal(
+        domain_id=genesis.id,
+        actor_id="human:owner",
+        key_id="root",
+        effects=[
+            CandidateEffect(
+                "contract.cancel",
+                {"contract_id": _contract().id, "reason": "superseded"},
+            ),
+            CandidateEffect(
+                "asset.propose",
+                {
+                    "asset": {
+                        "name": "report",
+                        "content": "conflicting completion",
+                        "origin": "human",
+                        "trust_tier": "human",
+                    }
+                },
+            ),
+        ],
+        signer=_Signer(),
+    )
+
+    decision = committer.commit(
+        candidate,
+        genesis,
+        verifier_factory=_verifier_factory,
+    )
+
+    assert decision.accepted is False
+    assert not store.has_asset_named("report")
+    assert not store.scan_runtime_records(record_type="lifecycle.terminal")
+    rejections = store.scan_runtime_records(record_type="candidate.rejected")
+    assert len(rejections) == 1
+    assert rejections[0][1].payload["candidate_id"] == candidate.id
+    assert "contract terminal" in rejections[0][1].payload["reason"]
+    store.close()
 
 
 def test_contract_and_activating_assets_commit_as_one_transaction_view(store):

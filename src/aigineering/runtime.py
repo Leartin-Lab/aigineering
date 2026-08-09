@@ -25,7 +25,11 @@ from aigineering.plugins.completion_projection import (
 from aigineering.plugins.recovery import schedule_projection_recovery
 from aigineering.plugins.task_semantics import method_payload
 from aigineering.core.runtime_projection import RuntimeProjection
-from aigineering.core.commitment import CandidateCommitter, record_candidate_rejection
+from aigineering.core.commitment import (
+    CandidateCommitRejected,
+    CandidateCommitter,
+    record_candidate_rejection,
+)
 from aigineering.core.worker_routing import is_eligible
 from aigineering.core.trace_manager import TraceManager
 from aigineering.core.trace import create_entry
@@ -412,6 +416,8 @@ def submit_worker_proposal(
     )
     try:
         decision = CandidateCommitter(store, trace).commit(proposal)
+    except CandidateCommitRejected:
+        raise
     except sqlite3.IntegrityError as exc:
         record_candidate_rejection(proposal, str(exc), store, trace)
         raise ValueError(str(exc)) from exc

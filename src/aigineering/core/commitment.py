@@ -31,6 +31,10 @@ from aigineering.core.projection_context import (
     EffectProjectionContext,
     load_effect_projection_context,
 )
+from aigineering.core.record_conflict import (
+    ClaimBindingConflict,
+    ImmutableRecordConflict,
+)
 from aigineering.core.fact_materialization import (
     reduce_asset_facts,
     trace_records,
@@ -137,6 +141,14 @@ def reduce_candidate(
     )
 
 
+class CandidateCommitRejected(ValueError):
+    """A commit predicate rejected the Candidate after authentication."""
+
+    def __init__(self, reason: str, decision: CommitmentDecision) -> None:
+        self.decision = decision
+        super().__init__(reason)
+
+
 class CandidateCommitter:
     """Store-independent transactional adapter for the pure reducer."""
 
@@ -209,7 +221,21 @@ class CandidateCommitter:
                 candidate_key_id=candidate.key_id,
                 candidate_id=candidate.id,
             )
-        except (CausalAllowanceConflict, OutputQualificationConflict) as exc:
+        except ClaimBindingConflict as exc:
+            receipt = next(
+                record
+                for record in decision.runtime_records
+                if record.record_type == "candidate.received"
+            )
+            rejection = record_candidate_rejection(
+                candidate, str(exc), self._store, self._trace, receipt=receipt
+            )
+            raise CandidateCommitRejected(str(exc), rejection) from exc
+        except (
+            CausalAllowanceConflict,
+            ImmutableRecordConflict,
+            OutputQualificationConflict,
+        ) as exc:
             receipt = next(
                 record
                 for record in decision.runtime_records

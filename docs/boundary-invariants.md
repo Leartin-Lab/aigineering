@@ -29,16 +29,16 @@ contract's declared outputs.
 
 ## 4. Projection is pure
 
-The `project_candidate()` function is a pure decision function. It never mutates
-the store, never commits side-effects. The `ProjectionResult` dataclass is
-frozen. Commit is a separate, explicit step downstream.
+Candidate reduction and typed-effect projection are pure decision functions.
+They never mutate the Store or commit side effects. Commitment is a separate,
+explicit boundary downstream.
 
 ## 5. All rejection paths are traced
 
-Every rejected candidate — whether from parse error, duplicate conflict,
-authority rejection, or protected-name collision — is recorded with a
-`RejectionCategory` and a human-readable `reject_reason` in the
-`ProjectionResult.rejected_candidates` list. No rejection is silent.
+Every rejected Candidate — whether from parsing, authority, containment, or a
+deterministic commitment conflict — produces a durable rejection fact and
+trace with a human-readable reason. Fragment-level projection rejections remain
+attached to the same audit trail. No rejection is silent.
 
 ## 6. Delegated behavior is ordinary task publication
 
@@ -67,6 +67,11 @@ claim, worker identity, fencing epoch, lease, and package binding before
 projection. A failed invocation or expired lease becomes a durable terminal
 fact and schedules a new recovery Contract.
 
+A terminal fact closes any unrelated active claim for the same Contract in the
+same transaction. The release is itself immutable and rebuildable. A stale
+claim-bound Candidate cannot publish after cancellation or completion, while
+exact replay of an already committed Candidate remains idempotent.
+
 Hosted `/exec` signs ordinary Asset effects; staged plan/replan signs ordinary
 Contract effects. The same SQLite transaction rechecks the binding, commits
 facts, and records an immutable attempt outcome (`output_asserted`, `expanded`,
@@ -85,6 +90,8 @@ trace events, idempotency, terminal facts, and claim transition commit in one
 database transaction. A mid-commit failure rolls the whole submission back.
 Derived completion markers and their audit traces likewise commit as one
 transaction consequence; a terminal fact and terminal trace cannot disagree.
+Terminal-driven claim release and its immutable release fact are part of that
+same transaction.
 
 ## 9. Runtime progress is reconstructable
 

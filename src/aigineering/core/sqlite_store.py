@@ -34,7 +34,10 @@ from aigineering.core.asset_graph_facts import (
 )
 from aigineering.core.lifecycle_facts import validate_terminal_record
 from aigineering.core.provenance import verify_asset_seal
-from aigineering.core.record_conflict import ImmutableRecordConflict
+from aigineering.core.record_conflict import (
+    ClaimBindingConflict,
+    ImmutableRecordConflict,
+)
 from aigineering.core.asset_versions import (
     replacement_claim_from_record,
     replacement_claim_payload,
@@ -117,7 +120,59 @@ class SQLiteStore:
 
     def append_runtime_record(self, record: RuntimeRecord) -> int:
         with self._conn:
-            return self._insert_runtime_record(record)
+            revision = self._insert_runtime_record(record)
+            if record.record_type == "lifecycle.terminal":
+                check_crash_point("after_terminal_before_claim_release")
+            self._release_claims_for_terminal_records((record,))
+            return revision
+
+    def _release_claims_for_terminal_records(
+        self,
+        records: tuple[RuntimeRecord, ...],
+        *,
+        submitting_claim_id: str = "",
+    ) -> None:
+        """Close claims invalidated by terminal facts in the same transaction."""
+        terminal_records = {
+            str(record.payload["contract_id"]): record
+            for record in records
+            if record.record_type == "lifecycle.terminal"
+        }
+        for contract_id, terminal in terminal_records.items():
+            row = self._conn.execute(
+                "SELECT claim_id, worker_id, epoch, package_id "
+                "FROM worker_claims WHERE contract_id = ? AND status = 'active'",
+                (contract_id,),
+            ).fetchone()
+            if row is None or row["claim_id"] == submitting_claim_id:
+                continue
+            recorded_at = now_iso()
+            cursor = self._conn.execute(
+                "UPDATE worker_claims SET status = 'released', updated_at = ? "
+                "WHERE claim_id = ? AND epoch = ? AND status = 'active'",
+                (recorded_at, row["claim_id"], int(row["epoch"])),
+            )
+            if cursor.rowcount != 1:
+                raise sqlite3.IntegrityError(
+                    "active claim changed during terminal commitment"
+                )
+            self._insert_runtime_record(
+                create_runtime_record(
+                    "claim.released",
+                    {
+                        "claim_id": row["claim_id"],
+                        "contract_id": contract_id,
+                        "epoch": int(row["epoch"]),
+                        "package_id": row["package_id"],
+                        "worker_id": row["worker_id"],
+                    },
+                    causal_parents=(
+                        self._claim_granted_record_id(row["claim_id"]),
+                        terminal.id,
+                    ),
+                    recorded_at=recorded_at,
+                )
+            )
 
     def _insert_runtime_record(self, record: RuntimeRecord) -> int:
         """Insert within the caller's transaction without committing it."""
@@ -1314,6 +1369,15 @@ class SQLiteStore:
         claim_id = f"lease:{compute_content_hash(f'{contract_id}|{worker_id}|{now.isoformat()}')}"
         try:
             self._conn.execute("BEGIN IMMEDIATE")
+            terminal = self._conn.execute(
+                "SELECT 1 FROM runtime_records WHERE record_type = "
+                "'lifecycle.terminal' AND "
+                "json_extract(payload_json, '$.contract_id') = ? LIMIT 1",
+                (contract_id,),
+            ).fetchone()
+            if terminal is not None:
+                self._conn.rollback()
+                return None
             existing = self._conn.execute(
                 "SELECT claim_id, status FROM worker_claims "
                 "WHERE contract_id = ? "
@@ -1749,6 +1813,17 @@ class SQLiteStore:
             check_crash_point("after_trace_before_runtime_records")
             for record in runtime_records:
                 self._insert_runtime_record(record)
+            if any(
+                record.record_type == "lifecycle.terminal"
+                for record in runtime_records
+            ):
+                check_crash_point("after_terminal_before_claim_release")
+            self._release_claims_for_terminal_records(
+                runtime_records,
+                submitting_claim_id=(
+                    claim_binding.claim_id if claim_binding is not None else ""
+                ),
+            )
             if claim_binding is not None:
                 self._finalize_claim_submission(
                     claim_binding,
@@ -1781,13 +1856,23 @@ class SQLiteStore:
             (claim_binding.claim_id,),
         ).fetchone()
         if existing is None:
-            raise sqlite3.IntegrityError("claim-bound Candidate has unknown claim")
+            raise ClaimBindingConflict("claim-bound Candidate has unknown claim")
         if existing["status"] == "submitted" and any(
             record.payload.get("claim_id") == claim_binding.claim_id
             and record.payload.get("candidate_id") == candidate_id
             for _, record in self.scan_runtime_records(record_type="claim.submitted")
         ):
             return True
+        terminal = self._conn.execute(
+            "SELECT 1 FROM runtime_records WHERE record_type = "
+            "'lifecycle.terminal' AND "
+            "json_extract(payload_json, '$.contract_id') = ? LIMIT 1",
+            (claim_binding.contract_id,),
+        ).fetchone()
+        if terminal is not None and existing["status"] != "submitted":
+            raise ClaimBindingConflict(
+                "claim-bound Candidate references terminal Contract"
+            )
         if (
             existing["status"] != "active"
             or existing["contract_id"] != claim_binding.contract_id
@@ -1796,7 +1881,7 @@ class SQLiteStore:
             or existing["package_id"] != claim_binding.package_id
             or existing["lease_until"] < now_iso()
         ):
-            raise sqlite3.IntegrityError(
+            raise ClaimBindingConflict(
                 "active worker claim predicate failed during Candidate commit"
             )
         return False
@@ -1869,7 +1954,7 @@ class SQLiteStore:
             ),
         )
         if cursor.rowcount != 1:
-            raise sqlite3.IntegrityError("claim changed during Candidate commitment")
+            raise ClaimBindingConflict("claim changed during Candidate commitment")
         decision_parents = [
             record.id
             for record in runtime_records

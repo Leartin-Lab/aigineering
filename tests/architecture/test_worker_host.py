@@ -27,6 +27,7 @@ from aigineering.protocol.effect_builders import (
 )
 from aigineering.protocol.envelope import CandidateEnvelope
 from aigineering.protocol.types import Contract
+from aigineering.protocol.runtime_record import create_runtime_record
 from aigineering.runtime import (
     WorkerInvocationError,
     WorkerSubmissionCommitError,
@@ -234,6 +235,36 @@ def test_claim_bound_candidate_rechecks_claim_state_inside_commit():
 
     assert store.get_assets_by_name("result") == []
     assert store.get_claim(contract.id)["status"] == "released"
+
+
+def test_terminal_contract_rejects_candidate_signed_under_older_claim():
+    store, contract, host = _runtime('/exec {"result":"done"}')
+    claimed = claim_next_package(store, worker_id=host.worker_id)
+    assert claimed is not None
+    envelope = CandidateEnvelope(
+        contract_id=contract.id,
+        worker_id=host.worker_id,
+        raw_output='/exec {"result":"done"}',
+        package_id=claimed.package.package_id,
+        claim_id=claimed.package.claim_id,
+        claim_epoch=claimed.package.claim_epoch,
+        idempotency_key=f"terminal-{claimed.package.package_id}",
+    )
+    proposal = host.sign_envelope(envelope, contract=contract)
+    store.append_runtime_record(
+        create_runtime_record(
+            "lifecycle.terminal",
+            {"contract_id": contract.id, "terminal": "cancelled"},
+        )
+    )
+
+    with pytest.raises(ValueError, match="terminal Contract"):
+        submit_worker_proposal(proposal, store)
+
+    assert store.get_assets_by_name("result") == []
+    assert store.get_claim(contract.id)["status"] == "released"
+    rejection = store.scan_runtime_records(record_type="candidate.rejected")[-1][1]
+    assert rejection.payload["candidate_id"] == proposal.id
 
 
 def test_submission_infrastructure_failure_is_not_candidate_rejection(monkeypatch):

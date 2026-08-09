@@ -166,8 +166,12 @@ eligible Contract
 
 One active claim is allowed per Contract. Renewal and submission prove
 possession of the registered Worker key. Expired claims, invocation failures,
-and malformed Worker results close visibly; recovery is published only when
-its Candidate is accepted.
+malformed Worker results, and Contract terminal facts close visibly. A terminal
+fact releases an unrelated active claim in the same transaction and records an
+immutable transition that rebuilds to the same claim view. A stale Candidate
+cannot publish after terminal closure; exact replay of an already committed
+Candidate remains idempotent. Recovery is published only when its Candidate is
+accepted.
 
 The SQLite submission transaction rechecks the claim fence and commits the
 Candidate, projection, accepted facts, trace, idempotency record, attempt

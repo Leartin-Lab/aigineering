@@ -18,3 +18,7 @@ class ImmutableRecordConflict(ValueError):
             f"immutable {record_type} conflict for id {record_id!r}: "
             "the existing canonical payload differs"
         )
+
+
+class ClaimBindingConflict(ValueError):
+    """A claim-bound Candidate no longer owns the fenced Contract attempt."""

@@ -91,6 +91,40 @@ def test_sqlite_terminal_uniqueness_arbitrates_competing_replicas(tmp_path):
     reopened.close()
 
 
+def test_sqlite_terminal_atomically_releases_active_claim_and_rebuilds():
+    store = SQLiteStore(":memory:")
+    contract = Contract(id="task:claimed", name="claimed")
+    store.add_contract(contract)
+    claim = store.claim_contract(
+        contract.id,
+        "worker:late",
+        package_id="package:late",
+    )
+    assert claim is not None and claim["status"] == "active"
+    terminal = create_runtime_record(
+        "lifecycle.terminal",
+        {"contract_id": contract.id, "terminal": "cancelled"},
+    )
+
+    store.commit_ingress_batch(
+        accepted_assets=[],
+        trace_entries=[],
+        runtime_records=(terminal,),
+    )
+
+    released = store.get_claim(contract.id)
+    assert released is not None and released["status"] == "released"
+    release_records = store.scan_runtime_records(record_type="claim.released")
+    assert len(release_records) == 1
+    assert terminal.id in release_records[0][1].causal_parents
+
+    store.rebuild_claim_projection()
+    rebuilt = store.get_claim(contract.id)
+    assert rebuilt is not None and rebuilt["status"] == "released"
+    assert store.claim_contract(contract.id, "worker:new") is None
+    store.close()
+
+
 @pytest.mark.parametrize("kind", ["memory", "sqlite"])
 def test_terminal_fact_cannot_precede_its_contract(kind):
     store = MemoryStore() if kind == "memory" else SQLiteStore(":memory:")
