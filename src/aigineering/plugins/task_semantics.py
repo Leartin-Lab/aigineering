@@ -383,6 +383,11 @@ def contracts_from_plan_asset(
     parent_tools = (
         set(parent_contract.tool_scope) if parent_contract is not None else None
     )
+    parent_labels = (
+        {label for label in parent_contract.labels if not label.startswith("plugin:")}
+        if parent_contract is not None
+        else None
+    )
     parent_budget = parent_contract.budget if parent_contract is not None else None
     sibling_promises = _accepted_sibling_output_promises(
         raw_contracts,
@@ -500,7 +505,9 @@ def contracts_from_plan_asset(
             outputs=outputs,
             activation=activation,
             tool_scope=tool_scope,
+            labels=labels,
             parent_tools=parent_tools,
+            parent_labels=parent_labels,
             allowed_input_names=allowed_input_names,
             sibling_promises=sibling_promises,
         )
@@ -766,7 +773,9 @@ def _plan_child_scope_findings(
     outputs: list[str],
     activation: str,
     tool_scope: list[str],
+    labels: list[str],
     parent_tools: set[str] | None,
+    parent_labels: set[str] | None,
     allowed_input_names: set[str] | None,
     sibling_promises: set[str],
 ) -> tuple[dict | None, list[dict]]:
@@ -807,6 +816,22 @@ def _plan_child_scope_findings(
                 "action": "rejected",
                 "expected": f"subset of {sorted(parent_tools)}",
                 "actual": str(sorted(tool_scope)),
+            },
+            [],
+        )
+    if parent_labels is not None and not set(labels).issubset(parent_labels):
+        return (
+            {
+                "child_name": name,
+                "field": "labels",
+                "reason": (
+                    f"labels {sorted(labels)} are not a subset of parent labels "
+                    f"{sorted(parent_labels)}"
+                ),
+                "action": "rejected",
+                "expected": f"subset of {sorted(parent_labels)}",
+                "actual": str(sorted(labels)),
+                "recoverable": True,
             },
             [],
         )

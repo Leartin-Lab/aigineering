@@ -259,6 +259,41 @@ def test_compile_error_exposes_only_stable_rejection_fields():
     assert raised.value.fields == ("description", "output_recommitment")
 
 
+def test_compile_rejects_labels_outside_parent_scope_before_commitment():
+    contract = replace(
+        _parent(),
+        description=json.dumps({"allowed_inputs": ["source"]}),
+        labels=("plugin:plan.compile",),
+        budget=1,
+    )
+    blueprint = json.dumps(
+        {
+            "contracts": [
+                {
+                    "name": "finish",
+                    "description": "Produce the required output.",
+                    "inputs": ["source"],
+                    "outputs": ["final_report"],
+                    "activation": "source",
+                    "budget": 1,
+                    "tool_scope": [],
+                    "labels": ["invented"],
+                }
+            ]
+        }
+    )
+
+    with pytest.raises(PlanningCompileError) as raised:
+        compile_planning_blueprint(
+            contract,
+            {"planning_blueprint": blueprint},
+            allowance=1,
+        )
+
+    assert raised.value.fields == ("labels", "output_recommitment")
+    assert "not a subset of parent labels" in str(raised.value)
+
+
 def test_continuation_plugin_proposes_one_ordinary_task_and_registry_is_explicit():
     parent = _parent()
     source = method_contract(

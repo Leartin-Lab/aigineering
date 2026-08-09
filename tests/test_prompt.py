@@ -137,6 +137,8 @@ def test_compile_prompt_exposes_schema_output_coverage_and_allowance():
     assert "child outputs must collectively include: final_report" in prompt
     assert '"outputs":["final_report"]' in prompt
     assert '"inputs":[]' in prompt
+    assert "labels list must be a subset of []" in prompt
+    assert "never invent labels or copy plugin:* labels" in prompt
 
 
 def test_compile_prompt_example_never_exceeds_one_remaining_allowance():

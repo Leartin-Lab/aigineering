@@ -163,12 +163,12 @@ def test_planner_system_origin_clamped():
 
 
 # ---------------------------------------------------------------------------
-# Labels select context assets, not business authority
+# Labels select context assets and therefore remain inside parent disclosure
 # ---------------------------------------------------------------------------
 
 
-def test_child_label_may_select_context_without_business_authority_check():
-    """Planner labels are preserved for asset injection, not used as authority."""
+def test_child_label_cannot_widen_parent_disclosure_context():
+    """A planner cannot use label selection to add undisclosed context."""
     parent = _parent(labels=["user"])
     asset = _plan_asset([_basic_child(labels=["admin"])])
     accepted, rejected = contracts_from_plan_asset(
@@ -177,13 +177,13 @@ def test_child_label_may_select_context_without_business_authority_check():
         parent_contract=parent,
     )
 
-    assert len(accepted) == 1
-    assert len(rejected) == 0
-    assert accepted[0].labels == ("admin",)
+    assert accepted == []
+    assert rejected[0]["field"] == "labels"
+    assert rejected[0]["action"] == "rejected"
 
 
-def test_child_label_superset_is_preserved_for_context_injection():
-    """Label subsets are not a business containment rule."""
+def test_child_label_superset_is_rejected_before_commitment():
+    """A mixed allowed and invented label set is still a scope widening."""
     parent = _parent(labels=["user"])
     asset = _plan_asset([_basic_child(labels=["user", "admin"])])
     accepted, rejected = contracts_from_plan_asset(
@@ -192,9 +192,23 @@ def test_child_label_superset_is_preserved_for_context_injection():
         parent_contract=parent,
     )
 
-    assert len(accepted) == 1
-    assert len(rejected) == 0
-    assert accepted[0].labels == ("user", "admin")
+    assert accepted == []
+    assert rejected[0]["field"] == "labels"
+    assert rejected[0]["recoverable"] is True
+
+
+def test_child_label_subset_is_preserved_for_context_injection():
+    parent = _parent(labels=["user", "reviewed"])
+    asset = _plan_asset([_basic_child(labels=["user"])])
+
+    accepted, rejected = contracts_from_plan_asset(
+        asset,
+        parent.id,
+        parent_contract=parent,
+    )
+
+    assert rejected == []
+    assert accepted[0].labels == ("user",)
 
 
 # ---------------------------------------------------------------------------
@@ -542,13 +556,13 @@ def test_mixed_valid_and_rejected_children():
         parent_contract=parent,
     )
 
-    assert len(accepted) == 3
+    assert len(accepted) == 2
     accepted_names = {c.name for c in accepted}
-    assert accepted_names == {"good", "bad_labels", "good2"}
+    assert accepted_names == {"good", "good2"}
 
-    assert len(rejected) == 1
+    assert len(rejected) == 2
     rejected_names = {r["child_name"] for r in rejected}
-    assert rejected_names == {"bad_output"}
+    assert rejected_names == {"bad_labels", "bad_output"}
 
 
 # ---------------------------------------------------------------------------

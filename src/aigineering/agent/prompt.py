@@ -182,11 +182,15 @@ def _planning_stage_instructions(contract: Contract) -> list[str]:
                     ]
                 )
             if label in {"plugin:plan.compile", "plugin:replan.compile"}:
+                allowed_labels = [
+                    item for item in contract.labels if not item.startswith("plugin:")
+                ]
                 lines.extend(
                     [
                         "- Each contract object must contain name, description, inputs, outputs, activation, budget, tool_scope, and labels.",
                         "- name and description must be non-empty; outputs must contain at least one asset name.",
                         f"- Sum of child budgets must be at most {contract.budget}; use budget 1 per child unless more is essential.",
+                        f"- Each child labels list must be a subset of {json.dumps(allowed_labels, ensure_ascii=False)}; never invent labels or copy plugin:* labels.",
                         f"- The child outputs must collectively include: {', '.join(contract.outputs)}.",
                         f"- Valid example for this exact Contract: {_planning_compile_example(contract)}",
                     ]
