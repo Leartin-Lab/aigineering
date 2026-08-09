@@ -843,6 +843,41 @@ def test_asset_effect_commits_fact_and_reduces_contract_completion(store):
     )
 
 
+def test_legacy_asset_proposal_identity_binds_candidate_provenance():
+    genesis, contract_candidate = _proposal()
+    store = SQLiteStore(":memory:")
+    committer = CandidateCommitter(store, store)
+    assert committer.commit(
+        contract_candidate, genesis, verifier_factory=_verifier_factory
+    ).accepted
+
+    decisions = []
+    for key in ("first-assertion", "second-assertion"):
+        candidate = create_candidate_proposal(
+            domain_id=genesis.id,
+            actor_id="human:owner",
+            key_id="root",
+            effects=[
+                CandidateEffect(
+                    "asset.propose",
+                    {"asset": {"name": "report", "content": "same"}},
+                )
+            ],
+            signer=_Signer(),
+            idempotency_key=key,
+        )
+        decisions.append(
+            committer.commit(candidate, genesis, verifier_factory=_verifier_factory)
+        )
+
+    assert all(decision.accepted for decision in decisions)
+    assets = store.get_assets_by_name("report")
+    assert len(assets) == 2
+    assert len({asset.id for asset in assets}) == 2
+    assert len({asset.content_hash for asset in assets}) == 1
+    store.close()
+
+
 def test_commit_conflict_rolls_back_effects_and_records_durable_rejection():
     genesis, contract_candidate = _proposal(
         capabilities=("asset.publish", "contract.cancel", "contract.publish")

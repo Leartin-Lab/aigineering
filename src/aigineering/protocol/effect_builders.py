@@ -11,6 +11,9 @@ from aigineering.protocol.asset_graph import (
     DefinitionContentAssertion,
     SignedAssetDefinition,
     content_object_to_dict,
+    create_content_object,
+    create_definition_content_assertion,
+    create_signed_definition,
     definition_content_assertion_to_dict,
     signed_definition_to_dict,
 )
@@ -19,6 +22,7 @@ from aigineering.protocol.types import Asset, Contract, ReplacementClaim
 from aigineering.protocol.wire import contract_to_dict
 
 if TYPE_CHECKING:
+    from aigineering.core.signing import Signer
     from aigineering.core.worker_routing import WorkerRegistration
 
 
@@ -225,12 +229,6 @@ def claim_bound_output_effects(
     envelope: CandidateEnvelope,
 ) -> tuple[CandidateEffect, ...]:
     """Translate one parsed `/exec` assertion into ordinary Asset effects."""
-    parsed = envelope.parsed_action
-    if not isinstance(parsed, Mapping) or parsed.get("type") != "exec":
-        raise ValueError("claim-bound output effects require a parsed /exec action")
-    outputs = parsed.get("outputs")
-    if not isinstance(outputs, Mapping) or not outputs:
-        raise ValueError("claim-bound /exec requires non-empty outputs")
     return tuple(
         CandidateEffect(
             "asset.propose",
@@ -247,5 +245,70 @@ def claim_bound_output_effects(
             },
             atomic_group=f"output:{envelope.contract_id}",
         )
-        for name, content in sorted(outputs.items())
+        for name, content in _claim_bound_outputs(envelope)
     )
+
+
+def _claim_bound_outputs(envelope: CandidateEnvelope) -> tuple[tuple[str, str], ...]:
+    parsed = envelope.parsed_action
+    if not isinstance(parsed, Mapping) or parsed.get("type") != "exec":
+        raise ValueError("claim-bound output effects require a parsed /exec action")
+    outputs = parsed.get("outputs")
+    if not isinstance(outputs, Mapping) or not outputs:
+        raise ValueError("claim-bound /exec requires non-empty outputs")
+    if not all(
+        isinstance(name, str) and isinstance(content, str)
+        for name, content in outputs.items()
+    ):
+        raise ValueError("claim-bound /exec outputs must map strings to strings")
+    return tuple(sorted(outputs.items()))
+
+
+def claim_bound_graph_output_effects(
+    envelope: CandidateEnvelope,
+    contract: Contract,
+    *,
+    domain_id: str,
+    actor_id: str,
+    key_id: str,
+    signer: Signer,
+) -> tuple[CandidateEffect, ...]:
+    """Build one atomic signed graph assertion batch for claimed `/exec` output."""
+    if contract.id != envelope.contract_id:
+        raise ValueError("claim-bound graph output requires its claimed Contract")
+    group = f"output:{contract.id}"
+    effects: list[CandidateEffect] = []
+    published_content_ids: set[str] = set()
+    for name, raw_content in _claim_bound_outputs(envelope):
+        content = create_content_object(raw_content)
+        definition = create_signed_definition(
+            domain_id=domain_id,
+            name=name,
+            description=f"Declared output {name!r} of Contract {contract.id}",
+            content_type="text",
+            source_kind="contract-output",
+            source_uri=contract.id,
+            actor_id=actor_id,
+            key_id=key_id,
+            signer=signer,
+        )
+        assertion = create_definition_content_assertion(
+            domain_id=domain_id,
+            definition_id=definition.id,
+            content_id=content.id,
+            relation_type="satisfies",
+            actor_id=actor_id,
+            key_id=key_id,
+            signer=signer,
+            evidence={"contract_id": contract.id, "output_name": name},
+        )
+        if content.id not in published_content_ids:
+            effect = content_publication_effect(content)
+            effects.append(CandidateEffect(effect.effect_type, effect.payload, group))
+            published_content_ids.add(content.id)
+        for effect in (
+            definition_publication_effect(definition),
+            definition_content_assertion_effect(assertion),
+        ):
+            effects.append(CandidateEffect(effect.effect_type, effect.payload, group))
+    return tuple(effects)

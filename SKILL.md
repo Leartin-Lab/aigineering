@@ -142,11 +142,12 @@ Avoid these commands for normal agent delegation:
   its declared slot to one exact task-produced Asset ID.
 - Remote claim and lease-renew requests are signed `worker.claim` and
   `worker.claim.renew` Candidates. Never send a self-reported `worker_id` body
-  or reuse one command Candidate. Hosted `/exec` signs `asset.propose` effects;
-  staged plan/replan and tool/fail/retry sign contained `contract.declare`
-  effects. All bind the returned Contract/claim/package/epoch and a non-empty
-  idempotency key. Custom Workers must compile raw actions before signing;
-  `worker.output` and `task.delegate` wrappers are rejected.
+  or reuse one command Candidate. Hosted `/exec` signs one atomic content,
+  definition, and assertion effect batch; staged plan/replan and
+  tool/fail/retry sign contained `contract.declare` effects. All bind the
+  returned Contract/claim/package/epoch and a non-empty idempotency key. Custom
+  Workers must compile raw actions before signing; `worker.output` and
+  `task.delegate` wrappers are rejected.
 - Custom Candidate clients must follow `conformance/README.md` and the versioned
   public vectors. Signed effect payloads and metadata do not allow floats,
   unsafe integers, non-string object keys, sets, bytes, NaN, or infinities;

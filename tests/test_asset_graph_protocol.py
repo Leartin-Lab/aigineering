@@ -7,6 +7,9 @@ import pytest
 from conftest import candidate_runtime
 
 from aigineering.core.sqlite_store import SQLiteStore
+from aigineering.core.store import MemoryStore
+from aigineering.core.trace import MemoryTraceStore
+from aigineering.core.verification import batch_verify_definition
 from aigineering.core.query_projection import StoreQueryProjection
 from aigineering.protocol.candidate import CandidateEffect
 from aigineering.protocol.effect_builders import (
@@ -259,6 +262,47 @@ def test_graph_facts_enter_through_candidate_commitment(temp_sqlite_store) -> No
     assert asset_view[0].name == definition.name
     assert asset_view[0].content == content.content
     assert asset_view[0].content_hash == content.id
+    verification = batch_verify_definition(temp_sqlite_store, definition.id)
+    assert verification["pass_count"] == 1
+    assert verification["fail_count"] == 0
+
+
+def test_graph_assertion_materializes_same_compatibility_asset_in_memory() -> None:
+    store = MemoryStore()
+    runtime = candidate_runtime(store, MemoryTraceStore())
+    content = create_content_object("portable")
+    definition = _definition(
+        runtime.signer,
+        actor_id=runtime.actor_key.actor_id,
+        domain_id=runtime.genesis.id,
+        key_id=runtime.actor_key.key_id,
+    )
+    assertion = create_definition_content_assertion(
+        domain_id=runtime.genesis.id,
+        definition_id=definition.id,
+        content_id=content.id,
+        relation_type="satisfies",
+        actor_id=runtime.actor_key.actor_id,
+        key_id=runtime.actor_key.key_id,
+        signer=runtime.signer,
+    )
+
+    decision = runtime.publisher.publish(
+        (
+            content_publication_effect(content),
+            definition_publication_effect(definition),
+            definition_content_assertion_effect(assertion),
+        ),
+        idempotency_key="memory-graph-materialization",
+    )
+
+    assert decision.accepted
+    assert len(decision.assets) == 1
+    assert store.get_asset(decision.assets[0].id) == decision.assets[0]
+    assert (
+        StoreQueryProjection(store).get_asset(decision.assets[0].id)
+        == decision.assets[0]
+    )
 
 
 def test_unknown_or_unsigned_graph_edges_are_rejected(temp_sqlite_store) -> None:

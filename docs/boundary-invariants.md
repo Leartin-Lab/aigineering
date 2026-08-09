@@ -14,6 +14,12 @@ No worker output enters shared runtime state without passing through both
 checks). The boundary enforces: raw output → candidate → (projection + authority) →
 accepted assets.
 
+Hosted `/exec` output is encoded as one atomic signed
+content/definition/assertion graph batch. Only an accepted assertion projects
+the compatibility Asset consumed by task completion. The projected Asset ID
+binds assertion provenance; reusable content identity does not collapse
+different publishers or definitions.
+
 ## 2. Only declared outputs become facts
 
 Undeclared names — even if parseable — are rejected with `authority_rejection`.

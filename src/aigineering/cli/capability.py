@@ -166,11 +166,14 @@ def add_persona(
 def list_capabilities(as_json: bool) -> None:
     """List tool, memory, and persona capability descriptors."""
     store = _persistent_store()
-    descriptors = [
-        asset
-        for asset in _query_projection(store).get_all_assets()
-        if any(asset.name.startswith(prefix) for prefix in _PREFIXES)
-    ]
+    descriptors = sorted(
+        (
+            asset
+            for asset in _query_projection(store).get_all_assets()
+            if any(asset.name.startswith(prefix) for prefix in _PREFIXES)
+        ),
+        key=lambda asset: (asset.name, asset.id),
+    )
 
     if as_json:
         _output_json([_descriptor_json(asset) for asset in descriptors])

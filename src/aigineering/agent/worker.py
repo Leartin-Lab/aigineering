@@ -19,7 +19,7 @@ from aigineering.protocol.actions import (
     parse_action,
     parse_method_action,
 )
-from aigineering.protocol.effect_builders import claim_bound_output_effects
+from aigineering.protocol.effect_builders import claim_bound_graph_output_effects
 from aigineering.protocol.envelope import CandidateEnvelope
 from aigineering.protocol.types import Asset, Candidate, Contract
 
@@ -212,7 +212,16 @@ class WorkerHost:
                         f"planning_compile_rejected:{fields}", str(exc)
                     ) from exc
             else:
-                effects = claim_bound_output_effects(parsed_envelope)
+                if contract is None or contract.id != envelope.contract_id:
+                    raise ValueError("claim-bound output requires the claimed Contract")
+                effects = claim_bound_graph_output_effects(
+                    parsed_envelope,
+                    contract,
+                    domain_id=self.genesis.id,
+                    actor_id=self.actor_key.actor_id,
+                    key_id=self.actor_key.key_id,
+                    signer=self.signer,
+                )
         binding = CandidateClaimBinding(
             contract_id=envelope.contract_id,
             claim_id=envelope.claim_id,

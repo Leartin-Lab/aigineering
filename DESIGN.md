@@ -95,9 +95,18 @@ Neither case overwrites history or transfers authority between signers.
 
 The three graph fact types enter through ordinary typed Candidate effects.
 Endpoint existence, domain binding, actor keys, and signatures are validated
-before commitment. Accepted assertions project to compatibility Asset views;
-legacy Assets retain their IDs and receive explicit schema-0 migration records
-without being presented as newly signed facts.
+before commitment. An authenticated WorkerHost translates `/exec` output into
+one atomic content/definition/assertion batch using its own key; the runtime
+never holds the private key. Accepted assertions deterministically materialize
+the compatibility Asset and `asset.committed` fact used by activation,
+completion, disclosure, and historical projection. Its identity follows the
+assertion while its definition and content fields reference the independent
+graph identities.
+
+Legacy Assets retain their historical IDs and receive explicit schema-0
+migration records without being presented as newly signed facts. New
+compatibility `asset.propose` materializations bind their Candidate signature
+and provenance so equal bytes from different assertions cannot collide.
 
 Semantic matchers are advisory adapters. They may publish a typed, signed
 relation Candidate with model, version, threshold, score, and evidence, but

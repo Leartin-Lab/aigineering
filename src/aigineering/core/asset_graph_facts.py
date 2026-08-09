@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 from aigineering.core.actor_facts import load_effective_actor_keys
 from aigineering.core.domain import load_genesis
 from aigineering.core.ids import canonical_json, compute_content_hash
+from aigineering.core.provenance import sign_asset
 from aigineering.protocol.asset_graph import (
     content_object_from_dict,
     definition_content_assertion_from_dict,
@@ -168,6 +171,68 @@ def graph_rows_from_record(
     return None, None, None
 
 
+def asset_from_graph_values(
+    content: Mapping[str, object],
+    definition: Mapping[str, object],
+    assertion: Mapping[str, object],
+) -> Asset:
+    """Project one accepted graph assertion to the compatibility Asset view."""
+    return sign_asset(
+        Asset(
+            id="asset:v1:" + compute_content_hash(str(assertion["id"])),
+            name=str(definition["name"]),
+            content=str(content["content"]),
+            content_type=str(definition["content_type"]),
+            created_by=str(definition["source_uri"]),
+            origin=(
+                "worker"
+                if str(definition["source_kind"]) == "contract-output"
+                else "definition-content-assertion"
+            ),
+            trust_tier="observed",
+            source_uri=str(definition["source_uri"]),
+            signed_by=str(assertion["actor_id"]),
+            signer_kind=str(assertion["signature_kind"]),
+            definition_hash=str(definition["id"]),
+            content_hash=str(content["id"]),
+        ),
+        signed_by=str(assertion["actor_id"]),
+    )
+
+
+def project_new_graph_assets(
+    all_records: tuple[RuntimeRecord, ...],
+    projected_records: tuple[RuntimeRecord, ...],
+) -> tuple[tuple[Asset, RuntimeRecord], ...]:
+    """Project compatibility Assets only for assertions in the current batch."""
+    definitions = {
+        str(record.payload["definition"]["id"]): record.payload["definition"]
+        for record in all_records
+        if record.record_type == "asset.definition.published"
+    }
+    contents = {
+        str(record.payload["content"]["id"]): record.payload["content"]
+        for record in all_records
+        if record.record_type == "asset.content.published"
+    }
+    projected: list[tuple[Asset, RuntimeRecord]] = []
+    for record in projected_records:
+        if record.record_type != "asset.definition-content.asserted":
+            continue
+        assertion = record.payload["assertion"]
+        projected.append(
+            (
+                asset_from_graph_values(
+                    contents[str(assertion["content_id"])],
+                    definitions[str(assertion["definition_id"])],
+                    assertion,
+                ),
+                record,
+            )
+        )
+    return tuple(projected)
+
+
 def project_graph_assets(store) -> tuple[Asset, ...]:
     """Build legacy-shaped read views from accepted v1 assertions."""
     contents = {
@@ -188,21 +253,5 @@ def project_graph_assets(store) -> tuple[Asset, ...]:
         content = contents.get(str(assertion["content_id"]))
         if definition is None or content is None:
             continue
-        assets.append(
-            Asset(
-                id="asset:v1:" + compute_content_hash(str(assertion["id"])),
-                name=str(definition["name"]),
-                content=str(content["content"]),
-                content_type=str(definition["content_type"]),
-                created_by=str(definition["source_uri"]),
-                origin="definition-content-assertion",
-                trust_tier="observed",
-                source_uri=str(definition["source_uri"]),
-                signed_by=str(assertion["actor_id"]),
-                signer_kind=str(assertion["signature_kind"]),
-                provenance_seal=str(assertion["signature"]),
-                definition_hash=str(definition["id"]),
-                content_hash=str(content["id"]),
-            )
-        )
+        assets.append(asset_from_graph_values(content, definition, assertion))
     return tuple(sorted(assets, key=lambda asset: asset.id))

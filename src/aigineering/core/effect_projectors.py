@@ -14,7 +14,13 @@ from aigineering.core.authority import matched_reserved_prefix
 from aigineering.core.contract_admission import validate_contract_commitment
 from aigineering.core.fact_materialization import asset_committed_record
 from aigineering.core.fact_reducer import METHOD_RESULT_PREFIXES
-from aigineering.core.ids import hash_asset_content, hash_asset_definition, hash_claim
+from aigineering.core.ids import (
+    canonical_json,
+    compute_content_hash,
+    hash_asset_content,
+    hash_asset_definition,
+    hash_claim,
+)
 from aigineering.core.projection_context import EffectProjectionContext
 from aigineering.core.provenance import sign_asset
 from aigineering.core.worker_routing import (
@@ -146,9 +152,20 @@ def project_asset_proposal(
             else candidate.actor_id
         )
     content_hash = hash_asset_content(name, content)
+    asset_id = "asset:v1:" + compute_content_hash(
+        canonical_json(
+            {
+                "candidate_id": candidate.id,
+                "candidate_signature": candidate.signature,
+                "content_hash": content_hash,
+                "created_by": created_by,
+                "definition": data,
+            }
+        )
+    )
     asset = sign_asset(
         Asset(
-            id=content_hash,
+            id=asset_id,
             name=name,
             content=content,
             content_type=str(data.get("content_type", "text")),

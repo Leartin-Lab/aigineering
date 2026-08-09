@@ -5,8 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from aigineering.core.effect_projectors import BUILTIN_EFFECTS, EffectProjection
+from aigineering.core.asset_graph_facts import project_new_graph_assets
 from aigineering.core.authority import matched_reserved_prefix
 from aigineering.core.causal_allowance import project_contract_allowance_records
+from aigineering.core.fact_materialization import asset_committed_record
 from aigineering.core.projection_context import EffectProjectionContext
 from aigineering.protocol.candidate import CandidateEffect, CandidateProposal
 from aigineering.protocol.runtime_record import RuntimeRecord
@@ -49,6 +51,9 @@ def project_effect_batch(
             raise ValueError(f"unsupported effect type {effect.effect_type!r}")
         required_capability, projector = handler
         claim_delegated = claimed_parent is not None and effect.effect_type in {
+            "asset.assert",
+            "asset.content.publish",
+            "asset.definition.publish",
             "asset.propose",
             "contract.declare",
         }
@@ -77,6 +82,12 @@ def project_effect_batch(
     assets = tuple(
         asset for _, projection in projections for asset in projection.assets
     )
+    projection_records = _ordered_projection_records(projections)
+    graph_assets = project_new_graph_assets(
+        effective_context.runtime_records + projection_records,
+        projection_records,
+    )
+    assets = assets + tuple(asset for asset, _ in graph_assets)
     if claimed_parent is not None:
         _validate_claim_bound_projection(claimed_parent, contracts, assets)
     allowance_records = project_contract_allowance_records(
@@ -90,7 +101,12 @@ def project_effect_batch(
         for effect, projection in projections
     )
     return EffectBatchProjection(
-        records=_ordered_projection_records(projections) + allowance_records,
+        records=projection_records
+        + tuple(
+            asset_committed_record(asset, causal_parents=(assertion.id,))
+            for asset, assertion in graph_assets
+        )
+        + allowance_records,
         relation_target=(targets[0][1] if len(targets) == 1 else candidate.id),
         projected_effects=targets,
         contracts=contracts,
@@ -99,7 +115,8 @@ def project_effect_batch(
             name
             for _, projection in projections
             for name in projection.accepted_asset_names
-        ),
+        )
+        + tuple(asset.name for asset, _ in graph_assets),
     )
 
 
@@ -171,12 +188,16 @@ def _validate_claim_bound_effects(
     if parent is None:
         raise ValueError("claim-bound Candidate references an unknown Contract")
     effect_types = {effect.effect_type for effect in candidate.effects}
-    if not effect_types <= {"asset.propose", "contract.declare"}:
+    graph_effects = {
+        "asset.assert",
+        "asset.content.publish",
+        "asset.definition.publish",
+    }
+    valid_output = effect_types == {"asset.propose"} or (
+        effect_types <= graph_effects and "asset.assert" in effect_types
+    )
+    if not valid_output and effect_types != {"contract.declare"}:
         raise ValueError("claim-bound Candidate contains an unsupported effect")
-    if len(effect_types) != 1:
-        raise ValueError(
-            "claim-bound Candidate cannot mix output and expansion effects"
-        )
     return parent
 
 

@@ -6,6 +6,8 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
 from aigineering.core.ids import hash_asset_content, hash_asset_definition
+from aigineering.core.asset_graph_facts import asset_from_graph_values
+from aigineering.protocol.asset_graph import content_object_id
 from aigineering.core.trust_policy import TrustPolicy
 from aigineering.protocol.types import ReplacementClaim, TrustTier
 
@@ -17,6 +19,36 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 # Batch verification over asset definitions
 # ---------------------------------------------------------------------------
+
+
+def _asset_identity_check(store: StoreProtocol, asset) -> tuple[str, str, bool]:
+    if asset.definition_hash.startswith("definition:v1:"):
+        expected_content = content_object_id(asset.content)
+        definitions = {
+            str(value["id"]): value for value in store.get_asset_definitions()
+        }
+        contents = {str(value["id"]): value for value in store.get_content_objects()}
+        definition = definitions.get(asset.definition_hash)
+        content = contents.get(asset.content_hash)
+        if definition is None or content is None:
+            return expected_content, asset.definition_hash, False
+        assertions = store.get_definition_content_assertions(
+            definition_id=asset.definition_hash,
+            content_id=asset.content_hash,
+        )
+        valid = any(
+            asset_from_graph_values(content, definition, assertion) == asset
+            for assertion in assertions
+        )
+        return expected_content, asset.definition_hash, valid
+    expected_content = hash_asset_content(asset.name, asset.content)
+    expected_definition = hash_asset_definition(asset.name)
+    return (
+        expected_content,
+        expected_definition,
+        asset.content_hash == expected_content
+        and asset.definition_hash == expected_definition,
+    )
 
 
 def batch_verify_definition(store: StoreProtocol, def_hash: str) -> dict[str, Any]:
@@ -35,12 +67,7 @@ def batch_verify_definition(store: StoreProtocol, def_hash: str) -> dict[str, An
     fail_count = 0
 
     for asset in assets:
-        expected_content = hash_asset_content(asset.name, asset.content)
-        expected_def = hash_asset_definition(asset.name)
-
-        content_ok = asset.content_hash == expected_content
-        def_ok = asset.definition_hash == expected_def
-        valid = content_ok and def_ok
+        expected_content, expected_def, valid = _asset_identity_check(store, asset)
 
         if valid:
             pass_count += 1
@@ -114,8 +141,10 @@ def verify_replacement_claims(
 
             # Verify content hashes on both assets
             for label, asset in [("source", source), ("replacement", replacement)]:
-                expected = hash_asset_content(asset.name, asset.content)
-                if asset.content_hash != expected:
+                expected, _expected_definition, valid = _asset_identity_check(
+                    store, asset
+                )
+                if not valid:
                     issues.append(
                         f"{label} asset {asset.id} content_hash mismatch: "
                         f"stored={asset.content_hash} expected={expected}"

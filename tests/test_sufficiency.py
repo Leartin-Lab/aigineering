@@ -363,13 +363,13 @@ def test_sufficiency_asset_can_be_stored_and_retrieved():
     store.add_asset(_make_asset("data_file", "data", signed=True))
 
     asset = sufficiency_result_asset(contract, store)
-    candidate_runtime(store, MemoryTraceStore()).accept_asset(
+    accepted = candidate_runtime(store, MemoryTraceStore()).accept_asset(
         asset,
         source="sufficiency",
         allow_protected=True,
     )
 
-    retrieved = store.get_asset(asset.id)
+    retrieved = store.get_asset(accepted.id)
     assert retrieved is not None
     assert retrieved.name == f"_sufficiency_result_{contract.id}"
 

@@ -95,15 +95,71 @@ def test_worker_host_signs_ordinary_claim_submission():
         record
         for _, record in store.scan_runtime_records(record_type="candidate.received")
         if record.payload.get("actor_id") == host.worker_id
-        and record.payload.get("effect_types") == ("asset.propose",)
+        and set(record.payload.get("effect_types", ()))
+        == {
+            "asset.assert",
+            "asset.content.publish",
+            "asset.definition.publish",
+        }
     )
     output = next(
         record
         for _, record in store.scan_runtime_records(record_type="asset.committed")
         if record.payload["asset"]["name"] == "result"
     )
-    assert output.causal_parents == (receipt.id,)
+    assertion = store.scan_runtime_records(
+        record_type="asset.definition-content.asserted"
+    )[-1][1]
+    assert assertion.causal_parents == (receipt.id,)
+    assert output.causal_parents == (assertion.id,)
+    asset = store.get_assets_by_name("result")[-1]
+    assert asset.id.startswith("asset:v1:")
+    assert asset.definition_hash.startswith("definition:v1:")
+    assert asset.content_hash.startswith("content:v1:")
     assert store.get_claim(contract.id)["status"] == "submitted"
+
+
+def test_worker_outputs_share_content_without_collapsing_assertion_identity():
+    store, first, original_host = _runtime('/exec {"result":"same"}')
+    fields = {
+        "name": "hosted_task_two",
+        "description": "Second provenance for equal content",
+        "inputs": (),
+        "outputs": ("result_two",),
+        "activation": "",
+        "budget": 3,
+        "tool_scope": (),
+        "labels": (),
+        "origin": "human",
+    }
+    second = Contract(id=hash_contract_v3(**fields), **fields)
+    store.add_contract(second)
+    host = WorkerHost(
+        MockWorker(
+            {
+                first.name: '/exec {"result":"same"}',
+                second.name: '/exec {"result_two":"same"}',
+            },
+            worker_id=original_host.worker_id,
+        ),
+        original_host.genesis,
+        original_host.actor_key,
+        original_host.signer,
+    )
+
+    for _ in range(2):
+        claimed = claim_next_package(store, worker_id=host.worker_id)
+        assert claimed is not None
+        assert execute_claimed_package(claimed, host, store)["status"] == "accepted"
+
+    assert len(store.get_content_objects()) == 1
+    assert len(store.get_asset_definitions()) == 2
+    assert len(store.get_definition_content_assertions()) == 2
+    assets = store.get_all_assets()
+    assert len(assets) == 2
+    assert len({asset.id for asset in assets}) == 2
+    assert len({asset.content_hash for asset in assets}) == 1
+    assert len({asset.definition_hash for asset in assets}) == 2
 
 
 def test_invalid_host_action_closes_claim_instead_of_ending_silently():
@@ -191,6 +247,40 @@ def test_claim_bound_candidate_replay_is_idempotent_after_claim_closes():
         if record.payload.get("candidate_id") == proposal.id
     ]
     assert len(committed) == 1
+
+
+def test_claim_bound_graph_output_rejects_partial_endpoint_batch():
+    store, contract, host = _runtime('/exec {"result":"done"}')
+    claimed = claim_next_package(store, worker_id=host.worker_id)
+    assert claimed is not None
+    envelope = CandidateEnvelope(
+        contract_id=contract.id,
+        worker_id=host.worker_id,
+        raw_output='/exec {"result":"done"}',
+        package_id=claimed.package.package_id,
+        claim_id=claimed.package.claim_id,
+        claim_epoch=claimed.package.claim_epoch,
+        idempotency_key=f"partial-{claimed.package.package_id}",
+    )
+    complete = host.sign_envelope(envelope, contract=contract)
+    partial = create_candidate_proposal(
+        domain_id=host.genesis.id,
+        actor_id=host.actor_key.actor_id,
+        key_id=host.actor_key.key_id,
+        effects=complete.effects[:-1],
+        signer=host.signer,
+        idempotency_key=envelope.idempotency_key,
+        claim_binding=complete.claim_binding,
+    )
+
+    result = submit_worker_proposal(partial, store)
+
+    assert result["status"] == "rejected"
+    assert "unsupported effect" in result["rejected"][0]
+    assert store.get_content_objects() == []
+    assert store.get_asset_definitions() == []
+    assert store.get_definition_content_assertions() == []
+    assert store.get_assets_by_name("result") == []
 
 
 def test_claim_bound_candidate_rejects_stale_epoch_before_projection():

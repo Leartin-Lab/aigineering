@@ -1814,8 +1814,7 @@ class SQLiteStore:
             for record in runtime_records:
                 self._insert_runtime_record(record)
             if any(
-                record.record_type == "lifecycle.terminal"
-                for record in runtime_records
+                record.record_type == "lifecycle.terminal" for record in runtime_records
             ):
                 check_crash_point("after_terminal_before_claim_release")
             self._release_claims_for_terminal_records(
