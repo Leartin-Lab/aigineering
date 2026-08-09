@@ -9,14 +9,14 @@ from aigineering.core.activation import (
     activation_names,
     validate_execution_activation,
 )
-from aigineering.core.authority import RESERVED_PREFIXES
 from aigineering.core.ids import (
     CONTRACT_SELF_REFERENCE,
     hash_asset_content,
     hash_asset_definition,
     hash_contract_current,
 )
-from aigineering.core.plan_scaffold import (
+from aigineering.plugins.plan_scaffold import (
+    PLAN_RESERVED_PREFIXES,
     _scaffold_tasks_to_raw_dicts,
     compile_placeholder_names,
     parse_plan_scaffold,
@@ -33,9 +33,6 @@ _METHOD_OUTPUT_PREFIX: dict[str, str] = {
     "fail": "_fail_result_",
 }
 _METHOD_LABEL_PREFIX = "method:"
-
-# Plan-specific reserved prefixes (superset of authority.RESERVED_PREFIXES).
-_PLAN_RESERVED_PREFIXES: frozenset[str] = RESERVED_PREFIXES | frozenset({"_persona_"})
 
 # Fields the planner must not set in child contract payloads.
 # (origin is always hard-clamped to "plan" by the engine.)
@@ -816,7 +813,7 @@ def _plan_child_scope_findings(
     protected_outputs = [
         output
         for output in outputs
-        if any(output.startswith(prefix) for prefix in _PLAN_RESERVED_PREFIXES)
+        if any(output.startswith(prefix) for prefix in PLAN_RESERVED_PREFIXES)
     ]
     if protected_outputs:
         return (
@@ -825,7 +822,7 @@ def _plan_child_scope_findings(
                 "field": "outputs",
                 "reason": f"outputs {protected_outputs} use reserved prefixes",
                 "action": "rejected",
-                "expected": f"no prefix in {sorted(_PLAN_RESERVED_PREFIXES)}",
+                "expected": f"no prefix in {sorted(PLAN_RESERVED_PREFIXES)}",
                 "actual": str(protected_outputs),
             },
             [],
@@ -987,7 +984,7 @@ def _can_contribute_sibling_promises(
     return not any(
         output.startswith(prefix)
         for output in outputs
-        for prefix in _PLAN_RESERVED_PREFIXES
+        for prefix in PLAN_RESERVED_PREFIXES
     )
 
 

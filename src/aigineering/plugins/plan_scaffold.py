@@ -1,4 +1,4 @@
-"""Plan scaffold model, parser, validator, and symbolic compiler (v0.5.0).
+"""Plugin-owned plan scaffold model, parser, validator, and symbolic compiler.
 
 ADR-018 structured planning scaffold: before creating child contracts, the plan
 LLM output is parsed as an intermediate scaffold that validates coverage,
@@ -34,7 +34,7 @@ _SCAFFOLD_STRUCTURAL_FIELDS: frozenset[str] = frozenset(
 )
 
 # Plan-specific reserved prefixes (superset of authority.RESERVED_PREFIXES).
-_PLAN_RESERVED_PREFIXES: frozenset[str] = RESERVED_PREFIXES | frozenset({"_persona_"})
+PLAN_RESERVED_PREFIXES: frozenset[str] = RESERVED_PREFIXES | frozenset({"_persona_"})
 
 # ---------------------------------------------------------------------------
 # Models
@@ -277,7 +277,7 @@ def validate_plan_scaffold(
 
         # Protected output names
         violated = [
-            o for o in produces if any(o.startswith(p) for p in _PLAN_RESERVED_PREFIXES)
+            o for o in produces if any(o.startswith(p) for p in PLAN_RESERVED_PREFIXES)
         ]
         if violated:
             errors.append(
@@ -286,7 +286,7 @@ def validate_plan_scaffold(
                     "field": "outputs",
                     "reason": f"outputs {violated} use reserved prefixes",
                     "action": "scaffold_rejected",
-                    "expected": f"no prefix in {sorted(_PLAN_RESERVED_PREFIXES)}",
+                    "expected": f"no prefix in {sorted(PLAN_RESERVED_PREFIXES)}",
                     "actual": str(violated),
                 }
             )
