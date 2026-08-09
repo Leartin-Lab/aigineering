@@ -1,9 +1,32 @@
 """Executable constraints for the 0.5 design/change/evidence workflow."""
 
 from pathlib import Path
+import re
 
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def _public_markdown_files() -> tuple[Path, ...]:
+    roots = (
+        "README.md",
+        "DESIGN.md",
+        "ROADMAP.md",
+        "CONTRIBUTING.md",
+        "SKILL.md",
+        "docs",
+        "changes",
+        "reports",
+        "conformance",
+    )
+    files: list[Path] = []
+    for relative in roots:
+        path = ROOT / relative
+        if path.is_file():
+            files.append(path)
+        else:
+            files.extend(path.rglob("*.md"))
+    return tuple(files)
 
 
 def test_stable_design_change_and_adr_are_current():
@@ -62,6 +85,38 @@ def test_public_sources_do_not_reference_private_workspaces():
                 assert marker not in content, (
                     f"{file.relative_to(ROOT)} contains {marker}"
                 )
+
+
+def test_documentation_index_routes_to_unique_public_owners():
+    index = (ROOT / "docs/README.md").read_text(encoding="utf-8")
+
+    for owner in (
+        "../DESIGN.md",
+        "boundary-invariants.md",
+        "adr/",
+        "../changes/",
+        "../ROADMAP.md",
+        "../reports/",
+        "../conformance/",
+        "../CONTRIBUTING.md",
+        "../SKILL.md",
+    ):
+        assert f"]({owner})" in index
+
+
+def test_public_markdown_local_links_resolve():
+    link_pattern = re.compile(r"(?<!!)\[[^]]*]\(([^)]+)\)")
+
+    for source in _public_markdown_files():
+        content = source.read_text(encoding="utf-8")
+        for raw_target in link_pattern.findall(content):
+            target = raw_target.split("#", 1)[0].strip()
+            if not target or "://" in target or target.startswith("mailto:"):
+                continue
+            resolved = (source.parent / target).resolve()
+            assert resolved.exists(), (
+                f"{source.relative_to(ROOT)} links to missing {raw_target}"
+            )
 
 
 def test_released_changes_are_ordered_and_current_design_is_v052():

@@ -1,7 +1,7 @@
 # Change 005: Documentation information architecture
 
-Status: Proposed
-Target: next maintenance cycle
+Status: Implemented and verified on dev; release pending
+Target: v0.5.3
 
 ## Problem
 
@@ -50,3 +50,10 @@ outside release artifacts.
 - public links and artifact contents are tested;
 - no release artifact refers to private workspaces;
 - moving documentation does not change protocol or runtime behavior.
+
+## Closure
+
+`docs/README.md` now provides one route to each public owner without copying
+its normative content. Architecture tests require the index, validate local
+Markdown links, and continue to reject references to private workspaces from
+public sources. No runtime behavior or historical decision record changed.
