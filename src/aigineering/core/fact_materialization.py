@@ -6,6 +6,7 @@ from collections.abc import Sequence
 from dataclasses import replace
 
 from aigineering.core.trace import create_entry
+from aigineering.core.lifecycle_facts import create_terminal_record
 from aigineering.protocol.runtime_record import RuntimeRecord, create_runtime_record
 from aigineering.protocol.wire import asset_to_dict, trace_entry_to_dict
 
@@ -48,9 +49,9 @@ def materialize_fact_reduction(
             trace_event_type = "complete"
             trace_kwargs["budget_remaining"] = 0
             lifecycle.append(
-                create_runtime_record(
-                    "lifecycle.terminal",
-                    {"contract_id": event.contract_id, "terminal": "complete"},
+                create_terminal_record(
+                    event.contract_id,
+                    "complete",
                     causal_parents=(
                         (asset_committed_record(asset).id,) if asset is not None else ()
                     ),
@@ -64,9 +65,9 @@ def materialize_fact_reduction(
                 f"parent {event.details.get('parent_id', '?')} completed"
             ]
             lifecycle.append(
-                create_runtime_record(
-                    "lifecycle.terminal",
-                    {"contract_id": event.contract_id, "terminal": "cancelled"},
+                create_terminal_record(
+                    event.contract_id,
+                    "cancelled",
                     causal_parents=(
                         (asset_committed_record(asset).id,) if asset is not None else ()
                     ),

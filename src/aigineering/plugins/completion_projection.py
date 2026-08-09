@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Protocol
 from aigineering.core.causal_allowance import resolve_causal_allowance
 from aigineering.core.disclosure import compute_disclosure
 from aigineering.core.output_satisfaction import all_outputs_satisfied
+from aigineering.core.lifecycle_facts import create_terminal_record
 from aigineering.core.runtime_projection import TERMINAL_EVENTS
 from aigineering.core.trace import create_entry
 from aigineering.core.trace_manager import TraceManager
@@ -343,10 +344,7 @@ def _commit_terminal(
                 store, contract, fallback=contract.budget
             ),
         )
-    terminal = create_runtime_record(
-        "lifecycle.terminal",
-        {"contract_id": contract.id, "terminal": event_type},
-    )
+    terminal = create_terminal_record(contract.id, event_type)
     trace_record = create_runtime_record(
         "trace.recorded", {"trace": trace_entry_to_dict(entry)}
     )

@@ -520,7 +520,7 @@ def test_projection_failure_terminal_is_distinct_from_recovery_progress():
     )
     runtime = (ROOT / "src/aigineering/runtime.py").read_text(encoding="utf-8")
 
-    assert '"lifecycle.terminal"' in projection
+    assert "create_terminal_record" in projection
     assert '"projection_rejection.recovery_scheduled"' in runtime
     assert "recovered_projection_ids" in runtime
 

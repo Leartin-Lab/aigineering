@@ -24,6 +24,7 @@ from aigineering.plugins.completion_projection import (
 from aigineering.plugins.recovery import schedule_projection_recovery
 from aigineering.plugins.task_semantics import method_payload
 from aigineering.core.runtime_projection import RuntimeProjection
+from aigineering.core.lifecycle_facts import create_terminal_record
 from aigineering.core.commitment import (
     CandidateCommitRejected,
     CandidateCommitter,
@@ -508,9 +509,9 @@ def _commit_recovery_outcome(
     records = []
     if record_terminal:
         records.append(
-            create_runtime_record(
-                "lifecycle.terminal",
-                {"contract_id": contract.id, "terminal": "failed"},
+            create_terminal_record(
+                contract.id,
+                "failed",
                 causal_parents=[source_record.id],
             )
         )
@@ -665,9 +666,9 @@ def process_expired_claims(store, *, candidate_publishers=None) -> list[str]:
             causal_parents=[grant_id],
             recorded_at=observed_at,
         )
-        terminal = create_runtime_record(
-            "lifecycle.terminal",
-            {"contract_id": contract.id, "terminal": "failed"},
+        terminal = create_terminal_record(
+            contract.id,
+            "failed",
             causal_parents=[expiration.id],
             recorded_at=observed_at,
         )
@@ -771,9 +772,9 @@ def _record_worker_invocation_failure(
             "worker_id": claimed.worker_id,
         },
     )
-    terminal = create_runtime_record(
-        "lifecycle.terminal",
-        {"contract_id": claimed.contract.id, "terminal": "failed"},
+    terminal = create_terminal_record(
+        claimed.contract.id,
+        "failed",
         causal_parents=[failure.id],
     )
     trace_record = create_runtime_record(

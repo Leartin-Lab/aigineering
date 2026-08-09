@@ -14,6 +14,7 @@ from aigineering.core.authority import matched_reserved_prefix
 from aigineering.core.contract_admission import validate_contract_commitment
 from aigineering.core.fact_materialization import asset_committed_record
 from aigineering.core.fact_reducer import METHOD_RESULT_PREFIXES
+from aigineering.core.lifecycle_facts import create_terminal_record
 from aigineering.core.ids import (
     canonical_json,
     compute_content_hash,
@@ -360,14 +361,11 @@ def project_contract_cancellation(
     reason = str(effect.payload.get("reason", ""))
     if not contract_id or not reason:
         raise ValueError("contract.cancel requires contract_id and reason")
-    record = create_runtime_record(
-        "lifecycle.terminal",
-        {
-            "actor_id": candidate.actor_id,
-            "contract_id": contract_id,
-            "reason": reason,
-            "terminal": "cancelled",
-        },
+    record = create_terminal_record(
+        contract_id,
+        "cancelled",
+        actor_id=candidate.actor_id,
+        reason=reason,
         causal_parents=(receipt_id,),
     )
     return EffectProjection(records=(record,), relation_target=contract_id)

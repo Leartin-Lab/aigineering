@@ -158,7 +158,9 @@ Engine-owned waiting state. Malformed activation is an explicit defect, not a
 predicate that remains false forever.
 
 One immutable terminal fact exists per Contract. Retry and recovery publish new
-Contracts; they do not reopen a closed attempt.
+Contracts; they do not reopen a closed attempt. Each causal module may derive
+an outcome, but `core.lifecycle_facts` alone constructs the canonical terminal
+RuntimeRecord and the Store alone arbitrates single assignment.
 
 ## Worker protocol
 

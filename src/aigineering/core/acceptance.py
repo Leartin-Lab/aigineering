@@ -6,6 +6,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 
 from aigineering.core.output_satisfaction import all_outputs_satisfied
+from aigineering.core.lifecycle_facts import create_terminal_record
 from aigineering.core.ids import acceptance_policy_id
 from aigineering.core.projection_context import EffectProjectionContext
 from aigineering.core.trace import create_entry
@@ -245,10 +246,7 @@ def materialize_qualification_facts(
             ),
             timestamp="",
         )
-        terminal = create_runtime_record(
-            "lifecycle.terminal",
-            {"contract_id": contract.id, "terminal": "complete"},
-        )
+        terminal = create_terminal_record(contract.id, "complete")
         trace_record = create_runtime_record(
             "trace.recorded",
             {"trace": trace_entry_to_dict(entry)},

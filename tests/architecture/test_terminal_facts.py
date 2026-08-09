@@ -2,12 +2,15 @@
 
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
+import ast
+from pathlib import Path
 
 import pytest
 
 from aigineering.core.record_conflict import ImmutableRecordConflict
 from aigineering.core.fact_reducer import FactReducer
 from aigineering.core.ids import contract_identity_v3
+from aigineering.core.lifecycle_facts import create_terminal_record
 from aigineering.core.control_plane import build_control_plane_contract
 from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.core.store import MemoryStore
@@ -34,6 +37,46 @@ def test_contract_terminal_is_single_assignment_and_exact_replay_is_idempotent(k
 
     if isinstance(store, SQLiteStore):
         store.close()
+
+
+def test_terminal_factory_preserves_optional_causal_fields():
+    terminal = create_terminal_record(
+        "task:factory",
+        "cancelled",
+        actor_id="human:owner",
+        reason="superseded",
+        causal_parents=("record:cause",),
+        recorded_at="2026-08-09T00:00:00+00:00",
+    )
+
+    assert terminal.payload == {
+        "actor_id": "human:owner",
+        "contract_id": "task:factory",
+        "reason": "superseded",
+        "terminal": "cancelled",
+    }
+    assert terminal.causal_parents == ("record:cause",)
+    assert terminal.recorded_at == "2026-08-09T00:00:00+00:00"
+
+
+def test_lifecycle_module_is_the_only_terminal_record_constructor():
+    owner = Path("src/aigineering/core/lifecycle_facts.py")
+    violations = []
+    for path in Path("src/aigineering").rglob("*.py"):
+        if path == owner:
+            continue
+        for node in ast.walk(ast.parse(path.read_text())):
+            if not isinstance(node, ast.Call):
+                continue
+            name = getattr(node.func, "id", getattr(node.func, "attr", ""))
+            if name != "create_runtime_record":
+                continue
+            record_type = node.args[0] if node.args else None
+            if isinstance(record_type, ast.Constant) and record_type.value == (
+                "lifecycle.terminal"
+            ):
+                violations.append(f"{path}:{node.lineno}")
+    assert violations == []
 
 
 @pytest.mark.parametrize("kind", ["memory", "sqlite"])
