@@ -2,9 +2,9 @@
 
 ## Current release
 
-Version: **v0.5.2**
+Version: **v0.5.3**
 
-v0.5.2 is the stable single-machine reference release. “Stable” applies to the
+v0.5.3 is the stable single-machine reference release. “Stable” applies to the
 documented local runtime and protocol surface; it is not a claim of external
 security audit or public-network deployment hardening.
 
@@ -27,12 +27,20 @@ Implemented:
   fallback;
 - a signed many-to-many definition/content graph with legacy reconstruction;
 - exact label-context binding in v4 Contract identity;
-- advisory semantic relation publication through the Candidate boundary.
+- advisory semantic relation publication through the Candidate boundary;
+- ordinary Worker output publication as an atomic signed content,
+  definition, and assertion graph;
+- transactional terminal/claim closure and durable deterministic commitment
+  rejection facts;
+- causal allowance as the sole runtime budget source;
+- one terminal-fact construction owner and Plugin-owned planning scaffold;
+- planning label containment aligned across prompt, Plugin, and commitment.
 
 Release evidence is recorded in
 `reports/050-post-review-boundary-hardening-2026-07-19.md` and
 `reports/051-redis-query-projection-2026-07-31.md`, and
-`reports/052-signed-definition-content-graph-2026-07-31.md`.
+`reports/052-signed-definition-content-graph-2026-07-31.md`. v0.5.3 convergence
+evidence is in `reports/053-boundary-convergence-2026-08-09.md`.
 
 ## Release gates
 

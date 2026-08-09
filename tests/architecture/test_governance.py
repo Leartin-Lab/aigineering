@@ -119,7 +119,7 @@ def test_public_markdown_local_links_resolve():
             )
 
 
-def test_released_changes_are_ordered_and_current_design_is_v052():
+def test_released_changes_are_ordered_and_current_design_is_v053():
     roadmap = (ROOT / "ROADMAP.md").read_text(encoding="utf-8")
     redis_change = (ROOT / "changes/003-redis-query-projection.md").read_text(
         encoding="utf-8"
@@ -135,13 +135,13 @@ def test_released_changes_are_ordered_and_current_design_is_v052():
     ).read_text(encoding="utf-8")
     design = (ROOT / "DESIGN.md").read_text(encoding="utf-8")
 
-    assert roadmap.index("v0.5.2") < roadmap.index("Future candidate directions")
+    assert roadmap.index("v0.5.3") < roadmap.index("Future candidate directions")
     assert "Status: Implemented and verified" in redis_change
     assert "Change 003 is closed" in identity_change
     assert "Status: Accepted" in redis_adr
     assert "Status: Implemented and verified" in identity_change
     assert "Status: Accepted" in identity_adr
-    assert "Status: implemented truth for v0.5.2" in design
+    assert "Status: implemented truth for v0.5.3" in design
     assert "Redis projection" in design
     assert "## Asset identity graph" in design
 

@@ -1,6 +1,6 @@
 # Change 007: Ordinary output and Asset graph convergence
 
-Status: Implemented and verified on dev; release pending
+Status: Implemented and verified
 Target: v0.5.3
 Decision: `docs/adr/ADR-017-signed-definition-content-graph.md`
 

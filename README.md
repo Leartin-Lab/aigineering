@@ -54,9 +54,9 @@ aig run "build a report with citations" \
   --base-url https://provider.example/v1
 ```
 
-## v0.5.2 scope
+## v0.5.3 scope
 
-v0.5.2 is the stable single-machine reference release. It provides:
+v0.5.3 is the stable single-machine reference release. It provides:
 
 - actor-signed Candidate publication;
 - one Candidate commitment boundary for CLI, Worker, Plugin, and HTTP surfaces;
@@ -75,11 +75,15 @@ v0.5.2 is the stable single-machine reference release. It provides:
   SQLite;
 - separate content, signed-definition, and signed-association identities with
   many-to-many history;
-- v4 Contracts that bind label-selected context to exact Asset IDs.
+- v4 Contracts that bind label-selected context to exact Asset IDs;
+- graph-native ordinary Worker outputs signed by the WorkerHost;
+- terminal/claim fencing and durable deterministic commitment rejections;
+- one causal allowance source and one terminal-fact constructor;
+- planning label containment before Candidate commitment.
 
 The release has deterministic boundary, reconstruction, concurrency, artifact,
-and real-LLM acceptance evidence. See
-[`reports/050-post-review-boundary-hardening-2026-07-19.md`](reports/050-post-review-boundary-hardening-2026-07-19.md).
+and bounded real-LLM evidence. See the
+[v0.5.3 convergence report](reports/053-boundary-convergence-2026-08-09.md).
 
 Inspect the accepted asset graph without changing authoritative state:
 
@@ -110,7 +114,7 @@ The signed graph acceptance evidence is recorded in
 
 ## Non-goals
 
-v0.5.2 does not claim:
+v0.5.3 does not claim:
 
 - cross-machine consensus or distributed Store semantics;
 - public-network deployment hardening;

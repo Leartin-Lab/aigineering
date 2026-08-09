@@ -1,6 +1,6 @@
 # Change 009: One terminal fact construction owner
 
-Status: Implemented and verified on dev; release pending
+Status: Implemented and verified
 Target: v0.5.3
 
 ## Problem

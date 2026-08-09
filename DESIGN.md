@@ -1,8 +1,8 @@
 # Aigineering Design
 
-Status: implemented truth for v0.5.2
+Status: implemented truth for v0.5.3
 
-This document describes the code shipped in the v0.5.2 reference release.
+This document describes the code shipped in the v0.5.3 reference release.
 Future designs do not belong here until their implementation, tests, migration,
 and release evidence are complete.
 
@@ -244,6 +244,7 @@ Each stage is independently claimable and testable. Compile enforces:
 - monotonic activation syntax;
 - input reachability from disclosed facts or accepted producers;
 - complete parent-output recommitment;
+- labels contained within the parent's non-Plugin context-selection scope;
 - tool, Worker, authority, and allowance containment.
 
 A final reachability closure is computed from accepted producers only. A
@@ -391,7 +392,7 @@ terminal, or replay owner.
 
 ## Release limits
 
-v0.5.2 is a stable local reference release, not:
+v0.5.3 is a stable local reference release, not:
 
 - a cross-machine distributed Store;
 - a consensus implementation;

@@ -1,6 +1,6 @@
 # Change 006: Terminal claim and rejection convergence
 
-Status: In progress
+Status: Implemented and verified
 Target: v0.5.3
 
 ## Problem
@@ -49,3 +49,12 @@ observable.
 The change is complete when terminal state and claim fencing share one
 transactional boundary, all deterministic commitment conflicts are observable,
 and no compatibility path can reopen or silently bypass that boundary.
+
+## Implementation evidence
+
+Terminal commitment now releases an unrelated active claim atomically and
+records the rebuildable transition. Claim acquisition and claim-bound commit
+both fence terminal Contracts. Deterministic immutable-record conflicts become
+durable Candidate rejections without misclassifying infrastructure failures.
+Crash, reconstruction, concurrency, replay, and worker API tests cover the
+shared boundary.

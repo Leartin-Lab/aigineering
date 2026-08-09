@@ -1,6 +1,6 @@
 # Change 008: Causal allowance as the single budget source
 
-Status: Implemented and verified on dev; release pending
+Status: Implemented and verified
 Target: v0.5.3
 Decision: `docs/adr/ADR-013-causal-allowance-facts.md`
 

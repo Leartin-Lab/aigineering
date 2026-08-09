@@ -1,6 +1,6 @@
 # Change 010: Planning scaffold Plugin ownership
 
-Status: Implemented and verified on dev; release pending
+Status: Implemented and verified
 Target: v0.5.3
 
 ## Problem

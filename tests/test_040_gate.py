@@ -1141,7 +1141,7 @@ class TestPublicDocs:
             assert claim not in readme.lower(), (
                 f"G11: README makes unsupported claim: {claim!r}"
             )
-        assert "v0.5.2" in readme.lower()
+        assert "v0.5.3" in readme.lower()
         assert "candidate" in readme.lower()
         assert "transaction" in readme.lower()
         assert "single-machine" in readme.lower()

@@ -1,6 +1,6 @@
 # Change 005: Documentation information architecture
 
-Status: Implemented and verified on dev; release pending
+Status: Implemented and verified
 Target: v0.5.3
 
 ## Problem

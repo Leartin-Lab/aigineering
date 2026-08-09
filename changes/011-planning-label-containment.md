@@ -1,6 +1,6 @@
 # Change 011: Planning label containment
 
-Status: Implemented and verified on dev; release pending
+Status: Implemented and verified
 Target: v0.5.3
 
 ## Problem
@@ -31,4 +31,6 @@ submission failure.
 Architecture and prompt tests cover invented labels, mixed supersets, valid
 subsets, stable compile rejection fields, and the independent commitment fence.
 A bounded real-LLM planning run reproduced the original failure before the
-change; the same scenario is part of the v0.5.3 live acceptance gate.
+change. Post-change provider runs either obeyed the boundary or ended with an
+explicit terminal Worker-format failure; no widened label or silent task end
+was accepted.
