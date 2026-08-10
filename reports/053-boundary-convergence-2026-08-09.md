@@ -38,6 +38,10 @@ The versioned release tree passed:
   suite: 50 passed;
 - wheel and sdist build for 0.5.3 with `twine check` passing both artifacts.
 
+The dev dependency pins Ruff 0.15.17 so local and clean Linux CI evaluate the
+same release gate instead of inheriting changing default rule sets from an
+unbounded future Ruff release.
+
 A clean virtual environment installed the wheel, reported version `0.5.3`,
 initialized a new domain, completed a claim-bound mock Worker task, and used
 fresh CLI processes to reopen the database and read the signed graph-backed
