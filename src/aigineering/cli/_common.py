@@ -126,7 +126,7 @@ def _run_demo(
     goal: str,
     trace_store: TraceStoreProtocol | None = None,
     store: StoreProtocol | None = None,
-    worker_kind: str = "mock",
+    worker_kind: str = "llm",
     model: Optional[str] = None,
     base_url: str = "https://api.openai.com/v1",
     save_config: bool = False,

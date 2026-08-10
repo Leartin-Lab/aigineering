@@ -105,13 +105,20 @@ def _output_run_json(
     "--worker",
     "worker_kind",
     type=click.Choice(["mock", "llm"]),
-    default=None,
-    help="Worker implementation to use (required for non-demo runs).",
+    default="llm",
+    show_default=True,
+    help="Worker implementation; mock is only for explicit tests and dry runs.",
 )
-@click.option("--model", default=None, help="LLM model name when --worker llm.")
+@click.option(
+    "--model",
+    default=None,
+    envvar="AIGINEERING_MODEL",
+    help="LLM model name (or AIGINEERING_MODEL).",
+)
 @click.option(
     "--base-url",
     default="https://api.openai.com/v1",
+    envvar="AIGINEERING_BASE_URL",
     show_default=True,
     help="OpenAI-compatible base URL when --worker llm.",
 )
@@ -164,7 +171,7 @@ def run(
     interval: float,
     mock_output: Optional[str],
     mock_presets: tuple[str, ...],
-    worker_kind: Optional[str],
+    worker_kind: str,
     model: Optional[str],
     base_url: str,
     timeout: float,
@@ -175,12 +182,6 @@ def run(
     json_output: bool,
 ) -> None:
     """Run one Worker cycle, a target task, or a quick goal task graph."""
-    if worker_kind is None:
-        raise click.UsageError(
-            "--worker is required.  Use 'mock' for deterministic testing, "
-            "'llm' for OpenAI-compatible models, or 'aig demo' for the "
-            "quickstart experience."
-        )
     capabilities = _parse_capabilities(capabilities_str)
     if run_once or target_task_id:
         _run_task_pool(
@@ -555,14 +556,20 @@ def _emit_run_result(payload: dict, json_output: bool) -> None:
     "--worker",
     "worker_kind",
     type=click.Choice(["mock", "llm"]),
-    default="mock",
+    default="llm",
     show_default=True,
-    help="Worker implementation to use.",
+    help="Worker implementation; mock is only for explicit tests and dry runs.",
 )
-@click.option("--model", default=None, help="LLM model name when --worker llm.")
+@click.option(
+    "--model",
+    default=None,
+    envvar="AIGINEERING_MODEL",
+    help="LLM model name (or AIGINEERING_MODEL).",
+)
 @click.option(
     "--base-url",
     default="https://api.openai.com/v1",
+    envvar="AIGINEERING_BASE_URL",
     show_default=True,
     help="OpenAI-compatible base URL when --worker llm.",
 )
@@ -611,7 +618,7 @@ def demo(
     behavior_labels: tuple[str, ...],
     save_config: bool,
 ) -> None:
-    """Run a quick demo with the given goal (quickstart experience)."""
+    """Run a quick goal through a real LLM Worker by default."""
     capabilities = _parse_capabilities(capabilities_str)
     try:
         store, trace_store, contract = _run_demo(

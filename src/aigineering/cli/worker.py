@@ -317,9 +317,9 @@ def worker_register(
 def worker_submit(candidate_json: str, idempotency_key: Optional[str]) -> None:
     """Submit a signed worker Candidate for projection and commitment.
 
-    CANDIDATE_JSON must be claim-bound and contain only ordinary
-    ``asset.propose`` output effects or ``contract.declare`` expansion effects.
-    Output is always JSON.
+    CANDIDATE_JSON must be claim-bound and contain either one atomic
+    content/definition/assertion output graph or contained ``contract.declare``
+    expansion effects. Output is always JSON.
     """
     try:
         data = json.loads(candidate_json)

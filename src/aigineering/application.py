@@ -53,7 +53,7 @@ def build_worker(
     worker_kind: str,
     *,
     model: str | None = None,
-    base_url: str = "https://api.openai.com/v1",
+    base_url: str | None = None,
     timeout: float = 60.0,
     max_retries: int = 3,
     capabilities: frozenset[str] | None = None,
@@ -62,11 +62,19 @@ def build_worker(
     if worker_kind == "mock":
         return MockWorker()
     if worker_kind == "llm":
-        if not model:
-            raise ValueError("--model is required when --worker llm")
+        effective_model = model or os.getenv("AIGINEERING_MODEL")
+        if not effective_model:
+            raise ValueError(
+                "LLM execution requires --model or AIGINEERING_MODEL; "
+                "use --worker mock only for explicit tests or dry runs"
+            )
         return LLMWorker(
-            model=model,
-            base_url=base_url,
+            model=effective_model,
+            base_url=(
+                base_url
+                or os.getenv("AIGINEERING_BASE_URL")
+                or "https://api.openai.com/v1"
+            ),
             timeout=int(timeout),
             max_retries=max_retries,
             capabilities=capabilities or frozenset(),

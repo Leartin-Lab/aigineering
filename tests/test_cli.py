@@ -281,7 +281,7 @@ def test_demo_command_exists():
     """aig demo <goal> runs and exits 0 (preserves quickstart)."""
     runner = CliRunner()
     with runner.isolated_filesystem():
-        result = runner.invoke(cli, ["demo", "test"])
+        result = runner.invoke(cli, ["demo", "test", "--worker", "mock"])
 
         assert result.exit_code == 0
         assert "Demo completed" in result.output
@@ -300,7 +300,7 @@ def test_demo_does_not_claim_completion_without_declared_output(monkeypatch):
     )
     runner = CliRunner()
     with runner.isolated_filesystem():
-        result = runner.invoke(cli, ["demo", "test"])
+        result = runner.invoke(cli, ["demo", "test", "--worker", "mock"])
 
     assert result.exit_code != 0
     assert "did not complete declared outputs" in result.output
@@ -311,10 +311,10 @@ def test_run_llm_worker_requires_model():
     """aig run --worker llm fails before network use when model is missing."""
     runner = CliRunner()
     with runner.isolated_filesystem():
-        result = runner.invoke(cli, ["run", "test", "--worker", "llm"])
+        result = runner.invoke(cli, ["run", "test"])
 
         assert result.exit_code != 0
-        assert "--model is required" in result.output
+        assert "AIGINEERING_MODEL" in result.output
 
 
 def test_demo_llm_worker_requires_model():
@@ -324,7 +324,30 @@ def test_demo_llm_worker_requires_model():
         result = runner.invoke(cli, ["demo", "test", "--worker", "llm"])
 
         assert result.exit_code != 0
-        assert "--model is required" in result.output
+        assert "AIGINEERING_MODEL" in result.output
+
+
+def test_run_defaults_to_llm_and_reads_model_from_environment(monkeypatch):
+    observed: dict[str, object] = {}
+
+    def fake_build_worker(worker_kind, **kwargs):
+        from aigineering.agent.mock import MockWorker
+
+        observed["worker_kind"] = worker_kind
+        observed["model"] = kwargs["model"]
+        return MockWorker(worker_id="llm:configured")
+
+    monkeypatch.setenv("AIGINEERING_MODEL", "configured-model")
+    monkeypatch.setattr("aigineering.cli._common.build_worker", fake_build_worker)
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        result = runner.invoke(cli, ["run", "test"])
+
+    assert result.exit_code == 0, result.output
+    assert observed == {
+        "worker_kind": "llm",
+        "model": "configured-model",
+    }
 
 
 def test_replay_valid_session():
