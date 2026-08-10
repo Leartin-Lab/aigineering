@@ -11,6 +11,8 @@ pytest.importorskip("httpx")
 
 from fastapi.testclient import TestClient
 
+from aigineering import __version__
+from aigineering.agent.harness import HarnessCandidateAdapter, candidate_json
 from aigineering.core.control_plane import build_control_plane_contract
 from aigineering.core.asset_versions import (
     create_replacement_claim,
@@ -22,31 +24,25 @@ from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.core.worker_routing import WorkerRegistration
 from aigineering.protocol.candidate import (
     ActorKey,
-    CandidateClaimBinding,
     CandidateEffect,
     candidate_proposal_to_dict,
     create_candidate_proposal,
     create_genesis_manifest,
 )
-from aigineering.protocol.actions import parse_action
-from aigineering.protocol.wire import contract_from_dict, contract_to_dict
+from aigineering.protocol.wire import contract_to_dict
 from aigineering.protocol.effect_builders import (
     actor_authorization_effect,
     asset_proposal_effect,
-    claim_bound_output_effects,
     replacement_claim_effect,
     worker_claim_effect,
     worker_claim_renewal_effect,
     worker_registration_effect,
 )
-from aigineering.plugins import (
-    StagedPlanningPlugin,
-    StagedReplanningPlugin,
-    TaskDelegationPlugin,
-)
-from aigineering.plugins.base import PluginRequest
-from aigineering.protocol.envelope import CandidateEnvelope
 from aigineering.server.app import app
+
+
+def test_server_reports_package_version():
+    assert app.version == __version__
 
 
 def test_request_store_dependency_closes_connection(monkeypatch):
@@ -142,63 +138,18 @@ def _register_worker(client, actor, worker_id: str):
 def _worker_submission(actor, worker_key, package, raw_output: str):
     signer, key = worker_key
     _root_signer, genesis = actor
-    idempotency_key = f"remote-{package['package_id']}"
     raw = raw_output
     if not raw.lstrip().startswith("/"):
         name, _, content = raw.partition(":")
         raw = "/exec " + json.dumps({"outputs": {name.strip(): content.strip()}})
-    action = parse_action(raw)
-    envelope = CandidateEnvelope(
-        contract_id=package["contract_id"],
-        worker_id=key.actor_id,
-        raw_output=raw,
-        parsed_action=(
-            {"type": "exec", "outputs": dict(action.outputs)}
-            if action.type == "exec"
-            else {"type": action.type, "payload": dict(action.payload)}
-        ),
-        package_id=package["package_id"],
-        claim_id=package["claim_id"],
-        claim_epoch=package["claim_epoch"],
-        idempotency_key=idempotency_key,
-    )
-    contract = contract_from_dict(package["contract"])
-    if action.type in {"plan", "replan"}:
-        plugin = (
-            StagedPlanningPlugin()
-            if action.type == "plan"
-            else StagedReplanningPlugin()
-        )
-        effects = plugin.propose(
-            PluginRequest(
-                parent=contract,
-                allowance=package["budget_remaining"],
-                parameters=action.payload,
+    adapter = HarnessCandidateAdapter(genesis.id, key, signer)
+    return json.loads(
+        candidate_json(
+            adapter.result_candidate(
+                package,
+                raw,
+                idempotency_key=f"remote-{package['package_id']}",
             )
-        ).effects
-    elif action.type in {"tool", "fail", "retry"}:
-        effects = (
-            TaskDelegationPlugin()
-            .propose_claimed(contract, action, allowance=package["budget_remaining"])
-            .effects
-        )
-    else:
-        effects = claim_bound_output_effects(envelope)
-    binding = CandidateClaimBinding(
-        package["contract_id"],
-        package["claim_id"],
-        package["claim_epoch"],
-        package["package_id"],
-    )
-    return candidate_proposal_to_dict(
-        create_candidate_proposal(
-            domain_id=genesis.id,
-            actor_id=key.actor_id,
-            key_id=key.key_id,
-            effects=effects,
-            signer=signer,
-            idempotency_key=idempotency_key,
-            claim_binding=binding,
         )
     )
 

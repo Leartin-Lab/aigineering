@@ -97,147 +97,168 @@ class WorkerHost:
         disclosed_assets: tuple[Asset, ...] = (),
         allowance: int | None = None,
     ) -> CandidateProposal:
-        if envelope.worker_id != self.worker_id:
-            raise ValueError("WorkerHost can sign only its own worker envelope")
-        if not envelope.raw_output.strip():
-            envelope = replace(
-                envelope,
-                raw_output='/fail {"reason":"worker produced no candidate output"}',
-                parsed_action={
-                    "type": "fail",
-                    "payload": {"reason": "worker produced no candidate output"},
-                },
-            )
-        elif (
-            envelope.parsed_action is None
-            and not envelope.raw_output.lstrip().startswith("/")
-        ):
-            outputs: dict[str, str] = {}
-            for line in envelope.raw_output.splitlines():
-                name, separator, content = line.partition(":")
-                if separator and name.strip() and content.strip():
-                    outputs[name.strip()] = content.strip()
-            envelope = replace(
-                envelope,
-                raw_output="/exec "
-                + json.dumps({"outputs": outputs}, sort_keys=True, ensure_ascii=False),
-                parsed_action={"type": "exec", "outputs": outputs},
-            )
-        envelope_candidate = Candidate(
-            worker_id=envelope.worker_id,
-            raw_output=envelope.raw_output,
-            parsed_action=envelope.parsed_action,
-            metadata=envelope.usage_metadata,
+        return compile_worker_envelope(
+            envelope,
+            domain_id=self.genesis.id,
+            actor_key=self.actor_key,
+            signer=self.signer,
+            contract=contract,
+            disclosed_assets=disclosed_assets,
+            allowance=allowance,
         )
-        action = parse_method_action(envelope_candidate)
-        if action is not None and action.type in {"plan", "replan"}:
-            if contract is None or contract.id != envelope.contract_id:
-                raise ValueError("staged planning requires the claimed Contract")
-            from aigineering.plugins import (
-                PluginRequest,
-                StagedPlanningPlugin,
-                StagedReplanningPlugin,
-            )
 
-            plugin = (
-                StagedPlanningPlugin()
-                if action.type == "plan"
-                else StagedReplanningPlugin()
-            )
-            try:
-                effects = plugin.propose(
-                    PluginRequest(
-                        parent=contract,
-                        assets=tuple(disclosed_assets),
-                        allowed_input_names=frozenset(contract.inputs),
-                        allowance=contract.budget if allowance is None else allowance,
-                        parameters=action.payload,
-                    )
-                ).effects
-            except ValueError as exc:
-                raise WorkerExecutionError(
-                    "planning_request_rejected", str(exc)
-                ) from exc
-        elif action is not None:
-            from aigineering.plugins import TaskDelegationPlugin
 
-            if contract is None or contract.id != envelope.contract_id:
-                raise ValueError("task expansion requires the claimed Contract")
-            try:
-                effects = (
-                    TaskDelegationPlugin()
-                    .propose_claimed(
-                        contract,
-                        action,
-                        allowance=contract.budget if allowance is None else allowance,
-                    )
-                    .effects
-                )
-            except ValueError as exc:
-                raise WorkerExecutionError(
-                    "task_delegation_rejected", str(exc)
-                ) from exc
-        else:
-            parsed_envelope = envelope
-            if envelope.parsed_action is None:
-                try:
-                    parsed = parse_action(envelope.raw_output)
-                except ActionParseError as exc:
-                    raise WorkerExecutionError("invalid_action", str(exc)) from exc
-                parsed_envelope = replace(
-                    envelope,
-                    parsed_action={
-                        "type": parsed.type,
-                        "outputs": dict(parsed.outputs),
-                    },
-                )
-            if contract is not None and any(
-                label in {"plugin:plan.compile", "plugin:replan.compile"}
-                for label in contract.labels
-            ):
-                from aigineering.plugins.planning import (
-                    PlanningCompileError,
-                    compile_planning_blueprint,
-                )
+def compile_worker_envelope(
+    envelope: CandidateEnvelope,
+    *,
+    domain_id: str,
+    actor_key: ActorKey,
+    signer: Signer,
+    contract: Contract | None = None,
+    disclosed_assets: tuple[Asset, ...] = (),
+    allowance: int | None = None,
+) -> CandidateProposal:
+    """Compile one harness action through the canonical Worker effect boundary."""
+    if envelope.worker_id != actor_key.actor_id:
+        raise ValueError("worker envelope actor does not match its signing key")
+    if signer.kind != actor_key.kind or signer.signer_id != actor_key.public_key:
+        raise ValueError("worker signer does not match its authorized actor key")
+    if "worker.submit" not in actor_key.capabilities:
+        raise ValueError("worker actor key requires 'worker.submit'")
+    if not envelope.raw_output.strip():
+        envelope = replace(
+            envelope,
+            raw_output='/fail {"reason":"worker produced no candidate output"}',
+            parsed_action={
+                "type": "fail",
+                "payload": {"reason": "worker produced no candidate output"},
+            },
+        )
+    elif envelope.parsed_action is None and not envelope.raw_output.lstrip().startswith(
+        "/"
+    ):
+        outputs: dict[str, str] = {}
+        for line in envelope.raw_output.splitlines():
+            name, separator, content = line.partition(":")
+            if separator and name.strip() and content.strip():
+                outputs[name.strip()] = content.strip()
+        envelope = replace(
+            envelope,
+            raw_output="/exec "
+            + json.dumps({"outputs": outputs}, sort_keys=True, ensure_ascii=False),
+            parsed_action={"type": "exec", "outputs": outputs},
+        )
+    envelope_candidate = Candidate(
+        worker_id=envelope.worker_id,
+        raw_output=envelope.raw_output,
+        parsed_action=envelope.parsed_action,
+        metadata=envelope.usage_metadata,
+    )
+    action = parse_method_action(envelope_candidate)
+    if action is not None and action.type in {"plan", "replan"}:
+        if contract is None or contract.id != envelope.contract_id:
+            raise ValueError("staged planning requires the claimed Contract")
+        from aigineering.plugins import (
+            PluginRequest,
+            StagedPlanningPlugin,
+            StagedReplanningPlugin,
+        )
 
-                try:
-                    effects = compile_planning_blueprint(
-                        contract,
-                        (parsed_envelope.parsed_action or {}).get("outputs", {}),
-                        allowance=contract.budget if allowance is None else allowance,
-                    )
-                except PlanningCompileError as exc:
-                    fields = ",".join(exc.fields) or "unknown"
-                    raise WorkerExecutionError(
-                        f"planning_compile_rejected:{fields}", str(exc)
-                    ) from exc
-            else:
-                if contract is None or contract.id != envelope.contract_id:
-                    raise ValueError("claim-bound output requires the claimed Contract")
-                effects = claim_bound_graph_output_effects(
-                    parsed_envelope,
-                    contract,
-                    domain_id=self.genesis.id,
-                    actor_id=self.actor_key.actor_id,
-                    key_id=self.actor_key.key_id,
-                    signer=self.signer,
-                )
-        binding = CandidateClaimBinding(
-            contract_id=envelope.contract_id,
-            claim_id=envelope.claim_id,
-            claim_epoch=envelope.claim_epoch,
-            package_id=envelope.package_id,
+        plugin = (
+            StagedPlanningPlugin()
+            if action.type == "plan"
+            else StagedReplanningPlugin()
         )
         try:
-            return create_candidate_proposal(
-                domain_id=self.genesis.id,
-                actor_id=self.actor_key.actor_id,
-                key_id=self.actor_key.key_id,
-                effects=effects,
-                signer=self.signer,
-                idempotency_key=envelope.idempotency_key,
-                claim_binding=binding,
-                metadata=envelope.usage_metadata,
+            effects = plugin.propose(
+                PluginRequest(
+                    parent=contract,
+                    assets=tuple(disclosed_assets),
+                    allowed_input_names=frozenset(contract.inputs),
+                    allowance=contract.budget if allowance is None else allowance,
+                    parameters=action.payload,
+                )
+            ).effects
+        except ValueError as exc:
+            raise WorkerExecutionError("planning_request_rejected", str(exc)) from exc
+    elif action is not None:
+        from aigineering.plugins import TaskDelegationPlugin
+
+        if contract is None or contract.id != envelope.contract_id:
+            raise ValueError("task expansion requires the claimed Contract")
+        try:
+            effects = (
+                TaskDelegationPlugin()
+                .propose_claimed(
+                    contract,
+                    action,
+                    allowance=contract.budget if allowance is None else allowance,
+                )
+                .effects
             )
         except ValueError as exc:
-            raise WorkerExecutionError("candidate_encoding_rejected", str(exc)) from exc
+            raise WorkerExecutionError("task_delegation_rejected", str(exc)) from exc
+    else:
+        parsed_envelope = envelope
+        if envelope.parsed_action is None:
+            try:
+                parsed = parse_action(envelope.raw_output)
+            except ActionParseError as exc:
+                raise WorkerExecutionError("invalid_action", str(exc)) from exc
+            parsed_envelope = replace(
+                envelope,
+                parsed_action={
+                    "type": parsed.type,
+                    "outputs": dict(parsed.outputs),
+                },
+            )
+        if contract is not None and any(
+            label in {"plugin:plan.compile", "plugin:replan.compile"}
+            for label in contract.labels
+        ):
+            from aigineering.plugins.planning import (
+                PlanningCompileError,
+                compile_planning_blueprint,
+            )
+
+            try:
+                effects = compile_planning_blueprint(
+                    contract,
+                    (parsed_envelope.parsed_action or {}).get("outputs", {}),
+                    allowance=contract.budget if allowance is None else allowance,
+                )
+            except PlanningCompileError as exc:
+                fields = ",".join(exc.fields) or "unknown"
+                raise WorkerExecutionError(
+                    f"planning_compile_rejected:{fields}", str(exc)
+                ) from exc
+        else:
+            if contract is None or contract.id != envelope.contract_id:
+                raise ValueError("claim-bound output requires the claimed Contract")
+            effects = claim_bound_graph_output_effects(
+                parsed_envelope,
+                contract,
+                domain_id=domain_id,
+                actor_id=actor_key.actor_id,
+                key_id=actor_key.key_id,
+                signer=signer,
+            )
+    binding = CandidateClaimBinding(
+        contract_id=envelope.contract_id,
+        claim_id=envelope.claim_id,
+        claim_epoch=envelope.claim_epoch,
+        package_id=envelope.package_id,
+    )
+    try:
+        return create_candidate_proposal(
+            domain_id=domain_id,
+            actor_id=actor_key.actor_id,
+            key_id=actor_key.key_id,
+            effects=effects,
+            signer=signer,
+            idempotency_key=envelope.idempotency_key,
+            claim_binding=binding,
+            metadata=envelope.usage_metadata,
+        )
+    except ValueError as exc:
+        raise WorkerExecutionError("candidate_encoding_rejected", str(exc)) from exc

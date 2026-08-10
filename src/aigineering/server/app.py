@@ -9,6 +9,7 @@ from typing import Optional
 from fastapi import Depends, FastAPI, HTTPException, Query
 from pydantic import BaseModel, Field
 
+from aigineering import __version__
 from aigineering.application import (
     find_trace_for_session as _find_trace_for_session,
     latest_session_file as _latest_session_file,
@@ -32,7 +33,7 @@ from aigineering.protocol.effect_builders import (
 )
 from aigineering.protocol.immutability import deep_thaw
 
-app = FastAPI(title="Aigineering API", version="0.5.2")
+app = FastAPI(title="Aigineering API", version=__version__)
 
 
 # ── Request / response models ────────────────────────────────────────────────

@@ -59,6 +59,11 @@ def asset_to_dict(asset: Asset) -> dict[str, Any]:
     }
 
 
+def asset_from_dict(data: Mapping[str, Any]) -> Asset:
+    """Rebuild an Asset from its public wire representation."""
+    return Asset(**deep_thaw(dict(data)))
+
+
 def contract_to_canonical(contract: Contract) -> str:
     d = {
         "parent_id": contract.parent_id,
