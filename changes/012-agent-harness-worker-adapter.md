@@ -17,6 +17,8 @@ harder than the test path.
 - expose one tested `HarnessCandidateAdapter` for claim, renewal, and result
   Candidates;
 - delegate result compilation to the same function used by WorkerHost;
+- normalize complete reasoning wrappers and JSON-valued LLM output content at
+  the provider adapter before strict action parsing;
 - preserve existing harness orchestration inside the Worker invocation;
 - make LLM the CLI execution default while keeping mock explicit;
 - document a framework-neutral pull/submit migration and completion contract.
@@ -32,6 +34,7 @@ harder than the test path.
 ## Exit criteria
 
 - built-in and harness Workers share one action-to-effect compiler;
+- provider presentation normalization does not relax Candidate validation;
 - claim, renewal, `/exec`, and `/plan` adapter paths have behavioral tests;
 - normal CLI help and public examples prefer configured LLM execution;
 - mock remains available only through explicit selection;

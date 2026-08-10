@@ -30,6 +30,11 @@ HarnessCandidateAdapter compiles its single action through the same WorkerHost
 effect path and signs claim, renewal, and result Candidates without exposing
 the harness private key to the runtime.
 
+Provider adapters may remove a complete reasoning-only wrapper or serialize a
+JSON-valued output as canonical text before action parsing. This is wire-shape
+normalization only: the result must still pass the same strict action,
+authority, projection, and commitment boundaries.
+
 ## Implemented runtime path
 
 Every supported publication surface follows the same path:

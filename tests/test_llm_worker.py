@@ -17,6 +17,7 @@ from aigineering.agent.llm import (
     _extract_usage,
 )
 from aigineering.agent.worker import Worker
+from aigineering.protocol.actions import parse_action
 from aigineering.protocol.types import Asset, Contract
 
 
@@ -519,6 +520,62 @@ def test_content_response_unchanged_without_tool_calls():
     candidate = worker.invoke(_min_contract(), [])
 
     assert candidate.raw_output == "report: ok"
+
+
+def test_provider_action_serializes_structured_output_content():
+    response = {
+        "choices": [
+            {
+                "message": {
+                    "content": (
+                        '/exec {"outputs":{"planning_blueprint":'
+                        '{"contracts":[{"name":"finish"}]}}}'
+                    )
+                }
+            }
+        ]
+    }
+    worker = LLMWorker(model="test-model", transport=lambda *_args: response)
+
+    candidate = worker.invoke(_min_contract(), [])
+
+    action = parse_action(candidate.raw_output)
+    assert json.loads(action.outputs["planning_blueprint"]) == {
+        "contracts": [{"name": "finish"}]
+    }
+
+
+def test_provider_action_removes_complete_leading_think_block():
+    response = {
+        "choices": [
+            {
+                "message": {
+                    "content": (
+                        "<think>private reasoning</think>\n"
+                        '/exec {"outputs":{"report":"grounded"}}'
+                    )
+                }
+            }
+        ]
+    }
+    worker = LLMWorker(model="test-model", transport=lambda *_args: response)
+
+    candidate = worker.invoke(_min_contract(), [])
+
+    assert candidate.raw_output == '/exec {"outputs":{"report":"grounded"}}'
+
+
+def test_provider_action_keeps_unclosed_think_block_for_fail_closed_parsing():
+    response = {
+        "choices": [
+            {"message": {"content": '<think>unfinished /exec {"report":"unsafe"}'}}
+        ]
+    }
+    worker = LLMWorker(model="test-model", transport=lambda *_args: response)
+
+    candidate = worker.invoke(_min_contract(), [])
+
+    assert candidate.raw_output.startswith("<think>")
     assert candidate.parsed_action is None
 
 

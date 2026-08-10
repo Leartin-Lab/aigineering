@@ -206,7 +206,7 @@ class LLMWorker:
 
         return Candidate(
             worker_id=self.worker_id,
-            raw_output=_extract_message_content(response),
+            raw_output=_normalize_provider_action(_extract_message_content(response)),
             parsed_action=None,
             metadata=usage_metadata,
         )
@@ -404,6 +404,66 @@ def _extract_message_content(response: Mapping[str, object]) -> str:
 
     raise WorkerExecutionError(
         "response_missing_content", "LLM response missing message content"
+    )
+
+
+def _normalize_provider_action(raw_output: str) -> str:
+    """Normalize provider presentation quirks without relaxing the protocol.
+
+    Some reasoning models expose a leading ``<think>`` block, and some models
+    encode JSON-valued Asset content as an object instead of the required JSON
+    string.  Both are provider presentation details.  The canonical action
+    parser still receives exactly one slash action with string output values.
+    """
+    action = raw_output.strip()
+    if action.startswith("<think>"):
+        marker = "</think>"
+        end = action.find(marker)
+        if end < 0:
+            return action
+        action = action[end + len(marker) :].strip()
+
+    fenced = action.startswith("```") and action.endswith("```")
+    candidate = action
+    if fenced:
+        lines = action.splitlines()
+        if len(lines) < 3:
+            return action
+        candidate = "\n".join(lines[1:-1]).strip()
+
+    command, separator, body = candidate.partition(" ")
+    if command != "/exec" or not separator or not body.strip():
+        return action
+    try:
+        payload = json.loads(body)
+    except json.JSONDecodeError:
+        return action
+    if not isinstance(payload, Mapping):
+        return action
+    raw_outputs = payload.get("outputs", payload)
+    if not isinstance(raw_outputs, Mapping):
+        return action
+
+    outputs: dict[str, str] = {}
+    for name, content in raw_outputs.items():
+        if not isinstance(name, str):
+            return action
+        if isinstance(content, str):
+            outputs[name] = content
+        elif isinstance(content, (Mapping, list)):
+            outputs[name] = json.dumps(
+                content,
+                sort_keys=True,
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+        else:
+            return action
+    return "/exec " + json.dumps(
+        {"outputs": outputs},
+        sort_keys=True,
+        ensure_ascii=False,
+        separators=(",", ":"),
     )
 
 
