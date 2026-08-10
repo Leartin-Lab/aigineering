@@ -42,7 +42,8 @@ Release evidence is recorded in
 `reports/050-post-review-boundary-hardening-2026-07-19.md` and
 `reports/051-redis-query-projection-2026-07-31.md`, and
 `reports/052-signed-definition-content-graph-2026-07-31.md`. v0.5.3 convergence
-evidence is in `reports/053-boundary-convergence-2026-08-09.md`.
+and harness stabilization evidence is in
+`reports/053-boundary-convergence-2026-08-09.md`.
 
 ## Release gates
 

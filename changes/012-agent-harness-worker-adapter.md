@@ -1,6 +1,6 @@
 # Change 012: Agent harness Worker adapter
 
-Status: Implemented on dev; verification in progress
+Status: Implemented and locally verified on dev
 Target: v0.5.3 stabilization
 Decisions: ADR-006 and ADR-012
 

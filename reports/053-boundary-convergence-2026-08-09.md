@@ -1,6 +1,6 @@
 # v0.5.3 boundary convergence acceptance
 
-Date: 2026-08-09
+Date: 2026-08-09; harness stabilization updated 2026-08-10
 Scope: single-machine SQLite reference runtime
 
 ## Result
@@ -23,7 +23,7 @@ compliance from any particular model provider.
 - the public documentation map names one owner for each kind of truth.
 
 The bounded transitions and their tests are recorded in Changes 005 through
-011. Existing ADR-013 and ADR-017 remain the durable decisions for causal
+012. Existing ADR-013 and ADR-017 remain the durable decisions for causal
 allowance and the signed definition/content graph; this maintenance release did
 not add a competing architecture decision.
 
@@ -32,8 +32,8 @@ not add a competing architecture decision.
 The versioned release tree passed:
 
 - `ruff check src/aigineering tests`;
-- `ruff format --check src/aigineering tests` across 219 files;
-- `pytest -q`: 1134 passed, 3 skipped;
+- `ruff format --check src/aigineering tests` across 221 files;
+- `pytest -q`: 1147 passed, 3 skipped;
 - the focused crash, concurrent Worker, reconstruction, WorkerHost, and claim
   suite: 50 passed;
 - wheel and sdist build for 0.5.3 with `twine check` passing both artifacts.
@@ -41,8 +41,11 @@ The versioned release tree passed:
 A clean virtual environment installed the wheel, reported version `0.5.3`,
 initialized a new domain, completed a claim-bound mock Worker task, and used
 fresh CLI processes to reopen the database and read the signed graph-backed
-output and Contract. The sdist contains the public design, Skill, documentation
-map, Change 011, and this report; it excludes tests and private workspaces.
+output and Contract. The wheel also imports the public
+`HarnessCandidateAdapter`; the sdist contains the public design, Skill,
+documentation map, Change 012, harness migration guide, and this report. It
+excludes tests and private workspaces. Both repository Skills passed their
+validator.
 
 The unchanged recursive execution surface remains covered by the deterministic
 staged-planning, nested-replanning, restart, and long-chain suites. Historical
@@ -56,11 +59,20 @@ Provider/model: DeepSeek OpenAI-compatible API / `deepseek-v4-flash`.
 Credentials remained in the ignored local environment and did not enter the
 Store, trace, report, or artifact.
 
-One clean ordinary task completed through the new WorkerHost graph path. Its
+One clean ordinary task completed through the default LLM Worker graph path
+without an explicit `--worker` or model argument. Its
 single Candidate committed `asset.content.publish`,
 `asset.definition.publish`, and `asset.assert`; a fresh CLI process rebuilt the
 completed task, exact output, token usage, zero rejections, zero recovery, and
 zero silent-failure risks. The accepted assertion was signed by the Worker key.
+The run consumed 678 prompt and 65 completion tokens.
+
+DeepSeek also returned one planning blueprint as a nested JSON value where the
+protocol requires Asset content text. The LLM adapter now canonicalizes that
+provider presentation and removes only a complete leading reasoning wrapper
+before strict action parsing. A synthetic provider run then compiled the
+normalized blueprint into two ordinary Contract declarations. Candidate,
+authority, and commitment validation remain unchanged.
 
 A planning run reached compile and exposed an invented child label. Commitment
 rejected it fail-closed. The planning Plugin and compiler prompt were aligned
