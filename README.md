@@ -20,11 +20,13 @@ git clone https://github.com/Leartin-Lab/aigineering.git
 cd aigineering
 pip install -e ".[dev]"
 
-# Deterministic local demonstration
-aig demo "build a report with citations"
+# Configure an OpenAI-compatible LLM Worker
+export AIGINEERING_API_KEY="..."
+export AIGINEERING_MODEL="your-model"
+export AIGINEERING_BASE_URL="https://provider.example/v1"
 
 # Persistent execution through the normal claim/package/submit protocol
-aig run "build a report with citations" --worker mock
+aig run "build a report with citations"
 
 # Inspect the resulting facts and trace
 aig trace
@@ -44,15 +46,16 @@ aig task create \
   --output report
 ```
 
-An OpenAI-compatible Worker can be used without changing the runtime protocol:
+Mock execution is an explicit deterministic dry-run, never the production
+default:
 
 ```bash
-export AIGINEERING_API_KEY="..."
-aig run "build a report with citations" \
-  --worker llm \
-  --model your-model \
-  --base-url https://provider.example/v1
+aig demo "build a report with citations" --worker mock
 ```
+
+Existing agent harnesses can keep their own model and tool orchestration while
+using signed pull/submit Candidates. See the
+[agent harness migration reference](docs/reference/agent-harness-migration.md).
 
 ## v0.5.3 scope
 

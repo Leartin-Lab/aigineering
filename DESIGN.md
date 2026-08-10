@@ -25,6 +25,11 @@ The kernel is responsible for:
 Provider prompts, tools, planning strategies, and user interfaces live outside
 the commitment kernel.
 
+An existing agent harness may remain the execution environment. The public
+HarnessCandidateAdapter compiles its single action through the same WorkerHost
+effect path and signs claim, renewal, and result Candidates without exposing
+the harness private key to the runtime.
+
 ## Implemented runtime path
 
 Every supported publication surface follows the same path:

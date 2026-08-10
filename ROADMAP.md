@@ -34,7 +34,9 @@ Implemented:
   rejection facts;
 - causal allowance as the sole runtime budget source;
 - one terminal-fact construction owner and Plugin-owned planning scaffold;
-- planning label containment aligned across prompt, Plugin, and commitment.
+- planning label containment aligned across prompt, Plugin, and commitment;
+- a framework-neutral signed Candidate adapter for existing agent harnesses;
+- configured LLM execution as the CLI default, with mock explicit for tests.
 
 Release evidence is recorded in
 `reports/050-post-review-boundary-hardening-2026-07-19.md` and

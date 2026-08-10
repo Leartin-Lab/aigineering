@@ -104,6 +104,35 @@ def test_documentation_index_routes_to_unique_public_owners():
         assert f"]({owner})" in index
 
 
+def test_public_skill_prefers_real_workers_and_routes_harness_migration():
+    skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+
+    assert "HarnessCandidateAdapter" in skill
+    assert "docs/reference/agent-harness-migration.md" in skill
+    assert 'aig run "produce a cited release review" --json' in skill
+    assert "Never present mock output as production" in skill
+    assert "--worker mock" in skill
+    assert 'aig run "build a report with citations"' in readme
+    quick_start = readme.split("## v0.5.3 scope", 1)[0]
+    assert (
+        "--worker mock"
+        not in quick_start.split(
+            "Mock execution is an explicit deterministic dry-run", 1
+        )[0]
+    )
+
+
+def test_harness_adapter_delegates_to_the_workerhost_compiler():
+    harness = (ROOT / "src/aigineering/agent/harness.py").read_text(encoding="utf-8")
+    worker = (ROOT / "src/aigineering/agent/worker.py").read_text(encoding="utf-8")
+
+    assert "compile_worker_envelope" in harness
+    assert "claim_bound_graph_output_effects" not in harness
+    assert worker.count("def compile_worker_envelope(") == 1
+    assert worker.count("claim_bound_graph_output_effects(") == 1
+
+
 def test_public_markdown_local_links_resolve():
     link_pattern = re.compile(r"(?<!!)\[[^]]*]\(([^)]+)\)")
 

@@ -14,6 +14,7 @@ navigation, not another architecture specification.
 | How do other implementations verify the wire protocol? | [`conformance/`](../conformance/) |
 | How do contributors change the project? | [`CONTRIBUTING.md`](../CONTRIBUTING.md) |
 | How does an AI coding worker use this repository? | [`SKILL.md`](../SKILL.md) |
+| How does an existing agent harness become a Worker? | [`reference/agent-harness-migration.md`](reference/agent-harness-migration.md) |
 
 ## Reading paths
 
