@@ -78,6 +78,8 @@ def test_staged_plan_proposes_three_atomic_ordinary_contracts():
     )
     assert compile_contract.outputs == _parent().outputs
     assert [contract.budget for contract in stages.contracts] == [1, 1, 6]
+    assert draft.tool_scope == dependencies.tool_scope == ()
+    assert compile_contract.tool_scope == _parent().tool_scope
     assert all(contract.origin == "plugin" for contract in stages.contracts)
     assert all(
         contract.acceptance_policy["mode"] == "mechanical"

@@ -205,6 +205,14 @@ def test_tool_completion_plugin_publishes_continuation_candidate():
             if record.record_type.endswith("rejected")
         ],
     )
+    assert "lookup" not in continuations[0].tool_scope
+    scheduled_entries = [
+        entry
+        for entry in store.get_by_contract(root.id)
+        if entry.event_type == "method_continuation_scheduled"
+    ]
+    assert len(scheduled_entries) == 1
+    assert scheduled_entries[0].relation_target == continuations[0].id
     receipts = [
         record
         for _, record in store.scan_runtime_records(record_type="candidate.received")

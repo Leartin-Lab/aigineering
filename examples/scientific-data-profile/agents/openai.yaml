@@ -1,0 +1,4 @@
+interface:
+  display_name: "Scientific Data Profile"
+  short_description: "Profile scientific tables through replayable Aigineering tasks."
+  default_prompt: "Use Aigineering to safely profile an authorized scientific CSV or TSV before analysis."

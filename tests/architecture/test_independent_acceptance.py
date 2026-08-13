@@ -114,7 +114,7 @@ def _candidate(genesis, actor_id, key_id, signer, effect, nonce):
     )
 
 
-def _publish_contract_and_output(domain):
+def _publish_contract_and_output(domain, *, produce_output: bool = True):
     store, genesis, committer, owner, producer, _, _, _, _ = domain
     rubric = Asset(id="rubric:compliance", name="review_rubric", content="be exact")
     evidence = Asset(
@@ -175,6 +175,8 @@ def _publish_contract_and_output(domain):
         "register-producer",
     )
     assert committer.commit(registered, genesis).accepted
+    if not produce_output:
+        return contract, None
     claimed = claim_next_package(store, worker_id="worker:producer")
     assert claimed is not None
 
@@ -269,6 +271,111 @@ def test_verifier_capability_and_exact_asset_qualification(acceptance_domain):
         "contract_id": contract.id,
         "terminal": "complete",
     }
+
+
+def test_parent_acceptance_can_bind_exact_descendant_output(acceptance_domain):
+    store, genesis, committer, owner, producer, verifier, _, _, _ = acceptance_domain
+    contract, _ = _publish_contract_and_output(acceptance_domain, produce_output=False)
+    fields = {
+        "name": "report.continue",
+        "description": "Publish the report after delegated evidence retrieval.",
+        "inputs": (),
+        "outputs": ("report",),
+        "activation": "",
+        "budget": 1,
+        "tool_scope": (),
+        "labels": (),
+        "origin": "continuation",
+        "parent_id": contract.id,
+    }
+    child = Contract(id=hash_contract_v3(**fields), **fields)
+    assert committer.commit(
+        _candidate(
+            genesis,
+            "human:owner",
+            "owner-key",
+            owner,
+            contract_declaration_effect(child),
+            "declare-descendant",
+        ),
+        genesis,
+    ).accepted
+    claimed = claim_next_package(
+        store, worker_id="worker:producer", contract_id=child.id
+    )
+    assert claimed is not None
+
+    class _Producer:
+        worker_id = "worker:producer"
+
+        def invoke(self, contract, disclosed_assets):
+            del contract, disclosed_assets
+            return Candidate(
+                worker_id=self.worker_id,
+                raw_output='/exec {"outputs":{"report":"descendant report"}}',
+            )
+
+    host = WorkerHost(
+        _Producer(),
+        genesis,
+        next(key for key in genesis.root_keys if key.actor_id == "worker:producer"),
+        producer,
+    )
+    assert execute_claimed_package(claimed, host, store)["status"] == "accepted"
+    descendant_asset = next(
+        asset
+        for asset in store.get_assets_by_name("report")
+        if asset.created_by == child.id
+    )
+    decision = committer.commit(
+        _candidate(
+            genesis,
+            "worker:verifier",
+            "verifier-key",
+            verifier,
+            _attestation_effect(contract, descendant_asset),
+            "attest-descendant",
+        ),
+        genesis,
+    )
+    assert decision.accepted
+    assert all_outputs_satisfied(contract, store)
+
+
+def test_parent_acceptance_rejects_unrelated_same_name_asset(acceptance_domain):
+    store, genesis, committer, owner, _, verifier, _, _, _ = acceptance_domain
+    contract, _ = _publish_contract_and_output(acceptance_domain)
+    unrelated = Asset(id="unrelated", name="report", content="unrelated")
+    published = committer.commit(
+        _candidate(
+            genesis,
+            "human:owner",
+            "owner-key",
+            owner,
+            asset_proposal_effect(unrelated),
+            "publish-unrelated",
+        ),
+        genesis,
+    )
+    assert published.accepted
+    asset = next(
+        item
+        for item in store.get_assets_by_name("report")
+        if item.created_by == "human:owner"
+    )
+    decision = committer.commit(
+        _candidate(
+            genesis,
+            "worker:verifier",
+            "verifier-key",
+            verifier,
+            _attestation_effect(contract, asset),
+            "attest-unrelated",
+        ),
+        genesis,
+    )
+    assert not decision.accepted
+    assert "or its descendants" in str(decision.runtime_records[1].payload)
 
 
 def test_attestation_must_bind_exact_policy_rubric_and_evidence(acceptance_domain):

@@ -25,12 +25,6 @@ logger = logging.getLogger(__name__)
 # API requests and how to interpret responses.
 SUPPORTED_CAPABILITIES = frozenset({"tool_calling", "json_schema"})
 
-# Multi-tool-call action type.  When a provider response contains more than
-# one tool_calls entry the worker emits this envelope so no calls are
-# silently dropped.  The engine does not yet dispatch multi-actions, so
-# they are recorded in the trace for auditability.
-_MULTI_ACTION_TYPE = "multi"
-
 Transport = Callable[
     [str, Mapping[str, str], Mapping[str, object]],
     Mapping[str, object],
@@ -174,7 +168,12 @@ class LLMWorker:
             and self._tool_definitions is not None
             and len(self._tool_definitions) > 0
         ):
-            payload["tools"] = self._tool_definitions
+            scoped_tools = _scoped_tool_definitions(
+                self._tool_definitions,
+                contract.tool_scope,
+            )
+            if scoped_tools:
+                payload["tools"] = scoped_tools
 
         headers = {"Content-Type": "application/json"}
         if self.api_key:
@@ -314,8 +313,10 @@ class LLMWorker:
         dictionary that the engine will dispatch through the normal
         authority/projection boundary.
 
-        When *tool_calls* contains more than one entry the worker emits a
-        ``multi`` envelope so no calls are silently dropped.
+        Multiple calls are rejected visibly. The runtime has no multi-action
+        commitment primitive, so selecting only one would silently discard
+        proposed work and emitting an unsupported envelope would fail later at
+        Candidate encoding.
         """
         if not tool_calls:
             raise WorkerExecutionError(
@@ -357,26 +358,22 @@ class LLMWorker:
                 )
             actions.append({"name": name, "args": args})
 
-        if len(actions) == 1:
-            raw_output = json.dumps(actions[0], ensure_ascii=False)
-            raw_output = f"/tool {raw_output}"
-            parsed_action: dict[str, object] = {
-                "type": "tool",
-                "payload": actions[0],
+        if len(actions) > 1:
+            payload = {
+                "reason": (
+                    "provider proposed multiple tool calls; publish each call as "
+                    "independently claimable work or retry with exactly one call"
+                ),
+                "proposed_tools": [str(action["name"]) for action in actions],
             }
-            return raw_output, parsed_action
+            return (
+                "/fail " + json.dumps(payload, sort_keys=True, ensure_ascii=False),
+                {"type": "fail", "payload": payload},
+            )
 
-        # Multiple tool calls: emit a multi-action envelope.
-        raw_output = json.dumps(
-            {"type": _MULTI_ACTION_TYPE, "actions": actions},
-            ensure_ascii=False,
-        )
-        raw_output = f"/multi {raw_output}"
-        parsed_action = {
-            "type": _MULTI_ACTION_TYPE,
-            "payload": {"actions": actions},
-        }
-        return raw_output, parsed_action
+        raw_output = json.dumps(actions[0], ensure_ascii=False)
+        raw_output = f"/tool {raw_output}"
+        return raw_output, {"type": "tool", "payload": actions[0]}
 
 
 def _extract_message_content(response: Mapping[str, object]) -> str:
@@ -491,6 +488,38 @@ def _extract_tool_calls(
         return tool_calls
 
     return None
+
+
+def _scoped_tool_definitions(
+    definitions: list[dict[str, object]],
+    tool_scope: tuple[str, ...],
+) -> list[dict[str, object]]:
+    """Return only well-formed provider tools declared by this Contract."""
+    allowed = set(tool_scope)
+    scoped: list[dict[str, object]] = []
+    seen: set[str] = set()
+    for definition in definitions:
+        function = definition.get("function")
+        if not isinstance(function, Mapping):
+            raise WorkerExecutionError(
+                "invalid_tool_definition",
+                "tool definition requires an object function",
+            )
+        name = function.get("name")
+        if not isinstance(name, str) or not name.strip():
+            raise WorkerExecutionError(
+                "invalid_tool_definition",
+                "tool definition requires a non-empty function.name",
+            )
+        if name in seen:
+            raise WorkerExecutionError(
+                "duplicate_tool_definition",
+                f"tool definition {name!r} is duplicated",
+            )
+        seen.add(name)
+        if name in allowed:
+            scoped.append(definition)
+    return scoped
 
 
 def _extract_usage(response: Mapping[str, object]) -> MappingProxyType | None:

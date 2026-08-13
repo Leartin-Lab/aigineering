@@ -15,7 +15,6 @@ from aigineering.core.capability_descriptors import (
 from aigineering.core.methods import method_contract, system_asset
 from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.core.tools import ToolRegistry
-from aigineering.core.worker_routing import WorkerRegistration
 from aigineering.protocol.actions import parse_action
 from aigineering.protocol.types import Contract, ToolSpec
 
@@ -62,9 +61,7 @@ def test_tool_worker_effect_is_observed_candidate_fact():
         is None
     )
     worker = ToolWorker(registry, worker_id="tool_worker:local")
-    worker.registration = lambda: WorkerRegistration(
-        "tool_worker:local", capabilities=("tool-execution",), version="1"
-    )
+    assert worker.registration().capabilities == ("tool-execution",)
     host = hosted_worker(
         store,
         worker,
@@ -114,9 +111,7 @@ def test_mcp_worker_effect_is_observed_candidate_fact():
         claim_next_package(store, worker_id="llm:untrusted", contract_id=child.id)
         is None
     )
-    worker.registration = lambda: WorkerRegistration(
-        "mcp_worker:search", capabilities=("mcp-execution",), version="1"
-    )
+    assert worker.registration().capabilities == ("mcp-execution",)
     host = hosted_worker(
         store,
         worker,

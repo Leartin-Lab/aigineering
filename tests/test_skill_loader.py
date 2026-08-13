@@ -122,9 +122,7 @@ class TestSkillLoaderScan:
         skill_dir = tmp_path / "absolute"
         skill_dir.mkdir()
         outside = tmp_path / "outside.md"
-        (skill_dir / "skill.toml").write_text(
-            f'name = "absolute"\nversion = "0.1.0"\ncontent_file = "{outside}"\n'
-        )
+        _write_skill_toml(skill_dir, "absolute", content_file=str(outside))
 
         loader = SkillLoader()
         try:

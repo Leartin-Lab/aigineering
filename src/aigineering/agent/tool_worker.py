@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 
 from aigineering.agent.tool_executor import ToolExecutor
 from aigineering.core.capability_descriptors import verify_descriptor
+from aigineering.core.worker_routing import WorkerRegistration
 from aigineering.plugins.task_semantics import method_payload
 from aigineering.protocol.types import Candidate
 
@@ -40,6 +41,14 @@ class ToolWorker:
         self._registry = registry
         self._executor = ToolExecutor(registry)
         self.worker_id = worker_id
+
+    def registration(self) -> WorkerRegistration:
+        """Route this Worker only to ordinary tool-execution Contracts."""
+        return WorkerRegistration(
+            self.worker_id,
+            capabilities=("tool-execution",),
+            profile_id="tool-worker-v1",
+        )
 
     def invoke(
         self,

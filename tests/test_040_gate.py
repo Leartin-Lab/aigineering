@@ -468,6 +468,7 @@ class TestTransactionalSubmit:
                 f"G3/C1: v0 DB (no schema_version row) must migrate to "
                 f"v{CURRENT_SCHEMA_VERSION}, got v{store2.schema_version}"
             )
+            store2.close()
 
     def test_unknown_schema_version_fails_closed(self):
         """SQLite store must fail closed on unknown schema version.
@@ -586,6 +587,7 @@ class TestClaimPersistence:
             claim = store2.get_claim("c1")
             assert claim is not None, "G8/N-P1.8: claim must survive restart"
             assert claim["claim_id"] == "claim-1"
+            store2.close()
 
 
 # ============================================================================
@@ -1141,7 +1143,7 @@ class TestPublicDocs:
             assert claim not in readme.lower(), (
                 f"G11: README makes unsupported claim: {claim!r}"
             )
-        assert "v0.5.3" in readme.lower()
+        assert "v0.5.4" in readme.lower()
         assert "candidate" in readme.lower()
         assert "transaction" in readme.lower()
         assert "single-machine" in readme.lower()
@@ -1255,3 +1257,4 @@ class TestSQLiteTrace:
             assert e.disclosed_assets == ("da-1", "da-2"), (
                 f"G3/C3: disclosed_assets round-trip failed: expected ('da-1', 'da-2'), got {e.disclosed_assets}"
             )
+            store.close()

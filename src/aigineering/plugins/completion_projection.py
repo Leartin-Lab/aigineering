@@ -266,7 +266,7 @@ class TaskCompletionProjector:
             return
         self._trace.record(
             parent.id,
-            "task_continuation_scheduled",
+            "method_continuation_scheduled",
             disclosed_assets=[asset.id for asset in assets],
             relation_type="tool",
             relation_target=continuation.id,

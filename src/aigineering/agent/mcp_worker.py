@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 
 from aigineering.agent.mcp_executor import MCPExecutor
 from aigineering.core.capability_descriptors import verify_descriptor
+from aigineering.core.worker_routing import WorkerRegistration
 from aigineering.plugins.task_semantics import method_payload
 from aigineering.protocol.types import Candidate
 
@@ -38,6 +39,14 @@ class MCPWorker:
     ) -> None:
         self._executor = MCPExecutor(mcp_servers)
         self.worker_id = worker_id
+
+    def registration(self) -> WorkerRegistration:
+        """Route this Worker only to ordinary MCP-execution Contracts."""
+        return WorkerRegistration(
+            self.worker_id,
+            capabilities=("mcp-execution",),
+            profile_id="mcp-worker-v1",
+        )
 
     def invoke(
         self,

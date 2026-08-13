@@ -19,6 +19,7 @@ from aigineering.core.ids import (
 from aigineering.core.provenance import sign_asset, verify_asset_seal
 from aigineering.core.trust_policy import TrustPolicy
 from aigineering.protocol.types import Asset, TrustTier
+from aigineering.protocol.immutability import deep_thaw
 
 CAPABILITY_KINDS = ("tool", "mcp", "skill", "memory", "persona")
 
@@ -95,7 +96,7 @@ def create_tool_descriptor(
         "name": name,
         "version": "0.1.0",
         "description": description,
-        "input_schema": dict(input_schema),
+        "input_schema": deep_thaw(input_schema),
         "sealed_config_ref": "",
     }
     return _build_descriptor_asset("tool", name, disclosed, trust_tier, source_uri)

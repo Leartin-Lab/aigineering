@@ -1,0 +1,9 @@
+Use the openalex_search tool exactly once to find up to five works relevant to
+the question below. Then return /exec with the declared output as a JSON string
+having exactly these fields: answer (non-empty string), citations (a non-empty
+list containing only stable OpenAlex IDs returned by the tool), and limitations
+(a list of non-empty strings). Do not cite an ID that is absent from the tool
+observation. State what can and cannot be concluded from metadata alone.
+
+Question: How is retrieval-augmented generation used to improve scientific
+question answering or literature research?

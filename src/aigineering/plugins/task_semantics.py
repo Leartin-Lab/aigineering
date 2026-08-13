@@ -223,6 +223,14 @@ def continuation_contract(
         if parent.sensitive_input_policy is not None
         else None
     )
+    tool_scope = parent.tool_scope
+    if method == "tool":
+        source_payload = method_payload(source_contract).get("payload", {})
+        used_tool = (
+            source_payload.get("name") if isinstance(source_payload, Mapping) else None
+        )
+        if isinstance(used_tool, str) and used_tool:
+            tool_scope = tuple(tool for tool in parent.tool_scope if tool != used_tool)
     contract_id = hash_contract_current(
         name=name,
         description=parent.description,
@@ -230,7 +238,7 @@ def continuation_contract(
         outputs=parent.outputs,
         activation="",
         budget=effective_budget,
-        tool_scope=parent.tool_scope,
+        tool_scope=tool_scope,
         labels=parent.labels,
         worker_capabilities=parent.worker_capabilities,
         worker_pools=parent.worker_pools,
@@ -248,7 +256,7 @@ def continuation_contract(
         outputs=parent.outputs,
         activation="",
         budget=effective_budget,
-        tool_scope=parent.tool_scope,
+        tool_scope=tool_scope,
         labels=parent.labels,
         context_asset_ids=parent.context_asset_ids,
         worker_capabilities=parent.worker_capabilities,

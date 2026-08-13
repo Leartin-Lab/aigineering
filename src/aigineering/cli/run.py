@@ -4,9 +4,16 @@ from __future__ import annotations
 
 import json
 import time
+from dataclasses import dataclass
 from typing import Optional
 
 import click
+
+from aigineering.agent.tool_registry_loader import (
+    load_tool_registry,
+    provider_tool_definitions,
+)
+from aigineering.agent.tool_worker import ToolWorker
 
 from aigineering.cli._common import (
     _asset_names_for,
@@ -33,6 +40,9 @@ from aigineering.runtime import (
 from aigineering.core.session import SessionStore
 from aigineering.core.trace import JsonLTraceStore
 from aigineering.protocol.types import Session
+from aigineering.core.capability_descriptors import create_tool_descriptor
+from aigineering.protocol.effect_builders import asset_proposal_effect
+from aigineering.cli._candidate import commit_local_effects, require_accepted
 
 
 def _parse_capabilities(capabilities_str: Optional[str]) -> frozenset[str] | None:
@@ -41,6 +51,12 @@ def _parse_capabilities(capabilities_str: Optional[str]) -> frozenset[str] | Non
         return None
     parts = [c.strip() for c in capabilities_str.split(",") if c.strip()]
     return frozenset(parts) if parts else None
+
+
+@dataclass(frozen=True)
+class _PoolHost:
+    host: object
+    required_contract_capability: str | None = None
 
 
 def _output_run_json(
@@ -143,6 +159,12 @@ def _output_run_json(
     help="Comma-separated provider capabilities (e.g. tool_calling,json_schema).",
 )
 @click.option(
+    "--tool-registry",
+    default=None,
+    metavar="MODULE:FACTORY",
+    help="Explicit local ToolRegistry factory; loads trusted operator code.",
+)
+@click.option(
     "--behavior-label",
     "behavior_labels",
     multiple=True,
@@ -177,6 +199,7 @@ def run(
     timeout: float,
     max_retries: int,
     capabilities_str: Optional[str],
+    tool_registry: Optional[str],
     behavior_labels: tuple[str, ...],
     save_config: bool,
     json_output: bool,
@@ -192,6 +215,7 @@ def run(
             timeout=timeout,
             max_retries=max_retries,
             capabilities=capabilities,
+            tool_registry_reference=tool_registry,
             mock_output=mock_output,
             mock_presets=mock_presets,
             wait_timeout=wait_timeout,
@@ -288,6 +312,7 @@ def _run_task_pool(
     timeout: float,
     max_retries: int,
     capabilities: frozenset[str] | None,
+    tool_registry_reference: str | None,
     mock_output: str | None,
     mock_presets: tuple[str, ...],
     wait_timeout: float,
@@ -297,13 +322,27 @@ def _run_task_pool(
     store = _persistent_store()
     cycles: list[dict] = []
     try:
+        tool_registry = (
+            load_tool_registry(tool_registry_reference)
+            if tool_registry_reference is not None
+            else None
+        )
+        provider_capabilities = capabilities or frozenset()
+        if tool_registry is not None:
+            provider_capabilities = provider_capabilities | {"tool_calling"}
+            _publish_tool_descriptors(store, tool_registry)
         worker = build_worker(
             worker_kind,
             model=model,
             base_url=base_url,
             timeout=timeout,
             max_retries=max_retries,
-            capabilities=capabilities,
+            capabilities=provider_capabilities,
+            tool_definitions=(
+                provider_tool_definitions(tool_registry)
+                if tool_registry is not None
+                else None
+            ),
         )
         _configure_pool_worker(
             worker,
@@ -312,14 +351,21 @@ def _run_task_pool(
             mock_output=mock_output,
             mock_presets=mock_presets,
         )
-        host = ensure_local_worker_host(store, worker)
+        hosts = [_PoolHost(ensure_local_worker_host(store, worker))]
+        if tool_registry is not None:
+            hosts.append(
+                _PoolHost(
+                    ensure_local_worker_host(store, ToolWorker(tool_registry)),
+                    "tool-execution",
+                )
+            )
         deadline = time.monotonic() + wait_timeout
         candidate_publishers = ensure_local_runtime_publishers(store)
         registry = _default_completion_registry()
         if target_task_id is None:
             _run_single_pool_cycle(
                 store,
-                host,
+                hosts,
                 candidate_publishers,
                 registry,
                 json_output=json_output,
@@ -328,7 +374,7 @@ def _run_task_pool(
 
         _run_target_pool(
             store,
-            host,
+            hosts,
             candidate_publishers,
             registry,
             target_task_id=target_task_id,
@@ -396,8 +442,29 @@ def _configure_pool_worker(
         )
 
 
+def _publish_tool_descriptors(store, registry) -> None:
+    descriptors = tuple(
+        create_tool_descriptor(
+            spec.name,
+            spec.description,
+            spec.input_schema,
+            source_uri=f"python:{spec.name}",
+        )
+        for spec in registry.list_specs()
+    )
+    effects = tuple(asset_proposal_effect(descriptor) for descriptor in descriptors)
+    require_accepted(
+        commit_local_effects(
+            store,
+            effects,
+            idempotency_key="tool-registry:"
+            + ",".join(sorted(descriptor.id for descriptor in descriptors)),
+        )
+    )
+
+
 def _run_single_pool_cycle(
-    store, host, candidate_publishers, registry, *, json_output: bool
+    store, hosts, candidate_publishers, registry, *, json_output: bool
 ) -> None:
     recovered = process_rejected_submissions(
         store, candidate_publishers=candidate_publishers
@@ -405,12 +472,26 @@ def _run_single_pool_cycle(
     processed_before = process_task_completions(
         store, registry, candidate_publishers=candidate_publishers
     )
-    claimed = claim_next_package(
-        store,
-        worker_id=host.worker_id,
-        candidate_publishers=candidate_publishers,
-    )
-    if claimed is None:
+    claims = []
+    submissions = []
+    for pool_host in hosts:
+        claimed = _claim_for_pool_host(
+            store,
+            pool_host,
+            candidate_publishers,
+        )
+        if claimed is None:
+            continue
+        claims.append(claimed)
+        submissions.append(
+            execute_claimed_package(
+                claimed,
+                pool_host.host,
+                store,
+                candidate_publishers=candidate_publishers,
+            )
+        )
+    if not claims:
         _emit_run_result(
             {
                 "ok": False,
@@ -421,22 +502,18 @@ def _run_single_pool_cycle(
             json_output,
         )
         raise click.exceptions.Exit(1)
-    result = execute_claimed_package(
-        claimed,
-        host,
-        store,
-        candidate_publishers=candidate_publishers,
-    )
     processed_after = process_task_completions(
         store, registry, candidate_publishers=candidate_publishers
     )
-    status = project_task_status(claimed.contract, store)
+    status = project_task_status(claims[0].contract, store)
     status["ok"] = status["status"] == "completed"
-    status["submission_status"] = result["status"]
+    status["submission_status"] = submissions[0]["status"]
     status["cycles"] = [
         {
-            "contracts": [claimed.contract.id],
-            "trace_events": len(store.get_by_contract(claimed.contract.id)),
+            "contracts": [claimed.contract.id for claimed in claims],
+            "trace_events": sum(
+                len(store.get_by_contract(claimed.contract.id)) for claimed in claims
+            ),
             "tasks_processed": processed_before + processed_after,
             "rejections_recovered": recovered,
         }
@@ -448,7 +525,7 @@ def _run_single_pool_cycle(
 
 def _run_target_pool(
     store,
-    host,
+    hosts,
     candidate_publishers,
     registry,
     *,
@@ -466,21 +543,25 @@ def _run_target_pool(
         processed_before = process_task_completions(
             store, registry, candidate_publishers=candidate_publishers
         )
-        claimed = claim_next_package(
-            store,
-            worker_id=host.worker_id,
-            candidate_publishers=candidate_publishers,
-        )
-        submission = (
-            execute_claimed_package(
-                claimed,
-                host,
+        claimed_packages = []
+        submissions = []
+        for pool_host in hosts:
+            claimed = _claim_for_pool_host(
                 store,
-                candidate_publishers=candidate_publishers,
+                pool_host,
+                candidate_publishers,
             )
-            if claimed is not None
-            else None
-        )
+            if claimed is None:
+                continue
+            claimed_packages.append(claimed)
+            submissions.append(
+                execute_claimed_package(
+                    claimed,
+                    pool_host.host,
+                    store,
+                    candidate_publishers=candidate_publishers,
+                )
+            )
         processed_after = process_task_completions(
             store, registry, candidate_publishers=candidate_publishers
         )
@@ -492,7 +573,7 @@ def _run_target_pool(
                     "contracts": touched_contracts,
                     "trace_events": len(new_entries),
                     "submission_status": (
-                        submission.get("status") if submission is not None else None
+                        submissions[-1].get("status") if submissions else None
                     ),
                     "tasks_processed": processed_before + processed_after,
                     "rejections_recovered": recovered,
@@ -522,7 +603,7 @@ def _run_target_pool(
 
         timed_out = time.monotonic() >= deadline
         idle = (
-            claimed is None
+            not claimed_packages
             and not processed_before
             and not processed_after
             and not recovered
@@ -538,6 +619,28 @@ def _run_target_pool(
                 raise click.exceptions.Exit(1)
             return
         time.sleep(max(interval, 0.05))
+
+
+def _claim_for_pool_host(store, pool_host, candidate_publishers):
+    capability = pool_host.required_contract_capability
+    if capability is None:
+        return claim_next_package(
+            store,
+            worker_id=pool_host.host.worker_id,
+            candidate_publishers=candidate_publishers,
+        )
+    for contract in store.get_all_contracts():
+        if capability not in contract.worker_capabilities:
+            continue
+        claimed = claim_next_package(
+            store,
+            worker_id=pool_host.host.worker_id,
+            contract_id=contract.id,
+            candidate_publishers=candidate_publishers,
+        )
+        if claimed is not None:
+            return claimed
+    return None
 
 
 def _emit_run_result(payload: dict, json_output: bool) -> None:

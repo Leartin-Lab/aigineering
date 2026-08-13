@@ -689,25 +689,58 @@ def test_provider_without_tool_calling_capability():
     assert "tools" not in seen_payload["payload"]
 
 
-def test_provider_with_tool_calling_includes_tools():
-    """Provider with 'tool_calling' capability includes tool definitions in payload."""
+def test_provider_with_tool_calling_includes_only_contract_scoped_tools():
+    """Provider receives only definitions named by the claimed Contract."""
     seen_payload: dict = {}
 
     def transport(url, headers, payload):
         seen_payload["payload"] = dict(payload)
         return {"choices": [{"message": {"content": "report: ok"}}]}
 
-    tool_defs = [{"type": "function", "function": {"name": "search"}}]
+    tool_defs = [
+        {"type": "function", "function": {"name": "search"}},
+        {"type": "function", "function": {"name": "admin"}},
+    ]
     worker = LLMWorker(
         model="test-model",
         transport=transport,
         capabilities=frozenset({"tool_calling"}),
         tool_definitions=tool_defs,
     )
-    worker.invoke(_min_contract(), [])
+    worker.invoke(Contract(id="scoped", tool_scope=("search",)), [])
 
     assert "tools" in seen_payload["payload"]
-    assert seen_payload["payload"]["tools"] == tool_defs
+    assert seen_payload["payload"]["tools"] == tool_defs[:1]
+
+
+def test_provider_tool_definitions_are_omitted_when_contract_scope_is_empty():
+    seen_payload: dict = {}
+
+    def transport(url, headers, payload):
+        seen_payload["payload"] = dict(payload)
+        return {"choices": [{"message": {"content": "report: ok"}}]}
+
+    worker = LLMWorker(
+        model="test-model",
+        transport=transport,
+        capabilities=frozenset({"tool_calling"}),
+        tool_definitions=[{"type": "function", "function": {"name": "search"}}],
+    )
+    worker.invoke(_min_contract(), [])
+
+    assert "tools" not in seen_payload["payload"]
+
+
+def test_malformed_tool_definition_fails_before_provider_call():
+    worker = LLMWorker(
+        model="test-model",
+        transport=lambda *_args: pytest.fail("provider must not be called"),
+        capabilities=frozenset({"tool_calling"}),
+        tool_definitions=[{"type": "function"}],
+    )
+
+    with pytest.raises(ValueError, match="function"):
+        worker.invoke(Contract(id="scoped", tool_scope=("search",)), [])
 
 
 def test_tool_calling_empty_definitions_skips_tools():
@@ -963,7 +996,7 @@ def test_provider_tool_call_mapping_preserves_authority():
 
 
 def test_multiple_tool_calls_in_one_response():
-    """Multiple tool_calls in one response → multi-action envelope emitted."""
+    """Multiple tool calls fail visibly instead of emitting unsupported /multi."""
 
     def transport(url, headers, payload):
         return {
@@ -1004,20 +1037,13 @@ def test_multiple_tool_calls_in_one_response():
     worker = LLMWorker(model="test-model", transport=transport)
     candidate = worker.invoke(_min_contract(), [])
 
-    # Multi-action envelope is emitted — no calls silently dropped
-    assert candidate.raw_output.startswith("/multi ")
-    body = json.loads(candidate.raw_output.removeprefix("/multi ").strip())
-    assert body["type"] == "multi"
-    assert len(body["actions"]) == 3
-    assert body["actions"][0] == {"name": "search", "args": {"q": "first"}}
-    assert body["actions"][1] == {"name": "lookup", "args": {"key": "second"}}
-    assert body["actions"][2] == {"name": "fetch", "args": {"url": "third"}}
-
-    # parsed_action reflects the multi envelope
+    assert candidate.raw_output.startswith("/fail ")
+    body = json.loads(candidate.raw_output.removeprefix("/fail ").strip())
+    assert body["proposed_tools"] == ["search", "lookup", "fetch"]
     assert candidate.parsed_action is not None
-    assert candidate.parsed_action["type"] == "multi"
+    assert candidate.parsed_action["type"] == "fail"
     payload = dict(candidate.parsed_action["payload"])
-    assert len(payload["actions"]) == 3
+    assert payload["proposed_tools"] == ("search", "lookup", "fetch")
 
 
 def test_no_api_key_leaked_in_error_messages():

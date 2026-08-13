@@ -57,6 +57,8 @@ def build_worker(
     timeout: float = 60.0,
     max_retries: int = 3,
     capabilities: frozenset[str] | None = None,
+    tool_definitions: list[dict[str, object]] | None = None,
+    routing_capabilities: frozenset[str] | None = None,
 ) -> MockWorker | LLMWorker:
     """Build one configured local worker at the application boundary."""
     if worker_kind == "mock":
@@ -78,6 +80,8 @@ def build_worker(
             timeout=int(timeout),
             max_retries=max_retries,
             capabilities=capabilities or frozenset(),
+            tool_definitions=tool_definitions,
+            routing_capabilities=routing_capabilities,
         )
     raise ValueError(f"unsupported worker: {worker_kind}")
 

@@ -85,7 +85,7 @@ def all_outputs_satisfied(
             matching = store.get_assets_by_name(output_name)
             if not any(
                 asset.id in qualified_ids
-                and asset.created_by == contract.id
+                and _is_contract_or_descendant(asset.created_by, contract.id, store)
                 and is_business_output(asset, output_name)
                 for asset in matching
             ):
@@ -105,3 +105,16 @@ def all_outputs_satisfied(
         if not any(is_business_output(asset, output_name) for asset in matching):
             return False
     return True
+
+
+def _is_contract_or_descendant(producer_id: str, contract_id: str, store) -> bool:
+    """Return whether immutable Contract ancestry binds producer to owner."""
+    current_id = producer_id
+    visited: set[str] = set()
+    while current_id and current_id not in visited:
+        if current_id == contract_id:
+            return True
+        visited.add(current_id)
+        current = store.get_contract(current_id)
+        current_id = str(current.parent_id or "") if current is not None else ""
+    return False

@@ -1,0 +1,5 @@
+subject,condition,measurement,batch
+S001,control,1.2,A
+S002,treatment,1.8,A
+S003,control,NA,B
+S004,treatment,2.1,B

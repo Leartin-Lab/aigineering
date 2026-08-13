@@ -64,8 +64,10 @@ def project_asset_attestation_records(
         raise ValueError(f"asset.attest references unknown Asset {asset_id!r}")
     if output_name not in contract.outputs or asset.name != output_name:
         raise ValueError("asset.attest must bind an exact declared output slot")
-    if asset.created_by != contract.id:
-        raise ValueError("asset.attest target was not produced for this Contract")
+    if not _is_contract_or_descendant(asset.created_by, contract.id, contracts):
+        raise ValueError(
+            "asset.attest target was not produced for this Contract or its descendants"
+        )
     if asset.signed_by == candidate.actor_id:
         raise ValueError("asset producer cannot attest its own output")
     policy = contract.acceptance_policy
@@ -174,6 +176,23 @@ def project_asset_attestation_records(
         relation_target=f"{contract_id}:{output_name}:{asset_id}",
         additional_capabilities=tuple(policy.get("verifier_capabilities", ())),
     )
+
+
+def _is_contract_or_descendant(
+    producer_id: str,
+    contract_id: str,
+    contracts: Mapping[str, object],
+) -> bool:
+    """Prove output provenance by following immutable parent links."""
+    current_id = producer_id
+    visited: set[str] = set()
+    while current_id and current_id not in visited:
+        if current_id == contract_id:
+            return True
+        visited.add(current_id)
+        current = contracts.get(current_id)
+        current_id = str(getattr(current, "parent_id", "") or "")
+    return False
 
 
 def validate_output_qualification_commit(

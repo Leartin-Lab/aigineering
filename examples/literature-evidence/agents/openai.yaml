@@ -1,0 +1,4 @@
+interface:
+  display_name: "Literature Evidence"
+  short_description: "Build replayable literature evidence through Aigineering tasks."
+  default_prompt: "Use Aigineering to retrieve, screen, extract, synthesize, and independently verify literature evidence."

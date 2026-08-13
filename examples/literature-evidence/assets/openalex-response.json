@@ -1,0 +1,32 @@
+{
+  "meta": {"count": 3},
+  "results": [
+    {
+      "id": "https://openalex.org/W0000000001",
+      "display_name": "Synthetic retrieval study one",
+      "publication_year": 2020,
+      "type": "article",
+      "doi": "https://doi.org/10.0000/example.1",
+      "cited_by_count": 10,
+      "primary_location": {"landing_page_url": "https://example.org/work/1"}
+    },
+    {
+      "id": "https://openalex.org/W0000000002",
+      "display_name": "Synthetic evidence retrieval study two",
+      "publication_year": 2024,
+      "type": "article",
+      "doi": "",
+      "cited_by_count": 4,
+      "primary_location": {"landing_page_url": "https://example.org/work/2"}
+    },
+    {
+      "id": "https://openalex.org/W0000000003",
+      "display_name": "Synthetic bounded third result",
+      "publication_year": 2025,
+      "type": "preprint",
+      "doi": "",
+      "cited_by_count": 0,
+      "primary_location": null
+    }
+  ]
+}

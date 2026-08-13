@@ -77,6 +77,7 @@ class StagedPlanningPlugin:
             acceptance_policy=policy,
             budget=1,
             minting_authority=(),
+            tool_scope=(),
         )
         dependencies = _stage_contract(
             parent,
@@ -97,6 +98,7 @@ class StagedPlanningPlugin:
             acceptance_policy=policy,
             budget=1,
             minting_authority=(),
+            tool_scope=(),
         )
         compile_contract = _stage_contract(
             parent,
@@ -127,6 +129,7 @@ class StagedPlanningPlugin:
                 for output in parent.outputs
                 if output in parent.minting_authority
             ),
+            tool_scope=parent.tool_scope,
         )
         return PlanningStages(draft, dependencies, compile_contract)
 
@@ -164,6 +167,7 @@ def _stage_contract(
     acceptance_policy: dict[str, object],
     budget: int,
     minting_authority: tuple[str, ...] | None = None,
+    tool_scope: tuple[str, ...] = (),
 ) -> Contract:
     name = f"{parent.name or parent.id}.{mode}.{stage}.{invocation}"
     labels = tuple(dict.fromkeys((*parent.labels, f"plugin:{mode}.{stage}")))
@@ -175,7 +179,7 @@ def _stage_contract(
         "outputs": outputs,
         "activation": activation,
         "budget": budget,
-        "tool_scope": parent.tool_scope,
+        "tool_scope": tool_scope,
         "labels": labels,
         "worker_capabilities": (),
         "worker_pools": parent.worker_pools,

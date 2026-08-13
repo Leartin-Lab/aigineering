@@ -28,7 +28,8 @@ def system_prompt() -> str:
         '`/fail {"reason": "..."}`. Do not use /replan for missing '
         "information, and do not use /retry when new evidence or a different "
         "plan is required. Do not add markdown, explanations, or undeclared "
-        "assets."
+        "assets. Request at most one tool per action; publish independent tasks "
+        "when multiple tool calls are required."
     )
 
 
@@ -60,6 +61,7 @@ def contract_prompt(contract: Contract, assets: list[Asset]) -> str:
         "",
         "Decision boundary:",
         "- Every asset listed under Disclosed assets includes its exact readable content; treat that content as directly available evidence, not as a path or handle requiring another tool.",
+        "- A successful tool observation is completed evidence. Satisfy the declared output from it; the same tool is removed from the continuation scope. Publish separate tasks when repeated calls are required.",
         "- Use /plan when disclosed information is insufficient.",
         "- /plan and /replan create three planning-stage tasks and therefore require at least 3 causal allowance units.",
         "- Use /replan only after an assumption, path, or result is invalid.",
