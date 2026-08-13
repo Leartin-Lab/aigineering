@@ -1,8 +1,8 @@
 # Aigineering Design
 
-Status: implemented truth for v0.5.3
+Status: implemented truth for v0.5.4
 
-This document describes the code shipped in the v0.5.3 reference release.
+This document describes the code shipped in the v0.5.4 reference release.
 Future designs do not belong here until their implementation, tests, migration,
 and release evidence are complete.
 
@@ -121,6 +121,12 @@ and provenance so equal bytes from different assertions cannot collide.
 Semantic matchers are advisory adapters. They may publish a typed, signed
 relation Candidate with model, version, threshold, score, and evidence, but
 similarity never changes an identity or bypasses commitment.
+
+Exact derived evidence is stronger than an advisory relation. A slice relation
+binds its source, replacement, lineage, range, and derivation version. Runtime
+policy and verification recompute the exact line, character, or UTF-8 byte
+range from the committed source; the relation signature alone cannot make
+caller-supplied content a valid slice.
 
 ## Candidates and effects
 
@@ -265,6 +271,10 @@ Replanning uses the same task protocol recursively. Tool use, fail, retry,
 continuation, recovery, and verification also publish or complete ordinary
 facts through registered Plugins.
 
+A successful tool task publishes a continuation whose scope omits that exact
+tool. Repeated calls are represented as separate ordinary tasks rather than an
+unbounded same-task tool loop; other parent-authorized tools remain available.
+
 ## Causal allowance
 
 Allowance is lineage authority, not a Worker wallet or mutable counter.
@@ -298,6 +308,10 @@ with all required verifier capabilities. The attestation binds:
 
 Producer self-attestation, wrong-slot Assets, missing evidence, and replacement
 of an already qualified slot fail closed.
+
+The exact Asset may be produced by the Contract itself or by a Contract whose
+immutable parent chain reaches it. This supports plan and tool descendants
+without accepting an unrelated same-name Asset.
 
 ## Persistence and reconstruction
 
@@ -364,6 +378,12 @@ execution, trace, audit, replay, recovery, and status views. The optional
 FastAPI adapter creates one Store connection per request and closes it
 deterministically.
 
+An operator may explicitly load a local `ToolRegistry` factory for `aig run`.
+The adapter publishes its public descriptors through Candidate commitment,
+passes only Contract-scoped definitions to the provider, and hosts tool calls
+on a separately registered capability-routed ToolWorker. Registry code is
+trusted local code and is never loaded by default.
+
 The reference HTTP server is not a hostile-network deployment profile. TLS,
 service authentication, rate limiting, and network policy remain external
 responsibilities.
@@ -402,7 +422,7 @@ terminal, or replay owner.
 
 ## Release limits
 
-v0.5.3 is a stable local reference release, not:
+v0.5.4 is a stable local reference release, not:
 
 - a cross-machine distributed Store;
 - a consensus implementation;

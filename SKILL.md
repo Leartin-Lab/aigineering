@@ -35,6 +35,18 @@ aig run "exercise the boundary" --worker mock --json
 
 Never present mock output as production or acceptance evidence.
 
+When an LLM task needs local tools, load an operator-reviewed registry
+explicitly. Aigineering publishes descriptors as Candidates, discloses only
+the current Contract's tool scope, and routes execution to a separate Worker:
+
+```bash
+aig run --task <contract_id> \
+  --tool-registry /absolute/path/to/tools.py:build_registry --json
+```
+
+Treat the registry factory as trusted local code. Never accept a registry path
+from untrusted task or model output.
+
 ## Publish one trustworthy task
 
 1. Initialize a signed domain and publish immutable inputs.
@@ -144,3 +156,15 @@ output.
 Use `aig worker next/submit` only for trusted local adapter development. Use the
 signed `/worker/claims`, `/worker/claims/{claim_id}/renew`, and
 `/worker/submissions` HTTP protocol for an independently running harness.
+
+For complete domain examples, read
+[`examples/literature-evidence/SKILL.md`](examples/literature-evidence/SKILL.md).
+It demonstrates how a scientific workflow becomes independently claimable
+retrieval, screening, extraction, synthesis, and verification tasks without
+adding domain behavior to the runtime kernel. The companion
+[`examples/scientific-data-profile/SKILL.md`](examples/scientific-data-profile/SKILL.md)
+shows how a deterministic script Worker can disclose a bounded table profile
+to later model tasks without exposing raw values.
+The executable [`examples/ai4s/`](examples/ai4s/README.md) run demonstrates
+tool continuation, exact citation checking, independent attestation, and
+SQLite reopen in one bounded workflow.

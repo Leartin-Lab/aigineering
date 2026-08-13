@@ -57,9 +57,18 @@ Existing agent harnesses can keep their own model and tool orchestration while
 using signed pull/submit Candidates. See the
 [agent harness migration reference](docs/reference/agent-harness-migration.md).
 
-## v0.5.3 scope
+Executable AI-for-science integrations are available as installable example
+skills: [`literature-evidence`](examples/literature-evidence/SKILL.md) turns
+retrieval through independent review into separately testable tasks, while
+[`scientific-data-profile`](examples/scientific-data-profile/SKILL.md) safely
+profiles authorized CSV/TSV inputs without disclosing raw rows. Both use
+zero-dependency adapters and offline replay fixtures. The
+[`auditable AI4S run`](examples/ai4s/README.md) additionally exercises a real
+LLM-to-tool continuation and independent citation attestation.
 
-v0.5.3 is the stable single-machine reference release. It provides:
+## v0.5.4 scope
+
+v0.5.4 is the stable single-machine reference release. It provides:
 
 - actor-signed Candidate publication;
 - one Candidate commitment boundary for CLI, Worker, Plugin, and HTTP surfaces;
@@ -82,11 +91,17 @@ v0.5.3 is the stable single-machine reference release. It provides:
 - graph-native ordinary Worker outputs signed by the WorkerHost;
 - terminal/claim fencing and durable deterministic commitment rejections;
 - one causal allowance source and one terminal-fact constructor;
-- planning label containment before Candidate commitment.
+- planning label containment before Candidate commitment;
+- explicitly configured, Contract-scoped tool registries and a separate
+  ToolWorker;
+- exact verifiable slice derivations and claim-gated disclosure;
+- independently attested descendant outputs;
+- executable AI4S literature and safe data-profile examples.
 
 The release has deterministic boundary, reconstruction, concurrency, artifact,
 and bounded real-LLM evidence. See the
-[v0.5.3 convergence report](reports/053-boundary-convergence-2026-08-09.md).
+[v0.5.3 convergence report](reports/053-boundary-convergence-2026-08-09.md) and
+the [v0.5.4 AI4S evidence](reports/054-ai4s-auditable-example-2026-08-13.md).
 
 Inspect the accepted asset graph without changing authoritative state:
 
@@ -117,7 +132,7 @@ The signed graph acceptance evidence is recorded in
 
 ## Non-goals
 
-v0.5.3 does not claim:
+v0.5.4 does not claim:
 
 - cross-machine consensus or distributed Store semantics;
 - public-network deployment hardening;

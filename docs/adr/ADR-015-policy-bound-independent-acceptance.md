@@ -21,6 +21,11 @@ rubric/evidence IDs. Projection rejects missing, changed, unknown, or
 non-committed context. Accepted attestation and qualification remain separate
 facts.
 
+The selected Asset may be produced by the Contract itself or by a Contract
+whose immutable parent chain reaches the accepted Contract. This allows
+ordinary planning and tool descendants to discharge a parent obligation while
+rejecting unrelated Assets that merely reuse the output name.
+
 The Store transaction enforces one selected immutable Asset per
 `(contract_id, output_name)`. Repeated attestations for that same Asset
 converge; an attempt to qualify a different Asset becomes a durable Candidate

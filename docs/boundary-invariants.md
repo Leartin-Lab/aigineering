@@ -126,7 +126,9 @@ publishes an `asset.attest` Candidate for that Contract, declared output slot,
 and exact Asset ID. Producer self-attestation, wrong-slot Assets, non-task
 Assets, missing evidence, and capability gaps fail closed. Accepted
 attestation creates reconstructable `asset.attested` and `output.qualified`
-facts; terminal projection commits in the same transaction.
+facts; terminal projection commits in the same transaction. The exact Asset
+may come from the Contract or an immutable descendant, but never from an
+unrelated same-name producer.
 
 ## 12. Recursive work cannot mint causal allowance
 
@@ -137,3 +139,12 @@ batches; SQLite rechecks the balance in the commit transaction to arbitrate
 concurrent publishers. Terminal Contracts extinguish their remaining allowance,
 and exact Candidate replay cannot reserve it twice. Allowance is task lineage
 authority, never a Worker account or mutable process counter.
+
+## 13. A signed derivation claim is not derivation proof
+
+Policies that accept a replacement claim type require a valid incoming claim
+for the exact disclosed Asset. Exact slices bind source, replacement, lineage,
+range, and derivation version, and verification recomputes content from the
+committed source. Invalid ranges, UTF-8 byte splits, mismatched content, or an
+unsupported derivation version fail closed. Semantic similarity cannot satisfy
+an exact derivation policy.

@@ -2,9 +2,9 @@
 
 ## Current release
 
-Version: **v0.5.3**
+Version: **v0.5.4**
 
-v0.5.3 is the stable single-machine reference release. “Stable” applies to the
+v0.5.4 is the stable single-machine reference release. “Stable” applies to the
 documented local runtime and protocol surface; it is not a claim of external
 security audit or public-network deployment hardening.
 
@@ -36,7 +36,12 @@ Implemented:
 - one terminal-fact construction owner and Plugin-owned planning scaffold;
 - planning label containment aligned across prompt, Plugin, and commitment;
 - a framework-neutral signed Candidate adapter for existing agent harnesses;
-- configured LLM execution as the CLI default, with mock explicit for tests.
+- configured LLM execution as the CLI default, with mock explicit for tests;
+- explicitly configured, Contract-scoped local tool registries with separate
+  capability-routed ToolWorkers;
+- verifiable exact slice derivations and claim-gated disclosure;
+- executable AI4S literature and data-profile examples with offline replay;
+- descendant-aware independent acceptance for delegated output Assets.
 
 Release evidence is recorded in
 `reports/050-post-review-boundary-hardening-2026-07-19.md` and
@@ -44,6 +49,8 @@ Release evidence is recorded in
 `reports/052-signed-definition-content-graph-2026-07-31.md`. v0.5.3 convergence
 and harness stabilization evidence is in
 `reports/053-boundary-convergence-2026-08-09.md`.
+v0.5.4 AI4S and derivation evidence is recorded in
+`reports/054-ai4s-auditable-example-2026-08-13.md`.
 
 ## Release gates
 
