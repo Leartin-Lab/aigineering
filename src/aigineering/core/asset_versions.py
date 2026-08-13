@@ -11,6 +11,8 @@ from typing import TYPE_CHECKING
 from aigineering.core.ids import hash_asset_content, hash_asset_definition, hash_claim
 from aigineering.core.provenance import sign_asset
 
+SLICE_DERIVATION_VERSION = "slice-v1"
+
 if TYPE_CHECKING:
     from aigineering.protocol.types import Asset, ReplacementClaim
     from aigineering.protocol.runtime_record import RuntimeRecord
@@ -21,7 +23,9 @@ def content_slice(content: str, range_spec: str) -> str:
 
     Supported forms:
     - ``lines:start-end``: 1-based, inclusive line range.
-    - ``chars:start-end``: 0-based, end-exclusive character range.
+    - ``chars:start-end``: 0-based, end-exclusive Unicode character range.
+    - ``utf8-bytes:start-end``: 0-based, end-exclusive UTF-8 byte range whose
+      boundaries must decode cleanly.
 
     Empty ``range_spec`` returns the original content. Invalid ranges fail
     closed with ``ValueError`` rather than silently producing the wrong asset.
@@ -32,7 +36,7 @@ def content_slice(content: str, range_spec: str) -> str:
     kind, sep, bounds = range_spec.partition(":")
     if sep != ":":
         raise ValueError(
-            "range_spec must be empty or use 'lines:start-end' / 'chars:start-end'"
+            "range_spec must be empty or use lines, chars, or UTF-8 byte bounds"
         )
     start_s, dash, end_s = bounds.partition("-")
     if dash != "-" or not start_s or not end_s:
@@ -49,10 +53,22 @@ def content_slice(content: str, range_spec: str) -> str:
         if start < 1:
             raise ValueError("line ranges are 1-based")
         lines = content.splitlines(keepends=True)
+        if end > len(lines):
+            raise ValueError("line range exceeds source content")
         return "".join(lines[start - 1 : end])
     if kind == "chars":
+        if end > len(content):
+            raise ValueError("character range exceeds source content")
         return content[start:end]
-    raise ValueError("range_spec kind must be 'lines' or 'chars'")
+    if kind == "utf8-bytes":
+        encoded = content.encode("utf-8")
+        if end > len(encoded):
+            raise ValueError("UTF-8 byte range exceeds source content")
+        try:
+            return encoded[start:end].decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise ValueError("UTF-8 byte range splits a character") from exc
+    raise ValueError("range_spec kind must be 'lines', 'chars', or 'utf8-bytes'")
 
 
 def create_slice_asset(
@@ -72,8 +88,10 @@ def create_slice_asset(
     from aigineering.protocol.types import Asset
 
     lineage_id = source.lineage_id or source.id
-    if slice_content is None:
-        slice_content = content_slice(source.content, range_spec)
+    derived_content = content_slice(source.content, range_spec)
+    if slice_content is not None and slice_content != derived_content:
+        raise ValueError("slice_content does not match the requested source range")
+    slice_content = derived_content
 
     asset = Asset(
         id=hash_asset_content(slice_name, slice_content),
@@ -99,6 +117,9 @@ def create_replacement_claim(
     claim_type: str = "replacement",
     signed_by: str = "",
     provenance_seal: str = "",
+    lineage_id: str = "",
+    derivation_version: str = "",
+    range_spec: str = "",
 ) -> ReplacementClaim:
     """Create a replacement claim linking source to replacement.
 
@@ -109,14 +130,25 @@ def create_replacement_claim(
     """
     from aigineering.protocol.types import ReplacementClaim
 
+    if claim_type == "slice" and not derivation_version:
+        derivation_version = SLICE_DERIVATION_VERSION
     return ReplacementClaim(
-        id=hash_claim(source_asset_id, replacement_asset_id, claim_type),
+        id=hash_claim(
+            source_asset_id,
+            replacement_asset_id,
+            claim_type,
+            derivation_version=derivation_version,
+            range_spec=range_spec,
+        ),
         source_asset_id=source_asset_id,
         replacement_asset_id=replacement_asset_id,
         definition_hash=definition_hash,
         claim_type=claim_type,
         signed_by=signed_by,
         provenance_seal=provenance_seal,
+        lineage_id=lineage_id,
+        derivation_version=derivation_version,
+        range_spec=range_spec,
     )
 
 
@@ -130,6 +162,8 @@ def replacement_claim_payload(claim: ReplacementClaim) -> dict[str, object]:
         "signed_by": claim.signed_by,
         "provenance_seal": claim.provenance_seal,
         "lineage_id": claim.lineage_id,
+        "derivation_version": claim.derivation_version,
+        "range_spec": claim.range_spec,
     }
 
 

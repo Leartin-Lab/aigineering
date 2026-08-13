@@ -332,8 +332,16 @@ def project_replacement_claim(
     claim_type = str(data.get("claim_type", "replacement"))
     if not source_asset_id or not replacement_asset_id:
         raise ValueError("asset.relate requires both asset identifiers")
+    derivation_version = str(data.get("derivation_version", ""))
+    range_spec = str(data.get("range_spec", ""))
     claim = ReplacementClaim(
-        id=hash_claim(source_asset_id, replacement_asset_id, claim_type),
+        id=hash_claim(
+            source_asset_id,
+            replacement_asset_id,
+            claim_type,
+            derivation_version=derivation_version,
+            range_spec=range_spec,
+        ),
         source_asset_id=source_asset_id,
         replacement_asset_id=replacement_asset_id,
         definition_hash=str(data.get("definition_hash", "")),
@@ -341,6 +349,8 @@ def project_replacement_claim(
         signed_by=candidate.actor_id,
         provenance_seal=candidate.signature,
         lineage_id=str(data.get("lineage_id", "")),
+        derivation_version=derivation_version,
+        range_spec=range_spec,
     )
     record = create_runtime_record(
         "replacement.claimed",

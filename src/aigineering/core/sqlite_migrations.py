@@ -32,7 +32,7 @@ from aigineering.protocol.wire import (
     trace_entry_to_dict,
 )
 
-CURRENT_SCHEMA_VERSION = 15
+CURRENT_SCHEMA_VERSION = 16
 
 
 class SQLiteMigrator:
@@ -138,6 +138,9 @@ class SQLiteMigrator:
             if current < 15:
                 self._migrate_to_v15()
                 self._record_schema_version(15)
+            if current < 16:
+                self._migrate_to_v16()
+                self._record_schema_version(16)
 
     def _migrate_to_v2(self) -> None:
         """Add 040 transactional worker state and contract authority metadata."""
@@ -388,6 +391,21 @@ class SQLiteMigrator:
     def _migrate_to_v15(self) -> None:
         """Bind exact context Asset references into v4 Contracts."""
         self._ensure_contract_columns()
+
+    def _migrate_to_v16(self) -> None:
+        """Persist deterministic derivation evidence for slice claims."""
+        columns = {
+            row["name"] for row in self._conn.execute("PRAGMA table_info(claims)")
+        }
+        if "derivation_version" not in columns:
+            self._conn.execute(
+                "ALTER TABLE claims ADD COLUMN derivation_version "
+                "TEXT NOT NULL DEFAULT ''"
+            )
+        if "range_spec" not in columns:
+            self._conn.execute(
+                "ALTER TABLE claims ADD COLUMN range_spec TEXT NOT NULL DEFAULT ''"
+            )
 
 
 def initialize_sqlite_schema(connection: sqlite3.Connection, store) -> None:

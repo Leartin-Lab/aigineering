@@ -5,6 +5,10 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
+from aigineering.core.asset_versions import (
+    SLICE_DERIVATION_VERSION,
+    content_slice,
+)
 from aigineering.core.ids import hash_asset_content, hash_asset_definition
 from aigineering.core.asset_graph_facts import asset_from_graph_values
 from aigineering.protocol.asset_graph import content_object_id
@@ -100,7 +104,7 @@ def batch_verify_definition(store: StoreProtocol, def_hash: str) -> dict[str, An
 def verify_replacement_claims(
     store: StoreProtocol, claims: list[ReplacementClaim]
 ) -> dict[str, Any]:
-    """Verify replacement/equivalence claims.
+    """Verify replacement/equivalence and deterministic derivation claims.
 
     For each claim, checks that the source and replacement assets exist in the
     store and that they share the same definition hash.
@@ -127,17 +131,53 @@ def verify_replacement_claims(
         if replacement is None:
             issues.append(f"replacement asset {claim.replacement_asset_id} not found")
 
+        verification_level = "identity"
         if source is not None and replacement is not None:
-            if source.definition_hash != replacement.definition_hash:
+            if claim.claim_type in {"replacement", "equivalent_input"} and (
+                source.definition_hash != replacement.definition_hash
+            ):
                 issues.append(
                     f"definition hash mismatch: "
                     f"source={source.definition_hash} vs replacement={replacement.definition_hash}"
                 )
-            if source.definition_hash != claim.definition_hash:
+            expected_claim_definition = (
+                replacement.definition_hash
+                if claim.claim_type == "slice"
+                else source.definition_hash
+            )
+            if expected_claim_definition != claim.definition_hash:
                 issues.append(
                     f"claim definition_hash {claim.definition_hash} does not match "
-                    f"assets' definition_hash {source.definition_hash}"
+                    f"expected definition_hash {expected_claim_definition}"
                 )
+
+            if claim.claim_type == "slice":
+                verification_level = "exact_derivation"
+                if claim.derivation_version != SLICE_DERIVATION_VERSION:
+                    issues.append(
+                        "slice claim requires derivation_version "
+                        f"{SLICE_DERIVATION_VERSION!r}"
+                    )
+                expected_lineage = source.lineage_id or source.id
+                if replacement.lineage_id != expected_lineage:
+                    issues.append(
+                        f"slice lineage {replacement.lineage_id!r} does not match "
+                        f"source lineage {expected_lineage!r}"
+                    )
+                if claim.lineage_id != expected_lineage:
+                    issues.append(
+                        f"claim lineage {claim.lineage_id!r} does not match "
+                        f"source lineage {expected_lineage!r}"
+                    )
+                try:
+                    expected_slice = content_slice(source.content, claim.range_spec)
+                except ValueError as exc:
+                    issues.append(f"invalid slice range: {exc}")
+                else:
+                    if replacement.content != expected_slice:
+                        issues.append(
+                            "slice content does not equal the declared source range"
+                        )
 
             # Verify content hashes on both assets
             for label, asset in [("source", source), ("replacement", replacement)]:
@@ -164,6 +204,7 @@ def verify_replacement_claims(
                 "replacement_asset_id": claim.replacement_asset_id,
                 "valid": valid,
                 "issues": issues,
+                "verification_level": verification_level,
             }
         )
 
@@ -227,6 +268,19 @@ def check_sensitive_input_policy(
                 violations.append(
                     f"accepted_claim_type '{ct}' is not a valid claim type; "
                     f"valid types: {sorted(valid_types)}"
+                )
+        input_assets = _collect_input_assets(contract, store)
+        for asset in input_assets:
+            claims = [
+                claim
+                for claim in store.get_claims_for_replacement_asset(asset.id)
+                if claim.claim_type in accepted_types
+            ]
+            verified = verify_replacement_claims(store, claims)
+            if not any(item["valid"] for item in verified["results"]):
+                violations.append(
+                    f"input asset {asset.id} has no verified incoming claim "
+                    f"with an accepted type {sorted(set(accepted_types))}"
                 )
 
     # --- Delegate tier and signer checks to TrustPolicy ---

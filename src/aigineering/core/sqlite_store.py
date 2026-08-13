@@ -114,7 +114,11 @@ class SQLiteStore:
         if db_path != ":memory:":
             self._conn.execute("PRAGMA journal_mode=WAL")
 
-        initialize_sqlite_schema(self._conn, self)
+        try:
+            initialize_sqlite_schema(self._conn, self)
+        except Exception:
+            self._conn.close()
+            raise
 
     # ── Immutable runtime-record envelope ────────────────────────────────
 
@@ -1997,8 +2001,8 @@ class SQLiteStore:
                 """INSERT INTO claims (
                     id, source_asset_id, replacement_asset_id,
                     definition_hash, claim_type, signed_by,
-                    provenance_seal, lineage_id
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    provenance_seal, lineage_id, derivation_version, range_spec
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     claim.id,
                     claim.source_asset_id,
@@ -2008,6 +2012,8 @@ class SQLiteStore:
                     claim.signed_by,
                     claim.provenance_seal,
                     claim.lineage_id,
+                    claim.derivation_version,
+                    claim.range_spec,
                 ),
             )
         except sqlite3.IntegrityError:
@@ -2051,6 +2057,13 @@ class SQLiteStore:
         ).fetchall()
         return [self._row_to_replacement_claim(r) for r in rows]
 
+    def get_claims_for_replacement_asset(self, asset_id: str) -> list:
+        rows = self._conn.execute(
+            "SELECT * FROM claims WHERE replacement_asset_id = ?",
+            (asset_id,),
+        ).fetchall()
+        return [self._row_to_replacement_claim(r) for r in rows]
+
     @staticmethod
     def _row_to_replacement_claim(row: sqlite3.Row):
         from aigineering.protocol.types import ReplacementClaim
@@ -2064,6 +2077,8 @@ class SQLiteStore:
             signed_by=row["signed_by"],
             provenance_seal=row["provenance_seal"],
             lineage_id=row["lineage_id"],
+            derivation_version=row["derivation_version"],
+            range_spec=row["range_spec"],
         )
 
     # ------------------------------------------------------------------

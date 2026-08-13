@@ -10,6 +10,7 @@ from aigineering.core.verification import (
     check_sensitive_input_policy,
     verify_replacement_claims,
 )
+from aigineering.core.asset_versions import create_replacement_claim
 from aigineering.core.provenance import sign_asset
 from aigineering.protocol.types import Asset, Contract, ReplacementClaim
 
@@ -172,12 +173,23 @@ class TestSensitiveInputPolicy:
         store = MemoryStore()
         def_hash = hash_asset_definition("trusted_input")
 
-        store.add_asset(
-            _make_asset(
-                "trusted_input",
-                "safe content",
-                signed_by="trusted-signer",
-                trust_tier="verified",
+        source = _make_asset("source", "safe content", trust_tier="verified")
+        trusted = _make_asset(
+            "trusted_input",
+            "safe content",
+            signed_by="trusted-signer",
+            trust_tier="verified",
+            lineage_id=source.id,
+        )
+        store.add_asset(source)
+        store.add_asset(trusted)
+        store.add_replacement_claim(
+            create_replacement_claim(
+                source.id,
+                trusted.id,
+                definition_hash=trusted.definition_hash,
+                claim_type="slice",
+                lineage_id=source.id,
             )
         )
 
@@ -191,7 +203,7 @@ class TestSensitiveInputPolicy:
                 "required_signer": "trusted-signer",
                 "required_definition_hashes": [def_hash],
                 "required_trust_tier": "high",
-                "accepted_claim_types": ["replacement"],
+                "accepted_claim_types": ["slice"],
             },
         )
 

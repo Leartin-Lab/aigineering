@@ -354,15 +354,21 @@ def hash_claim(
     source_id: str,
     replacement_id: str,
     claim_type: str,
+    *,
+    derivation_version: str = "",
+    range_spec: str = "",
 ) -> str:
     """Deterministic asset-replacement claim identity (``claim:`` tag)."""
-    canonical = canonical_json(
-        {
-            "claim_type": claim_type,
-            "replacement_id": replacement_id,
-            "source_id": source_id,
-        }
-    )
+    fields = {
+        "claim_type": claim_type,
+        "replacement_id": replacement_id,
+        "source_id": source_id,
+    }
+    if derivation_version:
+        fields["derivation_version"] = derivation_version
+    if range_spec:
+        fields["range_spec"] = range_spec
+    canonical = canonical_json(fields)
     return f"claim:{compute_content_hash(canonical)}"
 
 

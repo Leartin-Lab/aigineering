@@ -231,6 +231,8 @@ class ReplacementClaim:
     signed_by: str = ""
     provenance_seal: str = ""
     lineage_id: str = ""
+    derivation_version: str = ""
+    range_spec: str = ""
 
     _VALID_CLAIM_TYPES = frozenset(
         {

@@ -30,7 +30,9 @@ CREATE TABLE IF NOT EXISTS assets (
     keep_flag INTEGER NOT NULL DEFAULT 0,
     tombstoned INTEGER NOT NULL DEFAULT 0,
     tombstoned_at TEXT,
-    lineage_id TEXT NOT NULL DEFAULT ''
+    lineage_id TEXT NOT NULL DEFAULT '',
+    derivation_version TEXT NOT NULL DEFAULT '',
+    range_spec TEXT NOT NULL DEFAULT ''
 )
 """
 

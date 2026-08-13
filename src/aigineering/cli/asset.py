@@ -16,6 +16,7 @@ from aigineering.core.asset_versions import (
     resolve_latest,
 )
 from aigineering.core.control_plane import build_control_plane_asset
+from aigineering.core.verification import verify_replacement_claims
 from aigineering.protocol.effect_builders import (
     asset_proposal_effect,
     replacement_claim_effect,
@@ -219,6 +220,28 @@ def asset_slice(name: str, slice_name: str, range_spec: str, as_json: bool) -> N
     except ValueError as exc:
         raise click.ClickException(str(exc)) from exc
     sliced = decision.assets[0]
+    claim = create_replacement_claim(
+        source_asset_id=source.id,
+        replacement_asset_id=sliced.id,
+        definition_hash=sliced.definition_hash,
+        claim_type="slice",
+        lineage_id=source.lineage_id or source.id,
+        range_spec=range_spec,
+    )
+    verification = verify_replacement_claims(store, [claim])
+    if verification["fail_count"]:
+        issues = verification["results"][0]["issues"]
+        raise click.ClickException("; ".join(issues))
+    try:
+        require_accepted(
+            commit_local_effect(
+                store,
+                replacement_claim_effect(claim),
+                idempotency_key=f"asset-slice-claim:{claim.id}",
+            )
+        )
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
 
     if as_json:
         _output_json(
@@ -227,6 +250,8 @@ def asset_slice(name: str, slice_name: str, range_spec: str, as_json: bool) -> N
                 "name": sliced.name,
                 "lineage_id": sliced.lineage_id,
                 "definition_hash": sliced.definition_hash,
+                "claim_id": claim.id,
+                "range_spec": claim.range_spec,
             }
         )
     else:
@@ -243,11 +268,18 @@ def asset_slice(name: str, slice_name: str, range_spec: str, as_json: bool) -> N
     default="replacement",
     help="Claim type (replacement, slice, summary, redaction, equivalent_input).",
 )
+@click.option(
+    "--range",
+    "range_spec",
+    default="",
+    help="Required deterministic source range for a slice claim.",
+)
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON.")
 def asset_replace(
     source_id: str,
     replacement_id: str,
     claim_type: str,
+    range_spec: str,
     as_json: bool,
 ) -> None:
     """Create a replacement claim linking source to replacement asset."""
@@ -260,14 +292,26 @@ def asset_replace(
     if replacement is None:
         raise click.ClickException(f"Replacement asset '{replacement_id}' not found.")
 
+    if claim_type != "slice" and range_spec:
+        raise click.ClickException("--range is only valid with --claim-type slice")
     claim = create_replacement_claim(
         source_asset_id=source_id,
         replacement_asset_id=replacement_id,
-        definition_hash=source.definition_hash,
+        definition_hash=(
+            replacement.definition_hash
+            if claim_type == "slice"
+            else source.definition_hash
+        ),
         claim_type=claim_type,
         signed_by="",
         provenance_seal="",
+        lineage_id=(source.lineage_id or source.id) if claim_type == "slice" else "",
+        range_spec=range_spec,
     )
+    verification = verify_replacement_claims(store, [claim])
+    if verification["fail_count"]:
+        issues = verification["results"][0]["issues"]
+        raise click.ClickException("; ".join(issues))
     try:
         require_accepted(
             commit_local_effect(
@@ -289,6 +333,8 @@ def asset_replace(
                 "source_asset_id": claim.source_asset_id,
                 "replacement_asset_id": claim.replacement_asset_id,
                 "claim_type": claim.claim_type,
+                "derivation_version": claim.derivation_version,
+                "range_spec": claim.range_spec,
             }
         )
     else:

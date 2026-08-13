@@ -170,6 +170,8 @@ def replacement_claim_effect(claim: ReplacementClaim) -> CandidateEffect:
                 "claim_type": claim.claim_type,
                 "definition_hash": claim.definition_hash,
                 "lineage_id": claim.lineage_id,
+                "derivation_version": claim.derivation_version,
+                "range_spec": claim.range_spec,
                 "replacement_asset_id": claim.replacement_asset_id,
                 "source_asset_id": claim.source_asset_id,
             }

@@ -444,7 +444,7 @@ def test_v13_legacy_assets_migrate_without_changing_asset_identity(tmp_path) -> 
 
     reopened = SQLiteStore(str(db_path))
     try:
-        assert reopened.schema_version == 15
+        assert reopened.schema_version == 16
         assert reopened.get_asset(legacy.id) == legacy
         contents = reopened.get_content_objects()
         definitions = reopened.get_asset_definitions()

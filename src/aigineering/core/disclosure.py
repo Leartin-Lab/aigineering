@@ -17,6 +17,7 @@ class StoreLike(Protocol):
     def get_all_assets(self) -> list[Asset]: ...
     def get_assets_by_name(self, name: str) -> list[Asset]: ...
     def get_asset(self, asset_id: str) -> Asset | None: ...
+    def get_claims_for_replacement_asset(self, asset_id: str) -> list: ...
 
 
 class DisclosurePolicyError(ValueError):
@@ -57,7 +58,7 @@ def compute_disclosure(contract: Contract, store: StoreLike) -> list[Asset]:
                 input_assets.append(asset)
                 result.append(asset)
 
-    _enforce_sensitive_input_policy(contract, input_assets)
+    _enforce_sensitive_input_policy(contract, input_assets, store)
 
     if contract.id.startswith("task:v4:"):
         label_assets = tuple(
@@ -86,7 +87,7 @@ def compute_disclosure(contract: Contract, store: StoreLike) -> list[Asset]:
 
 
 def _enforce_sensitive_input_policy(
-    contract: Contract, input_assets: list[Asset]
+    contract: Contract, input_assets: list[Asset], store: StoreLike
 ) -> None:
     policy = contract.sensitive_input_policy
     if not isinstance(policy, Mapping) or not policy:
@@ -109,6 +110,27 @@ def _enforce_sensitive_input_policy(
             f"required definition hash {definition_hash!r} is not among disclosed inputs"
         )
 
+    accepted_claim_types = set(policy.get("accepted_claim_types", ()))
+    if accepted_claim_types:
+        from aigineering.core.verification import verify_replacement_claims
+        from aigineering.protocol.types import ReplacementClaim
+
+        unknown = accepted_claim_types - ReplacementClaim._VALID_CLAIM_TYPES
+        for claim_type in sorted(unknown):
+            reasons.append(f"accepted claim type {claim_type!r} is invalid")
+        for asset in input_assets:
+            claims = [
+                claim
+                for claim in store.get_claims_for_replacement_asset(asset.id)
+                if claim.claim_type in accepted_claim_types
+            ]
+            verification = verify_replacement_claims(store, claims)
+            if not any(item["valid"] for item in verification["results"]):
+                reasons.append(
+                    f"input asset {asset.id!r} has no verified incoming claim "
+                    f"of type {sorted(accepted_claim_types)}"
+                )
+
     if input_assets == [] and any(
         key in policy
         for key in (
@@ -117,6 +139,7 @@ def _enforce_sensitive_input_policy(
             "allowed_signers",
             "required_signer",
             "required_definition_hashes",
+            "accepted_claim_types",
         )
     ):
         reasons.append("sensitive input policy has no matching input assets")

@@ -119,6 +119,8 @@ class ReplacementClaimResponse(BaseModel):
     claim_type: str
     signed_by: str
     lineage_id: str
+    derivation_version: str
+    range_spec: str
 
 
 # ── Endpoints ────────────────────────────────────────────────────────────────
@@ -170,6 +172,8 @@ def _replacement_claim_response(claim) -> ReplacementClaimResponse:
         claim_type=claim.claim_type,
         signed_by=claim.signed_by,
         lineage_id=claim.lineage_id,
+        derivation_version=claim.derivation_version,
+        range_spec=claim.range_spec,
     )
 
 
@@ -353,11 +357,23 @@ def create_replacement_claim(
         claim = make_replacement_claim(
             source_asset_id=source.id,
             replacement_asset_id=replacement.id,
-            definition_hash=source.definition_hash,
+            definition_hash=str(proposed.get("definition_hash", "")),
             claim_type=str(proposed.get("claim_type", "replacement")),
+            lineage_id=str(proposed.get("lineage_id", "")),
+            derivation_version=str(proposed.get("derivation_version", "")),
+            range_spec=str(proposed.get("range_spec", "")),
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if claim.claim_type == "slice":
+        from aigineering.core.verification import verify_replacement_claims
+
+        verification = verify_replacement_claims(store, [claim])
+        if verification["fail_count"]:
+            raise HTTPException(
+                status_code=422,
+                detail="; ".join(verification["results"][0]["issues"]),
+            )
     expected_payload = deep_thaw(replacement_claim_effect(claim).payload)
     if body.effects[0].payload != expected_payload:
         raise HTTPException(

@@ -64,6 +64,7 @@ class StoreProtocol(Protocol):
     def add_replacement_claim(self, claim) -> None: ...
     def get_claims_by_definition(self, definition_hash: str) -> list: ...
     def get_claims_for_asset(self, asset_id: str) -> list: ...
+    def get_claims_for_replacement_asset(self, asset_id: str) -> list: ...
     def register_activation_refs(
         self, contract_id: str, asset_names: set[str]
     ) -> None: ...
@@ -537,6 +538,9 @@ class MemoryStore(_ProjectionIndexMixin):
 
     def get_claims_for_asset(self, asset_id: str) -> list:
         return [c for c in self._claims if c.source_asset_id == asset_id]
+
+    def get_claims_for_replacement_asset(self, asset_id: str) -> list:
+        return [c for c in self._claims if c.replacement_asset_id == asset_id]
 
 
 class JsonLStore(_ProjectionIndexMixin):
