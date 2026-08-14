@@ -2,9 +2,9 @@
 
 ## Current release
 
-Version: **v0.5.4**
+Version: **v0.5.5**
 
-v0.5.4 is the stable single-machine reference release. “Stable” applies to the
+v0.5.5 is the stable single-machine reference release. “Stable” applies to the
 documented local runtime and protocol surface; it is not a claim of external
 security audit or public-network deployment hardening.
 
@@ -41,7 +41,14 @@ Implemented:
   capability-routed ToolWorkers;
 - verifiable exact slice derivations and claim-gated disclosure;
 - executable AI4S literature and data-profile examples with offline replay;
-- descendant-aware independent acceptance for delegated output Assets.
+- descendant-aware independent acceptance for delegated output Assets;
+- deterministic JSON output shapes inherited by planned and recovery work;
+- Contract-v5 separation of execution requirements from delegation scope;
+- capability- and pool-routed heterogeneous local Worker fleets;
+- parallel tool calls compiled into ordinary tasks plus a boolean join;
+- commit-time completion convergence across concurrent SQLite writers;
+- durable recovery for both projection and claim-bound structural rejection;
+- a runtime-compiled AI4S example driven by one root task and a Skill.
 
 Release evidence is recorded in
 `reports/050-post-review-boundary-hardening-2026-07-19.md` and
@@ -51,6 +58,8 @@ and harness stabilization evidence is in
 `reports/053-boundary-convergence-2026-08-09.md`.
 v0.5.4 AI4S and derivation evidence is recorded in
 `reports/054-ai4s-auditable-example-2026-08-13.md`.
+v0.5.5 fleet and runtime-compilation evidence is recorded in
+`reports/055-local-worker-fleet-2026-08-14.md`.
 
 ## Release gates
 

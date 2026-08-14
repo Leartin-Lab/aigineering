@@ -130,6 +130,11 @@ facts; terminal projection commits in the same transaction. The exact Asset
 may come from the Contract or an immutable descendant, but never from an
 unrelated same-name producer.
 
+When the immutable policy declares deterministic `output_shapes`, producer
+submission and independent qualification both validate the exact JSON shape.
+Planning, recovery, retry, and continuation retain the applicable shape. A
+verifier attestation cannot turn mechanically malformed content into a fact.
+
 ## 12. Recursive work cannot mint causal allowance
 
 Root declarations materialize an immutable allowance grant. Every newly

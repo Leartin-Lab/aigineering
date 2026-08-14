@@ -16,6 +16,13 @@ An independent `acceptance_policy` has a non-empty `policy_version` and may
 declare sorted, unique rubric and evidence Asset IDs. Its content-addressed
 `policy_id` binds the complete immutable policy.
 
+The policy may declare `output_shapes` for deterministic JSON validation. The
+shape language is deliberately smaller than JSON Schema: exact object keys,
+non-empty homogeneous arrays, strings, non-empty strings, numbers, and
+booleans. Commitment checks the producer output before it becomes a fact and
+checks it again during attestation. Planning, recovery, retry, and continuation
+inherit the applicable shape; independent review cannot override it.
+
 `asset.attest` carries the exact policy ID/version and the policy's exact
 rubric/evidence IDs. Projection rejects missing, changed, unknown, or
 non-committed context. Accepted attestation and qualification remain separate
@@ -34,6 +41,7 @@ rejection.
 ## Consequences
 
 - a verifier cannot silently change the question it claims to have checked;
+- a verifier cannot qualify mechanically malformed output by opinion;
 - restart and active-active replicas reconstruct the same qualified output;
 - replacing an independently accepted output requires an explicit future
   replacement policy and a new attestation;
@@ -43,5 +51,6 @@ rejection.
 ## Evidence
 
 - `tests/architecture/test_independent_acceptance.py`
+- `tests/architecture/test_worker_host.py`
 - `tests/test_cli_acceptance.py`
 - `conformance/v0.5.0/protocol-vectors.json`

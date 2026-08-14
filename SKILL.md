@@ -35,6 +35,20 @@ aig run "exercise the boundary" --worker mock --json
 
 Never present mock output as production or acceptance evidence.
 
+Use a local Fleet when independent tasks need different model or tool
+capabilities. Declare requirements on tasks and delegated scope on their
+parents, then bind operator-selected providers in TOML:
+
+```bash
+aig fleet run --config /absolute/path/to/workers.toml \
+  --task <contract_id> --json
+```
+
+Capabilities and pools are the routing contract. Model names and prices remain
+replaceable operator configuration. Fleet capacity creates independent
+pull/claim/submit slots; it does not bypass the Store or create a second task
+queue.
+
 When an LLM task needs local tools, load an operator-reviewed registry
 explicitly. Aigineering publishes descriptors as Candidates, discloses only
 the current Contract's tool scope, and routes execution to a separate Worker:
@@ -115,7 +129,9 @@ The harness must return exactly one protocol action:
 
 - `/exec` publishes only declared outputs;
 - `/plan` or `/replan` publishes independently claimable work;
-- `/tool`, `/retry`, or `/fail` makes the corresponding decision visible.
+- `/tool`, `/parallel_tool`, `/retry`, or `/fail` makes the corresponding
+  decision visible. Parallel calls become ordinary tool tasks plus an `AND`
+  activated continuation.
 
 Do not translate every internal thought, tool call, or conversational turn into
 a task. Publish only work that must be independently scheduled, budgeted,
@@ -135,7 +151,13 @@ replayed, recovered, or accepted.
 
 For independently reviewed work, bind an acceptance policy at task creation and
 submit an attestation from a different actor. A producer cannot accept its own
-output.
+output. Use `output_shapes` when JSON fields and array/item types can be checked
+mechanically; the independent verifier cannot override a shape mismatch.
+
+For a planned, retry, or recovery task with unresolved tool scope, return only
+`/tool` or `/parallel_tool`. The committed observation creates a continuation
+that publishes the business output. Never construct tool-derived evidence in
+`/exec`, including during recovery.
 
 ## Preserve the boundary
 
@@ -165,6 +187,6 @@ adding domain behavior to the runtime kernel. The companion
 [`examples/scientific-data-profile/SKILL.md`](examples/scientific-data-profile/SKILL.md)
 shows how a deterministic script Worker can disclose a bounded table profile
 to later model tasks without exposing raw values.
-The executable [`examples/ai4s/`](examples/ai4s/README.md) run demonstrates
-tool continuation, exact citation checking, independent attestation, and
-SQLite reopen in one bounded workflow.
+The executable [`examples/ai4s/`](examples/ai4s/README.md) run demonstrates a
+Skill-guided root task, capability-routed local Fleet, runtime-compiled child
+graph, tool evidence, recovery, and SQLite reconstruction.

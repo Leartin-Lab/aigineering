@@ -1,8 +1,8 @@
 # Aigineering Design
 
-Status: implemented truth for v0.5.4
+Status: implemented truth for v0.5.5
 
-This document describes the code shipped in the v0.5.4 reference release.
+This document describes the code shipped in the v0.5.5 reference release.
 Future designs do not belong here until their implementation, tests, migration,
 and release evidence are complete.
 
@@ -34,6 +34,12 @@ Provider adapters may remove a complete reasoning-only wrapper or serialize a
 JSON-valued output as canonical text before action parsing. This is wire-shape
 normalization only: the result must still pass the same strict action,
 authority, projection, and commitment boundaries.
+
+The action adapter may also unwrap one syntactically valid method action that a
+provider accidentally quoted as the sole `/exec` key/value pair. Ambiguous,
+partial, or unsupported wrappers remain rejected. For a planned, retry, or
+recovery task with unresolved tool scope, the Contract prompt permits only
+tool dispatch; output publication happens in the observation continuation.
 
 ## Implemented runtime path
 
@@ -83,6 +89,12 @@ Worker requirements, origin, minting authority, sensitive-input policy, and
 acceptance policy. Current v4 Contracts also bind the exact Asset IDs resolved
 from label syntax at construction time. Replay and recursive task publication
 reuse those IDs instead of consulting a changed label catalog.
+
+Current v5 Contracts additionally separate execution requirements from
+delegation scope. `worker_capabilities` and `worker_pools` select who may execute
+the Contract. `delegation_capabilities` and `delegation_pools` bound what its
+descendants may require. These are capability labels, not model names or cost
+classes; operator-owned Worker registrations map them to concrete providers.
 
 The public conformance vectors in `conformance/v0.5.0/` cover canonical bytes,
 Candidate identity and signature, Genesis, Contract identity, effects,
@@ -204,6 +216,12 @@ The SQLite submission transaction rechecks the claim fence and commits the
 Candidate, projection, accepted facts, trace, idempotency record, attempt
 outcome, allowance consequences, and claim transition together.
 
+Pure output reduction normally runs before the write transaction. SQLite runs
+the same reducer again after acquiring its writer lock and inserting the batch
+Assets, then commits only newly visible consequences. Two concurrent Candidates
+that satisfy different outputs therefore converge on exactly one terminal fact
+instead of leaving an output-complete Contract unterminated.
+
 ## Disclosure
 
 A Worker receives a frozen package containing the exact disclosed Asset IDs and
@@ -254,12 +272,18 @@ draft
 → ordinary child Contracts
 ```
 
+When allowance permits, the staged expansion leaves up to three units at the
+parent for one durable repair of each stage. The reserve remains causal
+allowance, not an in-memory retry counter.
+
 Each stage is independently claimable and testable. Compile enforces:
 
 - non-empty executable descriptions and outputs;
 - monotonic activation syntax;
 - input reachability from disclosed facts or accepted producers;
 - complete parent-output recommitment;
+- at least two allowance units for a task with tool scope, covering one tool
+  task and its continuation;
 - labels contained within the parent's non-Plugin context-selection scope;
 - tool, Worker, authority, and allowance containment.
 
@@ -274,6 +298,18 @@ facts through registered Plugins.
 A successful tool task publishes a continuation whose scope omits that exact
 tool. Repeated calls are represented as separate ordinary tasks rather than an
 unbounded same-task tool loop; other parent-authorized tools remain available.
+
+Projection and method-result repair publish new recovery Contracts and retain
+the failed task's Skill context, routing scope, tools, and acceptance policy.
+Recovery depth is bounded at three immutable successor attempts. A recovery
+with unresolved tool scope cannot publish tool-derived outputs directly; it
+must first publish a tool task and consume the committed observation.
+
+`/parallel_tool` compiles two to eight calls into independently claimable tool
+Contracts and one continuation activated by the boolean conjunction of their
+observation names. Tool-specific capabilities route each call; the continuation
+cannot run until every observation is committed. No thread, future, or in-memory
+join is part of task truth.
 
 ## Causal allowance
 
@@ -309,6 +345,13 @@ with all required verifier capabilities. The attestation binds:
 Producer self-attestation, wrong-slot Assets, missing evidence, and replacement
 of an already qualified slot fail closed.
 
+An independent policy may additionally bind deterministic `output_shapes`.
+The small language supports exact JSON objects, non-empty arrays, strings,
+non-empty strings, numbers, and booleans. Shape validation runs when the
+producer submits an output and again before qualification. Planning,
+recovery, retry, and continuation inherit the relevant shapes, so a verifier
+opinion cannot legalize mechanically malformed content.
+
 The exact Asset may be produced by the Contract itself or by a Contract whose
 immutable parent chain reaches it. This supports plan and tool descendants
 without accepting an unrelated same-name Asset.
@@ -338,6 +381,13 @@ constraints, not process-local locks.
 Multiple same-machine Worker processes may use separate SQLite connections over
 one WAL database. Claim epochs fence stale results. A replacement process can
 reconstruct task progress and continue without restoring an Engine snapshot.
+
+The local Fleet launcher applies the same protocol within one process. Each
+capacity slot owns an independent SQLite connection and repeats only the normal
+pull, claim, invoke, and submit operations. It does not own a task queue or
+scheduling state. TOML profiles bind Worker adapters to capabilities, pools,
+capacity, and secret environment-variable names; task semantics remain model
+independent.
 
 EngineWorker applies the same rule across nested fact domains. It receives an
 outer claim context, executes against an isolated inner Store, persists bridge
@@ -422,7 +472,7 @@ terminal, or replay owner.
 
 ## Release limits
 
-v0.5.4 is a stable local reference release, not:
+v0.5.5 is a stable local reference release, not:
 
 - a cross-machine distributed Store;
 - a consensus implementation;
