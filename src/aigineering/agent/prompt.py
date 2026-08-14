@@ -7,6 +7,8 @@ import json
 from aigineering.core.labels import BEHAVIOR_LABEL_PREFIX
 from aigineering.protocol.types import Asset, Contract
 
+SKILL_CONTENT_PREFIX = "_skill_content_"
+
 
 def system_prompt() -> str:
     """Return the invariant-preserving system prompt."""
@@ -20,7 +22,10 @@ def system_prompt() -> str:
         '`/plan {"reason": "..."}`. If the current task has already gone '
         "off course because an assumption, path, or result is invalid, use "
         '`/replan {"reason": "..."}`. If you need an allowed tool, use '
-        '`/tool {"name": "...", "args": {}}`. If the same task can be '
+        '`/tool {"name": "...", "args": {}}`. '
+        "When the provider can request independent tools in parallel, multiple "
+        "tool calls are compiled into one /parallel_tool method and ordinary "
+        "tool tasks. If the same task can be "
         "attempted again after a transient execution or output failure, use "
         '`/retry {"reason": "..."}`. If required evidence is unavailable and '
         "no safe plan or allowed tool can obtain it, or completing the task "
@@ -28,8 +33,7 @@ def system_prompt() -> str:
         '`/fail {"reason": "..."}`. Do not use /replan for missing '
         "information, and do not use /retry when new evidence or a different "
         "plan is required. Do not add markdown, explanations, or undeclared "
-        "assets. Request at most one tool per action; publish independent tasks "
-        "when multiple tool calls are required."
+        "assets."
     )
 
 
@@ -39,8 +43,13 @@ def contract_prompt(contract: Contract, assets: list[Asset]) -> str:
     behavior_assets = [
         asset for asset in assets if asset.name.startswith(BEHAVIOR_LABEL_PREFIX)
     ]
+    skill_assets = [
+        asset for asset in assets if asset.name.startswith(SKILL_CONTENT_PREFIX)
+    ]
     evidence_assets = [
-        asset for asset in assets if not asset.name.startswith(BEHAVIOR_LABEL_PREFIX)
+        asset
+        for asset in assets
+        if not asset.name.startswith((BEHAVIOR_LABEL_PREFIX, SKILL_CONTENT_PREFIX))
     ]
 
     lines = [
@@ -56,6 +65,7 @@ def contract_prompt(contract: Contract, assets: list[Asset]) -> str:
         '- /plan {"reason": "why the current task needs more information"}',
         '- /replan {"reason": "why the current task has already gone off course"}',
         '- /tool {"name": "tool_name", "args": {}}',
+        '- /parallel_tool {"calls": [{"id": "a", "name": "tool_name", "args": {}}], "join": "all"}',
         '- /retry {"reason": "transient failure that permits the same task to be attempted again"}',
         '- /fail {"reason": "why the task cannot be completed safely"}',
         "",
@@ -80,6 +90,10 @@ def contract_prompt(contract: Contract, assets: list[Asset]) -> str:
         ]
     )
     for asset in behavior_assets:
+        lines.append(f"- {asset.name}: {asset.content}")
+
+    lines.extend(["", "Skill instructions:"])
+    for asset in skill_assets:
         lines.append(f"- {asset.name}: {asset.content}")
 
     lines.extend(
@@ -112,7 +126,7 @@ def _method_result_instructions(contract: Contract) -> list[str]:
         "Planner result protocol (required):",
         f"- Return /exec with exactly one output named `{output}`.",
         "- Its content must be one JSON object with a `contracts` array.",
-        "- Each child may contain only: name, description, inputs, outputs, activation, budget, tool_scope, labels.",
+            "- Each child may contain only: name, description, inputs, outputs, activation, budget, tool_scope, labels, capability_needs, pool_needs, delegation_capabilities, delegation_pools.",
         "- Use only disclosed input names, declared parent tools, and simple unqualified asset names in activation.",
         "- Activation is a boolean expression: join multiple required inputs with uppercase AND (for example `input_a AND input_b`); never use commas, JSON lists, or whitespace as an operator.",
         "- The method description lists parent_outputs. At least one child must produce every parent output; use intermediate outputs only when a later child consumes them.",
@@ -189,10 +203,13 @@ def _planning_stage_instructions(contract: Contract) -> list[str]:
                 ]
                 lines.extend(
                     [
-                        "- Each contract object must contain name, description, inputs, outputs, activation, budget, tool_scope, and labels.",
+                        "- Each contract object must contain name, description, inputs, outputs, activation, budget, tool_scope, labels, capability_needs, pool_needs, delegation_capabilities, and delegation_pools.",
                         "- name and description must be non-empty; outputs must contain at least one asset name.",
                         f"- Sum of child budgets must be at most {contract.budget}; use budget 1 per child unless more is essential.",
                         f"- Each child labels list must be a subset of {json.dumps(allowed_labels, ensure_ascii=False)}; never invent labels or copy plugin:* labels.",
+                        "- capability_needs are execution requirements, not prompt labels.",
+                        f"- Each child capability_needs and delegation_capabilities must be subsets of {json.dumps(list(contract.delegation_capabilities), ensure_ascii=False)}.",
+                        f"- Each child pool_needs and delegation_pools must be subsets of {json.dumps(list(contract.delegation_pools), ensure_ascii=False)}.",
                         f"- The child outputs must collectively include: {', '.join(contract.outputs)}.",
                         f"- Valid example for this exact Contract: {_planning_compile_example(contract)}",
                     ]
@@ -250,6 +267,13 @@ def _planning_compile_example(contract: Contract) -> str:
                 "labels": [],
             },
         ]
+    for item in contracts:
+        item.update(
+            capability_needs=[],
+            pool_needs=[],
+            delegation_capabilities=[],
+            delegation_pools=[],
+        )
     return json.dumps(
         {"contracts": contracts},
         sort_keys=True,

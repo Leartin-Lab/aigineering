@@ -51,6 +51,8 @@ CREATE TABLE IF NOT EXISTS contracts (
     context_asset_ids TEXT NOT NULL DEFAULT '[]',
     worker_capabilities TEXT NOT NULL DEFAULT '[]',
     worker_pools TEXT NOT NULL DEFAULT '[]',
+    delegation_capabilities TEXT NOT NULL DEFAULT '[]',
+    delegation_pools TEXT NOT NULL DEFAULT '[]',
     origin TEXT NOT NULL DEFAULT 'human',
     minting_authority TEXT NOT NULL DEFAULT '[]',
     sensitive_input_policy TEXT,

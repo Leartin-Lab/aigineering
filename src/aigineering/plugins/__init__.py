@@ -27,7 +27,9 @@ def default_completion_registry() -> CompletionRegistry:
     registry = CompletionRegistry()
     registry.register("plan", PlanningCompletionPlugin())
     registry.register("replan", ReplanningCompletionPlugin())
-    registry.register("tool", ToolCompletionPlugin())
+    tool_completion = ToolCompletionPlugin()
+    registry.register("tool", tool_completion)
+    registry.register("parallel_tool_item", tool_completion)
     registry.register("fail", FailCompletionPlugin())
     return registry
 

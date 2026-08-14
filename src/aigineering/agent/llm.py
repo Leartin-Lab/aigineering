@@ -313,10 +313,9 @@ class LLMWorker:
         dictionary that the engine will dispatch through the normal
         authority/projection boundary.
 
-        Multiple calls are rejected visibly. The runtime has no multi-action
-        commitment primitive, so selecting only one would silently discard
-        proposed work and emitting an unsupported envelope would fail later at
-        Candidate encoding.
+        Multiple calls become one ``/parallel_tool`` method request. Its Plugin
+        atomically publishes independently claimable tool tasks plus a Boolean
+        join continuation; tools never execute inside the LLM adapter.
         """
         if not tool_calls:
             raise WorkerExecutionError(
@@ -359,16 +358,11 @@ class LLMWorker:
             actions.append({"name": name, "args": args})
 
         if len(actions) > 1:
-            payload = {
-                "reason": (
-                    "provider proposed multiple tool calls; publish each call as "
-                    "independently claimable work or retry with exactly one call"
-                ),
-                "proposed_tools": [str(action["name"]) for action in actions],
-            }
+            payload = {"calls": actions, "join": "all"}
             return (
-                "/fail " + json.dumps(payload, sort_keys=True, ensure_ascii=False),
-                {"type": "fail", "payload": payload},
+                "/parallel_tool "
+                + json.dumps(payload, sort_keys=True, ensure_ascii=False),
+                {"type": "parallel_tool", "payload": payload},
             )
 
         raw_output = json.dumps(actions[0], ensure_ascii=False)

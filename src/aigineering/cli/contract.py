@@ -34,6 +34,14 @@ def contract_group() -> None:
 @click.option("--label", "labels", multiple=True, help="Labels (repeatable).")
 @click.option("--tool", "tool_scope", multiple=True, help="Tool scope (repeatable).")
 @click.option(
+    "--requires-capability", "worker_capabilities", multiple=True
+)
+@click.option("--worker-pool", "worker_pools", multiple=True)
+@click.option(
+    "--delegate-capability", "delegation_capabilities", multiple=True
+)
+@click.option("--delegate-pool", "delegation_pools", multiple=True)
+@click.option(
     "--sensitive-input-policy",
     "sensitive_input_policy",
     default=None,
@@ -53,6 +61,10 @@ def contract_add(
     budget: int,
     labels: tuple[str, ...],
     tool_scope: tuple[str, ...],
+    worker_capabilities: tuple[str, ...],
+    worker_pools: tuple[str, ...],
+    delegation_capabilities: tuple[str, ...],
+    delegation_pools: tuple[str, ...],
     sensitive_input_policy: str | None,
     acceptance_policy: str | None,
     as_json: bool,
@@ -81,6 +93,10 @@ def contract_add(
             budget=budget,
             labels=labels,
             tool_scope=tool_scope,
+            worker_capabilities=worker_capabilities,
+            worker_pools=worker_pools,
+            delegation_capabilities=delegation_capabilities,
+            delegation_pools=delegation_pools,
             sensitive_input_policy=policy,
             acceptance_policy=output_policy,
         )

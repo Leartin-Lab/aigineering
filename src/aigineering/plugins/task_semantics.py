@@ -80,8 +80,7 @@ def method_contract(parent: Contract, action: WorkerAction) -> Contract:
             and action.payload["name"].startswith("mcp:")
             else "tool-execution"
         )
-        if execution_capability not in worker_capabilities:
-            worker_capabilities.append(execution_capability)
+        worker_capabilities = [execution_capability]
 
     context_name = f"_method_ctx_{parent.id}"
     authority_templates: tuple[str, ...] = (
@@ -113,6 +112,8 @@ def method_contract(parent: Contract, action: WorkerAction) -> Contract:
         labels=labels,
         worker_capabilities=worker_capabilities,
         worker_pools=parent.worker_pools,
+        delegation_capabilities=parent.delegation_capabilities,
+        delegation_pools=parent.delegation_pools,
         origin="system",
         parent_id=parent.id,
         minting_authority=authority_templates,
@@ -148,6 +149,8 @@ def method_contract(parent: Contract, action: WorkerAction) -> Contract:
         context_asset_ids=parent.context_asset_ids,
         worker_capabilities=worker_capabilities,
         worker_pools=parent.worker_pools,
+        delegation_capabilities=parent.delegation_capabilities,
+        delegation_pools=parent.delegation_pools,
         origin="system",
         # A method contract needs exact authority for both its declared
         # result and the context asset that activates it.  Do not rely on a
@@ -179,6 +182,8 @@ def retry_contract(parent: Contract) -> Contract:
         labels=parent.labels,
         worker_capabilities=parent.worker_capabilities,
         worker_pools=parent.worker_pools,
+        delegation_capabilities=parent.delegation_capabilities,
+        delegation_pools=parent.delegation_pools,
         origin="retry",
         parent_id=parent.parent_id,
         minting_authority=authority,
@@ -199,6 +204,8 @@ def retry_contract(parent: Contract) -> Contract:
         context_asset_ids=parent.context_asset_ids,
         worker_capabilities=parent.worker_capabilities,
         worker_pools=parent.worker_pools,
+        delegation_capabilities=parent.delegation_capabilities,
+        delegation_pools=parent.delegation_pools,
         origin="retry",
         minting_authority=authority,
         sensitive_input_policy=parent.sensitive_input_policy,
@@ -242,6 +249,8 @@ def continuation_contract(
         labels=parent.labels,
         worker_capabilities=parent.worker_capabilities,
         worker_pools=parent.worker_pools,
+        delegation_capabilities=parent.delegation_capabilities,
+        delegation_pools=parent.delegation_pools,
         origin="continuation",
         parent_id=parent.id,
         minting_authority=authority,
@@ -261,6 +270,8 @@ def continuation_contract(
         context_asset_ids=parent.context_asset_ids,
         worker_capabilities=parent.worker_capabilities,
         worker_pools=parent.worker_pools,
+        delegation_capabilities=parent.delegation_capabilities,
+        delegation_pools=parent.delegation_pools,
         origin="continuation",
         minting_authority=authority,
         sensitive_input_policy=parent.sensitive_input_policy,
@@ -360,6 +371,7 @@ def contracts_from_plan_asset(
     parent_contract: Contract | None = None,
     allowed_input_names: set[str] | None = None,
     parent_budget_remaining: int | None = None,
+    context_assets: tuple[Asset, ...] = (),
 ) -> tuple[list[Contract], list[dict]]:
     """Expand a `_plan_result_*` asset into non-system child contracts.
 
@@ -472,6 +484,12 @@ def contracts_from_plan_asset(
         budget = _positive_int(raw.get("budget", 1), default=1)
         tool_scope = _string_list(raw.get("tool_scope", []))
         labels = _string_list(raw.get("labels", []))
+        capability_needs = _string_list(raw.get("capability_needs", []))
+        pool_needs = _string_list(raw.get("pool_needs", []))
+        delegation_capabilities = _string_list(
+            raw.get("delegation_capabilities", [])
+        )
+        delegation_pools = _string_list(raw.get("delegation_pools", []))
 
         try:
             validate_execution_activation(activation)
@@ -503,6 +521,11 @@ def contracts_from_plan_asset(
                     budget=budget,
                     tool_scope=tool_scope,
                     labels=labels,
+                    capability_needs=capability_needs,
+                    pool_needs=pool_needs,
+                    delegation_capabilities=delegation_capabilities,
+                    delegation_pools=delegation_pools,
+                    context_assets=context_assets,
                 )
             )
             continue
@@ -518,6 +541,11 @@ def contracts_from_plan_asset(
             parent_labels=parent_labels,
             allowed_input_names=allowed_input_names,
             sibling_promises=sibling_promises,
+            capability_needs=capability_needs,
+            pool_needs=pool_needs,
+            delegation_capabilities=delegation_capabilities,
+            delegation_pools=delegation_pools,
+            parent_contract=parent_contract,
         )
         rejected.extend(notes)
         if blocking is not None:
@@ -547,6 +575,11 @@ def contracts_from_plan_asset(
                 budget=budget,
                 tool_scope=tool_scope,
                 labels=labels,
+                capability_needs=capability_needs,
+                pool_needs=pool_needs,
+                delegation_capabilities=delegation_capabilities,
+                delegation_pools=delegation_pools,
+                context_assets=context_assets,
             )
         )
     if parent_contract is not None and allowed_input_names is not None:
@@ -786,6 +819,11 @@ def _plan_child_scope_findings(
     parent_labels: set[str] | None,
     allowed_input_names: set[str] | None,
     sibling_promises: set[str],
+    capability_needs: list[str],
+    pool_needs: list[str],
+    delegation_capabilities: list[str],
+    delegation_pools: list[str],
+    parent_contract: Contract,
 ) -> tuple[dict | None, list[dict]]:
     """Return one blocking containment finding plus non-blocking notes."""
     child_outputs = set(outputs)
@@ -839,6 +877,69 @@ def _plan_child_scope_findings(
                 "action": "rejected",
                 "expected": f"subset of {sorted(parent_labels)}",
                 "actual": str(sorted(labels)),
+                "recoverable": True,
+            },
+            [],
+        )
+    parent_capability_scope = (
+        set(parent_contract.delegation_capabilities)
+        | set(parent_contract.worker_capabilities)
+        if parent_contract.id.startswith("task:v5:")
+        else set(parent_contract.worker_capabilities)
+    )
+    parent_pool_scope = (
+        set(parent_contract.delegation_pools) | set(parent_contract.worker_pools)
+        if parent_contract.id.startswith("task:v5:")
+        else set(parent_contract.worker_pools)
+    )
+    if not set(capability_needs) <= parent_capability_scope:
+        return (
+            {
+                "child_name": name,
+                "field": "capability_needs",
+                "reason": "child execution requirements exceed parent delegation scope",
+                "action": "rejected",
+                "expected": f"subset of {sorted(parent_capability_scope)}",
+                "actual": str(sorted(capability_needs)),
+                "recoverable": True,
+            },
+            [],
+        )
+    if not set(pool_needs) <= parent_pool_scope:
+        return (
+            {
+                "child_name": name,
+                "field": "pool_needs",
+                "reason": "child worker pools exceed parent delegation scope",
+                "action": "rejected",
+                "expected": f"subset of {sorted(parent_pool_scope)}",
+                "actual": str(sorted(pool_needs)),
+                "recoverable": True,
+            },
+            [],
+        )
+    if not set(delegation_capabilities) <= parent_capability_scope:
+        return (
+            {
+                "child_name": name,
+                "field": "delegation_capabilities",
+                "reason": "child delegation capabilities exceed parent scope",
+                "action": "rejected",
+                "expected": f"subset of {sorted(parent_capability_scope)}",
+                "actual": str(sorted(delegation_capabilities)),
+                "recoverable": True,
+            },
+            [],
+        )
+    if not set(delegation_pools) <= parent_pool_scope:
+        return (
+            {
+                "child_name": name,
+                "field": "delegation_pools",
+                "reason": "child delegation pools exceed parent scope",
+                "action": "rejected",
+                "expected": f"subset of {sorted(parent_pool_scope)}",
+                "actual": str(sorted(delegation_pools)),
                 "recoverable": True,
             },
             [],
@@ -897,16 +998,21 @@ def _build_plan_contract(
     budget: int,
     tool_scope: list[str],
     labels: list[str],
+    capability_needs: list[str],
+    pool_needs: list[str],
+    delegation_capabilities: list[str],
+    delegation_pools: list[str],
+    context_assets: tuple[Asset, ...],
 ) -> Contract:
-    worker_capabilities = (
-        parent_contract.worker_capabilities if parent_contract is not None else ()
-    )
-    worker_pools = parent_contract.worker_pools if parent_contract is not None else ()
+    worker_capabilities = tuple(capability_needs)
+    worker_pools = tuple(pool_needs)
     sensitive_policy = (
         parent_contract.sensitive_input_policy if parent_contract is not None else None
     )
     context_asset_ids = (
-        parent_contract.context_asset_ids if parent_contract is not None else ()
+        tuple(sorted(asset.id for asset in context_assets if asset.name in labels))
+        if context_assets
+        else (parent_contract.context_asset_ids if parent_contract is not None else ())
     )
     identity = hash_contract_current(
         name=name,
@@ -919,6 +1025,8 @@ def _build_plan_contract(
         labels=labels,
         worker_capabilities=worker_capabilities,
         worker_pools=worker_pools,
+        delegation_capabilities=delegation_capabilities,
+        delegation_pools=delegation_pools,
         origin="plan",
         parent_id=parent_id,
         sensitive_input_policy=(
@@ -940,6 +1048,8 @@ def _build_plan_contract(
         context_asset_ids=context_asset_ids,
         worker_capabilities=worker_capabilities,
         worker_pools=worker_pools,
+        delegation_capabilities=delegation_capabilities,
+        delegation_pools=delegation_pools,
         origin="plan",
         sensitive_input_policy=sensitive_policy,
     )

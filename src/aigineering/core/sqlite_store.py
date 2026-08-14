@@ -498,6 +498,10 @@ class SQLiteStore:
             context_asset_ids=tuple(json.loads(row["context_asset_ids"])),
             worker_capabilities=tuple(json.loads(row["worker_capabilities"] or "[]")),
             worker_pools=tuple(json.loads(row["worker_pools"] or "[]")),
+            delegation_capabilities=tuple(
+                json.loads(row["delegation_capabilities"] or "[]")
+            ),
+            delegation_pools=tuple(json.loads(row["delegation_pools"] or "[]")),
             origin=row["origin"],
             minting_authority=tuple(json.loads(row["minting_authority"] or "[]")),
             sensitive_input_policy=(
@@ -645,11 +649,13 @@ class SQLiteStore:
                 id, parent_id, name, description,
                 inputs, outputs, activation, budget,
                 tool_scope, labels, context_asset_ids, worker_capabilities, worker_pools,
+                delegation_capabilities, delegation_pools,
                 origin, minting_authority, sensitive_input_policy, acceptance_policy
             ) VALUES (
                 :id, :parent_id, :name, :description,
                 :inputs, :outputs, :activation, :budget,
                 :tool_scope, :labels, :context_asset_ids, :worker_capabilities, :worker_pools,
+                :delegation_capabilities, :delegation_pools,
                 :origin, :minting_authority, :sensitive_input_policy, :acceptance_policy
             )""",
                 {
@@ -666,6 +672,10 @@ class SQLiteStore:
                     "context_asset_ids": json.dumps(list(d["context_asset_ids"])),
                     "worker_capabilities": json.dumps(list(d["worker_capabilities"])),
                     "worker_pools": json.dumps(list(d["worker_pools"])),
+                    "delegation_capabilities": json.dumps(
+                        list(d["delegation_capabilities"])
+                    ),
+                    "delegation_pools": json.dumps(list(d["delegation_pools"])),
                     "origin": d["origin"],
                     "minting_authority": json.dumps(list(d["minting_authority"])),
                     "sensitive_input_policy": (

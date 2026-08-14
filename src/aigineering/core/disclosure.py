@@ -60,7 +60,7 @@ def compute_disclosure(contract: Contract, store: StoreLike) -> list[Asset]:
 
     _enforce_sensitive_input_policy(contract, input_assets, store)
 
-    if contract.id.startswith("task:v4:"):
+    if contract.id.startswith(("task:v4:", "task:v5:")):
         label_assets = tuple(
             asset
             for asset_id in contract.context_asset_ids

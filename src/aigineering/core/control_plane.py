@@ -16,8 +16,7 @@ from aigineering.core.authority import _is_protected_name
 from aigineering.core.ids import (
     hash_asset_definition,
     hash_asset_content,
-    hash_contract_v3,
-    hash_contract_v4,
+    hash_contract_current,
 )
 from aigineering.protocol.types import Asset, Contract
 
@@ -105,6 +104,10 @@ def build_control_plane_contract(
     labels: tuple[str, ...] = (),
     context_asset_ids: tuple[str, ...] = (),
     tool_scope: tuple[str, ...] = (),
+    worker_capabilities: tuple[str, ...] = (),
+    worker_pools: tuple[str, ...] = (),
+    delegation_capabilities: tuple[str, ...] = (),
+    delegation_pools: tuple[str, ...] = (),
     sensitive_input_policy: dict | None = None,
     acceptance_policy: dict | None = None,
     allow_protected_outputs: bool = False,
@@ -149,12 +152,13 @@ def build_control_plane_contract(
         origin="human",
         sensitive_input_policy=policy,
         acceptance_policy=acceptance_policy,
+        worker_capabilities=worker_capabilities,
+        worker_pools=worker_pools,
+        delegation_capabilities=delegation_capabilities,
+        delegation_pools=delegation_pools,
+        context_asset_ids=context_asset_ids,
     )
-    identity = (
-        hash_contract_v4(**identity_fields, context_asset_ids=context_asset_ids)
-        if context_asset_ids
-        else hash_contract_v3(**identity_fields)
-    )
+    identity = hash_contract_current(**identity_fields)
 
     return Contract(
         id=identity,
@@ -167,13 +171,17 @@ def build_control_plane_contract(
         labels=labels,
         context_asset_ids=context_asset_ids,
         tool_scope=tool_scope,
+        worker_capabilities=worker_capabilities,
+        worker_pools=worker_pools,
+        delegation_capabilities=delegation_capabilities,
+        delegation_pools=delegation_pools,
         sensitive_input_policy=policy,
         acceptance_policy=acceptance_policy,
     )
 
 
 def bind_contract_label_assets(contract: Contract, store) -> Contract:
-    """Resolve label syntax once and bind exact Asset IDs into a v4 identity."""
+    """Resolve label syntax once and bind exact Asset IDs into Contract identity."""
     asset_ids = tuple(
         sorted(
             {
@@ -187,7 +195,7 @@ def bind_contract_label_assets(contract: Contract, store) -> Contract:
     )
     if not asset_ids:
         return contract
-    identity = hash_contract_v4(
+    identity = hash_contract_current(
         name=contract.name,
         description=contract.description,
         inputs=contract.inputs,
@@ -200,6 +208,8 @@ def bind_contract_label_assets(contract: Contract, store) -> Contract:
         parent_id=contract.parent_id,
         worker_capabilities=contract.worker_capabilities,
         worker_pools=contract.worker_pools,
+        delegation_capabilities=contract.delegation_capabilities,
+        delegation_pools=contract.delegation_pools,
         minting_authority=contract.minting_authority,
         sensitive_input_policy=contract.sensitive_input_policy,
         acceptance_policy=contract.acceptance_policy,

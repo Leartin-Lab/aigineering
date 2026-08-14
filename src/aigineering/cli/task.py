@@ -40,6 +40,27 @@ def task_group() -> None:
 @click.option("--label", "labels", multiple=True, help="Injection labels.")
 @click.option("--tool", "tool_scope", multiple=True, help="Allowed tool scope.")
 @click.option(
+    "--requires-capability",
+    "worker_capabilities",
+    multiple=True,
+    help="Worker capability required to execute this task.",
+)
+@click.option(
+    "--worker-pool", "worker_pools", multiple=True, help="Eligible worker pool."
+)
+@click.option(
+    "--delegate-capability",
+    "delegation_capabilities",
+    multiple=True,
+    help="Capability descendants may require.",
+)
+@click.option(
+    "--delegate-pool",
+    "delegation_pools",
+    multiple=True,
+    help="Worker pool descendants may select.",
+)
+@click.option(
     "--sensitive-input-policy",
     default=None,
     help="Sensitive input policy as a JSON object.",
@@ -60,6 +81,10 @@ def task_create(
     budget: int,
     labels: tuple[str, ...],
     tool_scope: tuple[str, ...],
+    worker_capabilities: tuple[str, ...],
+    worker_pools: tuple[str, ...],
+    delegation_capabilities: tuple[str, ...],
+    delegation_pools: tuple[str, ...],
     sensitive_input_policy: str | None,
     acceptance_policy: str | None,
     as_json: bool,
@@ -91,6 +116,10 @@ def task_create(
             budget=budget,
             labels=labels,
             tool_scope=tool_scope,
+            worker_capabilities=worker_capabilities,
+            worker_pools=worker_pools,
+            delegation_capabilities=delegation_capabilities,
+            delegation_pools=delegation_pools,
             sensitive_input_policy=policy,
             acceptance_policy=output_policy,
         )

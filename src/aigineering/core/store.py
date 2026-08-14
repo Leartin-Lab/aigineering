@@ -639,6 +639,8 @@ class JsonLStore(_ProjectionIndexMixin):
                     context_asset_ids=data.get("context_asset_ids", []),
                     worker_capabilities=data.get("worker_capabilities", []),
                     worker_pools=data.get("worker_pools", []),
+                    delegation_capabilities=data.get("delegation_capabilities", []),
+                    delegation_pools=data.get("delegation_pools", []),
                     origin=data.get("origin", "human"),
                     minting_authority=data.get("minting_authority", []),
                     sensitive_input_policy=data.get("sensitive_input_policy"),

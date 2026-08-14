@@ -32,7 +32,7 @@ from aigineering.protocol.wire import (
     trace_entry_to_dict,
 )
 
-CURRENT_SCHEMA_VERSION = 16
+CURRENT_SCHEMA_VERSION = 17
 
 
 class SQLiteMigrator:
@@ -83,6 +83,16 @@ class SQLiteMigrator:
             self._conn.execute(
                 "ALTER TABLE contracts "
                 "ADD COLUMN context_asset_ids TEXT NOT NULL DEFAULT '[]'"
+            )
+        if "delegation_capabilities" not in existing:
+            self._conn.execute(
+                "ALTER TABLE contracts "
+                "ADD COLUMN delegation_capabilities TEXT NOT NULL DEFAULT '[]'"
+            )
+        if "delegation_pools" not in existing:
+            self._conn.execute(
+                "ALTER TABLE contracts "
+                "ADD COLUMN delegation_pools TEXT NOT NULL DEFAULT '[]'"
             )
 
     def _record_schema_version(self, version: int) -> None:
@@ -141,6 +151,13 @@ class SQLiteMigrator:
             if current < 16:
                 self._migrate_to_v16()
                 self._record_schema_version(16)
+            if current < 17:
+                self._migrate_to_v17()
+                self._record_schema_version(17)
+
+    def _migrate_to_v17(self) -> None:
+        """Separate Contract execution requirements from delegation scope."""
+        self._ensure_contract_columns()
 
     def _migrate_to_v2(self) -> None:
         """Add 040 transactional worker state and contract authority metadata."""

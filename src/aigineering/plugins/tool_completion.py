@@ -14,10 +14,10 @@ if TYPE_CHECKING:
 class ToolCompletionPlugin:
     """Acknowledge a declared tool observation for continuation projection."""
 
-    action_type = "tool"
+    action_types = frozenset({"tool", "parallel_tool_item"})
 
     def can_handle(self, action_type: str) -> bool:
-        return action_type == self.action_type
+        return action_type in self.action_types
 
     def handle_completion(
         self,
@@ -26,6 +26,6 @@ class ToolCompletionPlugin:
         method_assets: list[Asset],
     ) -> bool:
         del runtime
-        if method_payload(contract).get("method") != self.action_type:
+        if method_payload(contract).get("method") not in self.action_types:
             return False
         return any(asset.name in contract.outputs for asset in method_assets)

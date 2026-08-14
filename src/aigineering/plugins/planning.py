@@ -35,14 +35,15 @@ class PlanningExpansionPlugin:
     plugin_id = "planning.expand.v1"
 
     def propose(self, request: PluginRequest) -> PluginProposal:
-        if len(request.assets) != 1:
-            raise ValueError("planning expansion requires exactly one plan Asset")
+        if not request.assets:
+            raise ValueError("planning expansion requires one plan Asset")
         contracts, rejections = contracts_from_plan_asset(
             request.assets[0],
             request.parent.id,
             parent_contract=request.parent,
             allowed_input_names=set(request.allowed_input_names),
             parent_budget_remaining=request.allowance,
+            context_assets=request.assets[1:],
         )
         blocking = any(is_blocking_plan_rejection(item) for item in rejections)
         if not contracts and not rejections:
@@ -71,6 +72,7 @@ def compile_planning_blueprint(
     outputs: Mapping[str, object],
     *,
     allowance: int,
+    context_assets: tuple[Asset, ...] = (),
 ) -> tuple[CandidateEffect, ...]:
     """Compile one Worker-local blueprint into ordinary child declarations."""
     if set(outputs) != {"planning_blueprint"}:
@@ -101,7 +103,7 @@ def compile_planning_blueprint(
     proposal = PlanningExpansionPlugin().propose(
         PluginRequest(
             parent=contract,
-            assets=(plan_asset,),
+            assets=(plan_asset, *context_assets),
             allowed_input_names=frozenset(str(name) for name in allowed_inputs),
             allowance=allowance,
         )

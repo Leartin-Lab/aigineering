@@ -53,12 +53,22 @@ class ScaffoldTask:
     budget: int = 1
     tool_scope: tuple[str, ...] = ()
     labels: tuple[str, ...] = ()
+    capability_needs: tuple[str, ...] = ()
+    pool_needs: tuple[str, ...] = ()
+    delegation_capabilities: tuple[str, ...] = ()
+    delegation_pools: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "consumes", tuple(self.consumes))
         object.__setattr__(self, "produces", tuple(self.produces))
         object.__setattr__(self, "tool_scope", tuple(self.tool_scope))
         object.__setattr__(self, "labels", tuple(self.labels))
+        object.__setattr__(self, "capability_needs", tuple(self.capability_needs))
+        object.__setattr__(self, "pool_needs", tuple(self.pool_needs))
+        object.__setattr__(
+            self, "delegation_capabilities", tuple(self.delegation_capabilities)
+        )
+        object.__setattr__(self, "delegation_pools", tuple(self.delegation_pools))
 
 
 @dataclass(frozen=True)
@@ -163,6 +173,12 @@ def _dict_to_scaffold(d: dict, has_final_contracts: bool) -> PlanScaffold:
             budget=_positive_int(t.get("budget"), 1),
             tool_scope=tuple(_string_list(t.get("tool_scope"))),
             labels=tuple(_string_list(t.get("labels"))),
+            capability_needs=tuple(_string_list(t.get("capability_needs"))),
+            pool_needs=tuple(_string_list(t.get("pool_needs"))),
+            delegation_capabilities=tuple(
+                _string_list(t.get("delegation_capabilities"))
+            ),
+            delegation_pools=tuple(_string_list(t.get("delegation_pools"))),
         )
         for t in tasks_raw
         if isinstance(t, dict)
@@ -434,6 +450,10 @@ def compile_placeholder_names(
             budget=task.budget,
             tool_scope=task.tool_scope,
             labels=task.labels,
+            capability_needs=task.capability_needs,
+            pool_needs=task.pool_needs,
+            delegation_capabilities=task.delegation_capabilities,
+            delegation_pools=task.delegation_pools,
         )
 
     def _compile_data_flow(df: ScaffoldDataFlow) -> ScaffoldDataFlow:
@@ -493,6 +513,10 @@ def _scaffold_tasks_to_raw_dicts(scaffold: PlanScaffold) -> list[dict]:
                 "budget": task.budget,
                 "tool_scope": list(task.tool_scope),
                 "labels": list(task.labels),
+                "capability_needs": list(task.capability_needs),
+                "pool_needs": list(task.pool_needs),
+                "delegation_capabilities": list(task.delegation_capabilities),
+                "delegation_pools": list(task.delegation_pools),
             }
         )
     return raw_list

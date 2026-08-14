@@ -15,6 +15,7 @@ from aigineering.core.candidate_publisher import (
 from aigineering.core.ids import (
     hash_asset_content,
     hash_asset_definition,
+    hash_contract_current,
     hash_contract_v3,
 )
 from aigineering.core.signing import Ed25519Signer
@@ -294,6 +295,106 @@ def test_compile_rejects_labels_outside_parent_scope_before_commitment():
     assert "not a subset of parent labels" in str(raised.value)
 
 
+def test_compile_binds_skill_label_and_specialized_execution_requirement():
+    skill = Asset(
+        id="asset:skill-extract-v1",
+        name="skill:literature.extract",
+        content="Extract source-bound evidence cards.",
+        trust_tier="configured",
+    )
+    fields = {
+        "name": "compile",
+        "description": json.dumps({"allowed_inputs": ["source"]}),
+        "inputs": ("source",),
+        "outputs": ("final_report",),
+        "activation": "source",
+        "budget": 2,
+        "tool_scope": (),
+        "labels": ("plugin:plan.compile", skill.name),
+        "context_asset_ids": (skill.id,),
+        "worker_capabilities": ("planning.compile",),
+        "worker_pools": ("orchestrator",),
+        "delegation_capabilities": ("text.extract", "reasoning.deep"),
+        "delegation_pools": ("economy", "advanced"),
+        "origin": "plugin",
+    }
+    contract = Contract(id=hash_contract_current(**fields), **fields)
+    blueprint = json.dumps(
+        {
+            "contracts": [
+                {
+                    "name": "extract",
+                    "description": "Extract evidence from the source.",
+                    "inputs": ["source"],
+                    "outputs": ["final_report"],
+                    "activation": "source",
+                    "budget": 1,
+                    "tool_scope": [],
+                    "labels": [skill.name],
+                    "capability_needs": ["text.extract"],
+                    "pool_needs": ["economy"],
+                }
+            ]
+        }
+    )
+
+    effects = compile_planning_blueprint(
+        contract,
+        {"planning_blueprint": blueprint},
+        allowance=2,
+        context_assets=(skill,),
+    )
+    child = contract_from_dict(effects[0].payload["contract"])
+
+    assert child.worker_capabilities == ("text.extract",)
+    assert child.worker_pools == ("economy",)
+    assert child.labels == (skill.name,)
+    assert child.context_asset_ids == (skill.id,)
+    assert child.id.startswith("task:v4:")
+
+
+def test_compile_rejects_execution_requirement_outside_delegation_scope():
+    fields = {
+        "name": "compile",
+        "description": json.dumps({"allowed_inputs": ["source"]}),
+        "inputs": ("source",),
+        "outputs": ("final_report",),
+        "activation": "source",
+        "budget": 1,
+        "tool_scope": (),
+        "labels": ("plugin:plan.compile",),
+        "delegation_capabilities": ("text.extract",),
+        "origin": "plugin",
+    }
+    contract = Contract(id=hash_contract_current(**fields), **fields)
+    blueprint = json.dumps(
+        {
+            "contracts": [
+                {
+                    "name": "synthesize",
+                    "description": "Synthesize the final report.",
+                    "inputs": ["source"],
+                    "outputs": ["final_report"],
+                    "activation": "source",
+                    "budget": 1,
+                    "tool_scope": [],
+                    "labels": [],
+                    "capability_needs": ["reasoning.deep"],
+                }
+            ]
+        }
+    )
+
+    with pytest.raises(PlanningCompileError) as raised:
+        compile_planning_blueprint(
+            contract,
+            {"planning_blueprint": blueprint},
+            allowance=1,
+        )
+
+    assert "capability_needs" in raised.value.fields
+
+
 def test_continuation_plugin_proposes_one_ordinary_task_and_registry_is_explicit():
     parent = _parent()
     source = method_contract(
@@ -342,6 +443,55 @@ def test_continuation_plugin_proposes_one_ordinary_task_and_registry_is_explicit
     assert decision.accepted is True
     assert len(store.get_all_contracts()) == 2
 
+
+def test_parallel_tool_method_compiles_independent_tasks_and_boolean_join():
+    fields = {
+        "name": "research",
+        "description": "Research two independent topics.",
+        "inputs": ("source",),
+        "outputs": ("final_report",),
+        "activation": "source",
+        "budget": 4,
+        "tool_scope": ("search", "lookup"),
+        "labels": (),
+        "worker_capabilities": ("reasoning.deep",),
+        "worker_pools": ("advanced",),
+        "delegation_capabilities": ("text.extract",),
+        "delegation_pools": ("economy",),
+        "origin": "human",
+    }
+    parent = Contract(id=hash_contract_current(**fields), **fields)
+    action = WorkerAction(
+        type="parallel_tool",
+        payload={
+            "calls": [
+                {"id": "a", "name": "search", "args": {"q": "alpha"}},
+                {"id": "b", "name": "lookup", "args": {"q": "beta"}},
+            ],
+            "join": "all",
+        },
+    )
+
+    proposal = TaskDelegationPlugin().propose_claimed(
+        parent, action, allowance=parent.budget
+    )
+    contracts = [
+        contract_from_dict(effect.payload["contract"])
+        for effect in proposal.effects
+    ]
+    tools, continuation = contracts[:-1], contracts[-1]
+
+    assert len(tools) == 2
+    assert all(item.parent_id == parent.id for item in contracts)
+    assert all(item.worker_capabilities == ("tool-execution",) for item in tools)
+    assert all(item.worker_pools == () for item in tools)
+    assert {json.loads(item.description)["method"] for item in tools} == {
+        "parallel_tool_item"
+    }
+    assert set(continuation.inputs) == {item.outputs[0] for item in tools}
+    assert continuation.activation == " AND ".join(continuation.inputs)
+    assert continuation.outputs == parent.outputs
+    assert sum(item.budget for item in contracts) == parent.budget
 
 @pytest.mark.parametrize("action_type", ["tool", "fail"])
 def test_claimed_action_plugin_proposes_ordinary_task_without_store(action_type):

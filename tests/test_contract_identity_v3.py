@@ -70,7 +70,7 @@ def test_method_contract_normalizes_self_authority_and_inherits_security():
 
     assert child.id.startswith("task:v3:")
     assert contract_identity_v3(child) == child.id
-    assert child.worker_capabilities == (*parent.worker_capabilities, "tool-execution")
+    assert child.worker_capabilities == ("tool-execution",)
     assert child.worker_pools == parent.worker_pools
     assert child.sensitive_input_policy == parent.sensitive_input_policy
     assert "_tool_capability_lookup" in child.inputs

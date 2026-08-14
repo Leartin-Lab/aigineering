@@ -78,6 +78,8 @@ def contract_to_canonical(contract: Contract) -> str:
         "context_asset_ids": sorted(contract.context_asset_ids),
         "worker_capabilities": sorted(contract.worker_capabilities),
         "worker_pools": sorted(contract.worker_pools),
+        "delegation_capabilities": sorted(contract.delegation_capabilities),
+        "delegation_pools": sorted(contract.delegation_pools),
         "origin": contract.origin,
         "minting_authority": sorted(contract.minting_authority),
         "sensitive_input_policy": (
@@ -109,6 +111,8 @@ def contract_to_dict(contract: Contract) -> dict[str, Any]:
         "context_asset_ids": contract.context_asset_ids,
         "worker_capabilities": contract.worker_capabilities,
         "worker_pools": contract.worker_pools,
+        "delegation_capabilities": contract.delegation_capabilities,
+        "delegation_pools": contract.delegation_pools,
         "origin": contract.origin,
         "minting_authority": contract.minting_authority,
         "sensitive_input_policy": (

@@ -226,6 +226,7 @@ def compile_worker_envelope(
                     contract,
                     (parsed_envelope.parsed_action or {}).get("outputs", {}),
                     allowance=contract.budget if allowance is None else allowance,
+                    context_assets=tuple(disclosed_assets),
                 )
             except PlanningCompileError as exc:
                 fields = ",".join(exc.fields) or "unknown"

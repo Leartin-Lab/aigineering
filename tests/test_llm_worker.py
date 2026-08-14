@@ -996,7 +996,7 @@ def test_provider_tool_call_mapping_preserves_authority():
 
 
 def test_multiple_tool_calls_in_one_response():
-    """Multiple tool calls fail visibly instead of emitting unsupported /multi."""
+    """Multiple tool calls compile to one parallel task-publication method."""
 
     def transport(url, headers, payload):
         return {
@@ -1037,13 +1037,22 @@ def test_multiple_tool_calls_in_one_response():
     worker = LLMWorker(model="test-model", transport=transport)
     candidate = worker.invoke(_min_contract(), [])
 
-    assert candidate.raw_output.startswith("/fail ")
-    body = json.loads(candidate.raw_output.removeprefix("/fail ").strip())
-    assert body["proposed_tools"] == ["search", "lookup", "fetch"]
+    assert candidate.raw_output.startswith("/parallel_tool ")
+    body = json.loads(candidate.raw_output.removeprefix("/parallel_tool ").strip())
+    assert [call["name"] for call in body["calls"]] == [
+        "search",
+        "lookup",
+        "fetch",
+    ]
+    assert body["join"] == "all"
     assert candidate.parsed_action is not None
-    assert candidate.parsed_action["type"] == "fail"
+    assert candidate.parsed_action["type"] == "parallel_tool"
     payload = dict(candidate.parsed_action["payload"])
-    assert payload["proposed_tools"] == ("search", "lookup", "fetch")
+    assert tuple(call["name"] for call in payload["calls"]) == (
+        "search",
+        "lookup",
+        "fetch",
+    )
 
 
 def test_no_api_key_leaked_in_error_messages():

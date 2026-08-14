@@ -49,6 +49,8 @@ class Contract:
     context_asset_ids: tuple[str, ...] = field(default_factory=tuple)
     worker_capabilities: tuple[str, ...] = field(default_factory=tuple)
     worker_pools: tuple[str, ...] = field(default_factory=tuple)
+    delegation_capabilities: tuple[str, ...] = field(default_factory=tuple)
+    delegation_pools: tuple[str, ...] = field(default_factory=tuple)
     origin: str = "human"
     minting_authority: tuple[str, ...] = field(default_factory=tuple)
     sensitive_input_policy: Optional[Mapping[str, Any]] = None
@@ -62,6 +64,10 @@ class Contract:
         object.__setattr__(self, "context_asset_ids", tuple(self.context_asset_ids))
         object.__setattr__(self, "worker_capabilities", tuple(self.worker_capabilities))
         object.__setattr__(self, "worker_pools", tuple(self.worker_pools))
+        object.__setattr__(
+            self, "delegation_capabilities", tuple(self.delegation_capabilities)
+        )
+        object.__setattr__(self, "delegation_pools", tuple(self.delegation_pools))
         object.__setattr__(self, "minting_authority", tuple(self.minting_authority))
         if self.sensitive_input_policy is not None:
             object.__setattr__(

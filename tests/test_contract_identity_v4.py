@@ -101,3 +101,29 @@ def test_v4_method_contract_commits_with_audit_method_label(temp_sqlite_store) -
     )
     assert child.context_asset_ids == (behavior.id,)
     assert runtime.accept_contract(child) == child
+
+
+def test_v5_identity_binds_execution_and_delegation_scopes(temp_sqlite_store) -> None:
+    fields = {
+        "name": "heterogeneous-root",
+        "description": "Plan work for specialized workers",
+        "inputs": (),
+        "outputs": ("result",),
+        "activation": "",
+        "budget": 5,
+        "tool_scope": (),
+        "labels": (),
+        "worker_capabilities": ("planning",),
+        "worker_pools": ("orchestrator",),
+        "delegation_capabilities": ("text.extract", "reasoning.deep"),
+        "delegation_pools": ("economy", "advanced"),
+        "origin": "human",
+    }
+    contract = Contract(id=hash_contract_current(**fields), **fields)
+
+    assert contract.id.startswith("task:v5:")
+    validate_contract_identity(contract)
+    candidate_runtime(temp_sqlite_store).accept_contract(contract)
+    assert temp_sqlite_store.get_contract(contract.id) == contract
+    temp_sqlite_store.rebuild_runtime_materializations()
+    assert temp_sqlite_store.get_contract(contract.id) == contract

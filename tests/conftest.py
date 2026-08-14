@@ -48,7 +48,7 @@ class CandidateTestRuntime:
         from aigineering.core.ids import contract_identity_v3
         from aigineering.protocol.effect_builders import contract_declaration_effect
 
-        if not contract.id.startswith(("task:v3:", "task:v4:")):
+        if not contract.id.startswith(("task:v3:", "task:v4:", "task:v5:")):
             contract = replace(contract, id=contract_identity_v3(contract))
         decision = self._publish(contract_declaration_effect(contract))
         assert decision.contract is not None

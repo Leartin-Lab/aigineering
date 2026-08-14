@@ -262,16 +262,30 @@ def _validate_claim_bound_projection(
             raise ValueError("claim-bound child widens disclosed input scope")
         if not set(contract.tool_scope) <= set(parent.tool_scope):
             raise ValueError("claim-bound child widens tool scope")
-        if not set(contract.worker_pools) <= set(parent.worker_pools):
+        parent_capability_scope = (
+            set(parent.delegation_capabilities) | set(parent.worker_capabilities)
+            if parent.id.startswith("task:v5:")
+            else set(parent.worker_capabilities)
+        )
+        parent_pool_scope = (
+            set(parent.delegation_pools) | set(parent.worker_pools)
+            if parent.id.startswith("task:v5:")
+            else set(parent.worker_pools)
+        )
+        if not set(contract.worker_pools) <= parent_pool_scope:
             raise ValueError("claim-bound child widens worker pools")
         extra_capabilities = set(contract.worker_capabilities) - set(
-            parent.worker_capabilities
+            parent_capability_scope
         )
         allowed_capabilities = (
             {"tool-execution", "mcp-execution"} if contract.tool_scope else set()
         )
         if not extra_capabilities <= allowed_capabilities:
             raise ValueError("claim-bound child widens worker capabilities")
+        if not set(contract.delegation_capabilities) <= parent_capability_scope:
+            raise ValueError("claim-bound child widens delegation capabilities")
+        if not set(contract.delegation_pools) <= parent_pool_scope:
+            raise ValueError("claim-bound child widens delegation pools")
         if not set(contract.minting_authority) <= set(parent.minting_authority):
             raise ValueError("claim-bound child widens minting authority")
         non_plugin_labels = {

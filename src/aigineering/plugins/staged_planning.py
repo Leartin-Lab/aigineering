@@ -183,6 +183,8 @@ def _stage_contract(
         "labels": labels,
         "worker_capabilities": (),
         "worker_pools": parent.worker_pools,
+        "delegation_capabilities": parent.delegation_capabilities,
+        "delegation_pools": parent.delegation_pools,
         "origin": "plugin",
         "parent_id": parent.id,
         "minting_authority": authority_templates,

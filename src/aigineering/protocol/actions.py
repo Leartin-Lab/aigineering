@@ -12,7 +12,15 @@ from aigineering.protocol.immutability import deep_freeze
 if TYPE_CHECKING:
     from aigineering.protocol.types import Candidate
 
-_SUPPORTED_ACTIONS = {"exec", "plan", "replan", "tool", "retry", "fail"}
+_SUPPORTED_ACTIONS = {
+    "exec",
+    "plan",
+    "replan",
+    "tool",
+    "parallel_tool",
+    "retry",
+    "fail",
+}
 
 
 class ActionParseError(ValueError):
@@ -82,6 +90,7 @@ def parse_method_action(candidate: "Candidate") -> WorkerAction | None:
         "plan",
         "replan",
         "tool",
+        "parallel_tool",
         "retry",
         "fail",
     }:
@@ -96,7 +105,7 @@ def parse_method_action(candidate: "Candidate") -> WorkerAction | None:
         action = parse_action(candidate.raw_output)
     except (ActionParseError, json.JSONDecodeError):
         return None
-    if action.type in {"plan", "replan", "tool", "retry", "fail"}:
+    if action.type in {"plan", "replan", "tool", "parallel_tool", "retry", "fail"}:
         return action
     return None
 

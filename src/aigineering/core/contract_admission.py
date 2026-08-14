@@ -47,10 +47,12 @@ def validate_acceptance_policy(contract: Contract) -> None:
 def validate_contract_commitment(
     contract: Contract, *, require_canonical_v3: bool = True
 ) -> None:
-    if require_canonical_v3 and not contract.id.startswith(("task:v3:", "task:v4:")):
+    if require_canonical_v3 and not contract.id.startswith(
+        ("task:v3:", "task:v4:", "task:v5:")
+    ):
         raise ValueError(
             "Candidate contracts require a canonical task:v3 identity "
-            "or canonical task:v4 identity"
+            "or newer canonical identity"
         )
     validate_contract_identity(contract)
     validate_acceptance_policy(contract)
