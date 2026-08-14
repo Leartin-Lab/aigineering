@@ -126,7 +126,7 @@ def test_tool_completion_plugin_publishes_continuation_candidate():
             worker_registration_effect(
                 WorkerRegistration(
                     "worker",
-                    capabilities=("tool-execution",),
+                    capabilities=("tool-execution", "tool:lookup"),
                     actor_id=worker_key.actor_id,
                     key_id=worker_key.key_id,
                 )

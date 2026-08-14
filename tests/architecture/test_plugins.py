@@ -476,14 +476,16 @@ def test_parallel_tool_method_compiles_independent_tasks_and_boolean_join():
         parent, action, allowance=parent.budget
     )
     contracts = [
-        contract_from_dict(effect.payload["contract"])
-        for effect in proposal.effects
+        contract_from_dict(effect.payload["contract"]) for effect in proposal.effects
     ]
     tools, continuation = contracts[:-1], contracts[-1]
 
     assert len(tools) == 2
     assert all(item.parent_id == parent.id for item in contracts)
-    assert all(item.worker_capabilities == ("tool-execution",) for item in tools)
+    assert {item.worker_capabilities for item in tools} == {
+        ("tool-execution", "tool:search"),
+        ("tool-execution", "tool:lookup"),
+    }
     assert all(item.worker_pools == () for item in tools)
     assert {json.loads(item.description)["method"] for item in tools} == {
         "parallel_tool_item"
@@ -492,6 +494,7 @@ def test_parallel_tool_method_compiles_independent_tasks_and_boolean_join():
     assert continuation.activation == " AND ".join(continuation.inputs)
     assert continuation.outputs == parent.outputs
     assert sum(item.budget for item in contracts) == parent.budget
+
 
 @pytest.mark.parametrize("action_type", ["tool", "fail"])
 def test_claimed_action_plugin_proposes_ordinary_task_without_store(action_type):

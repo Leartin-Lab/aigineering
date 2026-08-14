@@ -33,13 +33,9 @@ def contract_group() -> None:
 @click.option("--budget", type=int, default=5, help="Budget (default 5).")
 @click.option("--label", "labels", multiple=True, help="Labels (repeatable).")
 @click.option("--tool", "tool_scope", multiple=True, help="Tool scope (repeatable).")
-@click.option(
-    "--requires-capability", "worker_capabilities", multiple=True
-)
+@click.option("--requires-capability", "worker_capabilities", multiple=True)
 @click.option("--worker-pool", "worker_pools", multiple=True)
-@click.option(
-    "--delegate-capability", "delegation_capabilities", multiple=True
-)
+@click.option("--delegate-capability", "delegation_capabilities", multiple=True)
 @click.option("--delegate-pool", "delegation_pools", multiple=True)
 @click.option(
     "--sensitive-input-policy",

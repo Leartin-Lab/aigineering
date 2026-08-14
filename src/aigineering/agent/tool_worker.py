@@ -37,17 +37,36 @@ class ToolWorker:
         self,
         registry: ToolRegistry,
         worker_id: str = "tool_worker",
+        *,
+        pools: tuple[str, ...] = (),
+        capacity: int = 1,
+        profile_id: str = "tool-worker-v1",
+        routing_capabilities: tuple[str, ...] = (),
+        registration_version: str = "1",
     ) -> None:
         self._registry = registry
         self._executor = ToolExecutor(registry)
         self.worker_id = worker_id
+        self._pools = tuple(pools)
+        self._capacity = capacity
+        self._profile_id = profile_id
+        self._routing_capabilities = tuple(routing_capabilities)
+        self._registration_version = registration_version
 
     def registration(self) -> WorkerRegistration:
         """Route this Worker only to ordinary tool-execution Contracts."""
+        capabilities = (
+            "tool-execution",
+            *(f"tool:{spec.name}" for spec in self._registry.list_specs()),
+            *self._routing_capabilities,
+        )
         return WorkerRegistration(
             self.worker_id,
-            capabilities=("tool-execution",),
-            profile_id="tool-worker-v1",
+            capabilities=capabilities,
+            pools=self._pools,
+            profile_id=self._profile_id,
+            capacity=self._capacity,
+            version=self._registration_version,
         )
 
     def invoke(

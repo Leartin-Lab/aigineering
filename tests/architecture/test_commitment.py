@@ -6,6 +6,7 @@ from dataclasses import replace
 import hashlib
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier, Lock
 
 import pytest
 
@@ -1163,3 +1164,114 @@ def test_concurrent_candidate_commit_is_database_idempotent(tmp_path):
     ]
     assert len(terminals) == 1
     reopened.close()
+
+
+def test_concurrent_outputs_complete_contract_at_sqlite_commit_boundary(
+    tmp_path, monkeypatch
+):
+    """Two stale pure projections converge under SQLite's writer lock."""
+    path = tmp_path / "completion-race.db"
+    setup = SQLiteStore(str(path))
+    signer = _Signer()
+    genesis = create_genesis_manifest(
+        "completion-race",
+        (
+            ActorKey(
+                actor_id="human:owner",
+                key_id="root",
+                kind=signer.kind,
+                public_key=signer.signer_id,
+                capabilities=("asset.publish", "contract.publish"),
+            ),
+        ),
+        "policy:completion-race",
+    )
+    initialize_genesis(setup, genesis)
+    fields = {
+        "name": "two_outputs",
+        "description": "Complete only after both concurrent facts",
+        "inputs": (),
+        "outputs": ("left", "right"),
+        "activation": "",
+        "budget": 2,
+        "tool_scope": (),
+        "labels": (),
+        "origin": "human",
+    }
+    contract = Contract(id=hash_contract_v3(**fields), **fields)
+    declaration = create_candidate_proposal(
+        domain_id=genesis.id,
+        actor_id="human:owner",
+        key_id="root",
+        effects=[
+            CandidateEffect(
+                "contract.declare", {"contract": contract_to_dict(contract)}
+            )
+        ],
+        signer=signer,
+    )
+    assert (
+        CandidateCommitter(setup, setup)
+        .commit(declaration, verifier_factory=_verifier_factory)
+        .accepted
+    )
+    setup.close()
+
+    candidates = tuple(
+        create_candidate_proposal(
+            domain_id=genesis.id,
+            actor_id="human:owner",
+            key_id="root",
+            effects=[
+                CandidateEffect(
+                    "asset.propose", {"asset": {"name": name, "content": name}}
+                )
+            ],
+            signer=signer,
+        )
+        for name in contract.outputs
+    )
+    barrier = Barrier(2)
+    lock = Lock()
+    calls = 0
+    from aigineering.core import commitment as commitment_module
+
+    original_reduce = commitment_module.reduce_asset_facts
+
+    def synchronized_reduce(*args, **kwargs):
+        nonlocal calls
+        with lock:
+            calls += 1
+            synchronize = calls <= 2
+        result = original_reduce(*args, **kwargs)
+        if synchronize:
+            barrier.wait(timeout=2)
+        return result
+
+    monkeypatch.setattr(commitment_module, "reduce_asset_facts", synchronized_reduce)
+
+    def commit_one(candidate):
+        store = SQLiteStore(str(path))
+        try:
+            return CandidateCommitter(store, store).commit(
+                candidate, verifier_factory=_verifier_factory
+            )
+        finally:
+            store.close()
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        decisions = list(pool.map(commit_one, candidates))
+
+    reopened = SQLiteStore(str(path))
+    terminals = [
+        record
+        for _, record in reopened.scan_runtime_records(record_type="lifecycle.terminal")
+        if record.payload.get("contract_id") == contract.id
+    ]
+    traces = reopened.get_by_contract(contract.id)
+    reopened.close()
+
+    assert all(decision.accepted for decision in decisions)
+    assert len(terminals) == 1
+    assert terminals[0].payload["terminal"] == "complete"
+    assert [entry.event_type for entry in traces].count("complete") == 1

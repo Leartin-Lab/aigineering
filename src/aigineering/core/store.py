@@ -83,7 +83,7 @@ class StoreProtocol(Protocol):
         self, *, after_revision: int = 0, record_type: str | None = None
     ) -> list[tuple[int, RuntimeRecord]]: ...
     def get_runtime_revision(self) -> int: ...
-    def commit_ingress_batch(self, *args, **kwargs) -> None: ...
+    def commit_ingress_batch(self, *args, **kwargs) -> tuple[tuple, tuple]: ...
     def commit_replacement_claim(self, claim, trace_entry) -> None: ...
 
 
@@ -365,7 +365,7 @@ class MemoryStore(_ProjectionIndexMixin):
         candidate_actor_id: str = "",
         candidate_key_id: str = "",
         candidate_id: str = "",
-    ) -> None:
+    ) -> tuple[tuple, tuple]:
         """Apply one ingress batch with rollback-equivalent memory semantics."""
         if claim_binding is not None:
             raise TypeError(
@@ -376,7 +376,7 @@ class MemoryStore(_ProjectionIndexMixin):
             and record.payload.get("candidate_id") == candidate_id
             for _, record in self.scan_runtime_records()
         ):
-            return
+            return (), ()
         del candidate_actor_id, candidate_key_id, candidate_id
         del trace_entries
         if any(record.record_type == "output.qualified" for record in runtime_records):
@@ -419,6 +419,7 @@ class MemoryStore(_ProjectionIndexMixin):
             for record in runtime_records:
                 self.append_runtime_record(record)
             committed = True
+            return (), ()
         finally:
             if not committed:
                 (

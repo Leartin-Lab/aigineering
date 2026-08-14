@@ -211,7 +211,7 @@ class CandidateCommitter:
             ),
         )
         try:
-            self._store.commit_ingress_batch(
+            derived_traces, derived_records = self._store.commit_ingress_batch(
                 accepted_assets=list(decision.assets),
                 trace_entries=list(decision.trace_entries),
                 contracts=decision.contracts,
@@ -221,6 +221,12 @@ class CandidateCommitter:
                 candidate_key_id=candidate.key_id,
                 candidate_id=candidate.id,
             )
+            if derived_traces or derived_records:
+                decision = replace(
+                    decision,
+                    trace_entries=decision.trace_entries + tuple(derived_traces),
+                    runtime_records=decision.runtime_records + tuple(derived_records),
+                )
         except ClaimBindingConflict as exc:
             receipt = next(
                 record

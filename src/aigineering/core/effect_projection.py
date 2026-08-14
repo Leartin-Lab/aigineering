@@ -278,7 +278,13 @@ def _validate_claim_bound_projection(
             parent_capability_scope
         )
         allowed_capabilities = (
-            {"tool-execution", "mcp-execution"} if contract.tool_scope else set()
+            {
+                "tool-execution",
+                "mcp-execution",
+                *(f"tool:{name}" for name in contract.tool_scope),
+            }
+            if contract.tool_scope
+            else set()
         )
         if not extra_capabilities <= allowed_capabilities:
             raise ValueError("claim-bound child widens worker capabilities")

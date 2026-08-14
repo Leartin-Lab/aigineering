@@ -86,8 +86,7 @@ def _parallel_tool_contracts(
         json.dumps(normalized, sort_keys=True, ensure_ascii=False)
     )[:20]
     tool_tasks = tuple(
-        _parallel_tool_item_contract(parent, call, batch_key)
-        for call in normalized
+        _parallel_tool_item_contract(parent, call, batch_key) for call in normalized
     )
     observations = tuple(task.outputs[0] for task in tool_tasks)
     used_tools = {str(call["name"]) for call in normalized}
@@ -131,9 +130,7 @@ def _parallel_tool_item_contract(
 ) -> Contract:
     base = _claimed_method_contract(
         parent,
-        WorkerAction(
-            type="tool", payload={"name": call["name"], "args": call["args"]}
-        ),
+        WorkerAction(type="tool", payload={"name": call["name"], "args": call["args"]}),
     )
     description = json.loads(base.description)
     description["method"] = "parallel_tool_item"

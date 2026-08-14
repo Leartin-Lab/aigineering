@@ -155,5 +155,5 @@ def test_slice_derivation_reconstructs_after_sqlite_reopen(tmp_path: Path):
 
     assert restored == [claim]
     assert verify_replacement_claims(reopened, restored)["pass_count"] == 1
-    assert reopened.schema_version == 16
+    assert reopened.schema_version == 17
     reopened.close()

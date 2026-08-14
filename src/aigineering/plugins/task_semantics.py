@@ -74,13 +74,19 @@ def method_contract(parent: Contract, action: WorkerAction) -> Contract:
     labels = _append_method_label(parent.labels, action.type)
     worker_capabilities = list(parent.worker_capabilities)
     if action.type == "tool":
+        tool_name = action.payload.get("name")
         execution_capability = (
             "mcp-execution"
-            if isinstance(action.payload.get("name"), str)
-            and action.payload["name"].startswith("mcp:")
+            if isinstance(tool_name, str) and tool_name.startswith("mcp:")
             else "tool-execution"
         )
         worker_capabilities = [execution_capability]
+        if (
+            isinstance(tool_name, str)
+            and tool_name
+            and not tool_name.startswith("mcp:")
+        ):
+            worker_capabilities.append(f"tool:{tool_name}")
 
     context_name = f"_method_ctx_{parent.id}"
     authority_templates: tuple[str, ...] = (
@@ -486,9 +492,7 @@ def contracts_from_plan_asset(
         labels = _string_list(raw.get("labels", []))
         capability_needs = _string_list(raw.get("capability_needs", []))
         pool_needs = _string_list(raw.get("pool_needs", []))
-        delegation_capabilities = _string_list(
-            raw.get("delegation_capabilities", [])
-        )
+        delegation_capabilities = _string_list(raw.get("delegation_capabilities", []))
         delegation_pools = _string_list(raw.get("delegation_pools", []))
 
         try:

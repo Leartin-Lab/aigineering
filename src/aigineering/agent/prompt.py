@@ -126,7 +126,7 @@ def _method_result_instructions(contract: Contract) -> list[str]:
         "Planner result protocol (required):",
         f"- Return /exec with exactly one output named `{output}`.",
         "- Its content must be one JSON object with a `contracts` array.",
-            "- Each child may contain only: name, description, inputs, outputs, activation, budget, tool_scope, labels, capability_needs, pool_needs, delegation_capabilities, delegation_pools.",
+        "- Each child may contain only: name, description, inputs, outputs, activation, budget, tool_scope, labels, capability_needs, pool_needs, delegation_capabilities, delegation_pools.",
         "- Use only disclosed input names, declared parent tools, and simple unqualified asset names in activation.",
         "- Activation is a boolean expression: join multiple required inputs with uppercase AND (for example `input_a AND input_b`); never use commas, JSON lists, or whitespace as an operator.",
         "- The method description lists parent_outputs. At least one child must produce every parent output; use intermediate outputs only when a later child consumes them.",

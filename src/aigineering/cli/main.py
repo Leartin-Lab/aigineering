@@ -34,7 +34,9 @@ from aigineering.cli.capability import capability_group  # noqa: E402
 from aigineering.cli.domain import domain_group  # noqa: E402
 from aigineering.cli.cache import cache_group  # noqa: E402
 from aigineering.cli.graph import graph_group  # noqa: E402
+from aigineering.cli.fleet import fleet_group  # noqa: E402
 
+cli.add_command(fleet_group)
 cli.add_command(cache_group)
 cli.add_command(graph_group)
 cli.add_command(serve)

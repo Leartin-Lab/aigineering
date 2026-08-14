@@ -61,7 +61,7 @@ def test_tool_worker_effect_is_observed_candidate_fact():
         is None
     )
     worker = ToolWorker(registry, worker_id="tool_worker:local")
-    assert worker.registration().capabilities == ("tool-execution",)
+    assert worker.registration().capabilities == ("tool-execution", "tool:lookup")
     host = hosted_worker(
         store,
         worker,

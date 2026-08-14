@@ -1795,21 +1795,21 @@ class SQLiteStore:
         candidate_actor_id: str = "",
         candidate_key_id: str = "",
         candidate_id: str = "",
-    ) -> None:
+    ) -> tuple[tuple[TraceEntry, ...], tuple[RuntimeRecord, ...]]:
         with self._conn:
             # Conditional allowance/key/claim checks must observe the same
             # single-writer snapshot as their inserts, even for batches that
             # contain no Contract or Asset row to acquire the lock first.
             self._conn.execute("BEGIN IMMEDIATE")
             if self._candidate_already_committed(candidate_id):
-                return
+                return (), ()
             if claim_binding is not None and self._validate_claim_binding(
                 claim_binding,
                 candidate_actor_id,
                 candidate_key_id,
                 candidate_id,
             ):
-                return
+                return (), ()
             declarations = ((contract,) if contract is not None else ()) + tuple(
                 contracts
             )
@@ -1819,6 +1819,15 @@ class SQLiteStore:
             self._validate_allowance_records(runtime_records)
             self._insert_ingress_assets(accepted_assets)
             check_crash_point("after_asset_before_trace")
+            derived_traces, derived_records = self._commit_time_asset_consequences(
+                accepted_assets,
+                declarations,
+                trace_entries,
+                runtime_records,
+            )
+            trace_entries = list(trace_entries) + list(derived_traces)
+            runtime_records = runtime_records + derived_records
+            self._validate_allowance_records(derived_records)
             if reducer_callback is not None:
                 reducer_traces: list[TraceEntry] = reducer_callback()
                 trace_entries = list(trace_entries) + reducer_traces
@@ -1844,6 +1853,57 @@ class SQLiteStore:
                     candidate_id,
                     runtime_records,
                 )
+            return derived_traces, derived_records
+
+    def _commit_time_asset_consequences(
+        self,
+        accepted_assets: list[Asset],
+        declarations: tuple[Contract, ...],
+        trace_entries: list[TraceEntry],
+        runtime_records: tuple[RuntimeRecord, ...],
+    ) -> tuple[tuple[TraceEntry, ...], tuple[RuntimeRecord, ...]]:
+        """Close races between pure reduction and serialized commitment.
+
+        Candidate reduction normally derives these facts before the write
+        transaction.  A concurrent Candidate may commit another output before
+        this transaction acquires SQLite's writer lock.  Re-running the same
+        pure reducer against the transaction-visible snapshot materializes
+        only consequences that the earlier snapshot could not observe.
+        """
+        if not accepted_assets:
+            return (), ()
+
+        from aigineering.core.causal_allowance import materialize_terminal_allowance
+        from aigineering.core.fact_materialization import (
+            reduce_asset_facts,
+            trace_records,
+        )
+
+        projected_traces, projected_records = reduce_asset_facts(
+            self,
+            self,
+            accepted_assets,
+            pending_contracts=declarations,
+        )
+        known_trace_ids = {entry.id for entry in trace_entries}
+        known_record_ids = {record.id for record in runtime_records}
+        new_traces = tuple(
+            entry for entry in projected_traces if entry.id not in known_trace_ids
+        )
+        candidates = tuple(projected_records) + trace_records(new_traces)
+        new_records = tuple(
+            record for record in candidates if record.id not in known_record_ids
+        )
+        allowance_records = materialize_terminal_allowance(
+            self,
+            declarations,
+            runtime_records + new_records,
+        )
+        known_record_ids.update(record.id for record in new_records)
+        new_records += tuple(
+            record for record in allowance_records if record.id not in known_record_ids
+        )
+        return new_traces, new_records
 
     def _candidate_already_committed(self, candidate_id: str) -> bool:
         return bool(

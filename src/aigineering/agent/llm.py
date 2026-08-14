@@ -47,6 +47,7 @@ class LLMConfig:
     worker_pools: frozenset[str] = field(default_factory=frozenset)
     profile_id: str = "openai-compatible-v1"
     capacity: int = 1
+    registration_version: str = "1"
 
 
 class ProviderError(Exception):
@@ -78,6 +79,7 @@ class LLMWorker:
         worker_pools: frozenset[str] | None = None,
         profile_id: str | None = None,
         capacity: int | None = None,
+        registration_version: str | None = None,
     ) -> None:
         if config is not None:
             self.model = config.model
@@ -111,6 +113,11 @@ class LLMWorker:
                 profile_id if profile_id is not None else config.profile_id
             )
             self._capacity = capacity if capacity is not None else config.capacity
+            self._registration_version = (
+                registration_version
+                if registration_version is not None
+                else config.registration_version
+            )
         else:
             self.model = model
             self.api_key = (
@@ -128,6 +135,7 @@ class LLMWorker:
             self._worker_pools = worker_pools or frozenset()
             self.profile_id = profile_id or "openai-compatible-v1"
             self._capacity = capacity if capacity is not None else 1
+            self._registration_version = registration_version or "1"
 
         if self._capacity < 1:
             raise ValueError("capacity must be at least 1")
@@ -222,6 +230,7 @@ class LLMWorker:
             pools=tuple(self._worker_pools),
             profile_id=self.profile_id,
             capacity=self._capacity,
+            version=self._registration_version,
         )
 
     def _call_with_retry(
