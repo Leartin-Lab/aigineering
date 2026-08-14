@@ -19,6 +19,7 @@ from aigineering.protocol.runtime_record import RuntimeRecord, create_runtime_re
 
 CANDIDATE_PROTOCOL_VERSION = 1
 MAX_SAFE_JSON_INTEGER = (1 << 53) - 1
+WORKER_RAW_OUTPUT_METADATA_KEY = "_aigineering_worker_raw_output"
 
 
 def _validate_signed_json(value: Any, *, path: str) -> None:
@@ -430,17 +431,31 @@ def candidate_received_record(
         verifier_factory=verifier_factory,
         actor_keys=actor_keys,
     )
+    metadata = deep_thaw(candidate.metadata)
+    raw_output = metadata.pop(WORKER_RAW_OUTPUT_METADATA_KEY, "")
+    payload = {
+        "actor_id": candidate.actor_id,
+        "candidate_id": candidate.id,
+        "domain_id": candidate.domain_id,
+        "effect_types": [effect.effect_type for effect in candidate.effects],
+        "key_id": candidate.key_id,
+        "metadata": metadata,
+        "signature": candidate.signature,
+        "signature_kind": candidate.signature_kind,
+    }
+    if candidate.claim_binding is not None:
+        payload["contract_id"] = candidate.claim_binding.contract_id
+        payload["claim_id"] = candidate.claim_binding.claim_id
+        payload["raw_output"] = str(raw_output)
     return create_runtime_record(
         "candidate.received",
-        {
-            "actor_id": candidate.actor_id,
-            "candidate_id": candidate.id,
-            "domain_id": candidate.domain_id,
-            "effect_types": [effect.effect_type for effect in candidate.effects],
-            "key_id": candidate.key_id,
-            "metadata": deep_thaw(candidate.metadata),
-            "signature": candidate.signature,
-            "signature_kind": candidate.signature_kind,
-        },
+        payload,
         causal_parents=candidate.causal_parents,
     )
+
+
+def candidate_usage_metadata(candidate: CandidateProposal) -> dict[str, Any]:
+    """Return operator usage metadata without internal replay evidence."""
+    metadata = deep_thaw(candidate.metadata)
+    metadata.pop(WORKER_RAW_OUTPUT_METADATA_KEY, None)
+    return metadata

@@ -117,11 +117,19 @@ def _local_root_publisher(store) -> tuple[GenesisManifest, CandidatePublisher]:
     return genesis, CandidatePublisher(store, store, genesis, actor_key, signer)
 
 
-def ensure_local_worker_host(store, worker):
+def ensure_local_worker_host(
+    store, worker, *, effect_capabilities: tuple[str, ...] = ()
+):
     """Bind a local execution adapter to one durable delegated actor key."""
     genesis, authority = _local_root_publisher(store)
     worker_id = str(worker.worker_id)
-    key_suffix = compute_content_hash(worker_id)[:16]
+    effect_capabilities = tuple(sorted(set(effect_capabilities)))
+    key_identity = (
+        worker_id
+        if not effect_capabilities
+        else f"{worker_id}:{','.join(effect_capabilities)}"
+    )
+    key_suffix = compute_content_hash(key_identity)[:16]
     key_id = f"worker-{key_suffix}"
     path = actor_key_path().parent / f"{key_id}.ed25519"
     worker_signer = _load_or_create_signer(path)
@@ -130,7 +138,7 @@ def ensure_local_worker_host(store, worker):
         key_id,
         worker_signer.kind,
         worker_signer.signer_id,
-        ("worker.submit",),
+        ("worker.submit", *effect_capabilities),
     )
 
     return authorize_worker_host(worker, genesis, actor_key, worker_signer, authority)

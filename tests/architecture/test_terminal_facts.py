@@ -213,6 +213,48 @@ def test_atomic_fact_batch_does_not_cancel_child_satisfied_by_same_batch():
     assert ("child_cancelled", child.id) not in terminals
 
 
+def test_completed_planning_stage_keeps_ancestor_acceptance_verifier_reachable():
+    store = MemoryStore()
+    root = replace(
+        build_control_plane_contract(name="root", outputs=("report",), budget=8),
+        acceptance_policy={
+            "mode": "independent",
+            "policy_version": "review-v1",
+            "required_attestations": 1,
+            "verifier_capabilities": ("report.verify",),
+        },
+    )
+    root = replace(root, id=contract_identity_v3(root))
+    compiler = replace(
+        build_control_plane_contract(name="compiler", outputs=("report",), budget=6),
+        parent_id=root.id,
+    )
+    compiler = replace(compiler, id=contract_identity_v3(compiler))
+    verifier = replace(
+        build_control_plane_contract(name="verifier", outputs=("receipt",), budget=1),
+        parent_id=compiler.id,
+        inputs=("report",),
+        worker_capabilities=("report.verify",),
+    )
+    verifier = replace(verifier, id=contract_identity_v3(verifier))
+    for contract in (root, compiler, verifier):
+        store.add_contract(contract)
+    report = Asset(
+        id="asset:report",
+        name="report",
+        content="result",
+        created_by=compiler.id,
+        content_hash="report-hash",
+    )
+
+    events = FactReducer(store, MemoryTraceStore()).on_assets_created((report,))
+
+    terminals = [(event.type, event.contract_id) for event in events]
+    assert ("contract_complete", compiler.id) in terminals
+    assert ("contract_complete", root.id) not in terminals
+    assert ("child_cancelled", verifier.id) not in terminals
+
+
 def test_fact_reducer_does_not_repeat_a_recorded_terminal():
     store = MemoryStore()
     contract = build_control_plane_contract(

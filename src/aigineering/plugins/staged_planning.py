@@ -51,6 +51,7 @@ class StagedPlanningPlugin:
         if request.allowance < 3:
             raise ValueError("staged planning requires at least 3 allowance units")
         parent = request.parent
+        recovery_reserve = min(3, request.allowance - 3)
         invocation = _invocation_id(request, self.mode)
         draft_output = f"{self.mode}_draft_{invocation}"
         dependencies_output = f"{self.mode}_dependencies_{invocation}"
@@ -100,6 +101,14 @@ class StagedPlanningPlugin:
             minting_authority=(),
             tool_scope=(),
         )
+        compile_policy = dict(policy)
+        parent_shapes = (
+            parent.acceptance_policy.get("output_shapes", {})
+            if parent.acceptance_policy is not None
+            else {}
+        )
+        if parent_shapes:
+            compile_policy["output_shapes"] = deep_thaw(parent_shapes)
         compile_contract = _stage_contract(
             parent,
             mode=self.mode,
@@ -108,6 +117,11 @@ class StagedPlanningPlugin:
             description={
                 "allowed_inputs": sorted(
                     request.allowed_input_names or frozenset(parent.inputs)
+                ),
+                "parent_acceptance_policy": (
+                    deep_thaw(parent.acceptance_policy)
+                    if parent.acceptance_policy is not None
+                    else None
                 ),
                 "required_outputs": list(parent.outputs),
                 "stage": "compile",
@@ -122,8 +136,8 @@ class StagedPlanningPlugin:
             ),
             outputs=parent.outputs,
             activation=f"{draft_output} AND {dependencies_output}",
-            acceptance_policy=policy,
-            budget=request.allowance - 2,
+            acceptance_policy=compile_policy,
+            budget=request.allowance - 2 - recovery_reserve,
             minting_authority=tuple(
                 output
                 for output in parent.outputs

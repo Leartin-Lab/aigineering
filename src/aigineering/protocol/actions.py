@@ -20,6 +20,7 @@ _SUPPORTED_ACTIONS = {
     "parallel_tool",
     "retry",
     "fail",
+    "attest",
 }
 
 
@@ -54,7 +55,11 @@ def parse_action(raw_output: str) -> WorkerAction:
 
     payload = _parse_payload(body.strip())
     if action_type == "exec":
-        return WorkerAction(type=action_type, outputs=_parse_exec_outputs(payload))
+        outputs = _parse_exec_outputs(payload)
+        nested = _unwrap_single_method_output(outputs)
+        if nested is not None:
+            return nested
+        return WorkerAction(type=action_type, outputs=outputs)
     return WorkerAction(type=action_type, payload=dict(payload))
 
 
@@ -132,6 +137,27 @@ def _parse_exec_outputs(payload: Mapping[str, Any]) -> dict[str, str]:
             raise ActionParseError("/exec output content must be non-empty strings")
         outputs[name.strip()] = content.strip()
     return outputs
+
+
+def _unwrap_single_method_output(outputs: Mapping[str, str]) -> WorkerAction | None:
+    """Recover one unambiguous method action accidentally wrapped in `/exec`.
+
+    Some chat adapters quote a requested action as the sole key/value pair of
+    an exec object (for example ``{"/tool {\"name\"": "\"lookup\", ...}"}``).
+    Reconstruct only a syntactically valid, supported non-exec action.  This is
+    a wire normalization; malformed or ambiguous payloads remain rejected.
+    """
+    if len(outputs) != 1:
+        return None
+    name, content = next(iter(outputs.items()))
+    supported = tuple(f"/{action} " for action in sorted(_SUPPORTED_ACTIONS - {"exec"}))
+    if not name.startswith(supported):
+        return None
+    try:
+        nested = parse_action(f"{name}:{content}")
+    except (ActionParseError, json.JSONDecodeError):
+        return None
+    return nested if nested.type != "exec" else None
 
 
 def _strip_fence(raw: str) -> str:

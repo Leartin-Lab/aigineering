@@ -1,0 +1,7 @@
+name = "literature_evidence"
+version = "0.5.5"
+description = "Compile auditable literature research into independently claimable tasks."
+capabilities = ["literature.retrieve", "literature.screen", "literature.extract", "literature.synthesize", "literature.replan"]
+labels = ["ai4s", "literature"]
+trust_tier = "configured"
+content_file = "SKILL.md"

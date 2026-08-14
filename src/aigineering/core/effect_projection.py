@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from aigineering.core.effect_projectors import BUILTIN_EFFECTS, EffectProjection
 from aigineering.core.asset_graph_facts import project_new_graph_assets
+from aigineering.core.acceptance import validate_output_shape
 from aigineering.core.authority import matched_reserved_prefix
 from aigineering.core.causal_allowance import project_contract_allowance_records
 from aigineering.core.fact_materialization import asset_committed_record
@@ -193,9 +194,17 @@ def _validate_claim_bound_effects(
         "asset.content.publish",
         "asset.definition.publish",
     }
-    valid_output = effect_types == {"asset.propose"} or (
-        effect_types <= graph_effects and "asset.assert" in effect_types
+    output_effect_types = effect_types - {"asset.attest"}
+    valid_output = output_effect_types == {"asset.propose"} or (
+        output_effect_types <= graph_effects and "asset.assert" in output_effect_types
     )
+    if parent.origin == "recovery" and parent.tool_scope and valid_output:
+        raise ValueError(
+            "tool recovery cannot publish outputs before its remaining tool scope "
+            "is compiled into tool observations"
+        )
+    if "asset.attest" in effect_types and "asset.attest" not in actor_capabilities:
+        raise ValueError("claim-bound attestation actor lacks 'asset.attest'")
     if not valid_output and effect_types != {"contract.declare"}:
         raise ValueError("claim-bound Candidate contains an unsupported effect")
     return parent
@@ -237,6 +246,11 @@ def _validate_claim_bound_projection(
             raise ValueError(
                 "claim-bound output must satisfy exactly all declared outputs"
             )
+        if parent.acceptance_policy is not None:
+            for asset in assets:
+                validate_output_shape(
+                    parent.acceptance_policy, asset.name, asset.content
+                )
         return
     if not contracts:
         raise ValueError("claim-bound expansion produced no Contracts")

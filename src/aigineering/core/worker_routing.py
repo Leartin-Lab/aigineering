@@ -14,6 +14,9 @@ from aigineering.protocol.runtime_record import RuntimeRecord, create_runtime_re
 from aigineering.core.record_conflict import ImmutableRecordConflict
 
 
+EXCLUSIVE_EXECUTION_CAPABILITIES = frozenset({"tool-execution", "mcp-execution"})
+
+
 @dataclass(frozen=True)
 class WorkerRegistration:
     """Trusted description of one execution worker.
@@ -108,6 +111,9 @@ def registration_is_replay(
 def is_eligible(contract: Contract, worker: WorkerRegistration) -> bool:
     """Return whether *worker* satisfies all hard routing constraints."""
     if not worker.enabled or worker.active_claims >= worker.capacity:
+        return False
+    exclusive = set(worker.capabilities) & EXCLUSIVE_EXECUTION_CAPABILITIES
+    if exclusive and not exclusive.intersection(contract.worker_capabilities):
         return False
     if not set(contract.worker_capabilities).issubset(worker.capabilities):
         return False

@@ -40,6 +40,8 @@ class LLMConfig:
     api_key: str = ""
     timeout: float = 60.0  # seconds
     max_retries: int = 3
+    max_output_tokens: int = 2048
+    thinking_mode: str = ""
     retry_backoff: float = 2.0  # multiplier
     capabilities: frozenset[str] = field(default_factory=frozenset)
     tool_definitions: list[dict[str, object]] | None = None
@@ -80,6 +82,8 @@ class LLMWorker:
         profile_id: str | None = None,
         capacity: int | None = None,
         registration_version: str | None = None,
+        max_output_tokens: int | None = None,
+        thinking_mode: str | None = None,
     ) -> None:
         if config is not None:
             self.model = config.model
@@ -92,6 +96,14 @@ class LLMWorker:
             self.base_url = config.base_url.rstrip("/")
             self._timeout = config.timeout
             self._max_retries = config.max_retries
+            self._max_output_tokens = (
+                max_output_tokens
+                if max_output_tokens is not None
+                else config.max_output_tokens
+            )
+            self._thinking_mode = (
+                thinking_mode if thinking_mode is not None else config.thinking_mode
+            )
             self._retry_backoff = config.retry_backoff
             self._capabilities = (
                 capabilities if capabilities is not None else config.capabilities
@@ -128,6 +140,10 @@ class LLMWorker:
             self.base_url = base_url.rstrip("/")
             self._timeout = timeout
             self._max_retries = max_retries if max_retries is not None else 3
+            self._max_output_tokens = (
+                max_output_tokens if max_output_tokens is not None else 2048
+            )
+            self._thinking_mode = thinking_mode or ""
             self._retry_backoff = retry_backoff if retry_backoff is not None else 2.0
             self._capabilities = capabilities or frozenset()
             self._tool_definitions = tool_definitions
@@ -139,6 +155,10 @@ class LLMWorker:
 
         if self._capacity < 1:
             raise ValueError("capacity must be at least 1")
+        if self._max_output_tokens < 1:
+            raise ValueError("max_output_tokens must be at least 1")
+        if self._thinking_mode not in {"", "enabled", "disabled"}:
+            raise ValueError("thinking_mode must be 'enabled', 'disabled', or empty")
 
         self.worker_id = worker_id or f"llm:{self._sanitize_model_name()}"
         self._transport = transport
@@ -162,6 +182,7 @@ class LLMWorker:
         payload: dict[str, object] = {
             "model": self.model,
             "temperature": 0,
+            "max_tokens": self._max_output_tokens,
             "messages": [
                 {"role": "system", "content": system_prompt()},
                 {
@@ -170,6 +191,8 @@ class LLMWorker:
                 },
             ],
         }
+        if self._thinking_mode:
+            payload["thinking"] = {"type": self._thinking_mode}
 
         if (
             "tool_calling" in self._capabilities

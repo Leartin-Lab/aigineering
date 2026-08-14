@@ -46,6 +46,7 @@ from aigineering.protocol.candidate import (
     GenesisManifest,
     VerifierFactory,
     candidate_received_record,
+    candidate_usage_metadata,
     validate_genesis_manifest,
 )
 from aigineering.protocol.runtime_record import RuntimeRecord, create_runtime_record
@@ -129,7 +130,7 @@ def reduce_candidate(
             )
             for effect_type, relation_target in projection.projected_effects
         ],
-        usage_metadata=candidate.metadata or None,
+        usage_metadata=candidate_usage_metadata(candidate) or None,
     )
     return CommitmentDecision(
         candidate_id=candidate.id,

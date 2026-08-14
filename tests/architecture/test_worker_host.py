@@ -26,7 +26,7 @@ from aigineering.protocol.effect_builders import (
     worker_registration_effect,
 )
 from aigineering.protocol.envelope import CandidateEnvelope
-from aigineering.protocol.types import Contract
+from aigineering.protocol.types import Asset, Contract
 from aigineering.protocol.runtime_record import create_runtime_record
 from aigineering.runtime import (
     WorkerInvocationError,
@@ -247,6 +247,98 @@ def test_claim_bound_candidate_replay_is_idempotent_after_claim_closes():
         if record.payload.get("candidate_id") == proposal.id
     ]
     assert len(committed) == 1
+
+
+def test_verifier_worker_compiles_exact_disclosed_asset_attestation():
+    signer = Ed25519Signer()
+    actor = ActorKey(
+        "worker:verifier",
+        "verifier-1",
+        signer.kind,
+        signer.signer_id,
+        ("asset.attest", "literature.verify", "worker.submit"),
+    )
+    genesis = create_genesis_manifest(
+        "attestation-worker", (actor,), "policy:attestation-worker"
+    )
+    host = WorkerHost(MockWorker(worker_id=actor.actor_id), genesis, actor, signer)
+    contract = Contract(
+        id="task:verifier",
+        outputs=("verification_receipt",),
+        worker_capabilities=("literature.verify",),
+    )
+    target = Asset(
+        id="asset:report",
+        name="literature_report",
+        content='{"answer":"grounded"}',
+        created_by="task:root",
+    )
+    raw = (
+        '/attest {"contract_id":"task:root",'
+        '"output_name":"literature_report","asset_id":"asset:report",'
+        '"verdict":"accepted","outputs":'
+        '{"verification_receipt":"schema and citations accepted"}}'
+    )
+    envelope = CandidateEnvelope(
+        contract_id=contract.id,
+        worker_id=actor.actor_id,
+        raw_output=raw,
+        package_id="pkg:verifier",
+        claim_id="claim:verifier",
+        claim_epoch=1,
+        idempotency_key="attest:verifier",
+    )
+
+    proposal = host.sign_envelope(
+        envelope,
+        contract=contract,
+        disclosed_assets=(target,),
+    )
+
+    assert [effect.effect_type for effect in proposal.effects][-1] == "asset.attest"
+    assert proposal.effects[-1].payload["asset_id"] == target.id
+    assert proposal.effects[-1].payload["contract_id"] == "task:root"
+    assert proposal.effects[-1].payload["policy_id"] == ""
+    assert {effect.atomic_group for effect in proposal.effects} == {
+        f"output:{contract.id}"
+    }
+
+
+def test_tool_recovery_cannot_replace_missing_observation_with_direct_output():
+    store, _, original_host = _runtime('/exec {"result":"unused"}')
+    fields = {
+        "name": "retrieve.recover",
+        "description": "Recover retrieval from a committed observation",
+        "inputs": (),
+        "outputs": ("result",),
+        "activation": "",
+        "budget": 2,
+        "tool_scope": ("search",),
+        "labels": (),
+        "origin": "recovery",
+    }
+    recovery = Contract(id=hash_contract_v3(**fields), **fields)
+    store.add_contract(recovery)
+    host = WorkerHost(
+        MockWorker(
+            {recovery.name: '/exec {"result":"fabricated"}'},
+            worker_id=original_host.worker_id,
+        ),
+        original_host.genesis,
+        original_host.actor_key,
+        original_host.signer,
+    )
+    claimed = claim_next_package(
+        store, worker_id=host.worker_id, contract_id=recovery.id
+    )
+    assert claimed is not None
+
+    with pytest.raises(WorkerInvocationError, match="worker invocation failed"):
+        execute_claimed_package(claimed, host, store)
+
+    failure = store.scan_runtime_records(record_type="worker.invocation_failed")[-1][1]
+    assert failure.payload["category"] == "worker_error:tool_observation_required"
+    assert store.get_assets_by_name("result") == []
 
 
 def test_claim_bound_graph_output_rejects_partial_endpoint_batch():

@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 
 from aigineering.core.trace import create_entry
-from aigineering.protocol.candidate import CandidateProposal
+from aigineering.protocol.candidate import CandidateProposal, candidate_usage_metadata
 from aigineering.protocol.runtime_record import RuntimeRecord, create_runtime_record
 from aigineering.protocol.types import Asset, Contract, TraceEntry
 from aigineering.protocol.wire import trace_entry_to_dict
@@ -44,13 +44,17 @@ def candidate_rejection_decision(
     receipt: RuntimeRecord,
     reason: str,
 ) -> CommitmentDecision:
+    payload = {
+        "candidate_id": candidate.id,
+        "reason": reason,
+        "effect_types": [effect.effect_type for effect in candidate.effects],
+    }
+    if candidate.claim_binding is not None:
+        payload["contract_id"] = candidate.claim_binding.contract_id
+        payload["claim_id"] = candidate.claim_binding.claim_id
     rejection = create_runtime_record(
         "candidate.rejected",
-        {
-            "candidate_id": candidate.id,
-            "reason": reason,
-            "effect_types": [effect.effect_type for effect in candidate.effects],
-        },
+        payload,
         causal_parents=(receipt.id,),
     )
     trace = candidate_trace(
@@ -64,7 +68,7 @@ def candidate_rejection_decision(
         worker_id=candidate.actor_id,
         authority_result="rejected",
         rejected_fragments=[f"[candidate_rejection] {reason}"],
-        usage_metadata=candidate.metadata or None,
+        usage_metadata=candidate_usage_metadata(candidate) or None,
     )
     return CommitmentDecision(
         candidate_id=candidate.id,

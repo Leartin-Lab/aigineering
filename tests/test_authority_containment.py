@@ -782,14 +782,14 @@ def test_scaffold_placeholder_names_compile_before_containment():
                 {
                     "name": "gather",
                     "description": "Gather notes.",
-                    "budget": 1,
+                    "budget": 2,
                     "tool_scope": ["read"],
                     "labels": ["user"],
                 },
                 {
                     "name": "draft",
                     "description": "Draft final report.",
-                    "budget": 1,
+                    "budget": 2,
                     "tool_scope": ["read"],
                     "labels": ["user"],
                 },

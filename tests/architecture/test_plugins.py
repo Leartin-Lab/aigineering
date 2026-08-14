@@ -295,6 +295,110 @@ def test_compile_rejects_labels_outside_parent_scope_before_commitment():
     assert "not a subset of parent labels" in str(raised.value)
 
 
+def test_compile_requires_verifier_child_for_independent_parent_acceptance():
+    description = {
+        "allowed_inputs": ["source"],
+        "parent_acceptance_policy": {
+            "mode": "independent",
+            "verifier_capabilities": ["literature.verify"],
+        },
+    }
+    contract = replace(
+        _parent(),
+        parent_id="task:root",
+        description=json.dumps(description),
+        worker_capabilities=("literature.verify",),
+        delegation_capabilities=("literature.verify",),
+        budget=3,
+    )
+    producer = {
+        "name": "produce",
+        "description": "Produce the report.",
+        "inputs": ["source"],
+        "outputs": ["final_report"],
+        "activation": "source",
+        "budget": 1,
+        "tool_scope": [],
+        "labels": [],
+        "capability_needs": [],
+        "pool_needs": [],
+        "delegation_capabilities": [],
+        "delegation_pools": [],
+    }
+
+    with pytest.raises(PlanningCompileError) as raised:
+        compile_planning_blueprint(
+            contract,
+            {"planning_blueprint": json.dumps({"contracts": [producer]})},
+            allowance=3,
+        )
+    assert raised.value.fields == ("acceptance_policy",)
+
+    verifier = {
+        "name": "verify",
+        "description": "Attest the exact final report Asset.",
+        "inputs": ["final_report"],
+        "outputs": ["verification_receipt"],
+        "activation": "final_report",
+        "budget": 1,
+        "tool_scope": [],
+        "labels": [],
+        "capability_needs": ["literature.verify"],
+        "pool_needs": [],
+        "delegation_capabilities": [],
+        "delegation_pools": [],
+    }
+    effects = compile_planning_blueprint(
+        contract,
+        {"planning_blueprint": json.dumps({"contracts": [producer, verifier]})},
+        allowance=3,
+    )
+    assert len(effects) == 2
+
+
+def test_contract_v5_tool_child_requires_explicit_execution_capability():
+    fields = {
+        "name": "compile",
+        "description": json.dumps({"allowed_inputs": ["source"]}),
+        "inputs": ("source",),
+        "outputs": ("final_report",),
+        "activation": "source",
+        "budget": 2,
+        "tool_scope": ("read",),
+        "labels": ("plugin:plan.compile",),
+        "delegation_capabilities": ("text.retrieve",),
+        "origin": "plugin",
+    }
+    contract = Contract(id=hash_contract_current(**fields), **fields)
+    blueprint = {
+        "contracts": [
+            {
+                "name": "retrieve",
+                "description": "Retrieve the report source.",
+                "inputs": ["source"],
+                "outputs": ["final_report"],
+                "activation": "source",
+                "budget": 2,
+                "tool_scope": ["read"],
+                "labels": [],
+                "capability_needs": [],
+                "pool_needs": [],
+                "delegation_capabilities": [],
+                "delegation_pools": [],
+            }
+        ]
+    }
+
+    with pytest.raises(PlanningCompileError) as raised:
+        compile_planning_blueprint(
+            contract,
+            {"planning_blueprint": json.dumps(blueprint)},
+            allowance=2,
+        )
+
+    assert "capability_needs" in raised.value.fields
+
+
 def test_compile_binds_skill_label_and_specialized_execution_requirement():
     skill = Asset(
         id="asset:skill-extract-v1",
@@ -393,6 +497,47 @@ def test_compile_rejects_execution_requirement_outside_delegation_scope():
         )
 
     assert "capability_needs" in raised.value.fields
+
+
+def test_compile_rejects_tool_task_without_continuation_allowance():
+    fields = {
+        "name": "compile",
+        "description": json.dumps({"allowed_inputs": ["source"]}),
+        "inputs": ("source",),
+        "outputs": ("final_report",),
+        "activation": "source",
+        "budget": 2,
+        "tool_scope": ("lookup",),
+        "labels": ("plugin:plan.compile",),
+        "origin": "plugin",
+    }
+    contract = Contract(id=hash_contract_current(**fields), **fields)
+    blueprint = json.dumps(
+        {
+            "contracts": [
+                {
+                    "name": "lookup",
+                    "description": "Call lookup and produce the report.",
+                    "inputs": ["source"],
+                    "outputs": ["final_report"],
+                    "activation": "source",
+                    "budget": 1,
+                    "tool_scope": ["lookup"],
+                    "labels": [],
+                }
+            ]
+        }
+    )
+
+    with pytest.raises(PlanningCompileError) as raised:
+        compile_planning_blueprint(
+            contract,
+            {"planning_blueprint": blueprint},
+            allowance=2,
+        )
+
+    assert "budget" in raised.value.fields
+    assert "continuation" in str(raised.value)
 
 
 def test_continuation_plugin_proposes_one_ordinary_task_and_registry_is_explicit():

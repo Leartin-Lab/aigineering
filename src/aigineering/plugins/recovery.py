@@ -29,7 +29,7 @@ def schedule_method_result_recovery(
 ) -> Contract | None:
     """Create a normal Worker task that repairs malformed method output."""
 
-    if _recovery_depth(failed_contract.name) >= 1:
+    if _recovery_depth(failed_contract.name) >= 3:
         return None
 
     output_name = _method_result_output_name(method_type, parent_id)
@@ -68,6 +68,11 @@ def schedule_method_result_recovery(
         if failed_contract.sensitive_input_policy is not None
         else None
     )
+    acceptance_policy = (
+        dict(failed_contract.acceptance_policy)
+        if failed_contract.acceptance_policy is not None
+        else None
+    )
     cid = hash_contract_current(
         name=name,
         description=description,
@@ -85,6 +90,7 @@ def schedule_method_result_recovery(
         parent_id=parent_id,
         minting_authority=authority,
         sensitive_input_policy=policy,
+        acceptance_policy=acceptance_policy,
         context_asset_ids=failed_contract.context_asset_ids,
     )
     if runtime.get_contract(cid) is not None:
@@ -109,6 +115,7 @@ def schedule_method_result_recovery(
         origin="system",
         minting_authority=authority,
         sensitive_input_policy=failed_contract.sensitive_input_policy,
+        acceptance_policy=failed_contract.acceptance_policy,
     )
     context_template = system_asset(
         name=context_name,
@@ -153,10 +160,21 @@ def schedule_projection_recovery(
 ) -> Contract | None:
     """Create a normal recovery task for rejected Worker output."""
 
-    if _recovery_depth(failed_contract.name) >= 1:
+    if _recovery_depth(failed_contract.name) >= 3:
         return None
 
     context_name = f"_fail_context_{failed_contract.id}"
+    repair_instructions = (
+        "The failed task has allowed tools. If no successful tool observation "
+        "is disclosed, request an allowed tool before producing its declared "
+        "outputs. Never invent tool-derived evidence."
+        if failed_contract.tool_scope
+        else (
+            "Return exactly /exec with only the failed contract's declared "
+            "outputs. Do not invent undeclared asset names. Use the rejection "
+            "reasons to correct the output format and names."
+        )
+    )
     context = {
         "trigger": "projection_rejected",
         "failed_contract_id": failed_contract.id,
@@ -164,11 +182,7 @@ def schedule_projection_recovery(
         "bad_worker_output": candidate_raw[:4000],
         "rejections": rejections,
         "required_outputs": list(failed_contract.outputs),
-        "instructions": (
-            "Return exactly /exec with only the failed contract's declared "
-            "outputs. Do not invent undeclared asset names. Use the rejection "
-            "reasons to correct the output format and names."
-        ),
+        "instructions": repair_instructions,
     }
     name = f"{failed_contract.name or failed_contract.id}.recover"
     description = json.dumps(
@@ -176,8 +190,7 @@ def schedule_projection_recovery(
             "recovery": "projection_repair",
             "failed_contract_id": failed_contract.id,
             "instructions": (
-                f"Read {context_name}. Repair the rejected Worker output and "
-                f"produce exactly these declared outputs: "
+                f"Read {context_name}. {repair_instructions} Required outputs: "
                 f"{list(failed_contract.outputs)}."
             ),
         },
@@ -197,13 +210,22 @@ def schedule_projection_recovery(
         if failed_contract.sensitive_input_policy is not None
         else None
     )
+    acceptance_policy = (
+        dict(failed_contract.acceptance_policy)
+        if failed_contract.acceptance_policy is not None
+        else None
+    )
+    # Repair must retain the failed task's ability to publish the same method
+    # and continuation graph. Clamping every projection recovery to one unit
+    # makes a tool-using task irrecoverable after its observation is committed.
+    recovery_budget = max(1, failed_contract.budget)
     cid = hash_contract_current(
         name=name,
         description=description,
         inputs=inputs,
         outputs=list(failed_contract.outputs),
         activation=activation,
-        budget=1,
+        budget=recovery_budget,
         tool_scope=list(failed_contract.tool_scope),
         labels=list(failed_contract.labels),
         worker_capabilities=list(failed_contract.worker_capabilities),
@@ -214,6 +236,7 @@ def schedule_projection_recovery(
         parent_id=failed_contract.parent_id,
         minting_authority=authority,
         sensitive_input_policy=policy,
+        acceptance_policy=acceptance_policy,
         context_asset_ids=failed_contract.context_asset_ids,
     )
     if runtime.get_contract(cid) is not None:
@@ -227,7 +250,7 @@ def schedule_projection_recovery(
         inputs=inputs,
         outputs=failed_contract.outputs,
         activation=activation,
-        budget=1,
+        budget=recovery_budget,
         tool_scope=failed_contract.tool_scope,
         labels=failed_contract.labels,
         context_asset_ids=failed_contract.context_asset_ids,
@@ -238,6 +261,7 @@ def schedule_projection_recovery(
         origin="recovery",
         minting_authority=authority,
         sensitive_input_policy=failed_contract.sensitive_input_policy,
+        acceptance_policy=failed_contract.acceptance_policy,
     )
     context_template = system_asset(
         name=context_name,

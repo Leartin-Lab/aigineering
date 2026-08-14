@@ -270,6 +270,7 @@ def execute_claimed_package(
     trace = trace_store if trace_store is not None else store
     keeper = _ClaimLeaseKeeper(claimed, store)
     keeper.start()
+    candidate = None
     try:
         phase = "invocation"
         try:
@@ -331,6 +332,14 @@ def execute_claimed_package(
                 status_code=status_code,
                 retryable=retryable,
                 category=category,
+                raw_output=(
+                    candidate.raw_output
+                    if isinstance(exc, WorkerExecutionError) and candidate is not None
+                    else None
+                ),
+                diagnostic=(
+                    str(exc) if isinstance(exc, WorkerExecutionError) else None
+                ),
             )
             if candidate_publishers is not None:
                 process_worker_failures(
@@ -340,13 +349,20 @@ def execute_claimed_package(
                 f"worker invocation failed with status {status_code}; "
                 "claim was released and recovery was evaluated"
             ) from None
-        except (RuntimeError, TypeError, ValueError):
+        except (RuntimeError, TypeError, ValueError) as exc:
+            candidate_processing_failure = (
+                phase in {"envelope", "candidate_encoding"} and candidate is not None
+            )
             _record_worker_invocation_failure(
                 claimed,
                 store,
                 status_code=0,
                 retryable=False,
                 category=f"worker_error:{phase}_failure",
+                raw_output=(
+                    candidate.raw_output if candidate_processing_failure else None
+                ),
+                diagnostic=(str(exc) if candidate_processing_failure else None),
             )
             if candidate_publishers is not None:
                 process_worker_failures(
@@ -538,7 +554,7 @@ def _commit_recovery_outcome(
 
 
 def process_rejected_submissions(store, *, candidate_publishers=None) -> list[str]:
-    """Replay missing recovery effects from immutable rejected projections."""
+    """Replay recovery from every durable claim-bound Candidate rejection."""
     processed: list[str] = []
     records = [record for _, record in store.scan_runtime_records()]
     candidates = {
@@ -552,21 +568,34 @@ def process_rejected_submissions(store, *, candidate_publishers=None) -> list[st
         for record in records
         if record.record_type == "lifecycle.terminal"
     }
-    recovered_projection_ids = {
-        str(record.payload["projection_id"])
+    recovered_source_ids = {
+        str(
+            record.payload.get("projection_id")
+            or record.payload.get("rejection_id")
+            or ""
+        )
         for record in records
         if record.record_type
         in {
             "projection_rejection.recovery_scheduled",
             "projection_rejection.recovery_unavailable",
+            "candidate_rejection.recovery_scheduled",
+            "candidate_rejection.recovery_unavailable",
         }
     }
     for record in records:
-        if record.record_type != "projection.decided":
+        is_projection_rejection = (
+            record.record_type == "projection.decided"
+            and record.payload.get("status") == "rejected"
+        )
+        is_candidate_rejection = record.record_type == "candidate.rejected" and bool(
+            record.payload.get("contract_id")
+        )
+        if not is_projection_rejection and not is_candidate_rejection:
             continue
         payload = record.payload
         contract_id = str(payload["contract_id"])
-        if payload["status"] != "rejected" or record.id in recovered_projection_ids:
+        if record.id in recovered_source_ids:
             continue
         contract = store.get_contract(contract_id)
         if contract is None:
@@ -581,10 +610,21 @@ def process_rejected_submissions(store, *, candidate_publishers=None) -> list[st
                 f"rejected projection {record.id!r} has no replayable raw "
                 f"Candidate evidence for {candidate_id!r}"
             )
+        rejections = (
+            [dict(rejection) for rejection in payload["rejections"]]
+            if is_projection_rejection
+            else [
+                {
+                    "category": "candidate_rejection",
+                    "name": "(candidate)",
+                    "reject_reason": str(payload.get("reason", "Candidate rejected")),
+                }
+            ]
+        )
         recovery = _schedule_rejected_recovery(
             contract,
             str(candidate.payload["raw_output"]),
-            [dict(rejection) for rejection in payload["rejections"]],
+            rejections,
             store,
             store,
             candidate_publishers=candidate_publishers,
@@ -594,11 +634,15 @@ def process_rejected_submissions(store, *, candidate_publishers=None) -> list[st
             contract,
             recovery,
             source_record=record,
-            record_prefix="projection_rejection",
-            source_field="projection_id",
+            record_prefix=(
+                "projection_rejection"
+                if is_projection_rejection
+                else "candidate_rejection"
+            ),
+            source_field="projection_id" if is_projection_rejection else "rejection_id",
             record_terminal=contract_id not in terminal_contracts,
         )
-        recovered_projection_ids.add(record.id)
+        recovered_source_ids.add(record.id)
         terminal_contracts.add(contract_id)
         processed.append(contract_id)
     return processed
@@ -748,6 +792,8 @@ def _record_worker_invocation_failure(
     status_code: int,
     retryable: bool,
     category: str,
+    raw_output: str | None = None,
+    diagnostic: str | None = None,
 ) -> None:
     existing = store.get_by_contract(claimed.contract.id)
     parent_id = existing[-1].id if existing else None
@@ -760,17 +806,22 @@ def _record_worker_invocation_failure(
         authority_result="rejected",
         budget_remaining=claimed.package.budget_remaining,
     )
+    payload = {
+        "claim_id": claimed.package.claim_id,
+        "contract_id": claimed.contract.id,
+        "package_id": claimed.package.package_id,
+        "category": category,
+        "retryable": retryable,
+        "status_code": status_code,
+        "worker_id": claimed.worker_id,
+    }
+    if raw_output is not None:
+        payload["raw_output"] = raw_output[:4000]
+    if diagnostic is not None:
+        payload["diagnostic"] = diagnostic[:1000]
     failure = create_runtime_record(
         "worker.invocation_failed",
-        {
-            "claim_id": claimed.package.claim_id,
-            "contract_id": claimed.contract.id,
-            "package_id": claimed.package.package_id,
-            "category": category,
-            "retryable": retryable,
-            "status_code": status_code,
-            "worker_id": claimed.worker_id,
-        },
+        payload,
     )
     terminal = create_terminal_record(
         claimed.contract.id,
@@ -820,14 +871,23 @@ def process_worker_failures(store, *, candidate_publishers=None) -> list[str]:
             )
         recovery = _schedule_rejected_recovery(
             contract,
-            "provider invocation failed before Candidate production",
+            str(
+                failure.payload.get(
+                    "raw_output",
+                    "provider invocation failed before Candidate production",
+                )
+            ),
             [
                 {
                     "category": str(failure.payload["category"]),
                     "name": "(provider)",
                     "reject_reason": (
-                        f"status={failure.payload['status_code']} "
-                        f"retryable={failure.payload['retryable']}"
+                        str(failure.payload["diagnostic"])
+                        if "diagnostic" in failure.payload
+                        else (
+                            f"status={failure.payload['status_code']} "
+                            f"retryable={failure.payload['retryable']}"
+                        )
                     ),
                 }
             ],

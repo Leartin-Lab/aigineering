@@ -96,7 +96,10 @@ def test_root_grant_and_staged_planning_are_reconstructed_from_facts():
     reservations = _records(store, "allowance.reserved")
     assert len(reservations) == 3
     assert {record.payload["purpose"] for record in reservations} == {"planning"}
-    assert RuntimeProjection(store, trace).contract_view(root).budget_remaining == 0
+    # Staged planning deliberately leaves three causal units available so a
+    # rejected draft, dependency analysis, or compile result can publish one
+    # repair task instead of ending the root silently.
+    assert RuntimeProjection(store, trace).contract_view(root).budget_remaining == 3
     compile_contract = next(
         contract
         for contract in stage_decision.contracts
@@ -104,7 +107,7 @@ def test_root_grant_and_staged_planning_are_reconstructed_from_facts():
     )
     assert (
         RuntimeProjection(store, trace).contract_view(compile_contract).budget_remaining
-        == 6
+        == 3
     )
 
 

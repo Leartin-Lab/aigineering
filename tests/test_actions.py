@@ -31,6 +31,28 @@ def test_parse_method_actions_as_payload_only():
     assert action.payload == {"reason": "need decomposition"}
 
 
+def test_parse_attestation_action_keeps_exact_binding_payload():
+    action = parse_action(
+        '/attest {"contract_id":"task:root","output_name":"report",'
+        '"asset_id":"asset:report","verdict":"accepted",'
+        '"outputs":{"receipt":"checked"}}'
+    )
+
+    assert action.type == "attest"
+    assert action.payload["asset_id"] == "asset:report"
+    assert action.payload["outputs"] == {"receipt": "checked"}
+
+
+def test_parse_action_unwraps_one_unambiguous_quoted_tool_action():
+    action = parse_action(
+        '/exec {"outputs": {"/tool {\\"name\\"": '
+        '"\\"openalex_search\\", \\"args\\": {\\"query\\": \\"rag\\"}}"}}'
+    )
+
+    assert action.type == "tool"
+    assert action.payload == {"name": "openalex_search", "args": {"query": "rag"}}
+
+
 def test_reject_unsupported_action():
     with pytest.raises(ActionParseError, match="unsupported"):
         parse_action('/mutate {"state": "done"}')

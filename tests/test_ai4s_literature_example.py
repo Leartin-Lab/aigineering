@@ -15,10 +15,12 @@ from aigineering.core.candidate_publisher import publish_effect
 from aigineering.core.domain import initialize_genesis
 from aigineering.core.ids import hash_contract_v3
 from aigineering.core.runtime_projection import RuntimeProjection
+from aigineering.core.skill_loader import SkillLoader
 from aigineering.core.signing import Ed25519Signer
 from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.core.worker_coordination import authenticate_worker_command
 from aigineering.core.worker_routing import WorkerRegistration
+from aigineering.fleet_config import load_fleet_config
 from aigineering.protocol.candidate import ActorKey, create_genesis_manifest
 from aigineering.protocol.effect_builders import (
     contract_declaration_effect,
@@ -31,6 +33,8 @@ ROOT = Path(__file__).parents[1]
 EXAMPLE = ROOT / "examples" / "literature-evidence"
 SCRIPT = EXAMPLE / "scripts" / "openalex_search.py"
 FIXTURE = EXAMPLE / "assets" / "openalex-response.json"
+FLEET_CONFIG = ROOT / "examples" / "ai4s" / "workers.toml"
+QUERY = ROOT / "examples" / "ai4s" / "literature-query.json"
 
 
 def _module():
@@ -65,6 +69,56 @@ def _action(*, max_records: int = 2) -> str:
         text=True,
     )
     return result.stdout.strip()
+
+
+def test_ai4s_example_declares_capability_routed_runtime_fleet():
+    config = load_fleet_config(FLEET_CONFIG)
+
+    assert {worker.kind for worker in config.workers} == {"llm", "tool"}
+    assert {pool for worker in config.workers for pool in worker.pools} == {
+        "economy",
+        "reasoning",
+        "verification",
+    }
+    assert any(worker.capacity > 1 for worker in config.workers)
+    assert all(
+        worker.api_key_env != "" for worker in config.workers if worker.kind == "llm"
+    )
+    reasoning = next(worker for worker in config.workers if "reasoning" in worker.pools)
+    economy = next(worker for worker in config.workers if "economy" in worker.pools)
+    assert set(economy.capabilities) < set(reasoning.capabilities)
+    assert set(reasoning.pools) == {"economy", "reasoning"}
+    verifier = next(
+        worker for worker in config.workers if "verification" in worker.pools
+    )
+    assert verifier.capabilities == ("literature.verify",)
+    assert verifier.worker_id != reasoning.worker_id
+
+
+def test_literature_skill_is_loadable_by_runtime_manifest():
+    loader = SkillLoader()
+
+    manifests = loader.scan([str(EXAMPLE)])
+    assets = loader.build_assets()
+
+    assert [manifest.name for manifest in manifests] == ["literature_evidence"]
+    assert {asset.name for asset in assets} == {
+        "_skill_capability_literature_evidence",
+        "_skill_content_literature_evidence",
+    }
+    skill = (EXAMPLE / "SKILL.md").read_text(encoding="utf-8")
+    assert "complete bounded `records` array" in skill
+    assert "at least budget 7" in skill
+
+
+def test_ai4s_query_is_an_explicit_replayable_input_asset():
+    query = json.loads(QUERY.read_text(encoding="utf-8"))
+
+    assert query["databases"] == ["OpenAlex"]
+    assert query["maximum_records"] == 5
+    assert query["question"]
+    assert query["inclusion_criteria"]
+    assert query["exclusion_criteria"]
 
 
 def test_openalex_adapter_emits_bounded_replayable_action():

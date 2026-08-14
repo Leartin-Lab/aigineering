@@ -1,0 +1,54 @@
+[fleet]
+db_path = ".aig/store.db"
+poll_interval = 0.05
+
+[[workers]]
+id = "literature-economy"
+kind = "llm"
+model = "deepseek-v4-flash"
+base_url = "https://api.deepseek.com/v1"
+api_key_env = "DEEPSEEK_API_KEY"
+capabilities = ["literature.retrieve", "literature.screen", "literature.extract"]
+pools = ["economy"]
+capacity = 3
+profile_id = "deepseek-economy"
+max_output_tokens = 2048
+thinking_mode = "disabled"
+
+[[workers]]
+id = "literature-reasoning"
+kind = "llm"
+model = "deepseek-v4-flash"
+base_url = "https://api.deepseek.com/v1"
+api_key_env = "DEEPSEEK_API_KEY"
+capabilities = ["planning", "literature.retrieve", "literature.screen", "literature.extract", "literature.synthesize", "literature.replan"]
+# The advanced profile may backstop economy-routed work when the required
+# capability is absent from the cheap profile. Capability remains the hard gate.
+pools = ["economy", "reasoning"]
+capacity = 1
+profile_id = "deepseek-reasoning"
+version = "3"
+max_output_tokens = 2048
+thinking_mode = "disabled"
+
+[[workers]]
+id = "literature-tools"
+kind = "tool"
+tool_registry = "examples.ai4s.tools:build_registry"
+capacity = 2
+profile_id = "ai4s-tools"
+
+[[workers]]
+id = "literature-verifier"
+kind = "llm"
+model = "deepseek-v4-flash"
+base_url = "https://api.deepseek.com/v1"
+api_key_env = "DEEPSEEK_API_KEY"
+capabilities = ["literature.verify"]
+pools = ["verification"]
+capacity = 1
+profile_id = "deepseek-verifier"
+max_output_tokens = 2048
+thinking_mode = "disabled"
+effect_capabilities = ["asset.attest", "literature.verify"]
+version = "2"

@@ -152,6 +152,7 @@ def test_tool_completion_plugin_publishes_continuation_candidate():
             name="tool_report",
             outputs=("final_report",),
             tool_scope=("lookup",),
+            worker_capabilities=("tool-execution",),
             budget=4,
         )
     )

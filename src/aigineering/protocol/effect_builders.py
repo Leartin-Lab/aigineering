@@ -90,6 +90,7 @@ def asset_attestation_effect(
     verdict: str = "accepted",
     rubric_asset_ids: tuple[str, ...] = (),
     evidence_asset_ids: tuple[str, ...] = (),
+    atomic_group: str = "",
 ) -> CandidateEffect:
     """Attest one exact output Asset without copying or replacing its content."""
     return CandidateEffect(
@@ -104,6 +105,7 @@ def asset_attestation_effect(
             "rubric_asset_ids": list(rubric_asset_ids),
             "evidence_asset_ids": list(evidence_asset_ids),
         },
+        atomic_group=atomic_group,
     )
 
 

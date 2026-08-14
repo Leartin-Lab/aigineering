@@ -194,6 +194,11 @@ def retry_contract(parent: Contract) -> Contract:
         parent_id=parent.parent_id,
         minting_authority=authority,
         sensitive_input_policy=policy,
+        acceptance_policy=(
+            dict(parent.acceptance_policy)
+            if parent.acceptance_policy is not None
+            else None
+        ),
         context_asset_ids=parent.context_asset_ids,
     )
     return Contract(
@@ -215,6 +220,7 @@ def retry_contract(parent: Contract) -> Contract:
         origin="retry",
         minting_authority=authority,
         sensitive_input_policy=parent.sensitive_input_policy,
+        acceptance_policy=parent.acceptance_policy,
     )
 
 
@@ -261,6 +267,11 @@ def continuation_contract(
         parent_id=parent.id,
         minting_authority=authority,
         sensitive_input_policy=policy,
+        acceptance_policy=(
+            dict(parent.acceptance_policy)
+            if parent.acceptance_policy is not None
+            else None
+        ),
         context_asset_ids=parent.context_asset_ids,
     )
     return Contract(
@@ -281,6 +292,7 @@ def continuation_contract(
         origin="continuation",
         minting_authority=authority,
         sensitive_input_policy=parent.sensitive_input_policy,
+        acceptance_policy=parent.acceptance_policy,
     )
 
 
@@ -494,6 +506,44 @@ def contracts_from_plan_asset(
         pool_needs = _string_list(raw.get("pool_needs", []))
         delegation_capabilities = _string_list(raw.get("delegation_capabilities", []))
         delegation_pools = _string_list(raw.get("delegation_pools", []))
+
+        if tool_scope and budget < 2:
+            rejected.append(
+                {
+                    "child_name": name,
+                    "field": "budget",
+                    "reason": (
+                        "planned tool task requires budget >= 2 for one tool "
+                        "task and its continuation"
+                    ),
+                    "action": "rejected",
+                    "expected": "integer >= 2 when tool_scope is non-empty",
+                    "actual": str(budget),
+                    "recoverable": True,
+                }
+            )
+            continue
+        if (
+            parent_contract is not None
+            and parent_contract.id.startswith("task:v5:")
+            and tool_scope
+            and not capability_needs
+        ):
+            rejected.append(
+                {
+                    "child_name": name,
+                    "field": "capability_needs",
+                    "reason": (
+                        "Contract-v5 planned tool task must declare an explicit "
+                        "execution capability requirement"
+                    ),
+                    "action": "rejected",
+                    "expected": "non-empty capability_needs when tool_scope is non-empty",
+                    "actual": "[]",
+                    "recoverable": True,
+                }
+            )
+            continue
 
         try:
             validate_execution_activation(activation)
@@ -1013,6 +1063,21 @@ def _build_plan_contract(
     sensitive_policy = (
         parent_contract.sensitive_input_policy if parent_contract is not None else None
     )
+    parent_shapes = (
+        parent_contract.acceptance_policy.get("output_shapes", {})
+        if parent_contract is not None and parent_contract.acceptance_policy is not None
+        else {}
+    )
+    output_shapes = {
+        output: deep_thaw(parent_shapes[output])
+        for output in outputs
+        if output in parent_shapes
+    }
+    acceptance_policy = (
+        {"mode": "mechanical", "output_shapes": output_shapes}
+        if output_shapes
+        else None
+    )
     context_asset_ids = (
         tuple(sorted(asset.id for asset in context_assets if asset.name in labels))
         if context_assets
@@ -1036,6 +1101,7 @@ def _build_plan_contract(
         sensitive_input_policy=(
             dict(sensitive_policy) if sensitive_policy is not None else None
         ),
+        acceptance_policy=acceptance_policy,
         context_asset_ids=context_asset_ids,
     )
     return Contract(
@@ -1056,6 +1122,7 @@ def _build_plan_contract(
         delegation_pools=delegation_pools,
         origin="plan",
         sensitive_input_policy=sensitive_policy,
+        acceptance_policy=acceptance_policy,
     )
 
 

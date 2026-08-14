@@ -30,6 +30,9 @@ class FleetWorkerSpec:
     tool_registry: str = ""
     timeout: float = 60.0
     max_retries: int = 3
+    max_output_tokens: int = 2048
+    thinking_mode: str = ""
+    effect_capabilities: tuple[str, ...] = ()
     version: str = "1"
 
     def __post_init__(self) -> None:
@@ -43,6 +46,12 @@ class FleetWorkerSpec:
             raise ValueError("fleet LLM worker requires model")
         if self.kind == "tool" and not self.tool_registry:
             raise ValueError("fleet tool worker requires tool_registry")
+        if self.max_output_tokens < 1:
+            raise ValueError("fleet max_output_tokens must be at least 1")
+        if self.thinking_mode not in {"", "enabled", "disabled"}:
+            raise ValueError(
+                "fleet thinking_mode must be 'enabled', 'disabled', or empty"
+            )
 
 
 @dataclass(frozen=True)
@@ -106,6 +115,8 @@ def build_fleet_worker(spec: FleetWorkerSpec):
         worker_id=spec.worker_id,
         timeout=int(spec.timeout),
         max_retries=spec.max_retries,
+        max_output_tokens=spec.max_output_tokens,
+        thinking_mode=spec.thinking_mode,
         capabilities=frozenset(spec.provider_capabilities),
         tool_definitions=(
             provider_tool_definitions(registry) if registry is not None else None
@@ -135,12 +146,20 @@ def _worker_spec(raw: object) -> FleetWorkerSpec:
         "tool_registry",
         "timeout",
         "max_retries",
+        "max_output_tokens",
+        "thinking_mode",
+        "effect_capabilities",
         "version",
     }
     unknown = set(raw) - allowed
     if unknown:
         raise ValueError(f"unknown worker fields: {sorted(unknown)}")
-    for name in ("capabilities", "pools", "provider_capabilities"):
+    for name in (
+        "capabilities",
+        "pools",
+        "provider_capabilities",
+        "effect_capabilities",
+    ):
         value = raw.get(name, [])
         if not isinstance(value, list) or not all(
             isinstance(item, str) for item in value
@@ -160,5 +179,8 @@ def _worker_spec(raw: object) -> FleetWorkerSpec:
         tool_registry=str(raw.get("tool_registry", "")),
         timeout=float(raw.get("timeout", 60.0)),
         max_retries=int(raw.get("max_retries", 3)),
+        max_output_tokens=int(raw.get("max_output_tokens", 2048)),
+        thinking_mode=str(raw.get("thinking_mode", "")),
+        effect_capabilities=tuple(raw.get("effect_capabilities", ())),
         version=str(raw.get("version", "1")),
     )

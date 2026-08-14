@@ -1,9 +1,27 @@
-Use the openalex_search tool exactly once to find up to five works relevant to
-the question below. Then return /exec with the declared output as a JSON string
-having exactly these fields: answer (non-empty string), citations (a non-empty
-list containing only stable OpenAlex IDs returned by the tool), and limitations
-(a list of non-empty strings). Do not cite an ID that is absent from the tool
-observation. State what can and cannot be concluded from metadata alone.
+Read the committed literature_query input, then start by returning /plan.
+Compile this request into independently claimable
+retrieve, screen, evidence-extraction, and synthesis tasks. Bind every child to
+the literature-evidence Skill label. Use capability_needs to route mechanical
+retrieval and screening to economy workers and synthesis or replanning to a
+reasoning worker. The retrieval task may use only the openalex_search tool.
 
-Question: How is retrieval-augmented generation used to improve scientific
-question answering or literature research?
+The literature_report Asset content must be a serialized JSON object having exactly these fields:
+answer (non-empty string), citations (a non-empty list containing only stable
+OpenAlex IDs returned by the tool), and limitations (a list of non-empty
+strings). It must not be Markdown or prose outside that JSON object. Do not cite
+an ID absent from committed retrieval evidence. If the
+evidence is malformed or insufficient, return /replan; never silently invent a
+result. A separate task requiring capability literature.verify in pool
+verification must read literature_report and evidence_cards and declare only a
+verification_receipt output. Its description must copy the planning compiler's
+Parent Contract ID as the attestation target. After checking the exact disclosed
+literature_report Asset ID it must return /attest for that root Contract and
+Asset, plus its verification_receipt. It must /fail rather than attest malformed
+JSON, unknown citation IDs, or claims unsupported by committed evidence.
+
+The exact question and retrieval boundary are authoritative only in the
+literature_query Asset. Every child that needs them must declare that input.
+The retrieval_manifest must retain the tool result's complete bounded records,
+not only their IDs, so screening has the disclosed metadata it needs. Allocate
+at least budget 2 to retrieval and at least budget 7 to any task expected to
+publish /replan.

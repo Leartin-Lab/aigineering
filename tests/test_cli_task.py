@@ -409,7 +409,7 @@ def test_plan_attempt_is_expanded_without_method_lifecycle():
         assert "task_delegated" not in event_types
 
 
-def test_run_task_rejected_output_closes_failed_without_implicit_recovery():
+def test_run_task_rejected_output_closes_failed_and_publishes_new_recovery():
     runner = CliRunner()
     with runner.isolated_filesystem():
         create = runner.invoke(
@@ -449,7 +449,7 @@ def test_run_task_rejected_output_closes_failed_without_implicit_recovery():
         data = json.loads(audit.output)
         event_types = {entry["event_type"] for entry in data["trace"]}
         assert "failed" in event_types
-        assert data["task"]["recovery_count"] == 0
+        assert data["task"]["recovery_count"] == 1
 
 
 def test_task_status_reports_submitted_without_recovery_risk():

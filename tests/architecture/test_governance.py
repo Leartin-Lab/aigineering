@@ -148,7 +148,7 @@ def test_public_markdown_local_links_resolve():
             )
 
 
-def test_released_changes_are_ordered_and_current_design_is_v054():
+def test_released_changes_are_ordered_and_current_design_is_v055():
     roadmap = (ROOT / "ROADMAP.md").read_text(encoding="utf-8")
     redis_change = (ROOT / "changes/003-redis-query-projection.md").read_text(
         encoding="utf-8"
@@ -170,7 +170,7 @@ def test_released_changes_are_ordered_and_current_design_is_v054():
     assert "Status: Accepted" in redis_adr
     assert "Status: Implemented and verified" in identity_change
     assert "Status: Accepted" in identity_adr
-    assert "Status: implemented truth for v0.5.4" in design
+    assert "Status: implemented truth for v0.5.5" in design
     assert "Redis projection" in design
     assert "## Asset identity graph" in design
 
@@ -606,7 +606,8 @@ def test_projection_failure_terminal_is_distinct_from_recovery_progress():
 
     assert "create_terminal_record" in projection
     assert '"projection_rejection.recovery_scheduled"' in runtime
-    assert "recovered_projection_ids" in runtime
+    assert "recovered_source_ids" in runtime
+    assert '"candidate_rejection.recovery_scheduled"' in runtime
 
 
 def test_local_recovery_replay_publishes_contract_and_context_as_candidate():

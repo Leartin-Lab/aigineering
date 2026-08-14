@@ -61,7 +61,11 @@ def fleet_run(
                     _publish_tool_descriptors(store, registry)
                     published_registries.add(spec.tool_registry)
                 worker = build_fleet_worker(spec)
-                host = ensure_local_worker_host(store, worker)
+                host = ensure_local_worker_host(
+                    store,
+                    worker,
+                    effect_capabilities=spec.effect_capabilities,
+                )
                 fleet_hosts.append(FleetHost(host=host, capacity=spec.capacity))
         finally:
             store.close()

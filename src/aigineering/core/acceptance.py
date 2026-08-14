@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
+import json
 
 from aigineering.core.output_satisfaction import all_outputs_satisfied
 from aigineering.core.lifecycle_facts import create_terminal_record
@@ -77,9 +78,10 @@ def project_asset_attestation_records(
     if not isinstance(expected_policy_version, str) or not expected_policy_version:
         raise ValueError("independent acceptance requires a policy_version")
     expected_policy_id = acceptance_policy_id(policy)
-    if supplied_policy_id != expected_policy_id:
+    validate_output_shape(policy, output_name, asset.content)
+    if supplied_policy_id and supplied_policy_id != expected_policy_id:
         raise ValueError("asset.attest acceptance policy identity does not match")
-    if supplied_policy_version != expected_policy_version:
+    if supplied_policy_version and supplied_policy_version != expected_policy_version:
         raise ValueError("asset.attest acceptance policy version does not match")
     rubric_ids = tuple(str(value) for value in rubric_value)
     evidence_ids = tuple(str(value) for value in evidence_value)
@@ -176,6 +178,64 @@ def project_asset_attestation_records(
         relation_target=f"{contract_id}:{output_name}:{asset_id}",
         additional_capabilities=tuple(policy.get("verifier_capabilities", ())),
     )
+
+
+def _output_shape_error(value: object, shape: object, path: str = "$") -> str | None:
+    """Validate the deliberately small deterministic JSON shape language."""
+    if shape == "string":
+        return None if isinstance(value, str) else f"{path} must be a string"
+    if shape == "nonempty_string":
+        return (
+            None
+            if isinstance(value, str) and bool(value.strip())
+            else f"{path} must be a non-empty string"
+        )
+    if shape == "number":
+        return (
+            None
+            if isinstance(value, (int, float)) and not isinstance(value, bool)
+            else f"{path} must be a number"
+        )
+    if shape == "boolean":
+        return None if isinstance(value, bool) else f"{path} must be a boolean"
+    if isinstance(shape, Mapping):
+        if not isinstance(value, Mapping):
+            return f"{path} must be an object"
+        if set(value) != set(shape):
+            expected = sorted(str(key) for key in shape)
+            return f"{path} keys must be exactly {expected}"
+        for key in sorted(shape, key=str):
+            error = _output_shape_error(value[key], shape[key], f"{path}.{key}")
+            if error is not None:
+                return error
+        return None
+    if isinstance(shape, (list, tuple)) and len(shape) == 1:
+        if not isinstance(value, list) or not value:
+            return f"{path} must be a non-empty array"
+        for index, item in enumerate(value):
+            error = _output_shape_error(item, shape[0], f"{path}[{index}]")
+            if error is not None:
+                return error
+        return None
+    return f"{path} uses an unsupported output shape"
+
+
+def validate_output_shape(
+    policy: Mapping[str, object], output_name: str, content: str
+) -> None:
+    """Reject content that violates an immutable deterministic output shape."""
+    output_shapes = policy.get("output_shapes", {})
+    if not isinstance(output_shapes, Mapping):
+        raise ValueError("acceptance output_shapes must be an object")
+    if output_name not in output_shapes:
+        return
+    try:
+        output_value = json.loads(content)
+    except json.JSONDecodeError as exc:
+        raise ValueError("acceptance output shape requires valid JSON") from exc
+    shape_error = _output_shape_error(output_value, output_shapes[output_name])
+    if shape_error is not None:
+        raise ValueError(f"acceptance output shape mismatch: {shape_error}")
 
 
 def _is_contract_or_descendant(

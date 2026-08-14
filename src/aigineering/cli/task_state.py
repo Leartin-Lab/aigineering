@@ -183,6 +183,7 @@ def _silent_failure_risks(
     if (
         not all_outputs_satisfied(contract, store)
         and effective_view.budget_remaining <= 0
+        and not _has_unfinished_descendant(contract, store)
     ):
         risks.append(
             {
@@ -210,6 +211,28 @@ def _silent_failure_risks(
             }
         )
     return risks
+
+
+def _has_unfinished_descendant(contract: Contract, store) -> bool:
+    children: dict[str, list[str]] = {}
+    for candidate in store.get_all_contracts():
+        if candidate.parent_id is not None:
+            children.setdefault(candidate.parent_id, []).append(candidate.id)
+    terminal_ids = {
+        str(record.payload.get("contract_id", ""))
+        for _, record in store.scan_runtime_records(record_type="lifecycle.terminal")
+    }
+    pending = list(children.get(contract.id, ()))
+    visited: set[str] = set()
+    while pending:
+        contract_id = pending.pop()
+        if contract_id in visited:
+            continue
+        visited.add(contract_id)
+        if contract_id not in terminal_ids:
+            return True
+        pending.extend(children.get(contract_id, ()))
+    return False
 
 
 def _has_active_recovery(contract: Contract, store) -> bool:

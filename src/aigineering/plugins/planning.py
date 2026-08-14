@@ -119,4 +119,32 @@ def compile_planning_blueprint(
                 str(item.get("field", "unknown")) for item in proposal.rejections
             ),
         )
+    _validate_independent_verifier(contract, proposal.effects)
     return proposal.effects
+
+
+def _validate_independent_verifier(contract: Contract, effects) -> None:
+    try:
+        description = json.loads(contract.description)
+    except json.JSONDecodeError:
+        return
+    policy = description.get("parent_acceptance_policy")
+    if not isinstance(policy, dict) or policy.get("mode") != "independent":
+        return
+    required_capabilities = set(policy.get("verifier_capabilities", ()))
+    required_outputs = set(contract.outputs)
+    for effect in effects:
+        child = effect.payload.get("contract")
+        if not isinstance(child, Mapping):
+            continue
+        if (
+            required_capabilities.issubset(child.get("worker_capabilities", ()))
+            and required_outputs.issubset(child.get("inputs", ()))
+            and child.get("outputs")
+        ):
+            return
+    raise PlanningCompileError(
+        "independent parent acceptance requires a verifier child that consumes "
+        "all parent outputs and requires the policy verifier capabilities",
+        fields=("acceptance_policy",),
+    )

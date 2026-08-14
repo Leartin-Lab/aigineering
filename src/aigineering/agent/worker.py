@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 import json
 from typing import Protocol, runtime_checkable
@@ -10,16 +11,22 @@ from aigineering.core.signing import Signer
 from aigineering.protocol.candidate import (
     ActorKey,
     CandidateClaimBinding,
+    CandidateEffect,
     CandidateProposal,
     GenesisManifest,
+    WORKER_RAW_OUTPUT_METADATA_KEY,
     create_candidate_proposal,
 )
 from aigineering.protocol.actions import (
     ActionParseError,
+    action_from_dict,
     parse_action,
     parse_method_action,
 )
-from aigineering.protocol.effect_builders import claim_bound_graph_output_effects
+from aigineering.protocol.effect_builders import (
+    asset_attestation_effect,
+    claim_bound_graph_output_effects,
+)
 from aigineering.protocol.envelope import CandidateEnvelope
 from aigineering.protocol.types import Asset, Candidate, Contract
 
@@ -155,6 +162,16 @@ def compile_worker_envelope(
         metadata=envelope.usage_metadata,
     )
     action = parse_method_action(envelope_candidate)
+    direct_action = None
+    if action is None:
+        try:
+            direct_action = (
+                action_from_dict(envelope.parsed_action)
+                if envelope.parsed_action is not None
+                else parse_action(envelope.raw_output)
+            )
+        except ActionParseError:
+            direct_action = None
     if action is not None and action.type in {"plan", "replan"}:
         if contract is None or contract.id != envelope.contract_id:
             raise ValueError("staged planning requires the claimed Contract")
@@ -198,6 +215,23 @@ def compile_worker_envelope(
             )
         except ValueError as exc:
             raise WorkerExecutionError("task_delegation_rejected", str(exc)) from exc
+    elif direct_action is not None and direct_action.type == "attest":
+        if contract is None or contract.id != envelope.contract_id:
+            raise ValueError("claim-bound attestation requires the claimed Contract")
+        try:
+            effects = _compile_attestation_action(
+                envelope,
+                direct_action.payload,
+                contract,
+                disclosed_assets,
+                domain_id=domain_id,
+                actor_key=actor_key,
+                signer=signer,
+            )
+        except ValueError as exc:
+            raise WorkerExecutionError(
+                "attestation_request_rejected", str(exc)
+            ) from exc
     else:
         parsed_envelope = envelope
         if envelope.parsed_action is None:
@@ -236,7 +270,13 @@ def compile_worker_envelope(
         else:
             if contract is None or contract.id != envelope.contract_id:
                 raise ValueError("claim-bound output requires the claimed Contract")
-            effects = claim_bound_graph_output_effects(
+            if contract.origin == "recovery" and contract.tool_scope:
+                raise WorkerExecutionError(
+                    "tool_observation_required",
+                    "tool recovery must request its remaining allowed tool before "
+                    "publishing tool-derived outputs",
+                )
+            effects = _compile_claim_bound_outputs(
                 parsed_envelope,
                 contract,
                 domain_id=domain_id,
@@ -251,6 +291,8 @@ def compile_worker_envelope(
         package_id=envelope.package_id,
     )
     try:
+        signed_metadata = dict(envelope.usage_metadata or {})
+        signed_metadata[WORKER_RAW_OUTPUT_METADATA_KEY] = envelope.raw_output
         return create_candidate_proposal(
             domain_id=domain_id,
             actor_id=actor_key.actor_id,
@@ -259,7 +301,96 @@ def compile_worker_envelope(
             signer=signer,
             idempotency_key=envelope.idempotency_key,
             claim_binding=binding,
-            metadata=envelope.usage_metadata,
+            metadata=signed_metadata,
         )
     except ValueError as exc:
         raise WorkerExecutionError("candidate_encoding_rejected", str(exc)) from exc
+
+
+def _compile_attestation_action(
+    envelope: CandidateEnvelope,
+    payload,
+    contract: Contract,
+    disclosed_assets: tuple[Asset, ...],
+    *,
+    domain_id: str,
+    actor_key: ActorKey,
+    signer: Signer,
+) -> tuple:
+    target_contract_id = payload.get("contract_id")
+    output_name = payload.get("output_name")
+    asset_id = payload.get("asset_id")
+    verdict = payload.get("verdict", "accepted")
+    outputs = payload.get("outputs")
+    if not all(
+        isinstance(value, str) and value
+        for value in (target_contract_id, output_name, asset_id)
+    ):
+        raise ValueError(
+            "/attest requires contract_id, output_name, and asset_id strings"
+        )
+    if verdict not in {"accepted", "rejected"}:
+        raise ValueError("/attest verdict must be 'accepted' or 'rejected'")
+    if not isinstance(outputs, Mapping) or set(outputs) != set(contract.outputs):
+        raise ValueError(
+            "/attest outputs must satisfy exactly the verifier task outputs"
+        )
+    if not all(isinstance(value, str) and value.strip() for value in outputs.values()):
+        raise ValueError("/attest output content must be non-empty strings")
+    target = next((asset for asset in disclosed_assets if asset.id == asset_id), None)
+    if target is None or target.name != output_name:
+        raise ValueError("/attest must bind an exact disclosed Asset ID and name")
+    rubric_ids = payload.get("rubric_asset_ids", [])
+    evidence_ids = payload.get("evidence_asset_ids", [])
+    if not isinstance(rubric_ids, list) or not all(
+        isinstance(value, str) and value for value in rubric_ids
+    ):
+        raise ValueError("/attest rubric_asset_ids must be a list of strings")
+    if not isinstance(evidence_ids, list) or not all(
+        isinstance(value, str) and value for value in evidence_ids
+    ):
+        raise ValueError("/attest evidence_asset_ids must be a list of strings")
+    output_envelope = replace(
+        envelope,
+        parsed_action={"type": "exec", "outputs": outputs},
+    )
+    output_effects = _compile_claim_bound_outputs(
+        output_envelope,
+        contract,
+        domain_id=domain_id,
+        actor_id=actor_key.actor_id,
+        key_id=actor_key.key_id,
+        signer=signer,
+    )
+    attestation = asset_attestation_effect(
+        target_contract_id,
+        output_name,
+        asset_id,
+        policy_id=str(payload.get("policy_id", "")),
+        policy_version=str(payload.get("policy_version", "")),
+        verdict=verdict,
+        rubric_asset_ids=tuple(rubric_ids),
+        evidence_asset_ids=tuple(evidence_ids),
+        atomic_group=f"output:{contract.id}",
+    )
+    return (*output_effects, attestation)
+
+
+def _compile_claim_bound_outputs(
+    envelope: CandidateEnvelope,
+    contract: Contract,
+    *,
+    domain_id: str,
+    actor_id: str,
+    key_id: str,
+    signer: Signer,
+) -> tuple[CandidateEffect, ...]:
+    """Keep ordinary and attested outputs on one canonical graph compiler."""
+    return claim_bound_graph_output_effects(
+        envelope,
+        contract,
+        domain_id=domain_id,
+        actor_id=actor_id,
+        key_id=key_id,
+        signer=signer,
+    )

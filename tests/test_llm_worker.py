@@ -99,9 +99,11 @@ def test_llm_worker_returns_candidate_from_chat_completion():
 
     payload = seen["payload"]
     assert payload["model"] == "test-model"
+    assert payload["max_tokens"] == 2048
+    assert "thinking" not in payload
     user_prompt = payload["messages"][1]["content"]
     assert "Declared outputs: report" in user_prompt
-    assert "- evidence: observed" in user_prompt
+    assert "- evidence [asset_1]: observed" in user_prompt
 
 
 def test_llm_worker_requires_key_for_default_transport():
@@ -109,6 +111,27 @@ def test_llm_worker_requires_key_for_default_transport():
 
     with pytest.raises(ValueError, match="requires api_key"):
         worker.invoke(Contract(id="contract_1"), [])
+
+
+def test_llm_worker_can_disable_provider_thinking_for_structured_actions():
+    seen = {}
+
+    def transport(url, headers, payload):
+        del url, headers
+        seen.update(payload)
+        return {"choices": [{"message": {"content": "/exec {}"}}]}
+
+    worker = LLMWorker(
+        model="deepseek-v4-flash",
+        api_key="test",
+        transport=transport,
+        thinking_mode="disabled",
+        max_output_tokens=3072,
+    )
+    worker.invoke(Contract(id="task:structured"), [])
+
+    assert seen["thinking"] == {"type": "disabled"}
+    assert seen["max_tokens"] == 3072
 
 
 # ---------------------------------------------------------------------------

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 
 from aigineering.core.labels import BEHAVIOR_LABEL_PREFIX
+from aigineering.protocol.immutability import deep_thaw
 from aigineering.protocol.types import Asset, Contract
 
 SKILL_CONTENT_PREFIX = "_skill_content_"
@@ -23,15 +24,21 @@ def system_prompt() -> str:
         "off course because an assumption, path, or result is invalid, use "
         '`/replan {"reason": "..."}`. If you need an allowed tool, use '
         '`/tool {"name": "...", "args": {}}`. '
-        "When the provider can request independent tools in parallel, multiple "
-        "tool calls are compiled into one /parallel_tool method and ordinary "
+        "When two to eight independent tool calls are needed in parallel, they "
+        "are compiled from one /parallel_tool method into ordinary "
         "tool tasks. If the same task can be "
         "attempted again after a transient execution or output failure, use "
         '`/retry {"reason": "..."}`. If required evidence is unavailable and '
         "no safe plan or allowed tool can obtain it, or completing the task "
         "would require fabricated facts, use "
-        '`/fail {"reason": "..."}`. Do not use /replan for missing '
-        "information, and do not use /retry when new evidence or a different "
+        '`/fail {"reason": "..."}`. If the current task is an independent '
+        "verifier, use "
+        '`/attest {"contract_id":"...","output_name":"...",'
+        '"asset_id":"...","verdict":"accepted","outputs":'
+        '{"verification_receipt":"..."}}` only after checking the exact '
+        "disclosed Asset ID. "
+        "Do not use /replan for missing information, and do not use /retry "
+        "when new evidence or a different "
         "plan is required. Do not add markdown, explanations, or undeclared "
         "assets."
     )
@@ -51,9 +58,16 @@ def contract_prompt(contract: Contract, assets: list[Asset]) -> str:
         for asset in assets
         if not asset.name.startswith((BEHAVIOR_LABEL_PREFIX, SKILL_CONTENT_PREFIX))
     ]
+    unresolved_tool_dispatch = bool(contract.tool_scope) and contract.origin in {
+        "plan",
+        "recovery",
+        "retry",
+    }
 
     lines = [
         f"Contract name: {contract.name}",
+        f"Contract ID: {contract.id}",
+        f"Parent Contract ID: {contract.parent_id or '(none)'}",
         f"Description: {contract.description}",
         "Declared inputs: " + ", ".join(contract.inputs),
         "Declared outputs: " + ", ".join(contract.outputs),
@@ -65,11 +79,20 @@ def contract_prompt(contract: Contract, assets: list[Asset]) -> str:
         '- /plan {"reason": "why the current task needs more information"}',
         '- /replan {"reason": "why the current task has already gone off course"}',
         '- /tool {"name": "tool_name", "args": {}}',
-        '- /parallel_tool {"calls": [{"id": "a", "name": "tool_name", "args": {}}], "join": "all"}',
+        '- /parallel_tool {"calls": [{"id": "a", "name": "tool_a", "args": {}}, {"id": "b", "name": "tool_b", "args": {}}], "join": "all"} (2-8 independent calls only; use /tool for one call)',
         '- /retry {"reason": "transient failure that permits the same task to be attempted again"}',
         '- /fail {"reason": "why the task cannot be completed safely"}',
+        '- /attest {"contract_id": "target_contract", "output_name": "target_output", "asset_id": "exact_disclosed_asset_id", "verdict": "accepted", "outputs": {"declared_receipt": "verification details"}}',
         "",
         "Decision boundary:",
+        *(
+            [
+                "- REQUIRED NEXT ACTION: this task has unresolved allowed tools. Return /tool for one required call or /parallel_tool for 2-8 independent required calls; do not return /exec yet.",
+                f"- Choose only from these exact tool names: {', '.join(contract.tool_scope)}. The continuation after committed observations will publish declared outputs.",
+            ]
+            if unresolved_tool_dispatch
+            else []
+        ),
         "- Every asset listed under Disclosed assets includes its exact readable content; treat that content as directly available evidence, not as a path or handle requiring another tool.",
         "- A successful tool observation is completed evidence. Satisfy the declared output from it; the same tool is removed from the continuation scope. Publish separate tasks when repeated calls are required.",
         "- Use /plan when disclosed information is insufficient.",
@@ -79,9 +102,27 @@ def contract_prompt(contract: Contract, assets: list[Asset]) -> str:
         "- Use /retry only for a transient execution or output failure when the same task can be attempted again.",
         "- Do not use /retry when new evidence or a different plan is required.",
         "- Use /fail when evidence cannot be obtained safely or completion would require fabricated facts.",
+        "- For /attest, contract_id is the independently accepted Contract that declares target_output, not the current verifier Contract ID. The current verifier normally declares only its receipt output.",
+        "- When the task description names an exact attestation target Contract ID, copy that ID exactly; never substitute the current Contract ID or its immediate parent.",
         "",
     ]
     lines.extend(_method_result_instructions(contract))
+    if contract.acceptance_policy is not None:
+        output_shapes = contract.acceptance_policy.get("output_shapes", {})
+        if output_shapes:
+            lines.extend(
+                [
+                    "Deterministic output shape (commitment-enforced):",
+                    "- Return JSON content matching this exact shape; object keys are exact and arrays must be non-empty: "
+                    + json.dumps(
+                        deep_thaw(output_shapes),
+                        sort_keys=True,
+                        ensure_ascii=False,
+                    ),
+                    "- `nonempty_string` means a non-blank JSON string. A one-item shape list means a non-empty JSON array whose every item matches that shape.",
+                    "",
+                ]
+            )
     lines.extend(_planning_stage_instructions(contract))
     lines.extend(_generated_task_instructions(contract))
     lines.extend(
@@ -103,7 +144,7 @@ def contract_prompt(contract: Contract, assets: list[Asset]) -> str:
         ]
     )
     for asset in evidence_assets:
-        lines.append(f"- {asset.name}: {asset.content}")
+        lines.append(f"- {asset.name} [{asset.id}]: {asset.content}")
     return "\n".join(lines)
 
 
@@ -128,6 +169,7 @@ def _method_result_instructions(contract: Contract) -> list[str]:
         "- Its content must be one JSON object with a `contracts` array.",
         "- Each child may contain only: name, description, inputs, outputs, activation, budget, tool_scope, labels, capability_needs, pool_needs, delegation_capabilities, delegation_pools.",
         "- Use only disclosed input names, declared parent tools, and simple unqualified asset names in activation.",
+        "- Any child with non-empty tool_scope needs budget at least 2: one for the tool task and one for its continuation.",
         "- Activation is a boolean expression: join multiple required inputs with uppercase AND (for example `input_a AND input_b`); never use commas, JSON lists, or whitespace as an operator.",
         "- The method description lists parent_outputs. At least one child must produce every parent output; use intermediate outputs only when a later child consumes them.",
         "- Do not emit origin, trust_tier, created_by, minting_authority, worker_capabilities, worker_pools, or prose outside the action.",
@@ -206,14 +248,33 @@ def _planning_stage_instructions(contract: Contract) -> list[str]:
                         "- Each contract object must contain name, description, inputs, outputs, activation, budget, tool_scope, labels, capability_needs, pool_needs, delegation_capabilities, and delegation_pools.",
                         "- name and description must be non-empty; outputs must contain at least one asset name.",
                         f"- Sum of child budgets must be at most {contract.budget}; use budget 1 per child unless more is essential.",
+                        f"- Child inputs may use only these parent input names or outputs promised by another child: {json.dumps(_planning_allowed_inputs(contract), ensure_ascii=False)}.",
+                        "- The disclosed planning draft and dependency-analysis assets inform compilation only. Never copy their names into child inputs or activation unless they appear in the allowed parent input list above.",
                         f"- Each child labels list must be a subset of {json.dumps(allowed_labels, ensure_ascii=False)}; never invent labels or copy plugin:* labels.",
                         "- capability_needs are execution requirements, not prompt labels.",
                         f"- Each child capability_needs and delegation_capabilities must be subsets of {json.dumps(list(contract.delegation_capabilities), ensure_ascii=False)}.",
+                        "- Every child with non-empty tool_scope must also have non-empty capability_needs so routing cannot fall through to an arbitrary Worker.",
                         f"- Each child pool_needs and delegation_pools must be subsets of {json.dumps(list(contract.delegation_pools), ensure_ascii=False)}.",
                         f"- The child outputs must collectively include: {', '.join(contract.outputs)}.",
                         f"- Valid example for this exact Contract: {_planning_compile_example(contract)}",
                     ]
                 )
+                try:
+                    compile_description = json.loads(contract.description)
+                except json.JSONDecodeError:
+                    compile_description = {}
+                acceptance = compile_description.get("parent_acceptance_policy")
+                if (
+                    isinstance(acceptance, dict)
+                    and acceptance.get("mode") == "independent"
+                ):
+                    lines.extend(
+                        [
+                            f"- The parent Contract `{contract.parent_id}` uses independent acceptance. Include a verifier child that consumes every required parent output, produces its own receipt output, and instructs the Worker to use /attest against that parent Contract and the exact disclosed output Asset ID.",
+                            f"- The verifier child capability_needs must include: {json.dumps(acceptance.get('verifier_capabilities', []), ensure_ascii=False)}.",
+                            "- Producing an Asset whose name contains 'attestation' is not qualification; only the signed /attest effect qualifies the parent output.",
+                        ]
+                    )
             lines.append("")
             return lines
     return []
@@ -282,6 +343,17 @@ def _planning_compile_example(contract: Contract) -> str:
     )
 
 
+def _planning_allowed_inputs(contract: Contract) -> list[str]:
+    try:
+        description = json.loads(contract.description)
+    except json.JSONDecodeError:
+        return list(contract.inputs)
+    raw_inputs = description.get("allowed_inputs", contract.inputs)
+    if not isinstance(raw_inputs, (list, tuple)):
+        return list(contract.inputs)
+    return [name for name in raw_inputs if isinstance(name, str)]
+
+
 def _generated_task_instructions(contract: Contract) -> list[str]:
     """Give ordinary generated tasks an exact, non-recursive output contract."""
     if "plugin:fail" in contract.labels:
@@ -300,6 +372,15 @@ def _generated_task_instructions(contract: Contract) -> list[str]:
             "",
         ]
     if contract.origin == "recovery":
+        if contract.tool_scope:
+            return [
+                "Recovery task protocol (required):",
+                "- Repair the failed candidate using the disclosed failure context.",
+                "- The original task has allowed tools. Use /tool for one call or /parallel_tool for 2-8 independent calls when a successful observation is still required.",
+                "- Never construct a tool-derived declared output without a committed successful observation.",
+                "- After evidence is available, return /exec with exactly the declared output names.",
+                "",
+            ]
         return [
             "Recovery task protocol (required):",
             "- Repair the failed candidate using the disclosed failure context.",

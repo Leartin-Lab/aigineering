@@ -1,0 +1,18 @@
+{
+  "question": "How is retrieval-augmented generation used to improve scientific question answering or literature research?",
+  "search_expression": "retrieval augmented generation scientific question answering literature research",
+  "databases": ["OpenAlex"],
+  "date_range": {"from_year": 2020, "to_year": 2026},
+  "languages": ["English"],
+  "document_types": ["article", "preprint", "proceedings-article"],
+  "inclusion_criteria": [
+    "The work discusses retrieval-augmented generation for scientific question answering, evidence retrieval, or literature research."
+  ],
+  "exclusion_criteria": [
+    "The work has no stable OpenAlex identifier.",
+    "The metadata is unrelated to scientific or scholarly information access."
+  ],
+  "maximum_records": 5,
+  "retrieval_date": "2026-08-14",
+  "intended_evidence_claim": "Describe supported uses and metadata-only limitations without inferring full-text findings."
+}

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import pytest
 from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
@@ -114,7 +115,14 @@ def _candidate(genesis, actor_id, key_id, signer, effect, nonce):
     )
 
 
-def _publish_contract_and_output(domain, *, produce_output: bool = True):
+def _publish_contract_and_output(
+    domain,
+    *,
+    produce_output: bool = True,
+    output_content: str = "candidate report",
+    output_shapes=None,
+    expected_output_status: str = "accepted",
+):
     store, genesis, committer, owner, producer, _, _, _, _ = domain
     rubric = Asset(id="rubric:compliance", name="review_rubric", content="be exact")
     evidence = Asset(
@@ -149,6 +157,7 @@ def _publish_contract_and_output(domain, *, produce_output: bool = True):
             "evidence_asset_ids": [evidence_id],
             "required_attestations": 1,
             "verifier_capabilities": ["verify.compliance"],
+            **({"output_shapes": output_shapes} if output_shapes is not None else {}),
         },
     }
     contract = Contract(id=hash_contract_v3(**fields), **fields)
@@ -187,7 +196,8 @@ def _publish_contract_and_output(domain, *, produce_output: bool = True):
             del contract, disclosed_assets
             return Candidate(
                 worker_id=self.worker_id,
-                raw_output='/exec {"outputs":{"report":"candidate report"}}',
+                raw_output="/exec "
+                + json.dumps({"outputs": {"report": output_content}}),
             )
 
     host = WorkerHost(
@@ -197,7 +207,9 @@ def _publish_contract_and_output(domain, *, produce_output: bool = True):
         producer,
     )
     result = execute_claimed_package(claimed, host, store)
-    assert result["status"] == "accepted"
+    assert result["status"] == expected_output_status
+    if expected_output_status != "accepted":
+        return contract, None
     asset = store.get_assets_by_name("report")[0]
     assert asset.created_by == contract.id
     assert not all_outputs_satisfied(contract, store)
@@ -271,6 +283,68 @@ def test_verifier_capability_and_exact_asset_qualification(acceptance_domain):
         "contract_id": contract.id,
         "terminal": "complete",
     }
+
+
+def test_claim_bound_output_rejects_mismatched_deterministic_output_shape(
+    acceptance_domain,
+):
+    store, _, _, _, _, _, _, _, _ = acceptance_domain
+    contract, asset = _publish_contract_and_output(
+        acceptance_domain,
+        output_content=(
+            '{"answer":"grounded","citations":["W1"],"limitations":"none"}'
+        ),
+        output_shapes={
+            "report": {
+                "answer": "nonempty_string",
+                "citations": ["nonempty_string"],
+                "limitations": ["nonempty_string"],
+            }
+        },
+        expected_output_status="rejected",
+    )
+
+    assert asset is None
+    rejection = store.scan_runtime_records(record_type="candidate.rejected")[-1][1]
+    assert "output shape mismatch" in str(rejection.payload)
+
+
+def test_signed_attestation_request_derives_policy_from_exact_contract_identity(
+    acceptance_domain,
+):
+    _, genesis, committer, _, _, verifier, _, _, _ = acceptance_domain
+    contract, asset = _publish_contract_and_output(acceptance_domain)
+    effect = asset_attestation_effect(
+        contract.id,
+        "report",
+        asset.id,
+        policy_id="",
+        policy_version="",
+        rubric_asset_ids=tuple(contract.acceptance_policy["rubric_asset_ids"]),
+        evidence_asset_ids=tuple(contract.acceptance_policy["evidence_asset_ids"]),
+    )
+
+    decision = committer.commit(
+        _candidate(
+            genesis,
+            "worker:verifier",
+            "verifier-key",
+            verifier,
+            effect,
+            "derived-policy-binding",
+        ),
+        genesis,
+    )
+
+    assert decision.accepted
+    attested = next(
+        record
+        for record in decision.runtime_records
+        if record.record_type == "asset.attested"
+    )
+    assert attested.payload["policy_id"] == acceptance_policy_id(
+        contract.acceptance_policy
+    )
 
 
 def test_parent_acceptance_can_bind_exact_descendant_output(acceptance_domain):

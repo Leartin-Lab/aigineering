@@ -100,6 +100,25 @@ def test_eligibility_requires_all_capabilities_and_one_permitted_pool():
     ]
 
 
+def test_exclusive_tool_worker_cannot_claim_unqualified_reasoning_task():
+    contract = Contract(id="task:generic", outputs=("report",))
+    workers = (
+        WorkerRegistration("llm"),
+        WorkerRegistration("tools", capabilities=("tool-execution", "tool:lookup")),
+    )
+
+    assert [worker.worker_id for worker in eligible_workers(contract, workers)] == [
+        "llm"
+    ]
+    tool_contract = Contract(
+        id="task:tool",
+        worker_capabilities=("tool-execution", "tool:lookup"),
+    )
+    assert [
+        worker.worker_id for worker in eligible_workers(tool_contract, workers)
+    ] == ["tools"]
+
+
 def test_selection_is_least_loaded_then_worker_id():
     contract = _contract(worker_capabilities=(), worker_pools=())
     workers = [
@@ -187,6 +206,38 @@ def test_invalid_descendant_activation_is_visible_from_root_projection():
         risk["code"] == "descendant_invalid_activation"
         for risk in status["silent_failure_risks"]
     )
+    store.close()
+
+
+def test_expanded_parent_does_not_report_budget_exhaustion_while_child_runs():
+    store = SQLiteStore(":memory:")
+    root = Contract(id="task:expanded-root", outputs=("report",), budget=0)
+    child = Contract(
+        id="task:running-child",
+        parent_id=root.id,
+        outputs=("report",),
+        budget=1,
+    )
+    store.add_contract(root)
+    store.add_contract(child)
+    store.append_runtime_record(
+        create_runtime_record(
+            "attempt.closed",
+            {
+                "candidate_id": "candidate:expanded",
+                "claim_id": "claim:expanded",
+                "contract_id": root.id,
+                "outcome": "expanded",
+            },
+        )
+    )
+
+    status = project_task_status(root, store)
+
+    assert status["status"] == "expanded"
+    assert "budget_exhausted" not in {
+        risk["code"] for risk in status["silent_failure_risks"]
+    }
     store.close()
 
 
@@ -627,6 +678,94 @@ def test_malformed_provider_response_releases_claim_and_recovers():
     failure = store.scan_runtime_records(record_type="worker.invocation_failed")
     assert failure[-1][1].payload["category"] == "worker_error:response_missing_choices"
     assert any(child.origin == "recovery" for child in store.get_all_contracts())
+    store.close()
+
+
+def test_worker_encoding_failure_preserves_repairable_output_and_budget():
+    class StructurallyInvalidWorker:
+        worker_id = "worker:invalid-structure"
+
+        def invoke(self, contract, disclosed_assets):
+            del contract, disclosed_assets
+            return Candidate(
+                worker_id=self.worker_id,
+                raw_output='/parallel_tool {"calls": [{"name": "lookup"}]}',
+            )
+
+    store = SQLiteStore(":memory:")
+    authority_signer = Ed25519Signer()
+    authority_key = ActorKey(
+        "test:authority",
+        "test-authority-invalid-structure",
+        authority_signer.kind,
+        authority_signer.signer_id,
+        ("actor.authorize", "worker.register"),
+    )
+    recovery_signer = Ed25519Signer()
+    recovery_key = ActorKey(
+        "plugin:recovery.publish.v1",
+        "recovery-invalid-structure",
+        recovery_signer.kind,
+        recovery_signer.signer_id,
+        (
+            "asset.publish",
+            "asset.publish.protected",
+            "contract.publish",
+            "contract.publish.protected",
+        ),
+    )
+    genesis = create_genesis_manifest(
+        "invalid-structure",
+        (authority_key, recovery_key),
+        "policy:invalid-structure",
+    )
+    initialize_genesis(store, genesis)
+    contract = Contract(
+        id="task:invalid-structure",
+        outputs=("report",),
+        budget=3,
+        tool_scope=("lookup",),
+    )
+    store.add_contract(contract)
+    host = hosted_worker(
+        store,
+        StructurallyInvalidWorker(),
+        genesis=genesis,
+        authority_key=authority_key,
+        authority_signer=authority_signer,
+    )
+    claimed = claim_next_package(store, worker_id=host.worker_id)
+    assert claimed is not None
+    publishers = CandidatePublisherRegistry(
+        (
+            (
+                "recovery.publish.v1",
+                CandidatePublisher(
+                    store, store, genesis, recovery_key, recovery_signer
+                ),
+            ),
+        )
+    )
+
+    with pytest.raises(WorkerInvocationError, match="recovery was evaluated"):
+        execute_claimed_package(
+            claimed,
+            host,
+            store,
+            candidate_publishers=publishers,
+        )
+
+    failure = store.scan_runtime_records(record_type="worker.invocation_failed")[-1][1]
+    assert failure.payload["raw_output"].startswith("/parallel_tool")
+    assert "between 2 and 8" in failure.payload["diagnostic"]
+    recovery = next(
+        child for child in store.get_all_contracts() if child.origin == "recovery"
+    )
+    assert recovery.budget == contract.budget
+    assert recovery.tool_scope == contract.tool_scope
+    context = store.get_assets_by_name(f"_fail_context_{contract.id}")[-1]
+    assert "/parallel_tool" in context.content
+    assert "between 2 and 8" in context.content
     store.close()
 
 

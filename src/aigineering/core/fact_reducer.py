@@ -298,11 +298,19 @@ class FactReducer:
         """Find child contracts that should be cancelled after *completed_contract*
         finishes."""
         events: list[FactReducerEvent] = []
+        contracts_by_id = {contract.id: contract for contract in contracts}
 
         for contract in contracts:
             if contract.parent_id != completed_contract.id:
                 continue
             if contract.id in terminal_contract_ids:
+                continue
+            if self._serves_pending_independent_acceptance(
+                contract,
+                completed_contract,
+                contracts_by_id,
+                terminal_contract_ids,
+            ):
                 continue
             # If the child still has outstanding outputs, it's unfinished.
             if not self._all_outputs_satisfied(contract, pending_names):
@@ -315,6 +323,44 @@ class FactReducer:
                     )
                 )
         return events
+
+    @staticmethod
+    def _serves_pending_independent_acceptance(
+        child: Contract,
+        completed_parent: Contract,
+        contracts_by_id: dict[str, Contract],
+        terminal_contract_ids: set[str],
+    ) -> bool:
+        """Keep an explicit verifier reachable after an intermediate parent ends.
+
+        Staged planning owns its compiled children, so the task producing a
+        business output and the task independently qualifying it are siblings.
+        The compiler may finish when the output appears, but its verifier still
+        serves an independently accepted ancestor.  Capability and input
+        containment make that relationship explicit in immutable Contracts.
+        """
+        ancestor_id = completed_parent.parent_id
+        visited: set[str] = set()
+        while ancestor_id and ancestor_id not in visited:
+            visited.add(ancestor_id)
+            ancestor = contracts_by_id.get(ancestor_id)
+            if ancestor is None:
+                return False
+            policy = ancestor.acceptance_policy
+            verifier_capabilities = (
+                set(policy.get("verifier_capabilities", ()))
+                if policy is not None and policy.get("mode") == "independent"
+                else set()
+            )
+            if (
+                ancestor.id not in terminal_contract_ids
+                and verifier_capabilities
+                and verifier_capabilities.issubset(child.worker_capabilities)
+                and set(ancestor.outputs).issubset(child.inputs)
+            ):
+                return True
+            ancestor_id = ancestor.parent_id
+        return False
 
     def _contracts_with(
         self, pending_contracts: tuple[Contract, ...]
