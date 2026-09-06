@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 from aigineering.agent.tool_executor import ToolExecutor
 from aigineering.core.capability_descriptors import verify_descriptor
 from aigineering.core.worker_routing import WorkerRegistration
+from aigineering.protocol.immutability import deep_thaw
 from aigineering.plugins.task_semantics import method_payload
 from aigineering.protocol.types import Candidate
 
@@ -90,20 +91,21 @@ class ToolWorker:
         tool_name = tool_payload.get("name", "")
         args = tool_payload.get("args", {})
 
-        if not isinstance(tool_name, str) or not tool_name:
-            obs = json.dumps(
-                {
-                    "ok": False,
-                    "tool": str(tool_name),
-                    "result": "",
-                    "error": "tool action missing string payload.name",
-                },
-                sort_keys=True,
-                ensure_ascii=False,
-            )
-            return Candidate(
+        if len(contract.outputs) != 1:
+            return self._executor.error_candidate(
+                str(tool_name),
+                contract.id,
+                "tool method contract must declare exactly one observation output",
+                error_type="ToolContractError",
                 worker_id=self.worker_id,
-                raw_output=obs,
+            )
+        if not isinstance(tool_name, str) or not tool_name:
+            return self._executor.error_candidate(
+                str(tool_name),
+                contract.id,
+                "tool action missing string payload.name",
+                error_type="ToolActionError",
+                worker_id=self.worker_id,
             )
 
         descriptor_name = f"_tool_capability_{tool_name}"
@@ -112,44 +114,86 @@ class ToolWorker:
             None,
         )
         if tool_name not in contract.tool_scope:
-            obs = json.dumps(
-                {
-                    "ok": False,
-                    "tool": tool_name,
-                    "result": "",
-                    "error": f"tool '{tool_name}' is not in contract.tool_scope",
-                },
-                sort_keys=True,
-                ensure_ascii=False,
+            return _wrap_execution_candidate(
+                self.worker_id,
+                contract,
+                self._executor.error_candidate(
+                    tool_name,
+                    contract.id,
+                    f"tool '{tool_name}' is not in contract.tool_scope",
+                    error_type="ToolScopeError",
+                    worker_id=self.worker_id,
+                ),
             )
         elif descriptor is None or not verify_descriptor(descriptor, kind="tool"):
-            obs = json.dumps(
-                {
-                    "ok": False,
-                    "tool": tool_name,
-                    "result": "",
-                    "error": f"tool descriptor '{descriptor_name}' is missing or invalid",
-                },
-                sort_keys=True,
-                ensure_ascii=False,
+            return _wrap_execution_candidate(
+                self.worker_id,
+                contract,
+                self._executor.error_candidate(
+                    tool_name,
+                    contract.id,
+                    f"tool descriptor '{descriptor_name}' is missing or invalid",
+                    error_type="ToolCapabilityError",
+                    worker_id=self.worker_id,
+                ),
+            )
+        elif not _descriptor_matches_spec(
+            descriptor.content, tool_name, self._registry.get_spec(tool_name)
+        ):
+            return _wrap_execution_candidate(
+                self.worker_id,
+                contract,
+                self._executor.error_candidate(
+                    tool_name,
+                    contract.id,
+                    f"tool descriptor '{descriptor_name}' does not match the registered tool contract",
+                    error_type="ToolCapabilityDriftError",
+                    worker_id=self.worker_id,
+                ),
             )
         else:
-            obs = self._executor.invoke(
+            executed = self._executor.invoke(
                 tool_name,
                 args if isinstance(args, dict) else {},
                 contract.id,
-            ).raw_output
-        return _observation_candidate(self.worker_id, contract, obs)
+            )
+            return _wrap_execution_candidate(self.worker_id, contract, executed)
+
+
+def _descriptor_matches_spec(content: str, tool_name: str, spec: object) -> bool:
+    """Ensure the signed capability binds the exact executable tool contract."""
+    if spec is None:
+        return False
+    try:
+        descriptor = json.loads(content)
+    except (TypeError, ValueError):
+        return False
+    return (
+        isinstance(descriptor, dict)
+        and descriptor.get("kind") == "tool"
+        and descriptor.get("name") == tool_name
+        and descriptor.get("version", "0.1.0") == spec.version
+        and _schemas_equal(
+            descriptor.get("input_schema", {}), deep_thaw(spec.input_schema)
+        )
+        and _schemas_equal(
+            descriptor.get("output_schema", {}), deep_thaw(spec.output_schema)
+        )
+        and descriptor.get("max_output_bytes", 1_048_576) == spec.max_output_bytes
+    )
+
+
+def _schemas_equal(descriptor_schema: object, registered_schema: object) -> bool:
+    if descriptor_schema == registered_schema:
+        return True
+    # Older descriptors commonly declared the tool payload as an object while
+    # ToolSpec's historical default was the unconstrained schema {}.
+    return registered_schema == {} and descriptor_schema == {"type": "object"}
 
 
 def _observation_candidate(
     worker_id: str, contract: Contract, observation: str
 ) -> Candidate:
-    if len(contract.outputs) != 1:
-        return Candidate(
-            worker_id=worker_id,
-            raw_output="tool method contract must declare exactly one observation output",
-        )
     outputs = {contract.outputs[0]: observation}
     return Candidate(
         worker_id=worker_id,
@@ -159,4 +203,16 @@ def _observation_candidate(
             ensure_ascii=False,
         ),
         parsed_action={"type": "exec", "outputs": outputs},
+    )
+
+
+def _wrap_execution_candidate(
+    worker_id: str, contract: Contract, executed: Candidate
+) -> Candidate:
+    wrapped = _observation_candidate(worker_id, contract, executed.raw_output)
+    return Candidate(
+        worker_id=wrapped.worker_id,
+        raw_output=wrapped.raw_output,
+        parsed_action=wrapped.parsed_action,
+        metadata=executed.metadata,
     )

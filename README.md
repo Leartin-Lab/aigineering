@@ -65,11 +65,13 @@ profiles authorized CSV/TSV inputs without disclosing raw rows. Both use
 zero-dependency adapters and offline replay fixtures. The
 [`runtime-compiled AI4S run`](examples/ai4s/README.md) additionally exercises a
 Skill-guided root task, a capability-routed local Fleet, and ordinary tool
-continuations.
+continuations. The runtime-only acceptance path also covers staged planning,
+independent `/attest`, root qualification, and SQLite reopen without relying
+on the example audit driver.
 
-## v0.5.5 scope
+## v0.5.6 scope
 
-v0.5.5 is the stable single-machine reference release. It provides:
+v0.5.6 is the stable single-machine reference release. It provides:
 
 - actor-signed Candidate publication;
 - one Candidate commitment boundary for CLI, Worker, Plugin, and HTTP surfaces;
@@ -103,13 +105,20 @@ v0.5.5 is the stable single-machine reference release. It provides:
 - executable AI4S literature and safe data-profile examples;
 - heterogeneous local Worker fleets using independent SQLite connections;
 - parallel tool calls compiled into ordinary tasks and a boolean join;
-- durable recovery from claim-bound structural output rejection.
+- durable recovery from claim-bound structural output rejection;
+- executable local tool contracts with deterministic input/output schemas,
+  version binding, UTF-8 output limits, and descriptor-drift rejection;
+- structured tool execution metadata and a read-only `task audit --json`
+  productivity projection derived from durable lineage facts;
+- a runtime-only AI4S/Fleet tool-observation → continuation → independent
+  verifier loop that survives SQLite reopen.
 
 The release has deterministic boundary, reconstruction, concurrency, artifact,
 and bounded real-LLM evidence. See the
 [v0.5.3 convergence report](reports/053-boundary-convergence-2026-08-09.md) and
 the [v0.5.4 AI4S evidence](reports/054-ai4s-auditable-example-2026-08-13.md),
-and the [v0.5.5 Fleet evidence](reports/055-local-worker-fleet-2026-08-14.md).
+the [v0.5.5 Fleet evidence](reports/055-local-worker-fleet-2026-08-14.md), and
+the [v0.5.6 tool-closure evidence](reports/056-tool-closed-loop-productivity-2026-08-23.md).
 
 Inspect the accepted asset graph without changing authoritative state:
 
@@ -140,14 +149,18 @@ The signed graph acceptance evidence is recorded in
 
 ## Non-goals
 
-v0.5.5 does not claim:
+v0.5.6 does not claim:
 
 - cross-machine consensus or distributed Store semantics;
 - public-network deployment hardening;
 - an external security audit;
 - semantic truth of model-produced content;
 - scheduler fairness across independent machines;
-- a generic workflow language.
+- a generic workflow language;
+- production MCP transport;
+- process-level tool timeout, cancellation, or isolation;
+- exactly-once delivery for external side effects;
+- cross-machine Store and Worker discovery.
 
 The optional HTTP adapter binds to the local reference runtime. Authentication,
 TLS, rate limiting, and hostile-network controls remain deployment

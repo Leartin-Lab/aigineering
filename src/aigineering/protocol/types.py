@@ -102,9 +102,21 @@ class ToolSpec:
     name: str
     description: str = ""
     input_schema: Mapping[str, Any] = field(default_factory=dict)
+    output_schema: Mapping[str, Any] = field(default_factory=dict)
+    version: str = "0.1.0"
+    max_output_bytes: int = 1_048_576
 
     def __post_init__(self) -> None:
+        if not isinstance(self.version, str) or not self.version:
+            raise ValueError("tool version must be a non-empty string")
+        if (
+            isinstance(self.max_output_bytes, bool)
+            or not isinstance(self.max_output_bytes, int)
+            or self.max_output_bytes < 1
+        ):
+            raise ValueError("max_output_bytes must be an integer >= 1")
         object.__setattr__(self, "input_schema", deep_freeze(self.input_schema))
+        object.__setattr__(self, "output_schema", deep_freeze(self.output_schema))
 
 
 @dataclass(frozen=True)

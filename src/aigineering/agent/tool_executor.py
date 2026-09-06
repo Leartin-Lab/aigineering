@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from typing import Any
 
 from aigineering.core.tools import ToolRegistry
@@ -36,18 +37,29 @@ class ToolExecutor:
             Candidate whose ``raw_output`` is a JSON object with fields
             ``ok``, ``tool``, ``result``, and ``error``.
         """
+        started_ns = time.perf_counter_ns()
+        spec = self._registry.get_spec(tool_name)
+        tool_version = spec.version if spec is not None else "0.1.0"
+        result_bytes = 0
         try:
             result = self._registry.run(tool_name, args)
             if not isinstance(result, str):
                 raise TypeError("tool result must be a string")
+            result_bytes = len(result.encode("utf-8"))
             ok = True
             error = ""
             error_type = ""
+            retryable = False
         except Exception as e:
             result = ""
             ok = False
             error = str(e)
             error_type = type(e).__name__
+            result_bytes = int(getattr(e, "result_bytes", 0))
+            retryable = bool(
+                getattr(e, "retryable", False)
+                or isinstance(e, (TimeoutError, ConnectionError, OSError))
+            )
 
         obs = json.dumps(
             {
@@ -56,6 +68,7 @@ class ToolExecutor:
                 "result": result,
                 "error": error,
                 "error_type": error_type,
+                "retryable": retryable,
             },
             sort_keys=True,
             ensure_ascii=False,
@@ -63,4 +76,52 @@ class ToolExecutor:
         return Candidate(
             worker_id=f"tool_worker:{tool_name}",
             raw_output=obs,
+            metadata={
+                "contract_id": contract_id,
+                "tool": tool_name,
+                "tool_version": tool_version,
+                "duration_ms": (time.perf_counter_ns() - started_ns) // 1_000_000,
+                "result_bytes": result_bytes,
+                "error_type": error_type,
+                "retryable": retryable,
+            },
+        )
+
+    def error_candidate(
+        self,
+        tool_name: str,
+        contract_id: str,
+        error: str,
+        *,
+        error_type: str,
+        retryable: bool = False,
+        worker_id: str | None = None,
+    ) -> Candidate:
+        """Build a structured pre-execution failure with the same metadata contract."""
+        spec = self._registry.get_spec(tool_name)
+        tool_version = spec.version if spec is not None else "0.1.0"
+        obs = json.dumps(
+            {
+                "ok": False,
+                "tool": tool_name,
+                "result": "",
+                "error": error,
+                "error_type": error_type,
+                "retryable": retryable,
+            },
+            sort_keys=True,
+            ensure_ascii=False,
+        )
+        return Candidate(
+            worker_id=worker_id or f"tool_worker:{tool_name}",
+            raw_output=obs,
+            metadata={
+                "contract_id": contract_id,
+                "tool": tool_name,
+                "tool_version": tool_version,
+                "duration_ms": 0,
+                "result_bytes": 0,
+                "error_type": error_type,
+                "retryable": retryable,
+            },
         )

@@ -304,6 +304,13 @@ def test_local_fleet_recovers_bad_output_with_frozen_skill_context(
         assert reopened.scan_runtime_records(
             record_type="candidate_rejection.recovery_scheduled"
         )
+        before_digest = reopened.runtime_materialization_digest()
+        rebuilt_digest = reopened.rebuild_runtime_materializations()
+        assert rebuilt_digest == before_digest
+        rebuilt_recovery = reopened.get_contract(recovery.id)
+        assert rebuilt_recovery is not None
+        assert rebuilt_recovery.labels == task.labels
+        assert reopened.get_assets_by_name("evidence")[0].created_by == recovery.id
     finally:
         reopened.close()
     assert any(skill.name in names for names in worker.disclosures)

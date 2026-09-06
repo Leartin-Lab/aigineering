@@ -1,8 +1,8 @@
 # Aigineering Design
 
-Status: implemented truth for v0.5.5
+Status: implemented truth for v0.5.6
 
-This document describes the code shipped in the v0.5.5 reference release.
+This document describes the code shipped in the v0.5.6 reference release.
 Future designs do not belong here until their implementation, tests, migration,
 and release evidence are complete.
 
@@ -434,6 +434,29 @@ passes only Contract-scoped definitions to the provider, and hosts tool calls
 on a separately registered capability-routed ToolWorker. Registry code is
 trusted local code and is never loaded by default.
 
+`ToolSpec` is the local executable tool contract. It binds a deterministic
+input/output JSON-schema subset, version, and maximum UTF-8 result size. The
+registry validates inputs before invoking a handler and validates JSON results
+and byte limits before a successful observation is returned. The ToolWorker
+also checks that the signed descriptor matches the registered executable
+contract, failing closed on descriptor drift. Each observation Candidate
+includes structured execution metadata for tool version, duration, result
+bytes, error type, and retryability.
+
+The read-only `task audit --json` productivity projection walks the immutable
+Contract lineage and durable RuntimeRecords/trace. It reports tool calls,
+continuations, recoveries, rejections, terminal statuses, and usage metadata;
+it is an operator view, not a scheduler, budget owner, or alternate
+commitment path.
+
+The runtime-only AI4S acceptance path can therefore use the public Fleet and
+WorkerHost path for staged `/plan` compilation, a tool observation,
+continuation, independent `/attest`, root qualification, and SQLite reopen.
+This proves the local runtime loop, not an end-to-end production integration.
+MCP production transport, process-level timeout/cancellation/isolation,
+exactly-once external side effects, and cross-machine Store/Worker discovery
+remain outside the implemented boundary.
+
 The reference HTTP server is not a hostile-network deployment profile. TLS,
 service authentication, rate limiting, and network policy remain external
 responsibilities.
@@ -472,7 +495,7 @@ terminal, or replay owner.
 
 ## Release limits
 
-v0.5.5 is a stable local reference release, not:
+v0.5.6 is a stable local reference release, not:
 
 - a cross-machine distributed Store;
 - a consensus implementation;

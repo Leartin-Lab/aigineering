@@ -449,6 +449,9 @@ def _publish_tool_descriptors(store, registry) -> None:
             spec.description,
             spec.input_schema,
             source_uri=f"python:{spec.name}",
+            output_schema=spec.output_schema,
+            version=spec.version,
+            max_output_bytes=spec.max_output_bytes,
         )
         for spec in registry.list_specs()
     )

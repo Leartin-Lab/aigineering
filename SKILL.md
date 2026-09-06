@@ -59,7 +59,12 @@ aig run --task <contract_id> \
 ```
 
 Treat the registry factory as trusted local code. Never accept a registry path
-from untrusted task or model output.
+from untrusted task or model output. Declare a version, deterministic input and
+output schemas, and a bounded `max_output_bytes` on each `ToolSpec` when the
+tool returns JSON. The signed descriptor binds those fields to the registered
+handler; contract drift, invalid arguments, invalid JSON output, and oversized
+output become typed failed observations before business output can be
+published.
 
 ## Publish one trustworthy task
 
@@ -98,7 +103,9 @@ aig task audit <contract_id> --json
 
 Do not report success unless status is `completed`, every required output maps
 to an exact Asset ID, and the audit has no unexplained rejection or silent
-failure risk.
+failure risk. The audit's `productivity` projection covers the selected task
+and its descendants, including terminal states, tool success/failure,
+continuations, recoveries, rejections, and recorded token usage.
 
 ## Wrap an existing agent harness
 

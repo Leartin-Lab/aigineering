@@ -2,9 +2,9 @@
 
 ## Current release
 
-Version: **v0.5.5**
+Version: **v0.5.6**
 
-v0.5.5 is the stable single-machine reference release. “Stable” applies to the
+v0.5.6 is the stable single-machine reference release. “Stable” applies to the
 documented local runtime and protocol surface; it is not a claim of external
 security audit or public-network deployment hardening.
 
@@ -48,7 +48,16 @@ Implemented:
 - parallel tool calls compiled into ordinary tasks plus a boolean join;
 - commit-time completion convergence across concurrent SQLite writers;
 - durable recovery for both projection and claim-bound structural rejection;
-- a runtime-compiled AI4S example driven by one root task and a Skill.
+- a runtime-compiled AI4S example driven by one root task and a Skill;
+- executable local tool contracts with deterministic input/output schemas,
+  version binding, UTF-8 output limits, and descriptor-drift rejection;
+- structured tool execution metadata for duration, result bytes, error type,
+  and retryability;
+- a read-only `task audit --json` productivity projection reconstructed from
+  Contract lineage and durable runtime records;
+- a runtime-only AI4S/Fleet acceptance loop covering staged planning, tool
+  observation, continuation, independent `/attest`, root qualification, and
+  SQLite reopen.
 
 Release evidence is recorded in
 `reports/050-post-review-boundary-hardening-2026-07-19.md` and
@@ -58,8 +67,13 @@ and harness stabilization evidence is in
 `reports/053-boundary-convergence-2026-08-09.md`.
 v0.5.4 AI4S and derivation evidence is recorded in
 `reports/054-ai4s-auditable-example-2026-08-13.md`.
-v0.5.5 fleet and runtime-compilation evidence is recorded in
+Prior v0.5.5 fleet and runtime-compilation evidence is recorded in
 `reports/055-local-worker-fleet-2026-08-14.md`.
+The v0.5.6 implemented boundary is described in
+`changes/014-tool-closed-loop-productivity.md` and
+`docs/adr/ADR-020-tool-closed-loop-productivity.md`.
+Tool-closure, reconstruction, and bounded live Fleet evidence is recorded in
+`reports/056-tool-closed-loop-productivity-2026-08-23.md`.
 
 ## Release gates
 
@@ -80,6 +94,9 @@ Every stable release must pass:
 
 Future candidate directions include:
 
+- production MCP transport and protocol integration;
+- process-level tool timeout, cancellation, and isolation;
+- exactly-once coordination for external side effects;
 - cross-machine Store and Worker discovery;
 - deployment security profiles;
 - reproducible productivity and quality benchmarks.
@@ -97,3 +114,7 @@ Aigineering is not intended to become:
 - a mutable conversational state container;
 - a system in which Workers or tools directly write runtime facts;
 - a system whose correctness depends on one Engine process remaining alive.
+
+The v0.5.6 local tool loop does not claim production MCP transport,
+process-level timeout/cancellation/isolation, exactly-once external side
+effects, or cross-machine discovery.

@@ -16,6 +16,61 @@ from aigineering.protocol.types import ToolSpec
 _ADAPTER = (
     Path(__file__).parents[1] / "literature-evidence" / "scripts" / "openalex_search.py"
 )
+_OPENALEX_OUTPUT_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": [
+        "schema_version",
+        "source",
+        "endpoint",
+        "query",
+        "filters",
+        "retrieved_at",
+        "source_count",
+        "returned_count",
+        "truncated",
+        "warnings",
+        "records",
+    ],
+    "properties": {
+        "schema_version": {"type": "string", "const": "literature-retrieval-v1"},
+        "source": {"type": "string", "const": "openalex"},
+        "endpoint": {"type": "string", "minLength": 1},
+        "query": {"type": "string", "minLength": 1},
+        "filters": {"type": "object"},
+        "retrieved_at": {"type": "string", "minLength": 1},
+        "source_count": {"type": "integer", "minimum": 0},
+        "returned_count": {"type": "integer", "minimum": 0, "maximum": 25},
+        "truncated": {"type": "boolean"},
+        "warnings": {"type": "array", "items": {"type": "string"}},
+        "records": {
+            "type": "array",
+            "maxItems": 25,
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": [
+                    "id",
+                    "title",
+                    "publication_year",
+                    "type",
+                    "doi",
+                    "landing_page",
+                    "cited_by_count",
+                ],
+                "properties": {
+                    "id": {"type": "string", "minLength": 1},
+                    "title": {"type": "string", "minLength": 1},
+                    "publication_year": {},
+                    "type": {"type": "string"},
+                    "doi": {"type": "string"},
+                    "landing_page": {"type": "string"},
+                    "cited_by_count": {"type": "integer", "minimum": 0},
+                },
+            },
+        },
+    },
+}
 
 
 def build_registry() -> ToolRegistry:
@@ -43,6 +98,9 @@ def build_registry() -> ToolRegistry:
                     "to_year": {"type": "integer", "minimum": 1},
                 },
             },
+            output_schema=_OPENALEX_OUTPUT_SCHEMA,
+            version="1.0.0",
+            max_output_bytes=262_144,
         ),
         _openalex_search,
     )

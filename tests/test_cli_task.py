@@ -367,6 +367,9 @@ def test_task_wait_and_audit_json_after_run():
         assert audit_data["task"]["contract_id"] == contract_id
         assert audit_data["task"]["outputs"]["final_report"]
         assert len(audit_data["trace"]) > 0
+        assert audit_data["productivity"]["root_contract_id"] == contract_id
+        assert audit_data["productivity"]["contract_count"] == 1
+        assert audit_data["productivity"]["terminal_count"] == 1
 
 
 def test_plan_attempt_is_expanded_without_method_lifecycle():

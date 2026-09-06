@@ -15,6 +15,7 @@ from aigineering.core.control_plane import (
     bind_contract_label_assets,
     build_control_plane_contract,
 )
+from aigineering.core.task_productivity import project_task_productivity
 from aigineering.protocol.effect_builders import contract_declaration_effect
 from aigineering.protocol.wire import trace_entry_to_dict
 
@@ -237,6 +238,7 @@ def task_audit(contract_id: str, as_json: bool) -> None:
         contract.id,
         lambda: project_task_status(contract, store),
     )
+    productivity = project_task_productivity(contract, store)
     payload = {
         "task": status,
         "inputs": list(contract.inputs),
@@ -244,6 +246,7 @@ def task_audit(contract_id: str, as_json: bool) -> None:
         "labels": list(contract.labels),
         "tool_scope": list(contract.tool_scope),
         "trace": [trace_entry_to_dict(entry) for entry in entries],
+        "productivity": productivity,
     }
     if as_json:
         _output_json(payload)

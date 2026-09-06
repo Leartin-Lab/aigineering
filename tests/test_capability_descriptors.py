@@ -59,6 +59,8 @@ def test_tool_descriptor_registration_and_query():
         "type": "object",
         "properties": {"q": {"type": "string"}},
     }
+    assert content["output_schema"] == {}
+    assert content["max_output_bytes"] == 1_048_576
     assert content["sealed_config_ref"] == ""
 
     # Verify provenance on the Asset object itself

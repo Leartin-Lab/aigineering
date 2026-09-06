@@ -70,6 +70,10 @@ def create_tool_descriptor(
     input_schema: Mapping[str, Any],
     trust_tier: str = "configured",
     source_uri: str = "",
+    *,
+    output_schema: Mapping[str, Any] | None = None,
+    version: str = "0.1.0",
+    max_output_bytes: int = 1_048_576,
 ) -> Asset:
     """Create a capability descriptor Asset for a Tool.
 
@@ -85,6 +89,12 @@ def create_tool_descriptor(
         Trust tier for the tool (default ``"configured"``).
     source_uri : str
         URI identifying the tool's origin (e.g. ``"tool://web_search"``).
+    output_schema : Mapping or None
+        JSON Schema describing the tool's JSON output, when applicable.
+    version : str
+        Tool contract version.
+    max_output_bytes : int
+        UTF-8 output limit bound into the signed descriptor.
 
     Returns
     -------
@@ -94,9 +104,11 @@ def create_tool_descriptor(
     disclosed = {
         "kind": "tool",
         "name": name,
-        "version": "0.1.0",
+        "version": version,
         "description": description,
         "input_schema": deep_thaw(input_schema),
+        "output_schema": deep_thaw(output_schema or {}),
+        "max_output_bytes": max_output_bytes,
         "sealed_config_ref": "",
     }
     return _build_descriptor_asset("tool", name, disclosed, trust_tier, source_uri)

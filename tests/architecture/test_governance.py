@@ -148,7 +148,7 @@ def test_public_markdown_local_links_resolve():
             )
 
 
-def test_released_changes_are_ordered_and_current_design_is_v055():
+def test_released_changes_are_ordered_and_current_design_is_v056():
     roadmap = (ROOT / "ROADMAP.md").read_text(encoding="utf-8")
     redis_change = (ROOT / "changes/003-redis-query-projection.md").read_text(
         encoding="utf-8"
@@ -170,7 +170,7 @@ def test_released_changes_are_ordered_and_current_design_is_v055():
     assert "Status: Accepted" in redis_adr
     assert "Status: Implemented and verified" in identity_change
     assert "Status: Accepted" in identity_adr
-    assert "Status: implemented truth for v0.5.5" in design
+    assert "Status: implemented truth for v0.5.6" in design
     assert "Redis projection" in design
     assert "## Asset identity graph" in design
 
@@ -724,3 +724,48 @@ def test_retry_delegation_does_not_ship_as_completion_registry_semantics():
     assert "ToolCompletionPlugin" in plugins
     assert "FailMethodHandler" not in application
     assert "FailCompletionPlugin" in plugins
+
+
+def test_productivity_audit_and_tool_worker_preserve_candidate_boundary():
+    """Read projections and tool adapters cannot become alternate ingress paths."""
+    productivity = (ROOT / "src/aigineering/core/task_productivity.py").read_text(
+        encoding="utf-8"
+    )
+    assert "aigineering.plugins" not in productivity
+    for forbidden in (
+        "CandidateCommitter",
+        "RuntimeIngress",
+        "commit_ingress_batch",
+        "append_runtime_record",
+        ".add_asset(",
+        ".add_contract(",
+    ):
+        assert forbidden not in productivity
+
+    task = (ROOT / "src/aigineering/cli/task.py").read_text(encoding="utf-8")
+    audit = task.split("def task_audit", 1)[1].split("def _emit_error", 1)[0]
+    assert "project_task_productivity" in audit
+    for forbidden in (
+        "commit_local_effect",
+        "commit_ingress_batch",
+        "append_runtime_record",
+        ".add_asset(",
+        ".add_contract(",
+    ):
+        assert forbidden not in audit
+
+    for relative in (
+        "src/aigineering/agent/tool_worker.py",
+        "src/aigineering/agent/tool_executor.py",
+    ):
+        worker = (ROOT / relative).read_text(encoding="utf-8")
+        assert "Candidate" in worker
+        for forbidden in (
+            "CandidateCommitter",
+            "RuntimeIngress",
+            "commit_ingress_batch",
+            "append_runtime_record",
+            ".add_asset(",
+            ".add_contract(",
+        ):
+            assert forbidden not in worker
