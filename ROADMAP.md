@@ -2,9 +2,9 @@
 
 ## Current release
 
-Version: **v0.5.7**
+Version: **v0.5.8**
 
-v0.5.7 is the stable single-machine reference release. “Stable” applies to the
+v0.5.8 is the stable single-machine reference release. “Stable” applies to the
 documented local runtime and protocol surface; it is not a claim of external
 security audit or public-network deployment hardening.
 
@@ -94,18 +94,21 @@ Every stable release must pass:
 9. installation-state CLI and database-reopen smoke tests;
 10. bounded real-LLM system, Worker, and end-to-end scenarios.
 
-## Planned v0.5.8
+## v0.5.8 evidence and operability
 
-The next development scope is release evidence and operability:
+Implemented in `changes/016-reproducible-release-evidence.md` and ADR-021:
 
 - backup-first reconstruction verification with retained mismatch evidence;
-- reproducible local scaling measurements before optimizing context loading;
-- Python version and optional integration CI coverage plus installed-wheel checks;
-- AST-based dependency guards to supplement text-based architecture tests.
+- reproducible signed-publication scaling measurements;
+- Python 3.11–3.13 and API/Redis CI coverage plus installed-wheel checks;
+- publication reuse of validated artifacts;
+- AST-based dependency guards supplementing existing architecture tests.
 
-These are planned changes, not v0.5.7 guarantees. The v0.5.6 diagnostic rebuild
-mismatch remains unexplained. Process isolation, production MCP, and external
-side-effect guarantees require separate designs.
+Local observations and remote-execution limits are recorded in
+`reports/058-reproducible-release-evidence-2026-09-06.md`.
+The v0.5.6 diagnostic rebuild mismatch remains unexplained. Context-loading
+optimization, process isolation, production MCP, and external side-effect
+guarantees remain future work.
 
 ## Candidate directions
 

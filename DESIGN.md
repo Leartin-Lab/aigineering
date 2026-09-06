@@ -1,8 +1,8 @@
 # Aigineering Design
 
-Status: implemented truth for v0.5.7
+Status: implemented truth for v0.5.8
 
-This document describes the v0.5.7 implementation in this source tree.
+This document describes the v0.5.8 implementation in this source tree.
 Future designs do not belong here until their implementation, tests, migration,
 and release evidence are complete.
 
@@ -480,6 +480,16 @@ server/       optional HTTP transport
 Feature-specific semantics do not belong in the commitment coordinator.
 Store-specific transaction mechanics do not belong in Plugins or Workers.
 
+## Release diagnostics
+
+`aigineering.diagnostics` is an application adapter. It opens a source SQLite
+file read-only, retains a consistent backup, and rebuilds a second private copy.
+It compares semantic digests and immutable-record fingerprints and retains
+mismatch/error evidence without modifying the source. Manifest output excludes
+raw rows and exception text. Verification requires the current schema and never
+silently migrates historical evidence. See ADR-021 and
+[`release evidence`](docs/reference/release-evidence.md).
+
 ## Known transition boundaries
 
 The supported release retains only bounded compatibility needed to read
@@ -498,7 +508,7 @@ terminal, or replay owner.
 
 ## Release limits
 
-v0.5.7 is a stable local reference release, not:
+v0.5.8 is a stable local reference release, not:
 
 - a cross-machine distributed Store;
 - a consensus implementation;

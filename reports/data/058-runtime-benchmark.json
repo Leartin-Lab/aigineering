@@ -1,0 +1,687 @@
+{
+  "argv": [
+    "scripts/benchmark_runtime.py",
+    "--sizes",
+    "10",
+    "100",
+    "300",
+    "--samples",
+    "3",
+    "--output",
+    "/private/tmp/aigineering-058-benchmark.json"
+  ],
+  "benchmark": "aigineering-runtime",
+  "git": {
+    "dirty": true,
+    "revision": "4431c85d61a9443beb342c58370bb29f0e5d0d03"
+  },
+  "package": {
+    "name": "aigineering",
+    "version": "0.5.8"
+  },
+  "platform": "macOS-26.6.2-arm64-arm-64bit",
+  "python": {
+    "implementation": "CPython",
+    "version": "3.11.15"
+  },
+  "schema_version": 1,
+  "sizes": [
+    {
+      "actual_record_counts": {
+        "assets": 11,
+        "contracts": 11,
+        "runtime_records": 89,
+        "runtime_records_by_type": {
+          "allowance.granted": 11,
+          "asset.committed": 11,
+          "asset.legacy-graph.migrated": 11,
+          "candidate.committed": 11,
+          "candidate.received": 11,
+          "contract.declared": 11,
+          "domain.genesis": 1,
+          "trace.recorded": 22
+        },
+        "trace_events": 22
+      },
+      "history_size": 10,
+      "operations": {
+        "audit": {
+          "median_ms": 2.7095,
+          "p95_ms": 3.2603747,
+          "peak_memory_bytes": 350582,
+          "peak_memory_bytes_by_sample": [
+            350582,
+            349814,
+            349814
+          ],
+          "sample_count": 3,
+          "samples_ms": [
+            3.321583,
+            2.659583,
+            2.7095
+          ]
+        },
+        "commit": {
+          "median_ms": 13.549833,
+          "p95_ms": 14.7221955,
+          "peak_memory_bytes": 359583,
+          "peak_memory_bytes_by_sample": [
+            359583,
+            358915,
+            357457
+          ],
+          "sample_count": 3,
+          "samples_ms": [
+            14.852458,
+            13.549833,
+            13.380459
+          ]
+        },
+        "rebuild": {
+          "median_ms": 14.9615,
+          "p95_ms": 16.4110247,
+          "peak_memory_bytes": 665351,
+          "peak_memory_bytes_by_sample": [
+            665351,
+            664471,
+            664471
+          ],
+          "sample_count": 3,
+          "samples_ms": [
+            16.572083,
+            14.9615,
+            14.932708
+          ]
+        }
+      },
+      "samples": [
+        {
+          "after_record_counts": {
+            "assets": 11,
+            "contracts": 11,
+            "runtime_records": 89,
+            "runtime_records_by_type": {
+              "allowance.granted": 11,
+              "asset.committed": 11,
+              "asset.legacy-graph.migrated": 11,
+              "candidate.committed": 11,
+              "candidate.received": 11,
+              "contract.declared": 11,
+              "domain.genesis": 1,
+              "trace.recorded": 22
+            },
+            "trace_events": 22
+          },
+          "audit": {
+            "elapsed_ms": 3.321583,
+            "peak_memory_bytes": 350582
+          },
+          "audit_contract_count": 1,
+          "before_record_counts": {
+            "assets": 10,
+            "contracts": 10,
+            "runtime_records": 81,
+            "runtime_records_by_type": {
+              "allowance.granted": 10,
+              "asset.committed": 10,
+              "asset.legacy-graph.migrated": 10,
+              "candidate.committed": 10,
+              "candidate.received": 10,
+              "contract.declared": 10,
+              "domain.genesis": 1,
+              "trace.recorded": 20
+            },
+            "trace_events": 20
+          },
+          "commit": {
+            "elapsed_ms": 14.852458,
+            "peak_memory_bytes": 359583
+          },
+          "rebuild": {
+            "elapsed_ms": 16.572083,
+            "peak_memory_bytes": 665351
+          },
+          "rebuild_digest_matches": true,
+          "sample": 0
+        },
+        {
+          "after_record_counts": {
+            "assets": 11,
+            "contracts": 11,
+            "runtime_records": 89,
+            "runtime_records_by_type": {
+              "allowance.granted": 11,
+              "asset.committed": 11,
+              "asset.legacy-graph.migrated": 11,
+              "candidate.committed": 11,
+              "candidate.received": 11,
+              "contract.declared": 11,
+              "domain.genesis": 1,
+              "trace.recorded": 22
+            },
+            "trace_events": 22
+          },
+          "audit": {
+            "elapsed_ms": 2.659583,
+            "peak_memory_bytes": 349814
+          },
+          "audit_contract_count": 1,
+          "before_record_counts": {
+            "assets": 10,
+            "contracts": 10,
+            "runtime_records": 81,
+            "runtime_records_by_type": {
+              "allowance.granted": 10,
+              "asset.committed": 10,
+              "asset.legacy-graph.migrated": 10,
+              "candidate.committed": 10,
+              "candidate.received": 10,
+              "contract.declared": 10,
+              "domain.genesis": 1,
+              "trace.recorded": 20
+            },
+            "trace_events": 20
+          },
+          "commit": {
+            "elapsed_ms": 13.549833,
+            "peak_memory_bytes": 358915
+          },
+          "rebuild": {
+            "elapsed_ms": 14.9615,
+            "peak_memory_bytes": 664471
+          },
+          "rebuild_digest_matches": true,
+          "sample": 1
+        },
+        {
+          "after_record_counts": {
+            "assets": 11,
+            "contracts": 11,
+            "runtime_records": 89,
+            "runtime_records_by_type": {
+              "allowance.granted": 11,
+              "asset.committed": 11,
+              "asset.legacy-graph.migrated": 11,
+              "candidate.committed": 11,
+              "candidate.received": 11,
+              "contract.declared": 11,
+              "domain.genesis": 1,
+              "trace.recorded": 22
+            },
+            "trace_events": 22
+          },
+          "audit": {
+            "elapsed_ms": 2.7095,
+            "peak_memory_bytes": 349814
+          },
+          "audit_contract_count": 1,
+          "before_record_counts": {
+            "assets": 10,
+            "contracts": 10,
+            "runtime_records": 81,
+            "runtime_records_by_type": {
+              "allowance.granted": 10,
+              "asset.committed": 10,
+              "asset.legacy-graph.migrated": 10,
+              "candidate.committed": 10,
+              "candidate.received": 10,
+              "contract.declared": 10,
+              "domain.genesis": 1,
+              "trace.recorded": 20
+            },
+            "trace_events": 20
+          },
+          "commit": {
+            "elapsed_ms": 13.380459,
+            "peak_memory_bytes": 357457
+          },
+          "rebuild": {
+            "elapsed_ms": 14.932708,
+            "peak_memory_bytes": 664471
+          },
+          "rebuild_digest_matches": true,
+          "sample": 2
+        }
+      ]
+    },
+    {
+      "actual_record_counts": {
+        "assets": 101,
+        "contracts": 101,
+        "runtime_records": 809,
+        "runtime_records_by_type": {
+          "allowance.granted": 101,
+          "asset.committed": 101,
+          "asset.legacy-graph.migrated": 101,
+          "candidate.committed": 101,
+          "candidate.received": 101,
+          "contract.declared": 101,
+          "domain.genesis": 1,
+          "trace.recorded": 202
+        },
+        "trace_events": 202
+      },
+      "history_size": 100,
+      "operations": {
+        "audit": {
+          "median_ms": 25.429709,
+          "p95_ms": 25.5612584,
+          "peak_memory_bytes": 3224724,
+          "peak_memory_bytes_by_sample": [
+            3224724,
+            3224724,
+            3224724
+          ],
+          "sample_count": 3,
+          "samples_ms": [
+            25.328625,
+            25.575875,
+            25.429709
+          ]
+        },
+        "commit": {
+          "median_ms": 102.479791,
+          "p95_ms": 104.2170538,
+          "peak_memory_bytes": 3414422,
+          "peak_memory_bytes_by_sample": [
+            3413262,
+            3413262,
+            3414422
+          ],
+          "sample_count": 3,
+          "samples_ms": [
+            93.828375,
+            102.479791,
+            104.410083
+          ]
+        },
+        "rebuild": {
+          "median_ms": 138.308792,
+          "p95_ms": 152.6652545,
+          "peak_memory_bytes": 5971861,
+          "peak_memory_bytes_by_sample": [
+            5971349,
+            5971861,
+            5971349
+          ],
+          "sample_count": 3,
+          "samples_ms": [
+            136.354792,
+            154.260417,
+            138.308792
+          ]
+        }
+      },
+      "samples": [
+        {
+          "after_record_counts": {
+            "assets": 101,
+            "contracts": 101,
+            "runtime_records": 809,
+            "runtime_records_by_type": {
+              "allowance.granted": 101,
+              "asset.committed": 101,
+              "asset.legacy-graph.migrated": 101,
+              "candidate.committed": 101,
+              "candidate.received": 101,
+              "contract.declared": 101,
+              "domain.genesis": 1,
+              "trace.recorded": 202
+            },
+            "trace_events": 202
+          },
+          "audit": {
+            "elapsed_ms": 25.328625,
+            "peak_memory_bytes": 3224724
+          },
+          "audit_contract_count": 1,
+          "before_record_counts": {
+            "assets": 100,
+            "contracts": 100,
+            "runtime_records": 801,
+            "runtime_records_by_type": {
+              "allowance.granted": 100,
+              "asset.committed": 100,
+              "asset.legacy-graph.migrated": 100,
+              "candidate.committed": 100,
+              "candidate.received": 100,
+              "contract.declared": 100,
+              "domain.genesis": 1,
+              "trace.recorded": 200
+            },
+            "trace_events": 200
+          },
+          "commit": {
+            "elapsed_ms": 93.828375,
+            "peak_memory_bytes": 3413262
+          },
+          "rebuild": {
+            "elapsed_ms": 136.354792,
+            "peak_memory_bytes": 5971349
+          },
+          "rebuild_digest_matches": true,
+          "sample": 0
+        },
+        {
+          "after_record_counts": {
+            "assets": 101,
+            "contracts": 101,
+            "runtime_records": 809,
+            "runtime_records_by_type": {
+              "allowance.granted": 101,
+              "asset.committed": 101,
+              "asset.legacy-graph.migrated": 101,
+              "candidate.committed": 101,
+              "candidate.received": 101,
+              "contract.declared": 101,
+              "domain.genesis": 1,
+              "trace.recorded": 202
+            },
+            "trace_events": 202
+          },
+          "audit": {
+            "elapsed_ms": 25.575875,
+            "peak_memory_bytes": 3224724
+          },
+          "audit_contract_count": 1,
+          "before_record_counts": {
+            "assets": 100,
+            "contracts": 100,
+            "runtime_records": 801,
+            "runtime_records_by_type": {
+              "allowance.granted": 100,
+              "asset.committed": 100,
+              "asset.legacy-graph.migrated": 100,
+              "candidate.committed": 100,
+              "candidate.received": 100,
+              "contract.declared": 100,
+              "domain.genesis": 1,
+              "trace.recorded": 200
+            },
+            "trace_events": 200
+          },
+          "commit": {
+            "elapsed_ms": 102.479791,
+            "peak_memory_bytes": 3413262
+          },
+          "rebuild": {
+            "elapsed_ms": 154.260417,
+            "peak_memory_bytes": 5971861
+          },
+          "rebuild_digest_matches": true,
+          "sample": 1
+        },
+        {
+          "after_record_counts": {
+            "assets": 101,
+            "contracts": 101,
+            "runtime_records": 809,
+            "runtime_records_by_type": {
+              "allowance.granted": 101,
+              "asset.committed": 101,
+              "asset.legacy-graph.migrated": 101,
+              "candidate.committed": 101,
+              "candidate.received": 101,
+              "contract.declared": 101,
+              "domain.genesis": 1,
+              "trace.recorded": 202
+            },
+            "trace_events": 202
+          },
+          "audit": {
+            "elapsed_ms": 25.429709,
+            "peak_memory_bytes": 3224724
+          },
+          "audit_contract_count": 1,
+          "before_record_counts": {
+            "assets": 100,
+            "contracts": 100,
+            "runtime_records": 801,
+            "runtime_records_by_type": {
+              "allowance.granted": 100,
+              "asset.committed": 100,
+              "asset.legacy-graph.migrated": 100,
+              "candidate.committed": 100,
+              "candidate.received": 100,
+              "contract.declared": 100,
+              "domain.genesis": 1,
+              "trace.recorded": 200
+            },
+            "trace_events": 200
+          },
+          "commit": {
+            "elapsed_ms": 104.410083,
+            "peak_memory_bytes": 3414422
+          },
+          "rebuild": {
+            "elapsed_ms": 138.308792,
+            "peak_memory_bytes": 5971349
+          },
+          "rebuild_digest_matches": true,
+          "sample": 2
+        }
+      ]
+    },
+    {
+      "actual_record_counts": {
+        "assets": 301,
+        "contracts": 301,
+        "runtime_records": 2409,
+        "runtime_records_by_type": {
+          "allowance.granted": 301,
+          "asset.committed": 301,
+          "asset.legacy-graph.migrated": 301,
+          "candidate.committed": 301,
+          "candidate.received": 301,
+          "contract.declared": 301,
+          "domain.genesis": 1,
+          "trace.recorded": 602
+        },
+        "trace_events": 602
+      },
+      "history_size": 300,
+      "operations": {
+        "audit": {
+          "median_ms": 84.033291,
+          "p95_ms": 88.2220044,
+          "peak_memory_bytes": 9758908,
+          "peak_memory_bytes_by_sample": [
+            9707260,
+            9758908,
+            9758908
+          ],
+          "sample_count": 3,
+          "samples_ms": [
+            74.924333,
+            84.033291,
+            88.687417
+          ]
+        },
+        "commit": {
+          "median_ms": 302.425166,
+          "p95_ms": 302.7254294,
+          "peak_memory_bytes": 10332638,
+          "peak_memory_bytes_by_sample": [
+            10332166,
+            10332638,
+            10332638
+          ],
+          "sample_count": 3,
+          "samples_ms": [
+            302.425166,
+            287.305042,
+            302.758792
+          ]
+        },
+        "rebuild": {
+          "median_ms": 447.607791,
+          "p95_ms": 467.3376666,
+          "peak_memory_bytes": 18233797,
+          "peak_memory_bytes_by_sample": [
+            18067653,
+            18233797,
+            18233797
+          ],
+          "sample_count": 3,
+          "samples_ms": [
+            442.854625,
+            447.607791,
+            469.529875
+          ]
+        }
+      },
+      "samples": [
+        {
+          "after_record_counts": {
+            "assets": 301,
+            "contracts": 301,
+            "runtime_records": 2409,
+            "runtime_records_by_type": {
+              "allowance.granted": 301,
+              "asset.committed": 301,
+              "asset.legacy-graph.migrated": 301,
+              "candidate.committed": 301,
+              "candidate.received": 301,
+              "contract.declared": 301,
+              "domain.genesis": 1,
+              "trace.recorded": 602
+            },
+            "trace_events": 602
+          },
+          "audit": {
+            "elapsed_ms": 74.924333,
+            "peak_memory_bytes": 9707260
+          },
+          "audit_contract_count": 1,
+          "before_record_counts": {
+            "assets": 300,
+            "contracts": 300,
+            "runtime_records": 2401,
+            "runtime_records_by_type": {
+              "allowance.granted": 300,
+              "asset.committed": 300,
+              "asset.legacy-graph.migrated": 300,
+              "candidate.committed": 300,
+              "candidate.received": 300,
+              "contract.declared": 300,
+              "domain.genesis": 1,
+              "trace.recorded": 600
+            },
+            "trace_events": 600
+          },
+          "commit": {
+            "elapsed_ms": 302.425166,
+            "peak_memory_bytes": 10332166
+          },
+          "rebuild": {
+            "elapsed_ms": 442.854625,
+            "peak_memory_bytes": 18067653
+          },
+          "rebuild_digest_matches": true,
+          "sample": 0
+        },
+        {
+          "after_record_counts": {
+            "assets": 301,
+            "contracts": 301,
+            "runtime_records": 2409,
+            "runtime_records_by_type": {
+              "allowance.granted": 301,
+              "asset.committed": 301,
+              "asset.legacy-graph.migrated": 301,
+              "candidate.committed": 301,
+              "candidate.received": 301,
+              "contract.declared": 301,
+              "domain.genesis": 1,
+              "trace.recorded": 602
+            },
+            "trace_events": 602
+          },
+          "audit": {
+            "elapsed_ms": 84.033291,
+            "peak_memory_bytes": 9758908
+          },
+          "audit_contract_count": 1,
+          "before_record_counts": {
+            "assets": 300,
+            "contracts": 300,
+            "runtime_records": 2401,
+            "runtime_records_by_type": {
+              "allowance.granted": 300,
+              "asset.committed": 300,
+              "asset.legacy-graph.migrated": 300,
+              "candidate.committed": 300,
+              "candidate.received": 300,
+              "contract.declared": 300,
+              "domain.genesis": 1,
+              "trace.recorded": 600
+            },
+            "trace_events": 600
+          },
+          "commit": {
+            "elapsed_ms": 287.305042,
+            "peak_memory_bytes": 10332638
+          },
+          "rebuild": {
+            "elapsed_ms": 447.607791,
+            "peak_memory_bytes": 18233797
+          },
+          "rebuild_digest_matches": true,
+          "sample": 1
+        },
+        {
+          "after_record_counts": {
+            "assets": 301,
+            "contracts": 301,
+            "runtime_records": 2409,
+            "runtime_records_by_type": {
+              "allowance.granted": 301,
+              "asset.committed": 301,
+              "asset.legacy-graph.migrated": 301,
+              "candidate.committed": 301,
+              "candidate.received": 301,
+              "contract.declared": 301,
+              "domain.genesis": 1,
+              "trace.recorded": 602
+            },
+            "trace_events": 602
+          },
+          "audit": {
+            "elapsed_ms": 88.687417,
+            "peak_memory_bytes": 9758908
+          },
+          "audit_contract_count": 1,
+          "before_record_counts": {
+            "assets": 300,
+            "contracts": 300,
+            "runtime_records": 2401,
+            "runtime_records_by_type": {
+              "allowance.granted": 300,
+              "asset.committed": 300,
+              "asset.legacy-graph.migrated": 300,
+              "candidate.committed": 300,
+              "candidate.received": 300,
+              "contract.declared": 300,
+              "domain.genesis": 1,
+              "trace.recorded": 600
+            },
+            "trace_events": 600
+          },
+          "commit": {
+            "elapsed_ms": 302.758792,
+            "peak_memory_bytes": 10332638
+          },
+          "rebuild": {
+            "elapsed_ms": 469.529875,
+            "peak_memory_bytes": 18233797
+          },
+          "rebuild_digest_matches": true,
+          "sample": 2
+        }
+      ]
+    }
+  ],
+  "sqlite": {
+    "version": "3.53.0"
+  }
+}

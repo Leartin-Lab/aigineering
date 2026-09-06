@@ -1,42 +1,25 @@
 name: Publish to PyPI
 
 on:
-  pull_request:
-  push:
-    branches: [dev, main]
   release:
     types: [published]
 
 jobs:
-  build-check:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-      - name: Install build tools
-        run: pip install build twine
-      - name: Build distribution
-        run: python -m build
-      - name: Check distribution metadata
-        run: twine check dist/*
+  ci:
+    uses: ./.github/workflows/ci.yml
 
   pypi:
     if: github.event_name == 'release'
-    needs: build-check
+    needs: ci
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
       id-token: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Download validated publication distribution
+        uses: actions/download-artifact@v4
         with:
-          python-version: "3.11"
-      - name: Install build tool
-        run: pip install build
-      - name: Build distribution
-        run: python -m build
+          name: dist-python-3.11
+          path: dist
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
