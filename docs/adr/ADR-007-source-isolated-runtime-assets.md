@@ -22,10 +22,19 @@ prefixes such as `_tool_obs_`, `_tool_call_`, `_plan_result_`, `_method_ctx_`,
 
 Untrusted workers cannot mint protected runtime assets through normal output
 projection. Reserved assets must be created by an authorized runtime path, such
-as a system method contract or future signer policy.
+as an authorized Plugin/runtime policy or future signer policy.
 
 Tool observations, method results, skills, policies, and memory are represented
 as assets, but their source determines what they are allowed to prove.
+
+## Implementation note
+
+The source-isolation and reserved-namespace principles remain current. Under
+ADR-011, feature-specific behavior is Plugin-owned; the current planning path
+does not commit a `_plan_result_` method-result Asset. Historical names such as
+`_plan_result_` and `_method_ctx_` remain reserved for compatibility and cannot
+be minted by ordinary Worker output. See `DESIGN.md` for the implemented
+Plugin boundary.
 
 ## Consequences
 

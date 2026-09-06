@@ -151,10 +151,22 @@ class ToolWorker:
                     worker_id=self.worker_id,
                 ),
             )
+        elif not isinstance(args, dict):
+            return _wrap_execution_candidate(
+                self.worker_id,
+                contract,
+                self._executor.error_candidate(
+                    tool_name,
+                    contract.id,
+                    "tool payload.args must be a JSON object",
+                    error_type="ToolActionError",
+                    worker_id=self.worker_id,
+                ),
+            )
         else:
             executed = self._executor.invoke(
                 tool_name,
-                args if isinstance(args, dict) else {},
+                args,
                 contract.id,
             )
             return _wrap_execution_candidate(self.worker_id, contract, executed)

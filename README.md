@@ -69,9 +69,9 @@ continuations. The runtime-only acceptance path also covers staged planning,
 independent `/attest`, root qualification, and SQLite reopen without relying
 on the example audit driver.
 
-## v0.5.6 scope
+## v0.5.7 scope
 
-v0.5.6 is the stable single-machine reference release. It provides:
+v0.5.7 is the stable single-machine reference release. It provides:
 
 - actor-signed Candidate publication;
 - one Candidate commitment boundary for CLI, Worker, Plugin, and HTTP surfaces;
@@ -147,9 +147,12 @@ back to SQLite. Release evidence for this adapter is recorded in
 The signed graph acceptance evidence is recorded in
 [`reports/052-signed-definition-content-graph-2026-07-31.md`](reports/052-signed-definition-content-graph-2026-07-31.md).
 
+v0.5.7 adds fail-closed tool argument and schema fixes plus historical ADR
+clarifications. See [patch evidence](reports/057-tool-validation-patches-2026-09-06.md).
+
 ## Non-goals
 
-v0.5.6 does not claim:
+v0.5.7 does not claim:
 
 - cross-machine consensus or distributed Store semantics;
 - public-network deployment hardening;

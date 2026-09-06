@@ -1,7 +1,7 @@
 """Tests for ToolExecutor (v0.3.6 — split tool execution from lifecycle, renamed per ADR-006)."""
 
 import json
-
+import pytest
 
 from aigineering.agent.tool_executor import ToolExecutor
 from aigineering.agent.tool_worker import ToolWorker
@@ -136,6 +136,34 @@ def test_worker_parity_with_direct_registry():
     obs = json.loads(candidate.raw_output)
     assert obs["result"] == direct_result
     assert obs["ok"] is True
+
+
+@pytest.mark.parametrize("args", ["malformed", [], None, 1, True])
+def test_tool_worker_rejects_non_object_arguments_before_handler(args):
+    calls = []
+    registry = ToolRegistry()
+    registry.register(
+        ToolSpec(name="lookup"), lambda value: calls.append(value) or "ok"
+    )
+    descriptor = create_tool_descriptor(
+        "lookup", "lookup", {}, source_uri="python:lookup"
+    )
+    contract = Contract(
+        id="contract_1",
+        description=json.dumps({"payload": {"name": "lookup", "args": args}}),
+        outputs=("_tool_obs_contract_1",),
+        tool_scope=("lookup",),
+    )
+
+    candidate = ToolWorker(registry).invoke(contract, [descriptor])
+    observation = json.loads(candidate.parsed_action["outputs"][contract.outputs[0]])
+
+    assert calls == []
+    assert observation["ok"] is False
+    assert observation["error_type"] == "ToolActionError"
+    assert "JSON object" in observation["error"]
+    assert candidate.metadata["error_type"] == "ToolActionError"
+    assert candidate.metadata["retryable"] is False
 
 
 # ── Handler integration tests ──────────────────────────────────────────

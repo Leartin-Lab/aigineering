@@ -1,6 +1,6 @@
 # ADR-005: Unified Feature Ingress
 
-**Status**: Accepted
+**Status**: Accepted; implementation superseded in part by ADR-011
 **Date**: 2026-06-11
 
 ## Context
@@ -34,6 +34,15 @@ The default ingress for new execution behavior is **Method**. A method may plan,
 replan, call a tool, verify evidence, recover from failure, read context, or ask
 for human input, but it must do so through explicit contracts, assets, budget,
 and trace records.
+
+## Supersession and implementation note
+
+The classification and auditable-ingress principles remain valid. ADR-011
+supersedes the Method default and its method-owned implementation: current
+feature behavior is proposed by Plugins or WorkerHost adapters as ordinary
+signed Candidates and Contract declarations, while the commitment kernel does
+not assign lifecycle semantics to method names. See `DESIGN.md` for the
+implemented boundary.
 
 Workers execute bounded work and return candidates. They do not directly commit
 facts. Assets are durable records; they do not execute. Labels assemble context;

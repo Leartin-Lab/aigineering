@@ -28,7 +28,9 @@ python -m build
 - Do not treat undeclared outputs as committed assets.
 - Record rejected candidates in trace.
 - Keep DAG/tree views as trace projections, not runtime primitives.
-- Treat method requests such as `/plan`, `/replan`, `/retry`, and `/tool` as
-  explicit subtasks or method-runtime handlers, not hidden controller operations.
+- Treat action requests such as `/plan`, `/replan`, `/retry`, and `/tool` as
+  explicit ordinary Candidate/Contract work compiled through the relevant
+  Plugin or WorkerHost, never as hidden controller state. See ADR-011 and
+  `DESIGN.md` for the current implementation boundary.
 - Keep worker pull/submit claim-bound and transactionally committed on the
   SQLite path.

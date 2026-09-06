@@ -58,6 +58,8 @@ def validate_schema_document(schema: Mapping[str, Any], *, path: str = "$") -> N
     for key in schema:
         if key not in _SUPPORTED_KEYWORDS:
             raise ValueError(f"unsupported JSON schema keyword '{key}' at {path}")
+        if key != "const" and schema[key] is None:
+            raise ValueError(f"{path}.{key} must not be null")
 
     schema_type = schema.get("type")
     if schema_type is not None and (
@@ -147,13 +149,38 @@ def _type_matches(value: Any, schema_type: str) -> bool:
     return value is None
 
 
+def _json_structural_equal(left: Any, right: Any) -> bool:
+    """Compare JSON-like values without conflating booleans and numbers."""
+
+    if isinstance(left, bool) or isinstance(right, bool):
+        return isinstance(left, bool) and isinstance(right, bool) and left is right
+    if isinstance(left, Real) and isinstance(right, Real):
+        return left == right
+    if isinstance(left, Mapping) or isinstance(right, Mapping):
+        if not isinstance(left, Mapping) or not isinstance(right, Mapping):
+            return False
+        if len(left) != len(right) or left.keys() != right.keys():
+            return False
+        return all(_json_structural_equal(left[key], right[key]) for key in left)
+    if isinstance(left, (list, tuple)) or isinstance(right, (list, tuple)):
+        if not isinstance(left, (list, tuple)) or not isinstance(right, (list, tuple)):
+            return False
+        return len(left) == len(right) and all(
+            _json_structural_equal(left_item, right_item)
+            for left_item, right_item in zip(left, right)
+        )
+    return left == right
+
+
 def _validate_value(value: Any, schema: Mapping[str, Any], path: str) -> None:
     schema_type = schema.get("type")
     if schema_type is not None and not _type_matches(value, schema_type):
         raise ToolSchemaValidationError(f"{path} must be of type {schema_type}")
-    if "const" in schema and value != schema["const"]:
+    if "const" in schema and not _json_structural_equal(value, schema["const"]):
         raise ToolSchemaValidationError(f"{path} must equal const")
-    if "enum" in schema and value not in schema["enum"]:
+    if "enum" in schema and not any(
+        _json_structural_equal(value, candidate) for candidate in schema["enum"]
+    ):
         raise ToolSchemaValidationError(f"{path} must match enum")
 
     if isinstance(value, str):

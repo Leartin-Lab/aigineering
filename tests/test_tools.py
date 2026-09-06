@@ -3,6 +3,7 @@
 import pytest
 
 from aigineering.core.tools import ToolRegistry
+from aigineering.core.tool_schema import validate_value
 from aigineering.protocol.types import ToolSpec
 
 
@@ -127,6 +128,113 @@ def test_tool_registry_rejects_unsupported_schema_keyword():
         registry.register(
             ToolSpec(name="bad", input_schema={"pattern": "x"}), lambda _args: "ok"
         )
+
+
+def test_tool_registry_uses_json_equality_for_nested_const_and_enum():
+    registry = ToolRegistry()
+    registry.register(
+        ToolSpec(
+            name="lookup",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "const_value": {
+                        "const": {"enabled": True, "values": [1, {"count": 2}]}
+                    },
+                    "enum_value": {
+                        "enum": [{"enabled": True, "values": [1, {"count": 2}]}]
+                    },
+                },
+                "required": ["const_value", "enum_value"],
+            },
+        ),
+        lambda _args: "ok",
+    )
+
+    equivalent = {
+        "const_value": {"enabled": True, "values": (1.0, {"count": 2.0})},
+        "enum_value": {"enabled": True, "values": [1.0, {"count": 2.0}]},
+    }
+    assert registry.run("lookup", equivalent) == "ok"
+
+    with pytest.raises(ValueError, match="must equal const"):
+        registry.run(
+            "lookup",
+            {
+                "const_value": {"enabled": 1, "values": [1, {"count": 2}]},
+                "enum_value": equivalent["enum_value"],
+            },
+        )
+    with pytest.raises(ValueError, match="must match enum"):
+        registry.run(
+            "lookup",
+            {
+                "const_value": equivalent["const_value"],
+                "enum_value": {"enabled": True, "values": [True, {"count": 2}]},
+            },
+        )
+
+
+@pytest.mark.parametrize(
+    "keyword",
+    [
+        "type",
+        "properties",
+        "required",
+        "additionalProperties",
+        "items",
+        "enum",
+        "minLength",
+        "maxLength",
+        "minItems",
+        "maxItems",
+        "minimum",
+        "maximum",
+    ],
+)
+def test_tool_registry_rejects_null_schema_keyword_before_installing_handler(keyword):
+    registry = ToolRegistry()
+    called = False
+
+    def handler(_args):
+        nonlocal called
+        called = True
+        return "unexpected"
+
+    with pytest.raises(ValueError, match="must not be null"):
+        registry.register(
+            ToolSpec(name="bad", input_schema={keyword: None}),
+            handler,
+        )
+
+    assert registry.list_specs() == []
+    with pytest.raises(KeyError, match="unknown tool"):
+        registry.run("bad", {})
+    assert called is False
+
+
+def test_tool_schema_allows_null_const():
+    validate_value(None, {"const": None})
+
+
+def test_invalid_schema_registration_preserves_existing_handler():
+    registry = ToolRegistry()
+    registry.register(ToolSpec(name="lookup"), lambda _args: "original")
+    called = False
+
+    def replacement(_args):
+        nonlocal called
+        called = True
+        return "replacement"
+
+    with pytest.raises(ValueError, match="must not be null"):
+        registry.register(
+            ToolSpec(name="lookup", input_schema={"minLength": None}),
+            replacement,
+        )
+
+    assert registry.run("lookup", {}) == "original"
+    assert called is False
 
 
 @pytest.mark.parametrize(

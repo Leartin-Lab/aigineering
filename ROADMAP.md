@@ -2,9 +2,9 @@
 
 ## Current release
 
-Version: **v0.5.6**
+Version: **v0.5.7**
 
-v0.5.6 is the stable single-machine reference release. “Stable” applies to the
+v0.5.7 is the stable single-machine reference release. “Stable” applies to the
 documented local runtime and protocol surface; it is not a claim of external
 security audit or public-network deployment hardening.
 
@@ -75,6 +75,10 @@ The v0.5.6 implemented boundary is described in
 Tool-closure, reconstruction, and bounded live Fleet evidence is recorded in
 `reports/056-tool-closed-loop-productivity-2026-08-23.md`.
 
+v0.5.7 adds bounded tool argument/schema validation fixes and clarifies historical
+ADR implementation ownership. See `changes/015-tool-validation-patches.md` and
+`reports/057-tool-validation-patches-2026-09-06.md`.
+
 ## Release gates
 
 Every stable release must pass:
@@ -89,6 +93,19 @@ Every stable release must pass:
 8. wheel and sdist build plus metadata validation;
 9. installation-state CLI and database-reopen smoke tests;
 10. bounded real-LLM system, Worker, and end-to-end scenarios.
+
+## Planned v0.5.8
+
+The next development scope is release evidence and operability:
+
+- backup-first reconstruction verification with retained mismatch evidence;
+- reproducible local scaling measurements before optimizing context loading;
+- Python version and optional integration CI coverage plus installed-wheel checks;
+- AST-based dependency guards to supplement text-based architecture tests.
+
+These are planned changes, not v0.5.7 guarantees. The v0.5.6 diagnostic rebuild
+mismatch remains unexplained. Process isolation, production MCP, and external
+side-effect guarantees require separate designs.
 
 ## Candidate directions
 

@@ -1,8 +1,8 @@
 # Aigineering Design
 
-Status: implemented truth for v0.5.6
+Status: implemented truth for v0.5.7
 
-This document describes the code shipped in the v0.5.6 reference release.
+This document describes the v0.5.7 implementation in this source tree.
 Future designs do not belong here until their implementation, tests, migration,
 and release evidence are complete.
 
@@ -439,7 +439,10 @@ input/output JSON-schema subset, version, and maximum UTF-8 result size. The
 registry validates inputs before invoking a handler and validates JSON results
 and byte limits before a successful observation is returned. The ToolWorker
 also checks that the signed descriptor matches the registered executable
-contract, failing closed on descriptor drift. Each observation Candidate
+contract, failing closed on descriptor drift. Non-object tool arguments are
+rejected before execution. Schema constants and enums distinguish JSON booleans
+from numbers, and explicit null schema keywords are invalid except `const`.
+Each observation Candidate
 includes structured execution metadata for tool version, duration, result
 bytes, error type, and retryability.
 
@@ -495,7 +498,7 @@ terminal, or replay owner.
 
 ## Release limits
 
-v0.5.6 is a stable local reference release, not:
+v0.5.7 is a stable local reference release, not:
 
 - a cross-machine distributed Store;
 - a consensus implementation;
