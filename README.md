@@ -69,6 +69,15 @@ continuations. The runtime-only acceptance path also covers staged planning,
 independent `/attest`, root qualification, and SQLite reopen without relying
 on the example audit driver.
 
+## v0.5.9 business artifact development
+
+The current development version adds `aig artifact` for bounded attachments,
+PDF/text extraction, exact evidence selection, asset-bound Markdown citations,
+recursive ancestry and offline export. These are business adapters over the
+existing signed runtime. See the [artifact guide](docs/business-artifacts.md)
+and [ADR-022](docs/adr/ADR-022-portable-business-artifacts.md) for commands and
+limits. Optional PDF support: `pip install "aigineering[documents]"`.
+
 ## v0.5.8 scope
 
 v0.5.8 is the stable single-machine reference release. It provides:

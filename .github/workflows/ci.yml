@@ -32,7 +32,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install
-        run: python -m pip install -e ".[dev,api,redis]"
+        run: python -m pip install -e ".[dev,api,redis,documents]"
       - name: Lint
         run: ruff check src/aigineering tests scripts
       - name: Format check

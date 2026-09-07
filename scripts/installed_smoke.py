@@ -61,6 +61,47 @@ def diagnostic(
     return report
 
 
+def artifact_smoke(aig: Path, *, cwd: Path, env: dict[str, str]) -> str:
+    """Exercise the packaged artifact path in separate installed CLI processes."""
+
+    def artifact(*args: str) -> dict:
+        return json.loads(run([str(aig), "artifact", *args], cwd=cwd, env=env))
+
+    text = "A document can support an exact quotation.\n"
+    (cwd / "document.txt").write_text(text, encoding="utf-8")
+    source = artifact(
+        "import", "document.txt", "--name", "attachment", "--media-type", "text/plain"
+    )
+    document = artifact("parse", source["id"], "--name", "document")
+    evidence = artifact(
+        "cite",
+        document["id"],
+        "--name",
+        "evidence",
+        "--page",
+        "1",
+        "--start",
+        "0",
+        "--end",
+        "10",
+    )
+    (cwd / "cited.md").write_text("An exact quotation.[^c1]", encoding="utf-8")
+    (cwd / "bindings.json").write_text(
+        json.dumps({"c1": evidence["id"]}), encoding="utf-8"
+    )
+    report = artifact(
+        "report", "cited.md", "--bindings", "bindings.json", "--name", "cited-report"
+    )
+    ancestry = artifact("lineage", report["id"])
+    if len(ancestry["nodes"]) != 4 or len(ancestry["publications"]) != 4:
+        raise RuntimeError("artifact ancestry is incomplete")
+    artifact("export", report["id"], "--output", "artifact-export", "--include-sources")
+    source_files = list((cwd / "artifact-export" / "sources").iterdir())
+    if len(source_files) != 1 or source_files[0].read_bytes() != text.encode("utf-8"):
+        raise RuntimeError("artifact export did not preserve original bytes")
+    return report["id"]
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--wheel", type=Path, required=True)
@@ -176,6 +217,8 @@ def main() -> int:
         ):
             raise RuntimeError("task audit did not contain the completed root lineage")
 
+        artifact_id = artifact_smoke(aig, cwd=workdir, env=env)
+
         evidence_dir = (
             options.evidence_dir.resolve()
             if options.evidence_dir
@@ -206,8 +249,11 @@ def main() -> int:
                 str(python),
                 "-c",
                 "from aigineering.core.sqlite_store import SQLiteStore; "
+                "from aigineering.business.artifacts import lineage; "
                 f"s=SQLiteStore({str(workdir / '.aig' / 'store.db')!r}); "
-                f"assert s.get_contract({contract_id!r}) is not None; s.close(); print('reopened')",
+                f"assert s.get_contract({contract_id!r}) is not None; "
+                f"assert len(lineage({artifact_id!r}, s.get_asset)['nodes']) == 4; "
+                "s.close(); print('reopened')",
             ],
             cwd=workdir,
             env=env,

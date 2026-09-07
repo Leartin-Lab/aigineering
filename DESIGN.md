@@ -1,8 +1,8 @@
 # Aigineering Design
 
-Status: implemented truth for v0.5.8
+Status: implemented truth for v0.5.9
 
-This document describes the v0.5.8 implementation in this source tree.
+This document describes the v0.5.9 implementation in this source tree.
 Future designs do not belong here until their implementation, tests, migration,
 and release evidence are complete.
 
@@ -139,6 +139,22 @@ binds its source, replacement, lineage, range, and derivation version. Runtime
 policy and verification recompute the exact line, character, or UTF-8 byte
 range from the committed source; the relation signature alone cannot make
 caller-supplied content a valid slice.
+
+## Portable business artifacts
+
+The optional `business` adapter package implements `artifact-v1` envelopes over
+ordinary Assets. Bounded base64 attachments preserve byte SHA-256 separately
+from normalized text identity. Document, exact page/character evidence and
+Markdown citation bindings refer to exact accepted Asset IDs. These conventions
+also fit canonical Worker text outputs; they add no kernel effect or state.
+
+The `artifact` CLI signs administrative ingress, validates recursive business
+closure and exports Markdown, escaped evidence pages and ancestry metadata.
+Scoped ToolRegistry handlers return observations only. Consumer validation
+checks byte integrity and exact quotes; semantic support and parser fidelity
+remain unproven. Attachments are limited to 8 MiB, sources are omitted from
+exports unless explicitly included, and non-original disclosure views fail
+closed at every ancestry hop. See ADR-022 and `docs/business-artifacts.md`.
 
 ## Candidates and effects
 
@@ -508,7 +524,7 @@ terminal, or replay owner.
 
 ## Release limits
 
-v0.5.8 is a stable local reference release, not:
+v0.5.9 extends the local reference runtime. It does not provide:
 
 - a cross-machine distributed Store;
 - a consensus implementation;

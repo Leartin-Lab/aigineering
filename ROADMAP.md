@@ -2,11 +2,11 @@
 
 ## Current release
 
-Version: **v0.5.8**
+Version: **v0.5.9**
 
-v0.5.8 is the stable single-machine reference release. “Stable” applies to the
-documented local runtime and protocol surface; it is not a claim of external
-security audit or public-network deployment hardening.
+v0.5.9 is the current local development version of the single-machine reference
+runtime. The documented local runtime and protocol surface do not imply an
+external security audit or public-network deployment hardening.
 
 Implemented:
 
@@ -109,6 +109,25 @@ Local observations and remote-execution limits are recorded in
 The v0.5.6 diagnostic rebuild mismatch remains unexplained. Context-loading
 optimization, process isolation, production MCP, and external side-effect
 guarantees remain future work.
+
+## v0.5.9 portable business artifacts
+
+Implemented in `changes/017-portable-business-artifacts.md` and ADR-022:
+
+- bounded self-contained byte attachments through signed Asset publication;
+- optional PDF/OCR and strict UTF-8 extraction with versioned page text;
+- exact evidence selectors and asset-bound Markdown footnotes;
+- recursive fail-closed ancestry and deterministic offline export;
+- OpenAlex/Unpaywall location resolution and scoped public HTTPS acquisition;
+- explicit snapshot-scoped tool registration and canonical Harness integration.
+
+Local verification is recorded in
+`reports/059-portable-business-artifacts-2026-09-07.md`. This is the first asset
+and citation closure, shared by literature and other document domains. Automatic
+research orchestration, authenticated full-text services, XML parsers, alternate
+OCR/parser comparison, semantic claim verification, retraction checks, large blob
+storage and PDF coordinate overlays remain subsequent work. No remote release
+or fresh live-LLM qualification is implied by local deterministic tests.
 
 ## Candidate directions
 
