@@ -106,3 +106,18 @@ the promotion gate; no remote success is inferred from these local observations.
 
 The v0.5.6 diagnostic had no retained pre-rebuild snapshot. The identified CI
 cause does not retroactively prove the cause of that historical mismatch.
+
+## Final promotion follow-up
+
+A later Ubuntu Python 3.12 run exposed a second Fleet race between continuation
+declaration and scheduling-context publication. Exact observation context now
+commits before the continuation Candidate becomes claimable. The preparation
+record does not declare work or indicate successful scheduling. The final
+scheduling trace remains compatible with prior histories; ordinary and parallel
+continuations retain their existing input semantics.
+
+The installed-wheel smoke now selects Windows virtualenv executable paths rather
+than assuming POSIX `bin/`. The platform scan confirmed conditional POSIX mode-bit
+assertions and capability-based symlink skips. Domain and reconstruction tests
+passed (13 tests); this was a source-level portability review on macOS, not a
+Windows runner validation. Current CI platforms are documented in CONTRIBUTING.

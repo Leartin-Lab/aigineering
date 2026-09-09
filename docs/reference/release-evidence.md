@@ -2,7 +2,7 @@
 
 Use the repository version and a clean commit when publishing acceptance
 results. A local implementation commit is not a GitHub release or PyPI upload.
-CI runs deterministic tests on Python 3.11, 3.12, and 3.13 with API dependencies
+CI runs deterministic tests on Ubuntu with Python 3.11, 3.12, and 3.13 with API dependencies
 and a Redis 7 service. It builds and checks distributions and installs a wheel
 in a fresh environment outside the repository. Publication reuses that wheel
 and sdist after the complete reusable CI job succeeds.
@@ -11,11 +11,11 @@ and sdist after the complete reusable CI job succeeds.
 
 ```bash
 python -m aigineering.diagnostics .aig/store.db \
-  --output-dir /private/tmp/aig-rebuild-evidence
+  --output-dir .aig/rebuild-evidence
 ```
 
-The output directory must not exist; its parent must exist. On systems without
-`/private/tmp`, choose a private temporary directory on that system.
+The output directory must not exist; its parent must exist. Choose a private
+directory on your system; the example places it beside the local domain database.
 The tool creates `before.sqlite`, `rebuilt.sqlite`, and `manifest.json`. SQLite
 backup captures committed WAL contents consistently. Only the second copy is
 rebuilt. The manifest compares the runtime semantic digest and canonical-record
@@ -42,7 +42,7 @@ For a bounded deterministic baseline:
 
 ```bash
 python scripts/benchmark_runtime.py --sizes 10 100 300 --samples 3 \
-  --output /private/tmp/aig-runtime-benchmark.json
+  --output ./aig-runtime-benchmark.json
 ```
 
 The output path must not exist. Run `python scripts/benchmark_runtime.py --help`
@@ -53,7 +53,7 @@ compare changes. Traced memory is not process RSS, and mock/synthetic throughput
 is not model productivity or scientific quality.
 
 The current projection context reads the full fact history. The benchmark
-establishes a baseline; v0.5.8 does not claim to remove that scaling cost.
+establishes a baseline; the current runtime does not remove that scaling cost.
 
 ## Remaining release evidence
 

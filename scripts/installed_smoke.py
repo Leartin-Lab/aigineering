@@ -119,8 +119,10 @@ def main() -> int:
         workdir = Path(raw)
         venv_dir = workdir / "venv"
         venv.EnvBuilder(with_pip=True, clear=True).create(venv_dir)
-        python = venv_dir / "bin" / "python"
-        aig = venv_dir / "bin" / "aig"
+        venv_bin = venv_dir / ("Scripts" if os.name == "nt" else "bin")
+        executable_suffix = ".exe" if os.name == "nt" else ""
+        python = venv_bin / f"python{executable_suffix}"
+        aig = venv_bin / f"aig{executable_suffix}"
         env = {
             key: value
             for key, value in os.environ.items()

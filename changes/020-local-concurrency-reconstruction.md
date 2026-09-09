@@ -14,6 +14,10 @@ Local Fleet slots could also race while provisioning a shared plugin signing key
 An existence check followed by exclusive creation did not synchronize creators,
 and publishing the path before writing the complete key allowed partial reads.
 
+A later Python 3.12 CI run exposed a separate Fleet interleaving: a continuation
+Contract became visible before its scheduling trace committed. A competing Worker
+could claim it before the trace-bound tool observations were available.
+
 ## Changes
 
 Trace reconstruction preserves the first committed observation in revision order,
@@ -24,6 +28,12 @@ Local key publication writes and flushes a private temporary file before atomica
 linking it into its final path without replacing an existing key. Losing creators
 load the winner's complete key. The local identity adapter retains this filesystem
 responsibility; the commitment kernel is unchanged.
+
+Completion projection persists exact observation context before publishing its
+continuation Candidate. The preparation trace does not declare work or imply
+scheduling success. Worker packages read this context, with the previous scheduled
+trace retained for compatibility. Replay can finish interrupted publication;
+ordinary continuations without tool observations remain supported.
 
 ## Evidence
 

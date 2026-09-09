@@ -249,6 +249,16 @@ class TaskCompletionProjector:
             )
             self._record_terminal(parent, "failed")
             return
+        # A concurrent Worker can claim the Contract as soon as publication
+        # commits. Persist its exact observations first; this preparation alone
+        # neither declares work nor marks the parent as delegated.
+        self._trace.record(
+            parent.id,
+            "method_continuation_context_prepared",
+            disclosed_assets=[asset.id for asset in assets],
+            relation_type="tool",
+            relation_target=continuation.id,
+        )
         decision = publisher.publish(
             proposal.effects,
             idempotency_key=f"continuation:{source.id}:{continuation.id}",

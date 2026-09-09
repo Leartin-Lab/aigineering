@@ -985,7 +985,11 @@ def _method_context_assets_for(contract: Contract, store) -> tuple[Asset, ...]:
     seen: set[str] = set()
     for entry in store.get_all():
         if (
-            entry.event_type != "method_continuation_scheduled"
+            entry.event_type
+            not in {
+                "method_continuation_context_prepared",
+                "method_continuation_scheduled",
+            }
             or entry.relation_target != contract.id
         ):
             continue

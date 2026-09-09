@@ -80,9 +80,9 @@ existing signed runtime. See the [artifact guide](docs/business-artifacts.md)
 and [ADR-022](docs/adr/ADR-022-portable-business-artifacts.md) for commands and
 limits. Optional PDF support: `pip install "aigineering[documents]"`.
 
-## v0.5.8 scope
+## Reference runtime scope
 
-v0.5.8 is the stable single-machine reference release. It provides:
+The single-machine reference runtime provides:
 
 - actor-signed Candidate publication;
 - one Candidate commitment boundary for CLI, Worker, Plugin, and HTTP surfaces;
@@ -168,7 +168,7 @@ See the [release evidence guide](docs/reference/release-evidence.md) and
 
 ## Non-goals
 
-v0.5.8 does not claim:
+The current runtime does not claim:
 
 - cross-machine consensus or distributed Store semantics;
 - public-network deployment hardening;
