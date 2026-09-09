@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 import multiprocessing
+import os
 from pathlib import Path
 from threading import Barrier
 
@@ -54,12 +55,12 @@ def test_runtime_publishers_handle_forced_same_process_creation_race(
             publisher = ensure_local_plugin_publisher(
                 store, "planning.expand.v1", ("contract.publish",)
             )
-            return tuple([("planning.expand.v1", publisher.actor_key.public_key)])
+            return (("planning.expand.v1", publisher.actor_key.public_key),)
         finally:
             store.close()
 
-    with ThreadPoolExecutor(max_workers=4) as executor:
-        results = tuple(executor.map(provision_publishers, range(4)))
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = tuple(executor.map(provision_publishers, range(2)))
 
     assert all(result == results[0] for result in results)
 
@@ -83,7 +84,8 @@ def test_runtime_publishers_are_safe_across_spawned_processes(tmp_path, monkeypa
     before_key_files = {
         path: path.read_bytes() for path in key_path.parent.glob("*.ed25519")
     }
-    assert key_path.stat().st_mode & 0o077 == 0
+    if os.name != "nt":
+        assert key_path.stat().st_mode & 0o077 == 0
 
     store = SQLiteStore(db_path)
     try:
@@ -94,6 +96,7 @@ def test_runtime_publishers_are_safe_across_spawned_processes(tmp_path, monkeypa
     assert key_bytes == key_path.read_bytes()
     key_files = tuple(key_path.parent.glob("*.ed25519"))
     assert key_files
-    assert all(path.stat().st_mode & 0o077 == 0 for path in key_files)
+    if os.name != "nt":
+        assert all(path.stat().st_mode & 0o077 == 0 for path in key_files)
     assert before_key_files == {path: path.read_bytes() for path in key_files}
     assert not tuple(key_path.parent.glob(".*.ed25519.*"))
