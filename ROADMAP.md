@@ -2,9 +2,9 @@
 
 ## Current release
 
-Version: **v0.5.10**
+Version: **v0.5.11**
 
-v0.5.10 is the current local development version of the single-machine reference
+v0.5.11 is the current local development version of the single-machine reference
 runtime. The documented local runtime and protocol surface do not imply an
 external security audit or public-network deployment hardening.
 
@@ -78,6 +78,24 @@ Tool-closure, reconstruction, and bounded live Fleet evidence is recorded in
 v0.5.7 adds bounded tool argument/schema validation fixes and clarifies historical
 ADR implementation ownership. See `changes/015-tool-validation-patches.md` and
 `reports/057-tool-validation-patches-2026-09-06.md`.
+
+## v0.5.11 declarative method baseline
+
+Implemented in change 021 and ADR-023:
+
+- bounded versioned method packages and exact dependency/input binding;
+- ordinary Contract instantiation with explicit tool grants;
+- a seed method that creates candidate packages and revisions;
+- separately declared test suites, deterministic signed assessment and independent
+  qualification before exact-version reuse;
+- local CLI and an explicit-fixture end-to-end example, including SQLite reopen
+  and reconstruction.
+
+Local verification is recorded in
+`reports/061-declarative-method-baseline-2026-09-09.md`.
+This is a functional baseline. Additional cases and controlled experiments on
+context isolation, error propagation and heterogeneous Worker cost/quality will
+prepare v0.6.0. No general productivity improvement is claimed by fixture tests.
 
 ## Release gates
 

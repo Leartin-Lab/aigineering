@@ -1,8 +1,8 @@
 # Aigineering Design
 
-Status: implemented truth for v0.5.10
+Status: implemented truth for v0.5.11
 
-This document describes the v0.5.10 implementation in this source tree.
+This document describes the v0.5.11 implementation in this source tree.
 Future designs do not belong here until their implementation, tests, migration,
 and release evidence are complete.
 
@@ -159,6 +159,21 @@ checks byte integrity and exact quotes; semantic support and parser fidelity
 remain unproven. Attachments are limited to 8 MiB, sources are omitted from
 exports unless explicitly included, and non-original disclosure views fail
 closed at every ancestry hop. See ADR-022 and `docs/business-artifacts.md`.
+
+## Declarative methods
+
+The `methods` application adapter packages procedures, exact dependencies, input
+slots, output shapes and routing/tool requirements as ordinary signed Assets.
+Instantiation creates normal Contracts with frozen input Asset bindings and an
+explicit tool grant. A seed authoring method produces candidate packages using
+the same Worker protocol; it owns no private continuation state or authority.
+
+Separate test suites compile to ordinary case Contracts. Expected values are
+withheld from case Workers and read by a deterministic evaluation Worker. Default
+reuse requires an exact passing report, an independent policy-bound attestation,
+and consumer reconstruction of the test evidence. Explicit unverified trials are
+recorded in the invocation Contract. Import, evaluation and execution permission
+remain distinct. See ADR-023 and `docs/methods.md` for limits.
 
 ## Candidates and effects
 
@@ -545,7 +560,7 @@ terminal, or replay owner.
 
 ## Release limits
 
-v0.5.10 extends the local reference runtime. It does not provide:
+v0.5.11 extends the local reference runtime. It does not provide:
 
 - a cross-machine distributed Store;
 - a consensus implementation;

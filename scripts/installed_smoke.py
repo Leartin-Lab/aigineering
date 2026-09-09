@@ -102,6 +102,42 @@ def artifact_smoke(aig: Path, *, cwd: Path, env: dict[str, str]) -> str:
     return report["id"]
 
 
+def method_governance_smoke(
+    python: Path,
+    source_root: Path,
+    *,
+    cwd: Path,
+    env: dict[str, str],
+) -> dict:
+    """Run the checked-in method example through the installed wheel."""
+    target = cwd / "method-governance-run"
+    script = source_root / "examples" / "method-governance" / "demo.py"
+    result = subprocess.run(
+        [
+            str(python),
+            str(script),
+            "--worker",
+            "fixture",
+            "--directory",
+            str(target),
+        ],
+        cwd=cwd,
+        env=env,
+        check=False,
+        text=True,
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"method governance example failed: {result.stderr}")
+    try:
+        output = json.loads(result.stdout)
+    except json.JSONDecodeError as error:
+        raise RuntimeError("method governance example returned invalid JSON") from error
+    if output.get("status") != "complete" or output.get("rebuild_match") is not True:
+        raise RuntimeError(f"method governance example did not complete: {output}")
+    return output
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--wheel", type=Path, required=True)
@@ -219,13 +255,15 @@ def main() -> int:
         ):
             raise RuntimeError("task audit did not contain the completed root lineage")
 
-        artifact_id = artifact_smoke(aig, cwd=workdir, env=env)
-
         evidence_dir = (
             options.evidence_dir.resolve()
             if options.evidence_dir
             else workdir / "reconstruction-evidence"
         )
+        method_result = method_governance_smoke(
+            python, source_root, cwd=workdir, env=env
+        )
+        artifact_id = artifact_smoke(aig, cwd=workdir, env=env)
         report = diagnostic(
             python,
             workdir / ".aig" / "store.db",
@@ -238,6 +276,9 @@ def main() -> int:
             or report.get("status") != "passed"
         ):
             raise RuntimeError("reconstruction evidence is missing or incomplete")
+        (evidence_dir / "method-governance.json").write_text(
+            json.dumps(method_result, sort_keys=True) + "\n", encoding="utf-8"
+        )
 
         source_status = json_command(
             aig, ["task", "status", contract_id], cwd=workdir, env=env
