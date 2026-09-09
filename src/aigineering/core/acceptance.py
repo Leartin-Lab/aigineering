@@ -11,10 +11,10 @@ from aigineering.core.lifecycle_facts import create_terminal_record
 from aigineering.core.ids import acceptance_policy_id
 from aigineering.core.projection_context import EffectProjectionContext
 from aigineering.core.trace import create_entry
+from aigineering.core.candidate_decision import trace_record
 from aigineering.protocol.runtime_record import RuntimeRecord, create_runtime_record
 from aigineering.protocol.candidate import CandidateEffect, CandidateProposal
 from aigineering.protocol.types import TraceEntry
-from aigineering.protocol.wire import trace_entry_to_dict
 
 
 @dataclass(frozen=True)
@@ -326,11 +326,7 @@ def materialize_qualification_facts(
             timestamp="",
         )
         terminal = create_terminal_record(contract.id, "complete")
-        trace_record = create_runtime_record(
-            "trace.recorded",
-            {"trace": trace_entry_to_dict(entry)},
-            causal_parents=(terminal.id,),
-        )
+        trace_fact = trace_record(entry, causal_parents=(terminal.id,))
         traces.append(entry)
-        records.extend((terminal, trace_record))
+        records.extend((terminal, trace_fact))
     return tuple(traces), tuple(records)

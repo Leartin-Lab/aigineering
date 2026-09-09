@@ -13,8 +13,8 @@ from aigineering.runtime import (
     WorkerInvocationError,
     claim_next_package,
     execute_claimed_package,
-    process_rejected_submissions,
     process_task_completions,
+    run_runtime_maintenance_step,
 )
 from aigineering.core.candidate_publisher import (
     CandidatePublisher,
@@ -26,7 +26,7 @@ from aigineering.core.ids import (
     canonical_json,
     compute_content_hash,
     hash_asset_content,
-    hash_contract_current,
+    contract_from_fields,
 )
 from aigineering.core.output_satisfaction import is_business_output
 from aigineering.core.provenance import verify_asset_seal
@@ -307,8 +307,7 @@ def _run_inner_steps(
     registry = default_completion_registry()
     worker_hosts: dict[str, tuple[ActorKey, Ed25519Signer]] = {}
     for _ in range(max_steps):
-        process_rejected_submissions(store, candidate_publishers=candidate_publishers)
-        process_task_completions(
+        run_runtime_maintenance_step(
             store, registry, candidate_publishers=candidate_publishers
         )
         selected = _claim_inner_work(
@@ -360,7 +359,7 @@ def _inner_contract(outer: Contract) -> Contract:
         if outer.sensitive_input_policy is not None
         else None
     )
-    identity = hash_contract_current(
+    return contract_from_fields(
         name=outer.name,
         description=outer.description,
         inputs=list(outer.inputs),
@@ -374,20 +373,6 @@ def _inner_contract(outer: Contract) -> Contract:
         origin="engine_worker",
         sensitive_input_policy=policy,
         context_asset_ids=outer.context_asset_ids,
-    )
-    return Contract(
-        id=identity,
-        name=outer.name,
-        description=outer.description,
-        inputs=outer.inputs,
-        outputs=outer.outputs,
-        activation=outer.activation,
-        budget=outer.budget,
-        tool_scope=outer.tool_scope,
-        labels=outer.labels,
-        context_asset_ids=outer.context_asset_ids,
-        origin="engine_worker",
-        sensitive_input_policy=outer.sensitive_input_policy,
     )
 
 

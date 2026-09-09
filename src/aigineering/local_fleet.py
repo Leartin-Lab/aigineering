@@ -21,9 +21,7 @@ from aigineering.runtime import (
     WorkerInvocationError,
     claim_next_package,
     execute_claimed_package,
-    process_rejected_submissions,
-    process_task_completions,
-    process_worker_failures,
+    run_runtime_maintenance_step,
 )
 
 
@@ -84,9 +82,7 @@ def run_local_fleet(
             publishers = ensure_local_runtime_publishers(store)
             registry = default_completion_registry()
             while True:
-                process_worker_failures(store, candidate_publishers=publishers)
-                process_rejected_submissions(store, candidate_publishers=publishers)
-                process_task_completions(
+                run_runtime_maintenance_step(
                     store, registry, candidate_publishers=publishers
                 )
                 contract = store.get_contract(target_contract_id)

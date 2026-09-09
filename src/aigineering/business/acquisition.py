@@ -14,6 +14,7 @@ import ssl
 from datetime import datetime, timezone
 from urllib.parse import urljoin, urlsplit, urlunsplit
 
+from aigineering import __version__
 from aigineering.business.artifacts import MAX_ATTACHMENT_BYTES
 
 
@@ -89,7 +90,7 @@ def fetch_public(
                 "GET",
                 target,
                 headers={
-                    "User-Agent": "Aigineering/0.5.9",
+                    "User-Agent": f"Aigineering/{__version__}",
                     "Accept-Encoding": "identity",
                 },
             )

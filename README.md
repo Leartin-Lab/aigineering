@@ -69,9 +69,11 @@ continuations. The runtime-only acceptance path also covers staged planning,
 independent `/attest`, root qualification, and SQLite reopen without relying
 on the example audit driver.
 
-## v0.5.9 business artifact development
+## Current development
 
-The current development version adds `aig artifact` for bounded attachments,
+v0.5.10 converges repeated Contract construction and stateless runtime
+maintenance while preserving the v0.5.9 protocol and SQLite schema. The current
+development line also includes `aig artifact` for bounded attachments,
 PDF/text extraction, exact evidence selection, asset-bound Markdown citations,
 recursive ancestry and offline export. These are business adapters over the
 existing signed runtime. See the [artifact guide](docs/business-artifacts.md)

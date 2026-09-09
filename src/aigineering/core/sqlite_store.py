@@ -48,6 +48,12 @@ from aigineering.core.sqlite_migrations import (
     current_schema_version,
     initialize_sqlite_schema,
 )
+from aigineering.core.sqlite_materialization import (
+    asset_from_row,
+    contract_from_row,
+    replacement_claim_from_row,
+    runtime_record_from_row,
+)
 from aigineering.core.trace import entry_references_asset, trace_effective_payload
 from aigineering.core.worker_routing import (
     registration_is_replay,
@@ -393,16 +399,7 @@ class SQLiteStore:
         ).fetchone()
         return int(row[0])
 
-    @staticmethod
-    def _row_to_runtime_record(row: sqlite3.Row) -> RuntimeRecord:
-        return RuntimeRecord(
-            id=row["record_id"],
-            record_type=row["record_type"],
-            schema_version=int(row["schema_version"]),
-            payload=json.loads(row["payload_json"]),
-            causal_parents=tuple(json.loads(row["causal_parents"])),
-            recorded_at=row["recorded_at"],
-        )
+    _row_to_runtime_record = staticmethod(runtime_record_from_row)
 
     # ── Runtime Lifecycle ─────────────────────────────────────────────────
 
@@ -457,64 +454,8 @@ class SQLiteStore:
     # Row → dataclass helpers
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _row_to_asset(row: sqlite3.Row) -> Asset:
-        return Asset(
-            id=row["id"],
-            name=row["name"],
-            content=row["content"],
-            content_type=row["content_type"],
-            created_by=row["created_by"],
-            origin=row["origin"],
-            trust_tier=row["trust_tier"],
-            minted_by=row["minted_by"],
-            source_uri=row["source_uri"],
-            signed_by=row["signed_by"],
-            signer_kind=row["signer_kind"],
-            provenance_seal=row["provenance_seal"],
-            promptable=bool(row["promptable"]),
-            disclosure_view=row["disclosure_view"],
-            definition_hash=row["definition_hash"],
-            content_hash=row["content_hash"],
-            keep_flag=bool(row["keep_flag"]),
-            tombstoned=bool(row["tombstoned"]),
-            tombstoned_at=row["tombstoned_at"],
-            lineage_id=row["lineage_id"],
-        )
-
-    @staticmethod
-    def _row_to_contract(row: sqlite3.Row) -> Contract:
-        return Contract(
-            id=row["id"],
-            parent_id=row["parent_id"],
-            name=row["name"],
-            description=row["description"],
-            inputs=tuple(json.loads(row["inputs"])),
-            outputs=tuple(json.loads(row["outputs"])),
-            activation=row["activation"],
-            budget=row["budget"],
-            tool_scope=tuple(json.loads(row["tool_scope"])),
-            labels=tuple(json.loads(row["labels"])),
-            context_asset_ids=tuple(json.loads(row["context_asset_ids"])),
-            worker_capabilities=tuple(json.loads(row["worker_capabilities"] or "[]")),
-            worker_pools=tuple(json.loads(row["worker_pools"] or "[]")),
-            delegation_capabilities=tuple(
-                json.loads(row["delegation_capabilities"] or "[]")
-            ),
-            delegation_pools=tuple(json.loads(row["delegation_pools"] or "[]")),
-            origin=row["origin"],
-            minting_authority=tuple(json.loads(row["minting_authority"] or "[]")),
-            sensitive_input_policy=(
-                json.loads(row["sensitive_input_policy"])
-                if row["sensitive_input_policy"]
-                else None
-            ),
-            acceptance_policy=(
-                json.loads(row["acceptance_policy"])
-                if row["acceptance_policy"]
-                else None
-            ),
-        )
+    _row_to_asset = staticmethod(asset_from_row)
+    _row_to_contract = staticmethod(contract_from_row)
 
     # ------------------------------------------------------------------
     # StoreProtocol: assets
@@ -999,11 +940,19 @@ class SQLiteStore:
             for _, record in records
             if record.record_type == "asset.committed"
         }
-        trace_payloads = {
-            record.payload["trace"]["id"]: dict(record.payload["trace"])
-            for _, record in records
-            if record.record_type == "trace.recorded"
-        }
+        trace_payloads = {}
+        for _, record in records:
+            if record.record_type != "trace.recorded":
+                continue
+            payload = dict(record.payload["trace"])
+            existing = trace_payloads.setdefault(payload["id"], payload)
+            # Live insertion retains the first timestamp for an idempotent
+            # semantic trace. Concurrent recovery may record it again with a
+            # later timestamp; replay must use the same first-write rule.
+            if trace_effective_payload(
+                trace_entry_from_dict(existing)
+            ) != trace_effective_payload(trace_entry_from_dict(payload)):
+                raise ImmutableRecordConflict("trace event", payload["id"])
         idempotency_payloads = {
             (str(record.payload["contract_id"]), str(record.payload["key"])): (
                 runtime_record_effective_payload(record)["payload"]["result"]
@@ -2134,22 +2083,7 @@ class SQLiteStore:
         ).fetchall()
         return [self._row_to_replacement_claim(r) for r in rows]
 
-    @staticmethod
-    def _row_to_replacement_claim(row: sqlite3.Row):
-        from aigineering.protocol.types import ReplacementClaim
-
-        return ReplacementClaim(
-            id=row["id"],
-            source_asset_id=row["source_asset_id"],
-            replacement_asset_id=row["replacement_asset_id"],
-            definition_hash=row["definition_hash"],
-            claim_type=row["claim_type"],
-            signed_by=row["signed_by"],
-            provenance_seal=row["provenance_seal"],
-            lineage_id=row["lineage_id"],
-            derivation_version=row["derivation_version"],
-            range_spec=row["range_spec"],
-        )
+    _row_to_replacement_claim = staticmethod(replacement_claim_from_row)
 
     # ------------------------------------------------------------------
     # Lifecycle

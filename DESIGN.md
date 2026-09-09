@@ -1,8 +1,8 @@
 # Aigineering Design
 
-Status: implemented truth for v0.5.9
+Status: implemented truth for v0.5.10
 
-This document describes the v0.5.9 implementation in this source tree.
+This document describes the v0.5.10 implementation in this source tree.
 Future designs do not belong here until their implementation, tests, migration,
 and release evidence are complete.
 
@@ -76,6 +76,10 @@ are represented by signed effects and durable facts.
 ## Protocol values
 
 Protocol values are canonical, deeply immutable, and content addressed.
+Canonical identity hashing and signing interfaces are owned by
+`aigineering.protocol`; the former `aigineering.core.ids` and
+`aigineering.core.signing` paths are compatibility re-exports. Protocol modules
+do not depend back on runtime-core implementations.
 Signed JSON uses a language-neutral canonical subset:
 
 - string object keys;
@@ -279,6 +283,10 @@ Plugins are Store-free proposal functions. They receive a frozen request and
 return ordinary Candidate effects. They do not receive an Engine or mutation
 handle.
 
+All new runtime-created Contracts use one canonical construction helper so the
+materialized immutable entity and its selected v3, v4, or v5 identity cannot
+drift across planning, retry, recovery, continuation, CLI, or nested-Worker paths.
+
 Planning and replanning publish three ordinary tasks in one atomic group:
 
 ```text
@@ -398,6 +406,11 @@ Multiple same-machine Worker processes may use separate SQLite connections over
 one WAL database. Claim epochs fence stale results. A replacement process can
 reconstruct task progress and continue without restoring an Engine snapshot.
 
+CLI, local Fleet, and nested Workers share one stateless maintenance step for
+durable Worker failures, rejected submissions, and task-completion projection.
+The surrounding loops own only polling and termination policy; they do not own
+task truth.
+
 The local Fleet launcher applies the same protocol within one process. Each
 capacity slot owns an independent SQLite connection and repeats only the normal
 pull, claim, invoke, and submit operations. It does not own a task queue or
@@ -495,6 +508,14 @@ server/       optional HTTP transport
 
 Feature-specific semantics do not belong in the commitment coordinator.
 Store-specific transaction mechanics do not belong in Plugins or Workers.
+Read-only projections depend on narrow Asset, Contract, RuntimeRecord, and trace
+capabilities rather than the complete commitment Store. SQLite row decoding is
+isolated in a pure materialization module; the SQLiteStore continues to own its
+single connection and every authoritative transaction.
+
+An optional external trace sink is a post-commit export adapter. It is never
+consulted during Candidate reduction or SQLite commitment, and export failure
+cannot roll back or redefine already committed trace facts.
 
 ## Release diagnostics
 
@@ -524,7 +545,7 @@ terminal, or replay owner.
 
 ## Release limits
 
-v0.5.9 extends the local reference runtime. It does not provide:
+v0.5.10 extends the local reference runtime. It does not provide:
 
 - a cross-machine distributed Store;
 - a consensus implementation;

@@ -323,6 +323,42 @@ def test_create_and_get_contract(tmp_path, monkeypatch):
     assert fetched.json()["id"] == body["id"]
 
 
+def test_contract_response_preserves_authority_and_acceptance_fields(
+    tmp_path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    client, actor = _signed_client()
+    policy = {
+        "mode": "independent",
+        "policy_version": "review-v1",
+        "verifier_capabilities": ["review"],
+        "output_shapes": {"out": {"type": "string"}},
+    }
+
+    created = _post_contract(
+        client,
+        actor,
+        name="bounded_api_task",
+        outputs=["out"],
+        context_asset_ids=(),
+        worker_capabilities=("execute",),
+        worker_pools=("primary",),
+        delegation_capabilities=("child",),
+        delegation_pools=("secondary",),
+        acceptance_policy=policy,
+    )
+
+    assert created.status_code == 201, created.text
+    body = created.json()
+    assert body["worker_capabilities"] == ["execute"]
+    assert body["worker_pools"] == ["primary"]
+    assert body["delegation_capabilities"] == ["child"]
+    assert body["delegation_pools"] == ["secondary"]
+    assert body["acceptance_policy"] == policy
+    assert "minting_authority" in body
+    assert "sensitive_input_policy" in body
+
+
 def test_list_assets_and_contracts(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     client, actor = _signed_client()

@@ -53,7 +53,7 @@ from aigineering.protocol.runtime_record import RuntimeRecord, create_runtime_re
 
 if TYPE_CHECKING:
     from aigineering.core.store import StoreProtocol
-    from aigineering.core.trace import TraceStoreProtocol
+    from aigineering.core.trace import PostCommitTraceExporter, TraceStoreProtocol
 
 
 def _actor_capabilities(
@@ -155,9 +155,13 @@ class CandidateCommitter:
 
     def __init__(self, store: StoreProtocol, trace: TraceStoreProtocol) -> None:
         from aigineering.core.store import require_runtime_store
+        from aigineering.core.trace import TraceStoreExportAdapter
 
         self._store = require_runtime_store(store)
-        self._trace = trace
+        self._trace = store
+        self._trace_exporter: PostCommitTraceExporter | None = (
+            None if trace is store else TraceStoreExportAdapter(trace)
+        )
 
     def commit(
         self,
@@ -251,9 +255,8 @@ class CandidateCommitter:
             return record_candidate_rejection(
                 candidate, str(exc), self._store, self._trace, receipt=receipt
             )
-        if self._trace is not self._store:
-            for entry in decision.trace_entries:
-                self._trace.append(entry)
+        if self._trace_exporter is not None:
+            self._trace_exporter.export(decision.trace_entries)
         return decision
 
 
@@ -280,6 +283,7 @@ def record_candidate_rejection(
         runtime_records=decision.runtime_records,
     )
     if trace is not store:
-        for entry in decision.trace_entries:
-            trace.append(entry)
+        from aigineering.core.trace import TraceStoreExportAdapter
+
+        TraceStoreExportAdapter(trace).export(decision.trace_entries)
     return decision

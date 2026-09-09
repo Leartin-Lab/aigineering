@@ -16,6 +16,7 @@ from aigineering.core.authority import _is_protected_name
 from aigineering.core.ids import (
     hash_asset_definition,
     hash_asset_content,
+    contract_from_fields,
     hash_contract_current,
 )
 from aigineering.protocol.types import Asset, Contract
@@ -124,8 +125,6 @@ def build_control_plane_contract(
         Deprecated fail-closed compatibility parameter. Control-plane work
         contracts never receive runtime minting authority; true is rejected.
     """
-    from aigineering.protocol.types import Contract
-
     if not allow_protected_outputs:
         for output_name in outputs:
             if _is_protected_name(output_name):
@@ -158,26 +157,7 @@ def build_control_plane_contract(
         delegation_pools=delegation_pools,
         context_asset_ids=context_asset_ids,
     )
-    identity = hash_contract_current(**identity_fields)
-
-    return Contract(
-        id=identity,
-        name=name,
-        description=description,
-        inputs=inputs,
-        outputs=outputs,
-        activation=activation,
-        budget=budget,
-        labels=labels,
-        context_asset_ids=context_asset_ids,
-        tool_scope=tool_scope,
-        worker_capabilities=worker_capabilities,
-        worker_pools=worker_pools,
-        delegation_capabilities=delegation_capabilities,
-        delegation_pools=delegation_pools,
-        sensitive_input_policy=policy,
-        acceptance_policy=acceptance_policy,
-    )
+    return contract_from_fields(**identity_fields)
 
 
 def bind_contract_label_assets(contract: Contract, store) -> Contract:

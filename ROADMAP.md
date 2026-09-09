@@ -2,9 +2,9 @@
 
 ## Current release
 
-Version: **v0.5.9**
+Version: **v0.5.10**
 
-v0.5.9 is the current local development version of the single-machine reference
+v0.5.10 is the current local development version of the single-machine reference
 runtime. The documented local runtime and protocol surface do not imply an
 external security audit or public-network deployment hardening.
 
@@ -110,6 +110,36 @@ The v0.5.6 diagnostic rebuild mismatch remains unexplained. Context-loading
 optimization, process isolation, production MCP, and external side-effect
 guarantees remain future work.
 
+## v0.5.10 runtime primitive convergence
+
+Implemented in `changes/018-runtime-primitive-convergence.md`:
+
+- one canonical helper constructs new versioned Contract identities and entities;
+- retry, recovery, delegation, planning, CLI and nested-Worker construction reuse
+  that helper;
+- administrative recovery retains the complete independent acceptance policy;
+- one stateless maintenance step orders durable failure, rejection and completion
+  processing across CLI, local Fleet and nested Workers;
+- production code no longer depends on the legacy `core.methods` facade;
+- package version metadata and outbound acquisition identification share one
+  version source.
+
+The follow-up in `changes/019-runtime-boundary-cleanup.md` adds narrow Store
+capability ports, pure SQLite row materialization, canonical trace-record
+encoding, complete HTTP Contract views, protocol-owned identity/signing
+primitives, and core-owned derived terminal commitment without changing the
+transaction or wire boundary.
+
+The CI follow-up in `changes/020-local-concurrency-reconstruction.md` preserves
+first-observation trace timestamps during rebuild and atomically publishes local
+actor keys under concurrent initialization.
+
+Local verification is recorded in
+`reports/060-runtime-primitive-convergence-2026-09-09.md`. The SQLite connection
+and transaction owner remains intentionally unsplit. Physical JSONL ownership
+removal, incremental consequence watermarks and deeper ledger extraction remain
+future refactoring slices.
+
 ## v0.5.9 portable business artifacts
 
 Implemented in `changes/017-portable-business-artifacts.md` and ADR-022:
@@ -139,6 +169,11 @@ Future candidate directions include:
 - cross-machine Store and Worker discovery;
 - deployment security profiles;
 - reproducible productivity and quality benchmarks.
+- a versioned Contract-v6 migration that makes the creation version explicit
+  instead of selecting v3/v4/v5 from populated fields;
+- revision-watermarked consequence processing to replace whole-log recovery and
+  completion scans without introducing scheduler-owned state;
+- physical removal of legacy JSONL Store code after its supported import window.
 
 Work is not part of the supported release until its design, migration, tests,
 reconstruction proof, and public evidence are complete.

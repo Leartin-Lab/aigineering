@@ -541,16 +541,22 @@ def test_server_delegates_worker_command_authentication_to_protocol_service():
     assert "worker command actor lacks" in coordination
 
 
-def test_production_loops_use_neutral_task_completion_entrypoint():
+def test_production_loops_use_neutral_runtime_maintenance_entrypoint():
     cli = (ROOT / "src/aigineering/cli/run.py").read_text(encoding="utf-8")
+    common = (ROOT / "src/aigineering/cli/_common.py").read_text(encoding="utf-8")
+    fleet = (ROOT / "src/aigineering/local_fleet.py").read_text(encoding="utf-8")
     nested = (ROOT / "src/aigineering/agent/engine_worker.py").read_text(
         encoding="utf-8"
     )
 
-    assert "process_task_completions" in cli
-    assert "process_task_completions" in nested
-    assert "process_method_completions" not in cli
-    assert "process_method_completions" not in nested
+    for source in (cli, common, fleet, nested):
+        assert "run_runtime_maintenance_step" in source
+        assert "process_method_completions" not in source
+
+    assert "process_rejected_submissions" not in common
+    assert "process_rejected_submissions" not in cli
+    assert "process_rejected_submissions" not in fleet
+    assert "process_rejected_submissions" not in nested
 
 
 def test_new_expansion_avoids_delegation_facts_and_old_facts_remain_readable():
@@ -706,6 +712,17 @@ def test_task_projection_semantics_live_with_plugins_not_core_compatibility():
         and "aigineering.plugins" in path.read_text(encoding="utf-8")
     }
     assert core_plugin_imports == set()
+
+
+def test_production_code_does_not_import_core_methods_compatibility_module():
+    offenders = []
+    for path in (ROOT / "src/aigineering").rglob("*.py"):
+        if path.as_posix().endswith("/core/methods.py"):
+            continue
+        if "aigineering.core.methods" in path.read_text(encoding="utf-8"):
+            offenders.append(path.relative_to(ROOT).as_posix())
+
+    assert offenders == []
 
 
 def test_retry_delegation_does_not_ship_as_completion_registry_semantics():

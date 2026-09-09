@@ -7,7 +7,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from aigineering.core.ids import compute_content_hash
+from aigineering.protocol.identity import compute_content_hash
 from aigineering.protocol.immutability import deep_freeze, deep_thaw
 
 # Version 2 binds the selected WorkerProfile and registration revision into

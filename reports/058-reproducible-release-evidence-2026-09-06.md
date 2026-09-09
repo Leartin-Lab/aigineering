@@ -37,7 +37,7 @@ main database contents are not rebuilt or repaired.
   and sdist. A final no-isolation packaging pass includes the closing evidence.
 - `python scripts/installed_smoke.py --wheel
   /private/tmp/aigineering-058-release/aigineering-0.5.8-py3-none-any.whl
-  --expected-version 0.5.8 --source-root /Users/gaoyan/projects/aigineering
+  --expected-version 0.5.8 --source-root <repository-root>
   --evidence-dir /private/tmp/aigineering-058-reconstruction` passed.
   The script created a fresh dependency environment and verified imports outside
   the repository, signed publication, explicit mock execution, separate-process

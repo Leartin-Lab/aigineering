@@ -11,6 +11,7 @@ from aigineering.core.ids import hash_contract, hash_contract_v3
 from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.core.trace import create_entry
 from aigineering.protocol.types import Contract
+from aigineering.protocol.immutability import deep_thaw
 
 
 @pytest.fixture(autouse=True)
@@ -31,26 +32,38 @@ def initialize_candidate_domain_before_recreate(monkeypatch):
     monkeypatch.setattr(CliRunner, "invoke", invoke)
 
 
-def _make_recovery_scenario(db_path: str) -> tuple[SQLiteStore, Contract, Contract]:
+def _make_recovery_scenario(
+    db_path: str, *, acceptance_policy: dict | None = None
+) -> tuple[SQLiteStore, Contract, Contract]:
     """Populate a SQLiteStore with two contracts and recovery_required trace
     entries.  Returns (store, contract_a, contract_b)."""
     store = SQLiteStore(db_path=db_path)
 
-    contract_a = Contract(
-        id=hash_contract(
-            name="task_a",
-            description="First recovery target",
-            inputs=[],
-            outputs=["result_a"],
-            activation="",
-            budget=3,
-            tool_scope=[],
-            labels=[],
-            origin="human",
-        ),
+    identity_fields = dict(
         name="task_a",
+        description="First recovery target",
+        inputs=[],
+        outputs=["result_a"],
+        activation="",
+        budget=3,
+        tool_scope=[],
+        labels=[],
+        origin="human",
+    )
+    identity = hash_contract_v3 if acceptance_policy is not None else hash_contract
+    if acceptance_policy is not None:
+        identity_fields.update(minting_authority=[], sensitive_input_policy=None)
+        identity_fields["acceptance_policy"] = acceptance_policy
+    contract_a = Contract(
+        id=identity(**identity_fields),
+        name="task_a",
+        **({"description": "First recovery target"} if acceptance_policy else {}),
         outputs=["result_a"],
         budget=3,
+        activation="",
+        tool_scope=[],
+        labels=[],
+        acceptance_policy=acceptance_policy,
     )
     contract_b = Contract(
         id=hash_contract(
@@ -248,6 +261,28 @@ def test_recover_recreate():
             assert c.id == expected_id
             actual = store.get_contract(c.id)
             assert actual is not None
+
+
+def test_recover_recreate_preserves_acceptance_policy():
+    runner = CliRunner()
+    policy = {
+        "mode": "mechanical",
+        "verifier_capabilities": ["independent-review"],
+        "output_shapes": {"result_a": {"type": "object", "required": ["answer"]}},
+    }
+    with runner.isolated_filesystem():
+        store, original, _ = _make_recovery_scenario(
+            ".aig/store.db", acceptance_policy=policy
+        )
+
+        result = runner.invoke(cli, ["recover", "--recreate"])
+
+        assert result.exit_code == 0, result.output
+        recreated = store.get_contract(
+            next(c.id for c in store.get_all_contracts() if c.parent_id == original.id)
+        )
+        assert recreated is not None
+        assert deep_thaw(recreated.acceptance_policy) == policy
 
 
 def test_recover_recreate_json():

@@ -30,6 +30,7 @@ from aigineering.core.commitment import (
     CandidateCommitter,
     record_candidate_rejection,
 )
+from aigineering.core.candidate_decision import trace_record
 from aigineering.core.worker_routing import is_eligible
 from aigineering.core.trace_manager import TraceManager
 from aigineering.core.trace import create_entry
@@ -41,7 +42,6 @@ from aigineering.protocol.types import Asset, Contract
 from aigineering.protocol.wire import (
     asset_to_dict,
     contract_to_dict,
-    trace_entry_to_dict,
 )
 
 
@@ -52,6 +52,37 @@ class ClaimedPackage:
     method_context_assets: tuple[Asset, ...]
     package: WorkerPackage
     worker_id: str
+
+
+@dataclass(frozen=True)
+class RuntimeMaintenanceResult:
+    """Durable work observed by one stateless runtime maintenance pass."""
+
+    worker_failures: tuple[str, ...]
+    rejected_submissions: tuple[str, ...]
+    task_completions: tuple[str, ...]
+
+
+def run_runtime_maintenance_step(
+    store, completion_registry, *, candidate_publishers=None
+) -> RuntimeMaintenanceResult:
+    """Run the canonical, stateless maintenance sequence once."""
+    worker_failures = process_worker_failures(
+        store, candidate_publishers=candidate_publishers
+    )
+    rejected_submissions = process_rejected_submissions(
+        store, candidate_publishers=candidate_publishers
+    )
+    task_completions = process_task_completions(
+        store,
+        completion_registry,
+        candidate_publishers=candidate_publishers,
+    )
+    return RuntimeMaintenanceResult(
+        worker_failures=tuple(worker_failures),
+        rejected_submissions=tuple(rejected_submissions),
+        task_completions=tuple(task_completions),
+    )
 
 
 class WorkerInvocationError(RuntimeError):
@@ -533,11 +564,7 @@ def _commit_recovery_outcome(
         )
     records.extend(
         (
-            create_runtime_record(
-                "trace.recorded",
-                {"trace": trace_entry_to_dict(entry)},
-                causal_parents=[source_record.id],
-            ),
+            trace_record(entry, causal_parents=[source_record.id]),
             create_runtime_record(
                 f"{record_prefix}.recovery_"
                 f"{'scheduled' if recovery is not None else 'unavailable'}",
@@ -716,15 +743,12 @@ def process_expired_claims(store, *, candidate_publishers=None) -> list[str]:
             causal_parents=[expiration.id],
             recorded_at=observed_at,
         )
-        trace_record = create_runtime_record(
-            "trace.recorded",
-            {"trace": trace_entry_to_dict(entry)},
-            causal_parents=[expiration.id],
-            recorded_at=observed_at,
+        trace_fact = trace_record(
+            entry, causal_parents=[expiration.id], recorded_at=observed_at
         )
         operational.commit_claim_expiration(
             trace_entry=entry,
-            runtime_records=(expiration, terminal, trace_record),
+            runtime_records=(expiration, terminal, trace_fact),
             claim_id=str(claim["claim_id"]),
             claim_epoch=int(claim["epoch"]),
             expected_lease_until=lease_until,
@@ -828,14 +852,10 @@ def _record_worker_invocation_failure(
         "failed",
         causal_parents=[failure.id],
     )
-    trace_record = create_runtime_record(
-        "trace.recorded",
-        {"trace": trace_entry_to_dict(entry)},
-        causal_parents=[failure.id],
-    )
+    trace_fact = trace_record(entry, causal_parents=[failure.id])
     require_operational_store(store).commit_worker_invocation_failure(
         trace_entry=entry,
-        runtime_records=(failure, terminal, trace_record),
+        runtime_records=(failure, terminal, trace_fact),
         claim_id=claimed.package.claim_id,
         worker_id=claimed.worker_id,
         package_id=claimed.package.package_id,
@@ -941,9 +961,7 @@ def process_task_completions(
             relation_type="task_completion",
             relation_target=contract.parent_id,
         )
-        marker_record = create_runtime_record(
-            "trace.recorded", {"trace": trace_entry_to_dict(marker)}
-        )
+        marker_record = trace_record(marker)
         projected_record = create_runtime_record(
             "task_completion.projected",
             {

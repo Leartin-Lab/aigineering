@@ -15,16 +15,32 @@ from __future__ import annotations
 import json
 import logging
 import os
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, Optional, Protocol, runtime_checkable
 
 from aigineering.core.ids import now_iso, hash_event
 from aigineering.protocol.immutability import deep_thaw
 from aigineering.protocol.types import TraceEntry
+from aigineering.protocol.runtime_record import RuntimeRecord, create_runtime_record
 from aigineering.protocol.wire import trace_entry_from_dict, trace_entry_to_dict
 
 _logger = logging.getLogger(__name__)
+
+
+def trace_record_from_entry(
+    entry: TraceEntry,
+    *,
+    causal_parents: list[str] | tuple[str, ...] = (),
+    recorded_at: str | None = None,
+) -> RuntimeRecord:
+    """Encode one trace entry as the canonical durable runtime record."""
+    return create_runtime_record(
+        "trace.recorded",
+        {"trace": trace_entry_to_dict(entry)},
+        causal_parents=causal_parents,
+        recorded_at=recorded_at,
+    )
 
 
 def create_entry(
@@ -104,6 +120,28 @@ class TraceStoreProtocol(Protocol):
     def get_by_event_type(self, event_type: str) -> list[TraceEntry]: ...
     def get_all(self) -> list[TraceEntry]: ...
     def get_reverse_lineage(self, asset_id: str) -> list[TraceEntry]: ...
+
+
+class PostCommitTraceExporter(Protocol):
+    """Export already-committed trace entries to a disposable sink."""
+
+    def export(self, entries: Sequence[TraceEntry]) -> None: ...
+
+
+class TraceStoreExportAdapter:
+    """Compatibility exporter for legacy Memory/JSONL trace stores.
+
+    The wrapped store is never consulted while deciding or committing a
+    Candidate. It receives entries only after the authoritative Store commit
+    has succeeded.
+    """
+
+    def __init__(self, destination: TraceStoreProtocol) -> None:
+        self.destination = destination
+
+    def export(self, entries: Sequence[TraceEntry]) -> None:
+        for entry in entries:
+            self.destination.append(entry)
 
 
 class MemoryTraceStore:

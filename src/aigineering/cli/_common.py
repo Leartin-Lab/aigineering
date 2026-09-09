@@ -10,9 +10,9 @@ from typing import Optional
 import click
 
 from aigineering.core.ids import (
+    contract_from_fields,
     hash_asset_content,
     hash_asset_definition,
-    hash_contract_v3,
 )
 from aigineering.application import (
     build_worker,
@@ -205,25 +205,16 @@ def _run_demo(
         trust_tier="human",
     )
 
-    contract = Contract(
-        id=hash_contract_v3(
-            name="build_report",
-            description=f"Build a report for goal: {goal}",
-            inputs=["data_file", "citation_db"],
-            outputs=["final_report"],
-            activation="data_file AND citation_db",
-            budget=5,
-            tool_scope=[],
-            labels=list(behavior_labels),
-            origin="human",
-        ),
+    contract = contract_from_fields(
         name="build_report",
         description=f"Build a report for goal: {goal}",
         inputs=["data_file", "citation_db"],
         outputs=["final_report"],
         activation="data_file AND citation_db",
         budget=5,
+        tool_scope=[],
         labels=list(behavior_labels),
+        origin="human",
     )
 
     for suffix, effect in (
@@ -243,8 +234,8 @@ def _run_demo(
         WorkerInvocationError,
         claim_next_package,
         execute_claimed_package,
-        process_rejected_submissions,
         process_task_completions,
+        run_runtime_maintenance_step,
     )
     from aigineering.local_identity import (
         ensure_local_runtime_publishers,
@@ -257,8 +248,7 @@ def _run_demo(
     registry = default_completion_registry()
     last_submission = "none"
     for _ in range(64):
-        process_rejected_submissions(store, candidate_publishers=publishers)
-        process_task_completions(store, registry, candidate_publishers=publishers)
+        run_runtime_maintenance_step(store, registry, candidate_publishers=publishers)
         status = project_task_status(contract, store)
         if status["terminal"]:
             break
