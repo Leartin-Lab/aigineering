@@ -10,7 +10,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Optional
 
-from aigineering.core.ids import compute_content_hash
+from aigineering.protocol.identity import compute_content_hash
 from aigineering.protocol.immutability import deep_freeze, deep_thaw
 
 CURRENT_ENVELOPE_VERSION = 2

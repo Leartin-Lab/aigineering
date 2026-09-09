@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+import tempfile
 
 from aigineering.core.actor_facts import load_effective_actor_keys
 from aigineering.core.candidate_publisher import (
@@ -37,18 +38,33 @@ LOCAL_ROOT_CAPABILITIES = (
 )
 
 
+class _ActorKeyAlreadyExists(ValueError):
+    """The requested actor key path was published by another creator."""
+
+
 def actor_key_path() -> Path:
     return Path(os.environ.get("AIG_ACTOR_KEY_FILE", ".aig/identity/root.ed25519"))
 
 
 def write_actor_key(path: Path, signer: Ed25519Signer) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{path.name}.", dir=path.parent
+    )
     try:
-        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    except FileExistsError as exc:
-        raise ValueError(f"actor key already exists at {path}") from exc
-    with os.fdopen(descriptor, "w", encoding="ascii") as stream:
-        stream.write(signer.private_key_hex + "\n")
+        with os.fdopen(descriptor, "w", encoding="ascii") as stream:
+            stream.write(signer.private_key_hex + "\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        try:
+            os.link(temporary_name, path)
+        except FileExistsError as exc:
+            raise _ActorKeyAlreadyExists(f"actor key already exists at {path}") from exc
+    finally:
+        try:
+            os.unlink(temporary_name)
+        except FileNotFoundError:
+            pass
 
 
 def _posix_private_modes_supported() -> bool:
@@ -76,7 +92,11 @@ def _load_or_create_signer(path: Path) -> Ed25519Signer:
     if path.exists():
         return load_actor_signer(path)
     signer = Ed25519Signer()
-    write_actor_key(path, signer)
+    try:
+        write_actor_key(path, signer)
+    except _ActorKeyAlreadyExists:
+        # Another local Fleet process may have won the atomic publication.
+        return load_actor_signer(path)
     return signer
 
 

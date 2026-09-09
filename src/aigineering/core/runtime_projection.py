@@ -6,7 +6,7 @@ import json
 from dataclasses import dataclass
 from datetime import datetime
 from types import SimpleNamespace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from aigineering.core.activation import (
     activation_names,
@@ -22,16 +22,23 @@ from aigineering.core.output_satisfaction import (
     all_outputs_satisfied,
     is_business_output,
 )
+from aigineering.core.store_capabilities import (
+    AssetReader,
+    RuntimeRecordReader,
+    TraceReader,
+)
 from aigineering.protocol.wire import trace_entry_from_dict
 
 if TYPE_CHECKING:
-    from aigineering.core.store import StoreProtocol
-    from aigineering.core.trace import TraceStoreProtocol
     from aigineering.protocol.runtime_record import RuntimeRecord
     from aigineering.protocol.types import Contract, TraceEntry
 
 
 TERMINAL_EVENTS = frozenset({"complete", "failed", "cancelled", "unreachable"})
+
+
+class RuntimeProjectionReader(AssetReader, RuntimeRecordReader, Protocol):
+    """Read capabilities required to derive runtime task views."""
 
 
 @dataclass(frozen=True)
@@ -58,8 +65,8 @@ class RuntimeProjection:
 
     def __init__(
         self,
-        store: StoreProtocol,
-        trace: TraceStoreProtocol,
+        store: RuntimeProjectionReader,
+        trace: TraceReader,
         *,
         as_of: str | None = None,
         as_of_revision: int | None = None,

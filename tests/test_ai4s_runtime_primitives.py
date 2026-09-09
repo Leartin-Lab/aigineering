@@ -12,6 +12,7 @@ from aigineering.agent.tool_registry_loader import load_tool_registry
 from aigineering.cli.main import cli
 from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.core.worker_routing import WorkerRegistration
+from aigineering.core.candidate_publisher import CandidatePublisher
 from aigineering.protocol.types import Candidate, Contract
 
 
@@ -229,6 +230,35 @@ def test_runtime_ai4s_tool_continuation_attest_reopen_via_fleet_cli(
 ) -> None:
     """Exercise the real tool/continuation/attestation loop through Fleet CLI."""
     monkeypatch.chdir(tmp_path)
+    prepared_checks: list[bool] = []
+    original_publish = CandidatePublisher.publish
+
+    def check_prepared_context(self, effects, **kwargs):
+        if kwargs.get("idempotency_key", "").startswith("continuation:"):
+            prepared = SQLiteStore(".aig/store.db")
+            try:
+                records = prepared.get_by_event_type(
+                    "method_continuation_context_prepared"
+                )
+                target = effects[0].payload["contract"]["id"]
+                disclosed = {
+                    asset.id
+                    for source_id in kwargs["causal_parents"]
+                    for asset in prepared.get_assets_by_contract(source_id)
+                    if asset.promptable
+                }
+                assert disclosed
+                assert any(
+                    record.relation_target == target
+                    and set(record.disclosed_assets) == disclosed
+                    for record in records
+                ), "continuation context was not durable before Candidate publication"
+                prepared_checks.append(True)
+            finally:
+                prepared.close()
+        return original_publish(self, effects, **kwargs)
+
+    monkeypatch.setattr(CandidatePublisher, "publish", check_prepared_context)
     runner = CliRunner()
     assert runner.invoke(cli, ["domain", "init"]).exit_code == 0
 
@@ -317,6 +347,7 @@ def test_runtime_ai4s_tool_continuation_attest_reopen_via_fleet_cli(
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
     assert payload["status"] == "complete"
+    assert prepared_checks
 
     reopened = SQLiteStore(".aig/store.db")
     try:

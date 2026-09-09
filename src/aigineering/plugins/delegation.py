@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from aigineering.core.ids import compute_content_hash, hash_contract_current
+from aigineering.core.ids import compute_content_hash, contract_from_fields
 from aigineering.protocol.immutability import deep_thaw
 from aigineering.plugins.task_semantics import method_contract
 from aigineering.protocol.actions import WorkerAction
@@ -119,9 +119,7 @@ def _parallel_tool_contracts(
         ),
         "context_asset_ids": parent.context_asset_ids,
     }
-    continuation = Contract(
-        id=hash_contract_current(**continuation_fields), **continuation_fields
-    )
+    continuation = contract_from_fields(**continuation_fields)
     return (*tool_tasks, continuation)
 
 
@@ -166,7 +164,7 @@ def _parallel_tool_item_contract(
         ),
         "context_asset_ids": base.context_asset_ids,
     }
-    return Contract(id=hash_contract_current(**fields), **fields)
+    return contract_from_fields(**fields)
 
 
 def _claimed_method_contract(parent: Contract, action: WorkerAction) -> Contract:
@@ -200,7 +198,7 @@ def _claimed_method_contract(parent: Contract, action: WorkerAction) -> Contract
         ),
         "context_asset_ids": parent.context_asset_ids,
     }
-    return Contract(id=hash_contract_current(**fields), **fields)
+    return contract_from_fields(**fields)
 
 
 def _claimed_retry_contract(parent: Contract, allowance: int) -> Contract:
@@ -237,4 +235,4 @@ def _claimed_retry_contract(parent: Contract, allowance: int) -> Contract:
         "acceptance_policy": acceptance,
         "context_asset_ids": parent.context_asset_ids,
     }
-    return Contract(id=hash_contract_current(**fields), **fields)
+    return contract_from_fields(**fields)

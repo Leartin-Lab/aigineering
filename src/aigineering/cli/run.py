@@ -35,7 +35,7 @@ from aigineering.runtime import (
     claim_next_package,
     execute_claimed_package,
     process_task_completions,
-    process_rejected_submissions,
+    run_runtime_maintenance_step,
 )
 from aigineering.core.session import SessionStore
 from aigineering.core.trace import JsonLTraceStore
@@ -469,12 +469,11 @@ def _publish_tool_descriptors(store, registry) -> None:
 def _run_single_pool_cycle(
     store, hosts, candidate_publishers, registry, *, json_output: bool
 ) -> None:
-    recovered = process_rejected_submissions(
-        store, candidate_publishers=candidate_publishers
-    )
-    processed_before = process_task_completions(
+    maintenance = run_runtime_maintenance_step(
         store, registry, candidate_publishers=candidate_publishers
     )
+    recovered = list(maintenance.rejected_submissions)
+    processed_before = list(maintenance.task_completions)
     claims = []
     submissions = []
     for pool_host in hosts:
@@ -540,12 +539,11 @@ def _run_target_pool(
 ) -> None:
     while True:
         before_trace_count = len(store.get_all())
-        recovered = process_rejected_submissions(
-            store, candidate_publishers=candidate_publishers
-        )
-        processed_before = process_task_completions(
+        maintenance = run_runtime_maintenance_step(
             store, registry, candidate_publishers=candidate_publishers
         )
+        recovered = list(maintenance.rejected_submissions)
+        processed_before = list(maintenance.task_completions)
         claimed_packages = []
         submissions = []
         for pool_host in hosts:

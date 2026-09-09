@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
-from aigineering.core.ids import canonical_json, compute_content_hash, now_iso
+from aigineering.protocol.identity import canonical_json, compute_content_hash, now_iso
 from aigineering.protocol.immutability import deep_freeze, deep_thaw
 
 

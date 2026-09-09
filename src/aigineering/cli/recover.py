@@ -11,12 +11,11 @@ import click
 
 from aigineering.cli._common import _output_json, _persistent_store
 from aigineering.cli._candidate import commit_local_effect, require_accepted
-from aigineering.core.ids import hash_contract_current
+from aigineering.core.ids import contract_from_fields
 from aigineering.protocol.effect_builders import (
     contract_cancellation_effect,
     contract_declaration_effect,
 )
-from aigineering.protocol.types import Contract
 
 
 def _find_recovery_required_contract_ids(store) -> list[str]:
@@ -93,31 +92,7 @@ def _recreate_contracts(store, contract_ids: list[str]) -> list[dict[str, str]]:
             for output in original.outputs
             if output in original.minting_authority
         )
-        policy = (
-            dict(original.sensitive_input_policy)
-            if original.sensitive_input_policy is not None
-            else None
-        )
-        new_contract = Contract(
-            id=hash_contract_current(
-                name=original.name,
-                description=original.description,
-                inputs=list(original.inputs),
-                outputs=list(original.outputs),
-                activation=original.activation,
-                budget=original.budget,
-                tool_scope=list(original.tool_scope),
-                labels=list(original.labels),
-                worker_capabilities=original.worker_capabilities,
-                worker_pools=original.worker_pools,
-                delegation_capabilities=original.delegation_capabilities,
-                delegation_pools=original.delegation_pools,
-                origin="recovery",
-                parent_id=original.id,
-                minting_authority=authority,
-                sensitive_input_policy=policy,
-                context_asset_ids=original.context_asset_ids,
-            ),
+        new_contract = contract_from_fields(
             parent_id=original.id,
             name=original.name,
             description=original.description,
@@ -135,6 +110,7 @@ def _recreate_contracts(store, contract_ids: list[str]) -> list[dict[str, str]]:
             origin="recovery",
             minting_authority=authority,
             sensitive_input_policy=original.sensitive_input_policy,
+            acceptance_policy=original.acceptance_policy,
         )
         require_accepted(
             commit_local_effect(

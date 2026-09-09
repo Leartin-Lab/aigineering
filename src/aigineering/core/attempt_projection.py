@@ -5,10 +5,10 @@ from __future__ import annotations
 from dataclasses import replace
 
 from aigineering.core.trace import create_entry
+from aigineering.core.candidate_decision import trace_record
 from aigineering.core.lifecycle_facts import create_terminal_record
 from aigineering.protocol.candidate import CandidateProposal
 from aigineering.protocol.runtime_record import create_runtime_record
-from aigineering.protocol.wire import trace_entry_to_dict
 
 
 def close_claim_attempt(candidate: CandidateProposal, decision):
@@ -53,13 +53,7 @@ def close_claim_attempt(candidate: CandidateProposal, decision):
             ),
             timestamp="",
         )
-        records += (
-            create_runtime_record(
-                "trace.recorded",
-                {"trace": trace_entry_to_dict(entry)},
-                causal_parents=parents,
-            ),
-        )
+        records += (trace_record(entry, causal_parents=parents),)
         return replace(
             decision,
             runtime_records=records,
@@ -86,11 +80,7 @@ def close_claim_attempt(candidate: CandidateProposal, decision):
                 reason="claim-bound Candidate was rejected",
                 causal_parents=parents,
             ),
-            create_runtime_record(
-                "trace.recorded",
-                {"trace": trace_entry_to_dict(entry)},
-                causal_parents=parents,
-            ),
+            trace_record(entry, causal_parents=parents),
         )
         return replace(
             decision,

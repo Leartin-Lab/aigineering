@@ -11,9 +11,14 @@ from __future__ import annotations
 import json
 from collections import Counter, defaultdict
 from collections.abc import Iterable, Mapping
-from typing import Any
+from typing import Any, Protocol
 
 from aigineering.core.runtime_projection import TERMINAL_EVENTS
+from aigineering.core.store_capabilities import (
+    AssetReader,
+    ContractReader,
+    RuntimeRecordReader,
+)
 from aigineering.protocol.immutability import deep_thaw
 from aigineering.protocol.types import Contract, TraceEntry
 from aigineering.protocol.wire import trace_entry_from_dict
@@ -23,7 +28,13 @@ _FAILURE_TERMINALS = frozenset({"failed", "cancelled", "unreachable", "stalled"}
 _TOKEN_FIELDS = ("prompt_tokens", "completion_tokens", "total_tokens")
 
 
-def project_task_productivity(contract: Contract, store) -> dict[str, Any]:
+class ProductivityReader(AssetReader, ContractReader, RuntimeRecordReader, Protocol):
+    """Read capabilities needed for lineage productivity projection."""
+
+
+def project_task_productivity(
+    contract: Contract, store: ProductivityReader
+) -> dict[str, Any]:
     """Project productivity facts for *contract* and all immutable descendants.
 
     The function is intentionally read-only.  It does not call completion or
@@ -113,7 +124,7 @@ def project_task_productivity(contract: Contract, store) -> dict[str, Any]:
     }
 
 
-def _lineage_contracts(root: Contract, store) -> list[Contract]:
+def _lineage_contracts(root: Contract, store: ContractReader) -> list[Contract]:
     """Return root plus descendants using one deterministic graph walk."""
 
     contracts_by_id = {item.id: item for item in store.get_all_contracts()}

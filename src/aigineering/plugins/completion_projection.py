@@ -13,16 +13,17 @@ from typing import TYPE_CHECKING, Protocol
 from aigineering.core.causal_allowance import resolve_causal_allowance
 from aigineering.core.disclosure import compute_disclosure
 from aigineering.core.output_satisfaction import all_outputs_satisfied
-from aigineering.core.lifecycle_facts import create_terminal_record
-from aigineering.core.runtime_projection import TERMINAL_EVENTS
-from aigineering.core.trace import create_entry
+from aigineering.core.lifecycle_facts import commit_terminal_outcome
 from aigineering.core.trace_manager import TraceManager
-from aigineering.core.trace import TraceStoreProtocol
-from aigineering.core.store import StoreProtocol
+from aigineering.core.store_capabilities import (
+    AssetReader,
+    ContractReader,
+    RuntimeRecordReader,
+    TraceReader,
+)
 from aigineering.plugins.continuation import ContinuationTaskPlugin
 from aigineering.plugins.task_semantics import method_payload
-from aigineering.protocol.runtime_record import create_runtime_record
-from aigineering.protocol.wire import contract_from_dict, trace_entry_to_dict
+from aigineering.protocol.wire import contract_from_dict
 
 if TYPE_CHECKING:
     from aigineering.core.candidate_publisher import CandidatePublisherRegistry
@@ -32,7 +33,9 @@ if TYPE_CHECKING:
     from aigineering.protocol.types import Asset, Contract
 
 
-class CompletionStoreProtocol(StoreProtocol, TraceStoreProtocol, Protocol):
+class CompletionStoreProtocol(
+    AssetReader, ContractReader, RuntimeRecordReader, TraceReader, Protocol
+):
     """Store surface required by stateless completion projection."""
 
 
@@ -131,9 +134,8 @@ class TaskCompletionContext:
         relation_type: str,
         relation_target: str,
     ) -> bool:
-        return _commit_terminal(
+        return commit_terminal_outcome(
             self._store,
-            self._trace,
             contract,
             event_type,
             relation_type=relation_type,
@@ -247,6 +249,16 @@ class TaskCompletionProjector:
             )
             self._record_terminal(parent, "failed")
             return
+        # A concurrent Worker can claim the Contract as soon as publication
+        # commits. Persist its exact observations first; this preparation alone
+        # neither declares work nor marks the parent as delegated.
+        self._trace.record(
+            parent.id,
+            "method_continuation_context_prepared",
+            disclosed_assets=[asset.id for asset in assets],
+            relation_type="tool",
+            relation_target=continuation.id,
+        )
         decision = publisher.publish(
             proposal.effects,
             idempotency_key=f"continuation:{source.id}:{continuation.id}",
@@ -286,12 +298,7 @@ class TaskCompletionProjector:
             parent_id = parent.parent_id
 
     def _record_terminal(self, contract: Contract, event_type: str) -> None:
-        _commit_terminal(
-            self._store,
-            self._trace,
-            contract,
-            event_type,
-        )
+        commit_terminal_outcome(self._store, contract, event_type)
 
 
 def _tool_observation_succeeded(assets: list[Asset]) -> bool:
@@ -303,54 +310,3 @@ def _tool_observation_succeeded(assets: list[Asset]) -> bool:
         if isinstance(payload, dict) and payload.get("ok") is True:
             return True
     return False
-
-
-def _commit_terminal(
-    store: CompletionStoreProtocol,
-    trace: TraceManager,
-    contract: Contract,
-    event_type: str,
-    *,
-    relation_type: str = "",
-    relation_target: str = "",
-    reason: str = "",
-) -> bool:
-    existing_trace = any(
-        entry.event_type in TERMINAL_EVENTS and entry.contract_id == contract.id
-        for entry in trace.store.get_all()
-    )
-    existing_fact = any(
-        str(record.payload.get("contract_id", "")) == contract.id
-        for _, record in store.scan_runtime_records(record_type="lifecycle.terminal")
-    )
-    if existing_trace or existing_fact:
-        return False
-    if relation_type:
-        entry = create_entry(
-            contract.id,
-            event_type,
-            relation_type=relation_type,
-            relation_target=relation_target or contract.id,
-            rejected_fragments=[f"[{event_type}] {relation_type}: {reason}"],
-            budget_remaining=resolve_causal_allowance(
-                store, contract, fallback=contract.budget
-            ),
-        )
-    else:
-        entry = create_entry(
-            contract.id,
-            event_type,
-            budget_remaining=resolve_causal_allowance(
-                store, contract, fallback=contract.budget
-            ),
-        )
-    terminal = create_terminal_record(contract.id, event_type)
-    trace_record = create_runtime_record(
-        "trace.recorded", {"trace": trace_entry_to_dict(entry)}
-    )
-    store.commit_ingress_batch(
-        accepted_assets=[],
-        trace_entries=[entry],
-        runtime_records=(terminal, trace_record),
-    )
-    return True

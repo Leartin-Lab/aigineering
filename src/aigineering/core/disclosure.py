@@ -4,20 +4,13 @@ from __future__ import annotations
 
 from dataclasses import replace
 from collections.abc import Mapping
-from typing import Protocol
 
 from aigineering.core.labels import BEHAVIOR_LABEL_PREFIX, is_behavior_asset_allowed
+from aigineering.core.store_capabilities import AssetReader
 from aigineering.core.trust_policy import TrustPolicy
 from aigineering.protocol.types import Asset, Contract
 
 REDACTED_CONTENT = "[redacted]"
-
-
-class StoreLike(Protocol):
-    def get_all_assets(self) -> list[Asset]: ...
-    def get_assets_by_name(self, name: str) -> list[Asset]: ...
-    def get_asset(self, asset_id: str) -> Asset | None: ...
-    def get_claims_for_replacement_asset(self, asset_id: str) -> list: ...
 
 
 class DisclosurePolicyError(ValueError):
@@ -44,7 +37,7 @@ def redact_for_disclosure(asset: Asset) -> Asset:
     return replace(asset, content=REDACTED_CONTENT)
 
 
-def compute_disclosure(contract: Contract, store: StoreLike) -> list[Asset]:
+def compute_disclosure(contract: Contract, store: AssetReader) -> list[Asset]:
     seen: set[str] = set()
     result: list[Asset] = []
     input_assets: list[Asset] = []
@@ -87,7 +80,7 @@ def compute_disclosure(contract: Contract, store: StoreLike) -> list[Asset]:
 
 
 def _enforce_sensitive_input_policy(
-    contract: Contract, input_assets: list[Asset], store: StoreLike
+    contract: Contract, input_assets: list[Asset], store: AssetReader
 ) -> None:
     policy = contract.sensitive_input_policy
     if not isinstance(policy, Mapping) or not policy:

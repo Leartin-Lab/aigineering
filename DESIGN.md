@@ -1,8 +1,8 @@
 # Aigineering Design
 
-Status: implemented truth for v0.5.7
+Status: implemented truth for v0.5.10
 
-This document describes the v0.5.7 implementation in this source tree.
+This document describes the v0.5.10 implementation in this source tree.
 Future designs do not belong here until their implementation, tests, migration,
 and release evidence are complete.
 
@@ -76,6 +76,10 @@ are represented by signed effects and durable facts.
 ## Protocol values
 
 Protocol values are canonical, deeply immutable, and content addressed.
+Canonical identity hashing and signing interfaces are owned by
+`aigineering.protocol`; the former `aigineering.core.ids` and
+`aigineering.core.signing` paths are compatibility re-exports. Protocol modules
+do not depend back on runtime-core implementations.
 Signed JSON uses a language-neutral canonical subset:
 
 - string object keys;
@@ -139,6 +143,22 @@ binds its source, replacement, lineage, range, and derivation version. Runtime
 policy and verification recompute the exact line, character, or UTF-8 byte
 range from the committed source; the relation signature alone cannot make
 caller-supplied content a valid slice.
+
+## Portable business artifacts
+
+The optional `business` adapter package implements `artifact-v1` envelopes over
+ordinary Assets. Bounded base64 attachments preserve byte SHA-256 separately
+from normalized text identity. Document, exact page/character evidence and
+Markdown citation bindings refer to exact accepted Asset IDs. These conventions
+also fit canonical Worker text outputs; they add no kernel effect or state.
+
+The `artifact` CLI signs administrative ingress, validates recursive business
+closure and exports Markdown, escaped evidence pages and ancestry metadata.
+Scoped ToolRegistry handlers return observations only. Consumer validation
+checks byte integrity and exact quotes; semantic support and parser fidelity
+remain unproven. Attachments are limited to 8 MiB, sources are omitted from
+exports unless explicitly included, and non-original disclosure views fail
+closed at every ancestry hop. See ADR-022 and `docs/business-artifacts.md`.
 
 ## Candidates and effects
 
@@ -263,6 +283,10 @@ Plugins are Store-free proposal functions. They receive a frozen request and
 return ordinary Candidate effects. They do not receive an Engine or mutation
 handle.
 
+All new runtime-created Contracts use one canonical construction helper so the
+materialized immutable entity and its selected v3, v4, or v5 identity cannot
+drift across planning, retry, recovery, continuation, CLI, or nested-Worker paths.
+
 Planning and replanning publish three ordinary tasks in one atomic group:
 
 ```text
@@ -382,6 +406,11 @@ Multiple same-machine Worker processes may use separate SQLite connections over
 one WAL database. Claim epochs fence stale results. A replacement process can
 reconstruct task progress and continue without restoring an Engine snapshot.
 
+CLI, local Fleet, and nested Workers share one stateless maintenance step for
+durable Worker failures, rejected submissions, and task-completion projection.
+The surrounding loops own only polling and termination policy; they do not own
+task truth.
+
 The local Fleet launcher applies the same protocol within one process. Each
 capacity slot owns an independent SQLite connection and repeats only the normal
 pull, claim, invoke, and submit operations. It does not own a task queue or
@@ -479,6 +508,24 @@ server/       optional HTTP transport
 
 Feature-specific semantics do not belong in the commitment coordinator.
 Store-specific transaction mechanics do not belong in Plugins or Workers.
+Read-only projections depend on narrow Asset, Contract, RuntimeRecord, and trace
+capabilities rather than the complete commitment Store. SQLite row decoding is
+isolated in a pure materialization module; the SQLiteStore continues to own its
+single connection and every authoritative transaction.
+
+An optional external trace sink is a post-commit export adapter. It is never
+consulted during Candidate reduction or SQLite commitment, and export failure
+cannot roll back or redefine already committed trace facts.
+
+## Release diagnostics
+
+`aigineering.diagnostics` is an application adapter. It opens a source SQLite
+file read-only, retains a consistent backup, and rebuilds a second private copy.
+It compares semantic digests and immutable-record fingerprints and retains
+mismatch/error evidence without modifying the source. Manifest output excludes
+raw rows and exception text. Verification requires the current schema and never
+silently migrates historical evidence. See ADR-021 and
+[`release evidence`](docs/reference/release-evidence.md).
 
 ## Known transition boundaries
 
@@ -498,7 +545,7 @@ terminal, or replay owner.
 
 ## Release limits
 
-v0.5.7 is a stable local reference release, not:
+v0.5.10 extends the local reference runtime. It does not provide:
 
 - a cross-machine distributed Store;
 - a consensus implementation;

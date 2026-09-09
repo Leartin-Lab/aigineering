@@ -9,6 +9,11 @@ from typing import Any, Protocol
 
 from aigineering.core.ids import canonical_json, compute_content_hash
 from aigineering.core.asset_graph_facts import project_graph_assets
+from aigineering.core.store_capabilities import (
+    AssetReader,
+    ContractReader,
+    RuntimeRecordReader,
+)
 from aigineering.protocol.types import Asset, Contract
 from aigineering.protocol.wire import (
     asset_to_dict,
@@ -38,12 +43,16 @@ class QueryProjection(Protocol):
     ) -> dict[str, Any]: ...
 
 
+class QuerySnapshotReader(AssetReader, ContractReader, RuntimeRecordReader, Protocol):
+    """Authoritative read capabilities needed to build query projections."""
+
+
 class StoreQueryProjection:
     """Authoritative fallback using the Store's existing read surface."""
 
     def __init__(
         self,
-        store,
+        store: QuerySnapshotReader,
         *,
         redis_configured: bool = False,
         reason: str = "",
@@ -138,7 +147,9 @@ def _wire_json(value: dict[str, object]) -> str:
     return json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
 
 
-def build_query_snapshot(store, *, domain_id: str) -> QuerySnapshot:
+def build_query_snapshot(
+    store: QuerySnapshotReader, *, domain_id: str
+) -> QuerySnapshot:
     """Build one deterministic read snapshot from authoritative Store facts."""
     assets = StoreQueryProjection(store).get_all_assets()
     contracts = sorted(store.get_all_contracts(), key=lambda contract: contract.id)

@@ -11,9 +11,9 @@ from aigineering.core.activation import (
 )
 from aigineering.core.ids import (
     CONTRACT_SELF_REFERENCE,
+    contract_from_fields,
     hash_asset_content,
     hash_asset_definition,
-    hash_contract_current,
 )
 from aigineering.plugins.plan_scaffold import (
     PLAN_RESERVED_PREFIXES,
@@ -107,7 +107,7 @@ def method_contract(parent: Contract, action: WorkerAction) -> Contract:
             context_name,
             f"{call_prefix}{CONTRACT_SELF_REFERENCE}",
         )
-    contract_id = hash_contract_current(
+    return contract_from_fields(
         name=contract_name,
         description=description,
         inputs=inputs,
@@ -131,40 +131,6 @@ def method_contract(parent: Contract, action: WorkerAction) -> Contract:
         context_asset_ids=parent.context_asset_ids,
     )
 
-    # Expand minting_authority for method-type-specific system assets.
-    _extra_authority: tuple[str, ...] = (f"_fail_context_{contract_id}",)
-    if action.type == "fail":
-        _extra_authority = (f"_fail_report_{contract_id}",)
-    elif action.type == "tool":
-        if output_prefix == "_mcp_obs_":
-            _extra_authority = (f"_mcp_call_{contract_id}",)
-        else:
-            _extra_authority = (f"_tool_call_{contract_id}",)
-
-    return Contract(
-        id=contract_id,
-        parent_id=parent.id,
-        name=contract_name,
-        description=description,
-        inputs=inputs,
-        outputs=outputs,
-        activation=activation,
-        budget=1,
-        tool_scope=tool_scope,
-        labels=labels,
-        context_asset_ids=parent.context_asset_ids,
-        worker_capabilities=worker_capabilities,
-        worker_pools=parent.worker_pools,
-        delegation_capabilities=parent.delegation_capabilities,
-        delegation_pools=parent.delegation_pools,
-        origin="system",
-        # A method contract needs exact authority for both its declared
-        # result and the context asset that activates it.  Do not rely on a
-        # generic protected-name override when scheduling methods.
-        minting_authority=(output_name, context_name) + _extra_authority,
-        sensitive_input_policy=parent.sensitive_input_policy,
-    )
-
 
 def retry_contract(parent: Contract) -> Contract:
     """Create a security-equivalent replacement Contract for one failed attempt."""
@@ -177,7 +143,7 @@ def retry_contract(parent: Contract) -> Contract:
         if parent.sensitive_input_policy is not None
         else None
     )
-    contract_id = hash_contract_current(
+    return contract_from_fields(
         name=name,
         description=parent.description,
         inputs=parent.inputs,
@@ -200,27 +166,6 @@ def retry_contract(parent: Contract) -> Contract:
             else None
         ),
         context_asset_ids=parent.context_asset_ids,
-    )
-    return Contract(
-        id=contract_id,
-        parent_id=parent.parent_id,
-        name=name,
-        description=parent.description,
-        inputs=parent.inputs,
-        outputs=parent.outputs,
-        activation=parent.activation,
-        budget=parent.budget,
-        tool_scope=parent.tool_scope,
-        labels=parent.labels,
-        context_asset_ids=parent.context_asset_ids,
-        worker_capabilities=parent.worker_capabilities,
-        worker_pools=parent.worker_pools,
-        delegation_capabilities=parent.delegation_capabilities,
-        delegation_pools=parent.delegation_pools,
-        origin="retry",
-        minting_authority=authority,
-        sensitive_input_policy=parent.sensitive_input_policy,
-        acceptance_policy=parent.acceptance_policy,
     )
 
 
@@ -250,7 +195,7 @@ def continuation_contract(
         )
         if isinstance(used_tool, str) and used_tool:
             tool_scope = tuple(tool for tool in parent.tool_scope if tool != used_tool)
-    contract_id = hash_contract_current(
+    return contract_from_fields(
         name=name,
         description=parent.description,
         inputs=[],
@@ -273,26 +218,6 @@ def continuation_contract(
             else None
         ),
         context_asset_ids=parent.context_asset_ids,
-    )
-    return Contract(
-        id=contract_id,
-        parent_id=parent.id,
-        name=name,
-        description=parent.description,
-        outputs=parent.outputs,
-        activation="",
-        budget=effective_budget,
-        tool_scope=tool_scope,
-        labels=parent.labels,
-        context_asset_ids=parent.context_asset_ids,
-        worker_capabilities=parent.worker_capabilities,
-        worker_pools=parent.worker_pools,
-        delegation_capabilities=parent.delegation_capabilities,
-        delegation_pools=parent.delegation_pools,
-        origin="continuation",
-        minting_authority=authority,
-        sensitive_input_policy=parent.sensitive_input_policy,
-        acceptance_policy=parent.acceptance_policy,
     )
 
 
@@ -1083,7 +1008,7 @@ def _build_plan_contract(
         if context_assets
         else (parent_contract.context_asset_ids if parent_contract is not None else ())
     )
-    identity = hash_contract_current(
+    return contract_from_fields(
         name=name,
         description=description,
         inputs=inputs,
@@ -1103,26 +1028,6 @@ def _build_plan_contract(
         ),
         acceptance_policy=acceptance_policy,
         context_asset_ids=context_asset_ids,
-    )
-    return Contract(
-        id=identity,
-        parent_id=parent_id,
-        name=name,
-        description=description,
-        inputs=inputs,
-        outputs=outputs,
-        activation=activation,
-        budget=budget,
-        tool_scope=tool_scope,
-        labels=labels,
-        context_asset_ids=context_asset_ids,
-        worker_capabilities=worker_capabilities,
-        worker_pools=worker_pools,
-        delegation_capabilities=delegation_capabilities,
-        delegation_pools=delegation_pools,
-        origin="plan",
-        sensitive_input_policy=sensitive_policy,
-        acceptance_policy=acceptance_policy,
     )
 
 

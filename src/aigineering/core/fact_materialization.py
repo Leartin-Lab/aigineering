@@ -5,10 +5,11 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import replace
 
+from aigineering.core.candidate_decision import trace_record
 from aigineering.core.trace import create_entry
 from aigineering.core.lifecycle_facts import create_terminal_record
 from aigineering.protocol.runtime_record import RuntimeRecord, create_runtime_record
-from aigineering.protocol.wire import asset_to_dict, trace_entry_to_dict
+from aigineering.protocol.wire import asset_to_dict
 
 
 def asset_committed_record(asset, *, causal_parents=()) -> RuntimeRecord:
@@ -20,13 +21,7 @@ def asset_committed_record(asset, *, causal_parents=()) -> RuntimeRecord:
 
 
 def trace_records(entries: Sequence[object]) -> tuple[RuntimeRecord, ...]:
-    return tuple(
-        create_runtime_record(
-            "trace.recorded",
-            {"trace": trace_entry_to_dict(entry)},
-        )
-        for entry in entries
-    )
+    return tuple(trace_record(entry) for entry in entries)
 
 
 def materialize_fact_reduction(

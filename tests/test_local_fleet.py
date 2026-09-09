@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from threading import Barrier
 
+import pytest
+
 from aigineering.cli._candidate import commit_local_effects, require_accepted
 from aigineering.core.control_plane import (
     bind_contract_label_assets,
@@ -222,9 +224,24 @@ def test_local_fleet_executes_specialized_tasks_concurrently(tmp_path, monkeypat
         reopened.close()
 
 
+@pytest.mark.parametrize("concurrent_recovery", [False, True])
 def test_local_fleet_recovers_bad_output_with_frozen_skill_context(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, concurrent_recovery
 ):
+    if concurrent_recovery:
+        recovery_barrier = Barrier(2)
+        original_commit = SQLiteStore.commit_ingress_batch
+
+        def synchronized_recovery(store, *args, **kwargs):
+            if any(
+                record.record_type == "contract.declared"
+                and record.payload["contract"].get("origin") == "recovery"
+                for record in kwargs.get("runtime_records", ())
+            ):
+                recovery_barrier.wait(timeout=5)
+            return original_commit(store, *args, **kwargs)
+
+        monkeypatch.setattr(SQLiteStore, "commit_ingress_batch", synchronized_recovery)
     monkeypatch.chdir(tmp_path)
     db_path = str(tmp_path / "recovery-fleet.db")
     store = SQLiteStore(db_path)
@@ -304,9 +321,23 @@ def test_local_fleet_recovers_bad_output_with_frozen_skill_context(
         assert reopened.scan_runtime_records(
             record_type="candidate_rejection.recovery_scheduled"
         )
+        before_traces = {entry.id: entry for entry in reopened.get_all()}
+        if concurrent_recovery:
+            recovery_records = [
+                record
+                for _, record in reopened.scan_runtime_records(
+                    record_type="trace.recorded"
+                )
+                if record.payload["trace"]["event_type"] == "recovery_scheduled"
+            ]
+            assert len(recovery_records) == 2
+            assert (
+                len({record.payload["trace"]["id"] for record in recovery_records}) == 1
+            )
         before_digest = reopened.runtime_materialization_digest()
         rebuilt_digest = reopened.rebuild_runtime_materializations()
         assert rebuilt_digest == before_digest
+        assert {entry.id: entry for entry in reopened.get_all()} == before_traces
         rebuilt_recovery = reopened.get_contract(recovery.id)
         assert rebuilt_recovery is not None
         assert rebuilt_recovery.labels == task.labels

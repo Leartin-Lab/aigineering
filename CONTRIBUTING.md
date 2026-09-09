@@ -22,6 +22,14 @@ pytest -q
 python -m build
 ```
 
+The CI matrix currently runs Ubuntu with Python 3.11, 3.12 and 3.13. Local
+Windows checks must preserve functional assertions while skipping POSIX-only
+mode-bit checks; Windows ACLs are not equivalent to Unix `0600` permissions.
+Symlink tests check whether the platform permits creating a link. Subprocess
+tests use the active Python interpreter, and installed-wheel smoke selects
+`Scripts/*.exe` on Windows or `bin/*` on POSIX. These accommodations do not
+constitute a Windows CI certification.
+
 ## Architecture Guardrails
 
 - Do not let worker output directly mutate shared state.

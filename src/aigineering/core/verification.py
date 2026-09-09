@@ -11,12 +11,12 @@ from aigineering.core.asset_versions import (
 )
 from aigineering.core.ids import hash_asset_content, hash_asset_definition
 from aigineering.core.asset_graph_facts import asset_from_graph_values
+from aigineering.core.store_capabilities import AssetReader
 from aigineering.protocol.asset_graph import content_object_id
 from aigineering.core.trust_policy import TrustPolicy
 from aigineering.protocol.types import ReplacementClaim, TrustTier
 
 if TYPE_CHECKING:
-    from aigineering.core.store import StoreProtocol
     from aigineering.protocol.types import Contract
 
 
@@ -25,7 +25,7 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 
 
-def _asset_identity_check(store: StoreProtocol, asset) -> tuple[str, str, bool]:
+def _asset_identity_check(store: AssetReader, asset) -> tuple[str, str, bool]:
     if asset.definition_hash.startswith("definition:v1:"):
         expected_content = content_object_id(asset.content)
         definitions = {
@@ -55,7 +55,7 @@ def _asset_identity_check(store: StoreProtocol, asset) -> tuple[str, str, bool]:
     )
 
 
-def batch_verify_definition(store: StoreProtocol, def_hash: str) -> dict[str, Any]:
+def batch_verify_definition(store: AssetReader, def_hash: str) -> dict[str, Any]:
     """Verify all content hashes under a definition hash.
 
     Returns
@@ -102,7 +102,7 @@ def batch_verify_definition(store: StoreProtocol, def_hash: str) -> dict[str, An
 
 
 def verify_replacement_claims(
-    store: StoreProtocol, claims: list[ReplacementClaim]
+    store: AssetReader, claims: list[ReplacementClaim]
 ) -> dict[str, Any]:
     """Verify replacement/equivalence and deterministic derivation claims.
 
@@ -222,7 +222,7 @@ def verify_replacement_claims(
 
 def check_sensitive_input_policy(
     contract: Contract,
-    store: StoreProtocol,
+    store: AssetReader,
     policy: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Check if contract's sensitive inputs meet policy requirements.

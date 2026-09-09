@@ -1,0 +1,17 @@
+{
+  "after_digest": "d4754372e92c3538b92af321a593dddfa60daab87af58a2bd15e0e49823ff39e",
+  "before_digest": "d4754372e92c3538b92af321a593dddfa60daab87af58a2bd15e0e49823ff39e",
+  "bytes": 2215244,
+  "nodes": 4,
+  "ocr_exercised": false,
+  "pages": 15,
+  "parser": "pymupdf",
+  "parser_version": "1.27.2.3",
+  "publications": 4,
+  "reconstruction": "passed",
+  "report_id": "asset:v1:dd43652739b4912cb278ee4a3aef798a2c05b7bbfcddce9209e3ac85fc69315b",
+  "schema": "artifact-live-evidence-v1",
+  "semantic_support": "not_evaluated",
+  "sha256": "bdfaa68d8984f0dc02beaca527b76f207d99b666d31d1da728ee0728182df697",
+  "source": "https://arxiv.org/pdf/1706.03762"
+}

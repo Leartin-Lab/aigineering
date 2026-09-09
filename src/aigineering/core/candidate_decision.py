@@ -4,11 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 
-from aigineering.core.trace import create_entry
+from aigineering.core.trace import create_entry, trace_record_from_entry
 from aigineering.protocol.candidate import CandidateProposal, candidate_usage_metadata
 from aigineering.protocol.runtime_record import RuntimeRecord, create_runtime_record
 from aigineering.protocol.types import Asset, Contract, TraceEntry
-from aigineering.protocol.wire import trace_entry_to_dict
 
 
 @dataclass(frozen=True)
@@ -28,9 +27,17 @@ class CommitmentDecision:
         return self.contracts[0] if len(self.contracts) == 1 else None
 
 
-def trace_record(entry: TraceEntry) -> RuntimeRecord:
-    return create_runtime_record(
-        "trace.recorded", {"trace": trace_entry_to_dict(entry)}
+def trace_record(
+    entry: TraceEntry,
+    *,
+    causal_parents: tuple[str, ...] | list[str] = (),
+    recorded_at: str | None = None,
+) -> RuntimeRecord:
+    """Encode one TraceEntry as its canonical durable RuntimeRecord."""
+    return trace_record_from_entry(
+        entry,
+        causal_parents=causal_parents,
+        recorded_at=recorded_at,
     )
 
 

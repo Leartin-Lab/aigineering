@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from aigineering.protocol.candidate import ActorKey, CandidateEffect
 from aigineering.protocol.asset_graph import (
@@ -22,8 +22,21 @@ from aigineering.protocol.types import Asset, Contract, ReplacementClaim
 from aigineering.protocol.wire import contract_to_dict
 
 if TYPE_CHECKING:
-    from aigineering.core.signing import Signer
-    from aigineering.core.worker_routing import WorkerRegistration
+    from aigineering.protocol.signing import Signer
+
+
+class WorkerRegistrationLike(Protocol):
+    """Structural input accepted by the protocol-owned registration builder."""
+
+    capabilities: tuple[str, ...]
+    capacity: int
+    enabled: bool
+    pools: tuple[str, ...]
+    profile_id: str
+    version: str
+    worker_id: str
+    actor_id: str
+    key_id: str
 
 
 def contract_declaration_effect(
@@ -109,7 +122,7 @@ def asset_attestation_effect(
     )
 
 
-def worker_registration_effect(registration: WorkerRegistration) -> CandidateEffect:
+def worker_registration_effect(registration: WorkerRegistrationLike) -> CandidateEffect:
     return CandidateEffect(
         "worker.register",
         {

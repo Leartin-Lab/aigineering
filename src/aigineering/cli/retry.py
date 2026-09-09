@@ -6,7 +6,7 @@ import click
 
 from aigineering.cli._common import _output_json, _persistent_store
 from aigineering.cli._candidate import commit_local_effect, require_accepted
-from aigineering.core.methods import retry_contract
+from aigineering.plugins.task_semantics import retry_contract
 from aigineering.protocol.effect_builders import contract_declaration_effect
 
 

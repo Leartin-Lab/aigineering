@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from aigineering.core.ids import (
     canonical_json,
     compute_content_hash,
-    hash_contract_current,
+    contract_from_fields,
 )
 from aigineering.plugins.base import PluginProposal, PluginRequest
 from aigineering.protocol.effect_builders import contract_declaration_effect
@@ -210,5 +210,4 @@ def _stage_contract(
         "acceptance_policy": acceptance_policy,
         "context_asset_ids": parent.context_asset_ids,
     }
-    contract_id = hash_contract_current(**fields)
-    return Contract(id=contract_id, **fields)
+    return contract_from_fields(**fields)

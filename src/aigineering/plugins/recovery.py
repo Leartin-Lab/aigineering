@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING
 
-from aigineering.core.ids import hash_contract_current
+from aigineering.core.ids import contract_from_fields
 from aigineering.plugins.task_semantics import system_asset
 from aigineering.protocol.effect_builders import (
     asset_proposal_effect,
@@ -73,7 +73,7 @@ def schedule_method_result_recovery(
         if failed_contract.acceptance_policy is not None
         else None
     )
-    cid = hash_contract_current(
+    recovery = contract_from_fields(
         name=name,
         description=description,
         inputs=[context_name],
@@ -93,30 +93,8 @@ def schedule_method_result_recovery(
         acceptance_policy=acceptance_policy,
         context_asset_ids=failed_contract.context_asset_ids,
     )
-    if runtime.get_contract(cid) is not None:
+    if runtime.get_contract(recovery.id) is not None:
         return None
-
-    recovery = Contract(
-        id=cid,
-        parent_id=parent_id,
-        name=name,
-        description=description,
-        inputs=[context_name],
-        outputs=[output_name],
-        activation=context_name,
-        budget=1,
-        tool_scope=[],
-        labels=[f"method:{method_type}"],
-        context_asset_ids=failed_contract.context_asset_ids,
-        worker_capabilities=failed_contract.worker_capabilities,
-        worker_pools=failed_contract.worker_pools,
-        delegation_capabilities=failed_contract.delegation_capabilities,
-        delegation_pools=failed_contract.delegation_pools,
-        origin="system",
-        minting_authority=authority,
-        sensitive_input_policy=failed_contract.sensitive_input_policy,
-        acceptance_policy=failed_contract.acceptance_policy,
-    )
     context_template = system_asset(
         name=context_name,
         content=json.dumps(context, sort_keys=True, ensure_ascii=False),
@@ -219,7 +197,7 @@ def schedule_projection_recovery(
     # and continuation graph. Clamping every projection recovery to one unit
     # makes a tool-using task irrecoverable after its observation is committed.
     recovery_budget = max(1, failed_contract.budget)
-    cid = hash_contract_current(
+    recovery = contract_from_fields(
         name=name,
         description=description,
         inputs=inputs,
@@ -239,30 +217,8 @@ def schedule_projection_recovery(
         acceptance_policy=acceptance_policy,
         context_asset_ids=failed_contract.context_asset_ids,
     )
-    if runtime.get_contract(cid) is not None:
+    if runtime.get_contract(recovery.id) is not None:
         return None
-
-    recovery = Contract(
-        id=cid,
-        parent_id=failed_contract.parent_id,
-        name=name,
-        description=description,
-        inputs=inputs,
-        outputs=failed_contract.outputs,
-        activation=activation,
-        budget=recovery_budget,
-        tool_scope=failed_contract.tool_scope,
-        labels=failed_contract.labels,
-        context_asset_ids=failed_contract.context_asset_ids,
-        worker_capabilities=failed_contract.worker_capabilities,
-        worker_pools=failed_contract.worker_pools,
-        delegation_capabilities=failed_contract.delegation_capabilities,
-        delegation_pools=failed_contract.delegation_pools,
-        origin="recovery",
-        minting_authority=authority,
-        sensitive_input_policy=failed_contract.sensitive_input_policy,
-        acceptance_policy=failed_contract.acceptance_policy,
-    )
     context_template = system_asset(
         name=context_name,
         content=json.dumps(context, sort_keys=True, ensure_ascii=False),

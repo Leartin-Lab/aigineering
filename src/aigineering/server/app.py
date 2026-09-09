@@ -85,13 +85,24 @@ class AssetResponse(BaseModel):
 
 class ContractResponse(BaseModel):
     id: str
+    parent_id: str | None
     name: str
+    description: str
     inputs: list[str]
     outputs: list[str]
     activation: str
     budget: int
     labels: list[str]
     tool_scope: list[str]
+    context_asset_ids: list[str]
+    worker_capabilities: list[str]
+    worker_pools: list[str]
+    delegation_capabilities: list[str]
+    delegation_pools: list[str]
+    origin: str
+    minting_authority: list[str]
+    sensitive_input_policy: dict | None
+    acceptance_policy: dict | None
 
 
 class SessionResponse(BaseModel):
@@ -143,13 +154,32 @@ def _asset_response(asset) -> AssetResponse:
 def _contract_response(contract) -> ContractResponse:
     return ContractResponse(
         id=contract.id,
+        parent_id=contract.parent_id,
         name=contract.name,
+        description=contract.description,
         inputs=list(contract.inputs),
         outputs=list(contract.outputs),
         activation=contract.activation,
         budget=contract.budget,
         labels=list(contract.labels),
         tool_scope=list(contract.tool_scope),
+        context_asset_ids=list(contract.context_asset_ids),
+        worker_capabilities=list(contract.worker_capabilities),
+        worker_pools=list(contract.worker_pools),
+        delegation_capabilities=list(contract.delegation_capabilities),
+        delegation_pools=list(contract.delegation_pools),
+        origin=contract.origin,
+        minting_authority=list(contract.minting_authority),
+        sensitive_input_policy=(
+            deep_thaw(contract.sensitive_input_policy)
+            if contract.sensitive_input_policy is not None
+            else None
+        ),
+        acceptance_policy=(
+            deep_thaw(contract.acceptance_policy)
+            if contract.acceptance_policy is not None
+            else None
+        ),
     )
 
 

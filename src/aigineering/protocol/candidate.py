@@ -11,8 +11,8 @@ import unicodedata
 from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Mapping
 
-from aigineering.core.ids import canonical_json, compute_content_hash
-from aigineering.core.signing import Signer, Verifier, create_verifier
+from aigineering.protocol.identity import canonical_json, compute_content_hash
+from aigineering.protocol.signing import Signer, Verifier, create_verifier
 from aigineering.protocol.immutability import deep_freeze, deep_thaw
 from aigineering.protocol.runtime_record import RuntimeRecord, create_runtime_record
 
