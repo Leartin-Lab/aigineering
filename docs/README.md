@@ -15,6 +15,7 @@ navigation, not another architecture specification.
 | How are release evidence and rebuild failures reproduced? | [`reference/release-evidence.md`](reference/release-evidence.md) |
 | How do contributors change the project? | [`CONTRIBUTING.md`](../CONTRIBUTING.md) |
 | How does an AI coding worker use this repository? | [`SKILL.md`](../SKILL.md) |
+| How do procedures become reusable, evaluated methods? | [`methods.md`](methods.md) |
 | How does an existing agent harness become a Worker? | [`reference/agent-harness-migration.md`](reference/agent-harness-migration.md) |
 
 ## Reading paths

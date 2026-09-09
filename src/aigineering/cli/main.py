@@ -37,6 +37,7 @@ from aigineering.cli.graph import graph_group  # noqa: E402
 from aigineering.cli.fleet import fleet_group  # noqa: E402
 
 from aigineering.cli.artifact import artifact_group  # noqa: E402
+from aigineering.cli.method import method_group  # noqa: E402
 
 cli.add_command(artifact_group)
 cli.add_command(fleet_group)
@@ -63,6 +64,7 @@ cli.add_command(readiness)
 cli.add_command(asset_group)
 cli.add_command(task_group)
 cli.add_command(contract_group)
+cli.add_command(method_group)
 
 
 def main() -> None:

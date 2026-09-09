@@ -71,14 +71,16 @@ on the example audit driver.
 
 ## Current development
 
-v0.5.10 converges repeated Contract construction and stateless runtime
-maintenance while preserving the v0.5.9 protocol and SQLite schema. The current
-development line also includes `aig artifact` for bounded attachments,
-PDF/text extraction, exact evidence selection, asset-bound Markdown citations,
-recursive ancestry and offline export. These are business adapters over the
-existing signed runtime. See the [artifact guide](docs/business-artifacts.md)
-and [ADR-022](docs/adr/ADR-022-portable-business-artifacts.md) for commands and
-limits. Optional PDF support: `pip install "aigineering[documents]"`.
+v0.5.11 adds declarative method packages and a local create → test → independently
+accept → reuse lifecycle. Methods run as ordinary Contracts; generated methods
+remain unverified until explicitly evaluated. See the [method guide](docs/methods.md)
+and [fixture example](examples/method-governance/README.md).
+
+The v0.5.10 baseline converges Contract construction and stateless runtime
+maintenance, fixes concurrent trace reconstruction and local signing-key
+publication, and preserves the v0.5.9 protocol and SQLite schema. The artifact
+adapter provides bounded attachments, extraction, exact evidence and offline
+citation export; see the [artifact guide](docs/business-artifacts.md).
 
 ## Reference runtime scope
 

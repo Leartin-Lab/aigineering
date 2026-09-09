@@ -1,0 +1,26 @@
+{
+  "schema": "method-cases-v1",
+  "name": "heldout-counts",
+  "cases": [
+    {
+      "name": "equal",
+      "inputs": {"source": "{\"source\": 3, \"reported\": 3}"},
+      "expected": {
+        "assessment": {
+          "matched": true,
+          "reason": "source and reported values match"
+        }
+      }
+    },
+    {
+      "name": "different",
+      "inputs": {"source": "{\"source\": 3, \"reported\": 4}"},
+      "expected": {
+        "assessment": {
+          "matched": false,
+          "reason": "source and reported values differ"
+        }
+      }
+    }
+  ]
+}

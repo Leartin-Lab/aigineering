@@ -1,0 +1,24 @@
+{
+  "schema": "method-package-v1",
+  "name": "check-number",
+  "version": "1.0.0",
+  "description": "Check whether source and reported numbers match.",
+  "instructions": "Compare source and reported values and explain the result.",
+  "inputs": ["source"],
+  "outputs": {
+    "assessment": {
+      "matched": "boolean",
+      "reason": "nonempty_string"
+    }
+  },
+  "requirements": {
+    "tool_scope": [],
+    "worker_capabilities": [],
+    "worker_pools": [],
+    "delegation_capabilities": [],
+    "delegation_pools": []
+  },
+  "dependencies": [],
+  "context_asset_ids": [],
+  "examples": []
+}
