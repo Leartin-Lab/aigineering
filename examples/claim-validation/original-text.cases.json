@@ -1,0 +1,38 @@
+{
+  "schema": "method-cases-v1",
+  "name": "original-text-checks",
+  "cases": [
+    {
+      "name": "exact-match",
+      "inputs": {
+        "source": "{\"claims\":[{\"id\":\"claim-1\",\"text\":\"Seven hours was associated with higher scores.\"},{\"id\":\"claim-2\",\"text\":\"The sample came from two campuses.\"}]}",
+        "report": "{\"claims\":[{\"claim_id\":\"claim-1\",\"original_text\":\"Seven hours was associated with higher scores.\"},{\"claim_id\":\"claim-2\",\"original_text\":\"The sample came from two campuses.\"}]}"
+      },
+      "expected": {"assessment": {"check": "original-text-v1", "passed": true, "findings": "", "semantic_checked": false}}
+    },
+    {
+      "name": "changed-original",
+      "inputs": {
+        "source": "{\"claims\":[{\"id\":\"claim-1\",\"text\":\"Seven hours was associated with higher scores.\"},{\"id\":\"claim-2\",\"text\":\"The sample came from two campuses.\"}]}",
+        "report": "{\"claims\":[{\"claim_id\":\"claim-1\",\"original_text\":\"Seven hours improves scores.\"},{\"claim_id\":\"claim-2\",\"original_text\":\"The sample came from two campuses.\"}]}"
+      },
+      "expected": {"assessment": {"check": "original-text-v1", "passed": false, "findings": "original-text-mismatch:claim-1", "semantic_checked": false}}
+    },
+    {
+      "name": "duplicate-report-claim",
+      "inputs": {
+        "source": "{\"claims\":[{\"id\":\"claim-1\",\"text\":\"Seven hours was associated with higher scores.\"},{\"id\":\"claim-2\",\"text\":\"The sample came from two campuses.\"}]}",
+        "report": "{\"claims\":[{\"claim_id\":\"claim-1\",\"original_text\":\"Seven hours was associated with higher scores.\"},{\"claim_id\":\"claim-1\",\"original_text\":\"Seven hours was associated with higher scores.\"},{\"claim_id\":\"claim-2\",\"original_text\":\"The sample came from two campuses.\"}]}"
+      },
+      "expected": {"assessment": {"check": "original-text-v1", "passed": false, "findings": "duplicate-report-claim-id", "semantic_checked": false}}
+    },
+    {
+      "name": "missing-report-claim",
+      "inputs": {
+        "source": "{\"claims\":[{\"id\":\"claim-1\",\"text\":\"Seven hours was associated with higher scores.\"},{\"id\":\"claim-2\",\"text\":\"The sample came from two campuses.\"}]}",
+        "report": "{\"claims\":[{\"claim_id\":\"claim-1\",\"original_text\":\"Seven hours was associated with higher scores.\"}]}"
+      },
+      "expected": {"assessment": {"check": "original-text-v1", "passed": false, "findings": "claim-id-set-mismatch", "semantic_checked": false}}
+    }
+  ]
+}

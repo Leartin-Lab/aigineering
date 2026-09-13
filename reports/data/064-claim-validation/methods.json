@@ -1,0 +1,380 @@
+{
+  "schema": "claim-validation-evidence-v1",
+  "rebuild": {
+    "status": "passed",
+    "before_digest": "3f7a23da0988607a347b2446541a2d556d38526448495e1fd7fbea284fd6f5e2",
+    "after_digest": "3f7a23da0988607a347b2446541a2d556d38526448495e1fd7fbea284fd6f5e2",
+    "records_unchanged": true,
+    "changed_tables": [
+      "worker_claims",
+      "worker_registrations"
+    ]
+  },
+  "methods": [
+    {
+      "name": "original-text",
+      "ids": {
+        "method": {
+          "asset_id": "asset:v1:18705aa720751f61eae142b23d0cbb95f5aa90f1802c21e2c0145b34a4593a5a",
+          "name": "method.claim-original-text-check.1.0.0"
+        },
+        "cases": {
+          "asset_id": "asset:v1:0f7ae6e756ad384709d6a1f20c9dea11163e14789eeecbdb9f6ee4e2d6183c16",
+          "name": "original-text-cases"
+        },
+        "run": {
+          "run_id": "asset:v1:d4a34788a2dbb23d2805ed96ac0d76a969ac6b92a9348d7881a244442d0f2ca1",
+          "contract_id": "task:v5:b84a38794cd69c8cd6a9b6952f255f149ae95408681a2bf75bba35906b861355",
+          "name": "original-text-evaluation"
+        },
+        "evaluation": {
+          "evaluation_id": "asset:v1:723b266e4f62e32452675151fd5311a8f0a9352be10d0e12dd1bd90010064d4b",
+          "contract_id": "task:v4:d20f250f21911fbf0726dbd785a3dae0586b3cfe4f8bc1d0359ebafc0582d1b0"
+        },
+        "reuse": {
+          "contract_id": "task:v4:8eb2d4de8c6fe8dc66799fb1c87af6d66cd62ca16f2c97a5240c93c54b88f39d",
+          "name": "original-text-reuse"
+        }
+      },
+      "evaluation": {
+        "asset_id": "asset:v1:723b266e4f62e32452675151fd5311a8f0a9352be10d0e12dd1bd90010064d4b",
+        "name": "method.assessment.d4a34788a2dbb23d2805",
+        "created_by": "task:v4:d20f250f21911fbf0726dbd785a3dae0586b3cfe4f8bc1d0359ebafc0582d1b0",
+        "content": {
+          "cases": [
+            {
+              "contract_id": "task:v4:d8e2d37fa3ba09232b7705a00f44cb503b0d514612be12af602f17049cd7879b",
+              "name": "exact-match",
+              "outputs": {
+                "assessment": "asset:v1:85fe05c6621c0acec7f433843c194796dc49d679e27b461cbad9635f3eef738d"
+              },
+              "passed": true,
+              "reasons": []
+            },
+            {
+              "contract_id": "task:v4:c28f69b31f4a63386a361e1dfb403d57f447103e427660de4858a6b5c2c66de9",
+              "name": "changed-original",
+              "outputs": {
+                "assessment": "asset:v1:6bd8bd2b23281c67e0f39295c1461de4706d86135eafe6d7af690e075a658014"
+              },
+              "passed": true,
+              "reasons": []
+            },
+            {
+              "contract_id": "task:v4:54c4c99848d3f466a9b13e302d6e077bea49e7dced8c3d8c1f39c3986978a6c7",
+              "name": "duplicate-report-claim",
+              "outputs": {
+                "assessment": "asset:v1:2999a80e5f55a5061da4758e3d30a1091167c0f86268ce9af012c97bf8f053c2"
+              },
+              "passed": true,
+              "reasons": []
+            },
+            {
+              "contract_id": "task:v4:6c2b94fb27358f23290c5b25f322155fdb3ea129314fdf663e295b74838ffcb0",
+              "name": "missing-report-claim",
+              "outputs": {
+                "assessment": "asset:v1:3607c8a7de712adffc9b1e5dbea946f01452f58120a063b061367f2dbd02be43"
+              },
+              "passed": true,
+              "reasons": []
+            }
+          ],
+          "method_asset_id": "asset:v1:18705aa720751f61eae142b23d0cbb95f5aa90f1802c21e2c0145b34a4593a5a",
+          "passed": true,
+          "root_contract_id": "task:v5:b84a38794cd69c8cd6a9b6952f255f149ae95408681a2bf75bba35906b861355",
+          "run_asset_id": "asset:v1:d4a34788a2dbb23d2805ed96ac0d76a969ac6b92a9348d7881a244442d0f2ca1",
+          "schema": "method-evaluation-v1",
+          "suite_asset_id": "asset:v1:0f7ae6e756ad384709d6a1f20c9dea11163e14789eeecbdb9f6ee4e2d6183c16"
+        }
+      },
+      "case_outputs": [
+        {
+          "asset_id": "asset:v1:85fe05c6621c0acec7f433843c194796dc49d679e27b461cbad9635f3eef738d",
+          "name": "original-text-evaluation.case0.assessment",
+          "created_by": "task:v4:d8e2d37fa3ba09232b7705a00f44cb503b0d514612be12af602f17049cd7879b",
+          "content": {
+            "check": "original-text-v1",
+            "findings": "",
+            "passed": true,
+            "semantic_checked": false
+          }
+        },
+        {
+          "asset_id": "asset:v1:6bd8bd2b23281c67e0f39295c1461de4706d86135eafe6d7af690e075a658014",
+          "name": "original-text-evaluation.case1.assessment",
+          "created_by": "task:v4:c28f69b31f4a63386a361e1dfb403d57f447103e427660de4858a6b5c2c66de9",
+          "content": {
+            "check": "original-text-v1",
+            "findings": "original-text-mismatch:claim-1",
+            "passed": false,
+            "semantic_checked": false
+          }
+        },
+        {
+          "asset_id": "asset:v1:2999a80e5f55a5061da4758e3d30a1091167c0f86268ce9af012c97bf8f053c2",
+          "name": "original-text-evaluation.case2.assessment",
+          "created_by": "task:v4:54c4c99848d3f466a9b13e302d6e077bea49e7dced8c3d8c1f39c3986978a6c7",
+          "content": {
+            "check": "original-text-v1",
+            "findings": "duplicate-report-claim-id",
+            "passed": false,
+            "semantic_checked": false
+          }
+        },
+        {
+          "asset_id": "asset:v1:3607c8a7de712adffc9b1e5dbea946f01452f58120a063b061367f2dbd02be43",
+          "name": "original-text-evaluation.case3.assessment",
+          "created_by": "task:v4:6c2b94fb27358f23290c5b25f322155fdb3ea129314fdf663e295b74838ffcb0",
+          "content": {
+            "check": "original-text-v1",
+            "findings": "claim-id-set-mismatch",
+            "passed": false,
+            "semantic_checked": false
+          }
+        }
+      ],
+      "reuse_outputs": [
+        {
+          "asset_id": "asset:v1:b8355159b4a8052d8857e2ca6712487869cd1c56f52bbb2d027584e96b5e89ae",
+          "name": "original-text.reused",
+          "created_by": "task:v4:8eb2d4de8c6fe8dc66799fb1c87af6d66cd62ca16f2c97a5240c93c54b88f39d",
+          "content": {
+            "check": "original-text-v1",
+            "findings": "",
+            "passed": true,
+            "semantic_checked": false
+          }
+        }
+      ]
+    },
+    {
+      "name": "evidence-bindings",
+      "ids": {
+        "method": {
+          "asset_id": "asset:v1:47e267025d68096050f794616df1ca2063823d8422258e30ceb54631c16c64a5",
+          "name": "method.claim-evidence-binding-check.1.0.0"
+        },
+        "cases": {
+          "asset_id": "asset:v1:080f0bec4be8caeb097f9ce72b3d317b241a53ccda85531283846bf69c9fac38",
+          "name": "evidence-bindings-cases"
+        },
+        "run": {
+          "run_id": "asset:v1:a1ee4cb5d7ba13af4ce11bb7dc9373d8a85ecc977b22d8bcf79a0af40456b8de",
+          "contract_id": "task:v5:1be90b7f40c2ec7b931e2b049e3517597f1450599cb1539f5f9679a032d37b89",
+          "name": "evidence-bindings-evaluation"
+        },
+        "evaluation": {
+          "evaluation_id": "asset:v1:df6e21e19dc76294b8933c2cebb906ff552691a1b349b0fd05ff0290a88bb3b0",
+          "contract_id": "task:v4:65cff9f246970ac8f668f6200afee9234cfb04c7b13407a492de05dec87d4f95"
+        },
+        "reuse": {
+          "contract_id": "task:v4:7265dfba75e7fa77b695a98593fa111f90256882eba2ec351d878c454fbad403",
+          "name": "evidence-bindings-reuse"
+        }
+      },
+      "evaluation": {
+        "asset_id": "asset:v1:df6e21e19dc76294b8933c2cebb906ff552691a1b349b0fd05ff0290a88bb3b0",
+        "name": "method.assessment.a1ee4cb5d7ba13af4ce1",
+        "created_by": "task:v4:65cff9f246970ac8f668f6200afee9234cfb04c7b13407a492de05dec87d4f95",
+        "content": {
+          "cases": [
+            {
+              "contract_id": "task:v4:783e9c4bb34767dbd14950be80c8cfb8da05e2fbbf43c14c391f29330e9645ac",
+              "name": "exact-bindings",
+              "outputs": {
+                "assessment": "asset:v1:b62ae0932855ab57d976e7f89684fc0d85933c740bf03f598a818137e888dd53"
+              },
+              "passed": true,
+              "reasons": []
+            },
+            {
+              "contract_id": "task:v4:4b8083c72874f12772dae8398deefabd896179f29941dfa51fcacb212b7d535d",
+              "name": "unknown-excerpt",
+              "outputs": {
+                "assessment": "asset:v1:1e4bc186a407aebb6d77f28215ea21f598f214cb249dfdcf16cbd248c2ab39af"
+              },
+              "passed": true,
+              "reasons": []
+            },
+            {
+              "contract_id": "task:v4:88dadb843ee812415991a73489bf496402b17a7f7cba3ddb7ae2df193a9ad2ff",
+              "name": "duplicate-excerpt-id",
+              "outputs": {
+                "assessment": "asset:v1:7968d7ebcdb0fa5600cce6db363c5879cc8866be3d9e36240be401d9bc787e35"
+              },
+              "passed": true,
+              "reasons": []
+            },
+            {
+              "contract_id": "task:v4:5c3034f1ef85ca62740b2545e8960341c9cd9d8b2b88d644170904d84ce74ac1",
+              "name": "missing-binding",
+              "outputs": {
+                "assessment": "asset:v1:93d223630ec8819910c6f2e4f3759bf71b849adcac1c7d31fc77be482c3578e0"
+              },
+              "passed": true,
+              "reasons": []
+            },
+            {
+              "contract_id": "task:v4:6244c4cb948aa5ca4acfe10c7c9dc7596e88c3b9f3e57c09440f62b97b32e9d7",
+              "name": "fake-quote",
+              "outputs": {
+                "assessment": "asset:v1:7b0583d30caaa589021fc870af16eb3fb7651a0dbd690fdca4f3f9453475e0ff"
+              },
+              "passed": true,
+              "reasons": []
+            }
+          ],
+          "method_asset_id": "asset:v1:47e267025d68096050f794616df1ca2063823d8422258e30ceb54631c16c64a5",
+          "passed": true,
+          "root_contract_id": "task:v5:1be90b7f40c2ec7b931e2b049e3517597f1450599cb1539f5f9679a032d37b89",
+          "run_asset_id": "asset:v1:a1ee4cb5d7ba13af4ce11bb7dc9373d8a85ecc977b22d8bcf79a0af40456b8de",
+          "schema": "method-evaluation-v1",
+          "suite_asset_id": "asset:v1:080f0bec4be8caeb097f9ce72b3d317b241a53ccda85531283846bf69c9fac38"
+        }
+      },
+      "case_outputs": [
+        {
+          "asset_id": "asset:v1:b62ae0932855ab57d976e7f89684fc0d85933c740bf03f598a818137e888dd53",
+          "name": "evidence-bindings-evaluation.case0.assessment",
+          "created_by": "task:v4:783e9c4bb34767dbd14950be80c8cfb8da05e2fbbf43c14c391f29330e9645ac",
+          "content": {
+            "check": "evidence-bindings-v1",
+            "findings": "",
+            "passed": true,
+            "semantic_checked": false
+          }
+        },
+        {
+          "asset_id": "asset:v1:1e4bc186a407aebb6d77f28215ea21f598f214cb249dfdcf16cbd248c2ab39af",
+          "name": "evidence-bindings-evaluation.case1.assessment",
+          "created_by": "task:v4:4b8083c72874f12772dae8398deefabd896179f29941dfa51fcacb212b7d535d",
+          "content": {
+            "check": "evidence-bindings-v1",
+            "findings": "unknown-binding-excerpt-id:claim-1\nunknown-evidence-excerpt-id:claim-1",
+            "passed": false,
+            "semantic_checked": false
+          }
+        },
+        {
+          "asset_id": "asset:v1:7968d7ebcdb0fa5600cce6db363c5879cc8866be3d9e36240be401d9bc787e35",
+          "name": "evidence-bindings-evaluation.case2.assessment",
+          "created_by": "task:v4:88dadb843ee812415991a73489bf496402b17a7f7cba3ddb7ae2df193a9ad2ff",
+          "content": {
+            "check": "evidence-bindings-v1",
+            "findings": "duplicate-evidence-excerpt-id:claim-1",
+            "passed": false,
+            "semantic_checked": false
+          }
+        },
+        {
+          "asset_id": "asset:v1:93d223630ec8819910c6f2e4f3759bf71b849adcac1c7d31fc77be482c3578e0",
+          "name": "evidence-bindings-evaluation.case3.assessment",
+          "created_by": "task:v4:5c3034f1ef85ca62740b2545e8960341c9cd9d8b2b88d644170904d84ce74ac1",
+          "content": {
+            "check": "evidence-bindings-v1",
+            "findings": "missing-evidence-bindings:claim-1",
+            "passed": false,
+            "semantic_checked": false
+          }
+        },
+        {
+          "asset_id": "asset:v1:7b0583d30caaa589021fc870af16eb3fb7651a0dbd690fdca4f3f9453475e0ff",
+          "name": "evidence-bindings-evaluation.case4.assessment",
+          "created_by": "task:v4:6244c4cb948aa5ca4acfe10c7c9dc7596e88c3b9f3e57c09440f62b97b32e9d7",
+          "content": {
+            "check": "evidence-bindings-v1",
+            "findings": "quote-not-substring:claim-1:excerpt-results",
+            "passed": false,
+            "semantic_checked": false
+          }
+        }
+      ],
+      "reuse_outputs": [
+        {
+          "asset_id": "asset:v1:735c3f3f546fa8c657cf606bc0bb87f497e71ebec17316edf02e6ea29f886374",
+          "name": "evidence-bindings.reused",
+          "created_by": "task:v4:7265dfba75e7fa77b695a98593fa111f90256882eba2ec351d878c454fbad403",
+          "content": {
+            "check": "evidence-bindings-v1",
+            "findings": "",
+            "passed": true,
+            "semantic_checked": false
+          }
+        }
+      ]
+    }
+  ],
+  "acceptance_records": [
+    {
+      "type": "asset.attested",
+      "payload": {
+        "asset_id": "asset:v1:723b266e4f62e32452675151fd5311a8f0a9352be10d0e12dd1bd90010064d4b",
+        "contract_id": "task:v4:d20f250f21911fbf0726dbd785a3dae0586b3cfe4f8bc1d0359ebafc0582d1b0",
+        "evidence_asset_ids": [
+          "asset:v1:0f7ae6e756ad384709d6a1f20c9dea11163e14789eeecbdb9f6ee4e2d6183c16",
+          "asset:v1:18705aa720751f61eae142b23d0cbb95f5aa90f1802c21e2c0145b34a4593a5a",
+          "asset:v1:2999a80e5f55a5061da4758e3d30a1091167c0f86268ce9af012c97bf8f053c2",
+          "asset:v1:3607c8a7de712adffc9b1e5dbea946f01452f58120a063b061367f2dbd02be43",
+          "asset:v1:6bd8bd2b23281c67e0f39295c1461de4706d86135eafe6d7af690e075a658014",
+          "asset:v1:85fe05c6621c0acec7f433843c194796dc49d679e27b461cbad9635f3eef738d",
+          "asset:v1:d4a34788a2dbb23d2805ed96ac0d76a969ac6b92a9348d7881a244442d0f2ca1"
+        ],
+        "output_name": "method.assessment.d4a34788a2dbb23d2805",
+        "policy_id": "acceptance:v1:f38d8cb990bee5a9aa65535e81023340162b7de66cbb0e602cfa7762a5f26107",
+        "policy_version": "method-evaluation-v1",
+        "rubric_asset_ids": [],
+        "verdict": "accepted",
+        "verifier_actor_id": "plugin:method.review.v1",
+        "verifier_key_id": "plugin-ab77783f9444fa41"
+      }
+    },
+    {
+      "type": "output.qualified",
+      "payload": {
+        "asset_id": "asset:v1:723b266e4f62e32452675151fd5311a8f0a9352be10d0e12dd1bd90010064d4b",
+        "contract_id": "task:v4:d20f250f21911fbf0726dbd785a3dae0586b3cfe4f8bc1d0359ebafc0582d1b0",
+        "output_name": "method.assessment.d4a34788a2dbb23d2805",
+        "policy_id": "acceptance:v1:f38d8cb990bee5a9aa65535e81023340162b7de66cbb0e602cfa7762a5f26107",
+        "verifier_actor_ids": [
+          "plugin:method.review.v1"
+        ]
+      }
+    },
+    {
+      "type": "asset.attested",
+      "payload": {
+        "asset_id": "asset:v1:df6e21e19dc76294b8933c2cebb906ff552691a1b349b0fd05ff0290a88bb3b0",
+        "contract_id": "task:v4:65cff9f246970ac8f668f6200afee9234cfb04c7b13407a492de05dec87d4f95",
+        "evidence_asset_ids": [
+          "asset:v1:080f0bec4be8caeb097f9ce72b3d317b241a53ccda85531283846bf69c9fac38",
+          "asset:v1:1e4bc186a407aebb6d77f28215ea21f598f214cb249dfdcf16cbd248c2ab39af",
+          "asset:v1:47e267025d68096050f794616df1ca2063823d8422258e30ceb54631c16c64a5",
+          "asset:v1:7968d7ebcdb0fa5600cce6db363c5879cc8866be3d9e36240be401d9bc787e35",
+          "asset:v1:7b0583d30caaa589021fc870af16eb3fb7651a0dbd690fdca4f3f9453475e0ff",
+          "asset:v1:93d223630ec8819910c6f2e4f3759bf71b849adcac1c7d31fc77be482c3578e0",
+          "asset:v1:a1ee4cb5d7ba13af4ce11bb7dc9373d8a85ecc977b22d8bcf79a0af40456b8de",
+          "asset:v1:b62ae0932855ab57d976e7f89684fc0d85933c740bf03f598a818137e888dd53"
+        ],
+        "output_name": "method.assessment.a1ee4cb5d7ba13af4ce1",
+        "policy_id": "acceptance:v1:9b9f8b0aa447c704018065aa52326ffe56f15f74928230d41800da270d7707c6",
+        "policy_version": "method-evaluation-v1",
+        "rubric_asset_ids": [],
+        "verdict": "accepted",
+        "verifier_actor_id": "plugin:method.review.v1",
+        "verifier_key_id": "plugin-ab77783f9444fa41"
+      }
+    },
+    {
+      "type": "output.qualified",
+      "payload": {
+        "asset_id": "asset:v1:df6e21e19dc76294b8933c2cebb906ff552691a1b349b0fd05ff0290a88bb3b0",
+        "contract_id": "task:v4:65cff9f246970ac8f668f6200afee9234cfb04c7b13407a492de05dec87d4f95",
+        "output_name": "method.assessment.a1ee4cb5d7ba13af4ce1",
+        "policy_id": "acceptance:v1:9b9f8b0aa447c704018065aa52326ffe56f15f74928230d41800da270d7707c6",
+        "verifier_actor_ids": [
+          "plugin:method.review.v1"
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,46 @@
+{
+  "schema": "method-cases-v1",
+  "name": "evidence-binding-checks",
+  "cases": [
+    {
+      "name": "exact-bindings",
+      "inputs": {
+        "source": "{\"claims\":[{\"id\":\"claim-1\",\"text\":\"Seven hours was associated with higher scores.\"},{\"id\":\"claim-2\",\"text\":\"The sample came from two campuses.\"}],\"source_excerpts\":[{\"id\":\"excerpt-results\",\"text\":\"The seven-hour group had higher scores.\"},{\"id\":\"excerpt-design\",\"text\":\"The sample came from two campuses.\"}]}",
+        "report": "{\"claims\":[{\"claim_id\":\"claim-1\",\"original_text\":\"Seven hours was associated with higher scores.\",\"evidence_excerpt_ids\":[\"excerpt-results\"],\"evidence_bindings\":[{\"excerpt_id\":\"excerpt-results\",\"quote\":\"seven-hour group had higher scores\"}]},{\"claim_id\":\"claim-2\",\"original_text\":\"The sample came from two campuses.\",\"evidence_excerpt_ids\":[\"excerpt-design\"],\"evidence_bindings\":[{\"excerpt_id\":\"excerpt-design\",\"quote\":\"sample came from two campuses\"}]}]}"
+      },
+      "expected": {"assessment": {"check": "evidence-bindings-v1", "passed": true, "findings": "", "semantic_checked": false}}
+    },
+    {
+      "name": "unknown-excerpt",
+      "inputs": {
+        "source": "{\"claims\":[{\"id\":\"claim-1\",\"text\":\"Seven hours was associated with higher scores.\"},{\"id\":\"claim-2\",\"text\":\"The sample came from two campuses.\"}],\"source_excerpts\":[{\"id\":\"excerpt-results\",\"text\":\"The seven-hour group had higher scores.\"},{\"id\":\"excerpt-design\",\"text\":\"The sample came from two campuses.\"}]}",
+        "report": "{\"claims\":[{\"claim_id\":\"claim-1\",\"original_text\":\"Seven hours was associated with higher scores.\",\"evidence_excerpt_ids\":[\"excerpt-missing\"],\"evidence_bindings\":[{\"excerpt_id\":\"excerpt-missing\",\"quote\":\"unknown\"}]},{\"claim_id\":\"claim-2\",\"original_text\":\"The sample came from two campuses.\",\"evidence_excerpt_ids\":[\"excerpt-design\"],\"evidence_bindings\":[{\"excerpt_id\":\"excerpt-design\",\"quote\":\"sample came from two campuses\"}]}]}"
+      },
+      "expected": {"assessment": {"check": "evidence-bindings-v1", "passed": false, "findings": "unknown-binding-excerpt-id:claim-1\nunknown-evidence-excerpt-id:claim-1", "semantic_checked": false}}
+    },
+    {
+      "name": "duplicate-excerpt-id",
+      "inputs": {
+        "source": "{\"claims\":[{\"id\":\"claim-1\",\"text\":\"Seven hours was associated with higher scores.\"},{\"id\":\"claim-2\",\"text\":\"The sample came from two campuses.\"}],\"source_excerpts\":[{\"id\":\"excerpt-results\",\"text\":\"The seven-hour group had higher scores.\"},{\"id\":\"excerpt-design\",\"text\":\"The sample came from two campuses.\"}]}",
+        "report": "{\"claims\":[{\"claim_id\":\"claim-1\",\"original_text\":\"Seven hours was associated with higher scores.\",\"evidence_excerpt_ids\":[\"excerpt-results\",\"excerpt-results\"],\"evidence_bindings\":[{\"excerpt_id\":\"excerpt-results\",\"quote\":\"seven-hour group had higher scores\"}]},{\"claim_id\":\"claim-2\",\"original_text\":\"The sample came from two campuses.\",\"evidence_excerpt_ids\":[\"excerpt-design\"],\"evidence_bindings\":[{\"excerpt_id\":\"excerpt-design\",\"quote\":\"sample came from two campuses\"}]}]}"
+      },
+      "expected": {"assessment": {"check": "evidence-bindings-v1", "passed": false, "findings": "duplicate-evidence-excerpt-id:claim-1", "semantic_checked": false}}
+    },
+    {
+      "name": "missing-binding",
+      "inputs": {
+        "source": "{\"claims\":[{\"id\":\"claim-1\",\"text\":\"Seven hours was associated with higher scores.\"},{\"id\":\"claim-2\",\"text\":\"The sample came from two campuses.\"}],\"source_excerpts\":[{\"id\":\"excerpt-results\",\"text\":\"The seven-hour group had higher scores.\"},{\"id\":\"excerpt-design\",\"text\":\"The sample came from two campuses.\"}]}",
+        "report": "{\"claims\":[{\"claim_id\":\"claim-1\",\"original_text\":\"Seven hours was associated with higher scores.\",\"evidence_excerpt_ids\":[\"excerpt-results\" ]},{\"claim_id\":\"claim-2\",\"original_text\":\"The sample came from two campuses.\",\"evidence_excerpt_ids\":[\"excerpt-design\"],\"evidence_bindings\":[{\"excerpt_id\":\"excerpt-design\",\"quote\":\"sample came from two campuses\"}]}]}"
+      },
+      "expected": {"assessment": {"check": "evidence-bindings-v1", "passed": false, "findings": "missing-evidence-bindings:claim-1", "semantic_checked": false}}
+    },
+    {
+      "name": "fake-quote",
+      "inputs": {
+        "source": "{\"claims\":[{\"id\":\"claim-1\",\"text\":\"Seven hours was associated with higher scores.\"},{\"id\":\"claim-2\",\"text\":\"The sample came from two campuses.\"}],\"source_excerpts\":[{\"id\":\"excerpt-results\",\"text\":\"The seven-hour group had higher scores.\"},{\"id\":\"excerpt-design\",\"text\":\"The sample came from two campuses.\"}]}",
+        "report": "{\"claims\":[{\"claim_id\":\"claim-1\",\"original_text\":\"Seven hours was associated with higher scores.\",\"evidence_excerpt_ids\":[\"excerpt-results\"],\"evidence_bindings\":[{\"excerpt_id\":\"excerpt-results\",\"quote\":\"randomized trial proved causation\"}]},{\"claim_id\":\"claim-2\",\"original_text\":\"The sample came from two campuses.\",\"evidence_excerpt_ids\":[\"excerpt-design\"],\"evidence_bindings\":[{\"excerpt_id\":\"excerpt-design\",\"quote\":\"sample came from two campuses\"}]}]}"
+      },
+      "expected": {"assessment": {"check": "evidence-bindings-v1", "passed": false, "findings": "quote-not-substring:claim-1:excerpt-results", "semantic_checked": false}}
+    }
+  ]
+}

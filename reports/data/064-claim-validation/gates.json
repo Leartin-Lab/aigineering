@@ -1,0 +1,268 @@
+{
+  "schema": "claim-validation-gates-v1",
+  "semantic_checked": false,
+  "gates": [
+    {
+      "name": "valid",
+      "fleet": {
+        "contract_id": "task:v3:38ccfc623b8ece7a1218241506401d4bef3d724a08db478d64f5334a7951a1a6",
+        "status": "complete",
+        "completed": true,
+        "timed_out": false,
+        "worker_errors": []
+      },
+      "task": {
+        "contract_id": "task:v3:38ccfc623b8ece7a1218241506401d4bef3d724a08db478d64f5334a7951a1a6",
+        "name": "structural-gate",
+        "status": "completed",
+        "terminal": true,
+        "ok": true,
+        "outputs_satisfied": true,
+        "blockers": [
+          "terminal:complete"
+        ],
+        "budget_remaining": 0,
+        "projection_hash": "0fe4caa44255fb1cb10ce7503d4c210947429a38c4f3d420cc3bd21572143d3c",
+        "outputs": {
+          "structural_receipt": "asset:v1:2cb127c11c7f53b5213b86f5f5caa1edeb3733d3418a859ebd414371ce006c8c"
+        },
+        "silent_failure_risks": [],
+        "rejection_count": 0,
+        "rejections": [],
+        "recovery_count": 0,
+        "recoveries": [],
+        "trace_event_count": 4,
+        "token_usage": []
+      },
+      "contract_count": 1,
+      "receipts": [
+        {
+          "asset_id": "asset:v1:2cb127c11c7f53b5213b86f5f5caa1edeb3733d3418a859ebd414371ce006c8c",
+          "name": "structural_receipt",
+          "created_by": "task:v3:38ccfc623b8ece7a1218241506401d4bef3d724a08db478d64f5334a7951a1a6",
+          "content": {
+            "report_asset_id": "asset:v1:cc15fe1b040412a598bd863d840e851ef3faf9192f4bcf6ee7d7edfdf6bb5388",
+            "semantic_checked": false,
+            "source_asset_id": "asset:v1:da5a0f31b3b0ea67bf7bf2ef8a17cc523cb10c8831b8a79b86be059cf75056be",
+            "structural_checks_passed": true
+          }
+        }
+      ],
+      "failure_reports": [],
+      "rebuild": {
+        "status": "passed",
+        "before_digest": "f0dc8e19719b91204e6c6e876cced6a8c24aaf0ec6a3fbc296189243c5ffba03",
+        "after_digest": "f0dc8e19719b91204e6c6e876cced6a8c24aaf0ec6a3fbc296189243c5ffba03",
+        "records_unchanged": true,
+        "changed_tables": [
+          "worker_claims",
+          "worker_registrations"
+        ]
+      }
+    },
+    {
+      "name": "claims-initial",
+      "fleet": {
+        "contract_id": "task:v3:38ccfc623b8ece7a1218241506401d4bef3d724a08db478d64f5334a7951a1a6",
+        "status": "failed",
+        "completed": false,
+        "timed_out": false,
+        "worker_errors": []
+      },
+      "task": {
+        "contract_id": "task:v3:38ccfc623b8ece7a1218241506401d4bef3d724a08db478d64f5334a7951a1a6",
+        "name": "structural-gate",
+        "status": "failed",
+        "terminal": true,
+        "ok": false,
+        "outputs_satisfied": false,
+        "blockers": [
+          "terminal:failed"
+        ],
+        "budget_remaining": 0,
+        "projection_hash": "7c6e92ebb67b8b9e092d89e1099a5cb4977f3dd4ccb3c5665d54c3d1c15427fa",
+        "outputs": {},
+        "silent_failure_risks": [],
+        "rejection_count": 1,
+        "rejections": [
+          "[failed] fail: worker published an explicit fail task"
+        ],
+        "recovery_count": 0,
+        "recoveries": [],
+        "trace_event_count": 5,
+        "token_usage": []
+      },
+      "contract_count": 2,
+      "receipts": [],
+      "failure_reports": [
+        {
+          "name": "_fail_report_task:v3:332c9f093b0a1ede60f57694e1f3a18cc407ad17d1fc25af5ec375581541d98c",
+          "content": "{\"method\": \"fail\", \"parent_contract_id\": \"task:v3:38ccfc623b8ece7a1218241506401d4bef3d724a08db478d64f5334a7951a1a6\", \"parent_contract_name\": \"structural-gate\", \"parent_inputs\": [\"research_result\", \"review_report\"], \"parent_outputs\": [\"structural_receipt\"], \"parent_tool_scope\": [], \"payload\": {\"reason\": \"structural claim check failed: original-text-mismatch:claim-1\\noriginal-text-mismatch:claim-2\\noriginal-text-mismatch:claim-3\\nmissing-evidence-bindings:claim-1\\nmissing-evidence-bindings:claim-2\\nmissing-evidence-bindings:claim-3\"}}"
+        }
+      ],
+      "rebuild": {
+        "status": "passed",
+        "before_digest": "18f02204df4c7b1719659a4a564a1c38a4fceb6e495b94913d49d7f43dd92c2d",
+        "after_digest": "18f02204df4c7b1719659a4a564a1c38a4fceb6e495b94913d49d7f43dd92c2d",
+        "records_unchanged": true,
+        "changed_tables": [
+          "worker_claims",
+          "worker_registrations"
+        ]
+      }
+    },
+    {
+      "name": "claims-intermediate",
+      "fleet": {
+        "contract_id": "task:v3:38ccfc623b8ece7a1218241506401d4bef3d724a08db478d64f5334a7951a1a6",
+        "status": "failed",
+        "completed": false,
+        "timed_out": false,
+        "worker_errors": []
+      },
+      "task": {
+        "contract_id": "task:v3:38ccfc623b8ece7a1218241506401d4bef3d724a08db478d64f5334a7951a1a6",
+        "name": "structural-gate",
+        "status": "failed",
+        "terminal": true,
+        "ok": false,
+        "outputs_satisfied": false,
+        "blockers": [
+          "terminal:failed"
+        ],
+        "budget_remaining": 0,
+        "projection_hash": "d336f53c40a1bb2cd1a0e1f8001b5c4bccd3b5358a716846a2851c0c07ac2363",
+        "outputs": {},
+        "silent_failure_risks": [],
+        "rejection_count": 1,
+        "rejections": [
+          "[failed] fail: worker published an explicit fail task"
+        ],
+        "recovery_count": 0,
+        "recoveries": [],
+        "trace_event_count": 5,
+        "token_usage": []
+      },
+      "contract_count": 2,
+      "receipts": [],
+      "failure_reports": [
+        {
+          "name": "_fail_report_task:v3:6b2024b7078b51f057fff3e0e9f474dcd9f3f9f2b6b0d65d22a16b2830b0b3da",
+          "content": "{\"method\": \"fail\", \"parent_contract_id\": \"task:v3:38ccfc623b8ece7a1218241506401d4bef3d724a08db478d64f5334a7951a1a6\", \"parent_contract_name\": \"structural-gate\", \"parent_inputs\": [\"research_result\", \"review_report\"], \"parent_outputs\": [\"structural_receipt\"], \"parent_tool_scope\": [], \"payload\": {\"reason\": \"structural claim check failed: missing-evidence-bindings:claim-1\\nmissing-evidence-bindings:claim-2\\nmissing-evidence-bindings:claim-3\"}}"
+        }
+      ],
+      "rebuild": {
+        "status": "passed",
+        "before_digest": "80f38b120589fb3367d425d7c4d361197fef8f4df050d872c495def1396398b5",
+        "after_digest": "80f38b120589fb3367d425d7c4d361197fef8f4df050d872c495def1396398b5",
+        "records_unchanged": true,
+        "changed_tables": [
+          "worker_claims",
+          "worker_registrations"
+        ]
+      }
+    },
+    {
+      "name": "claims-citation-tightened",
+      "fleet": {
+        "contract_id": "task:v3:38ccfc623b8ece7a1218241506401d4bef3d724a08db478d64f5334a7951a1a6",
+        "status": "failed",
+        "completed": false,
+        "timed_out": false,
+        "worker_errors": []
+      },
+      "task": {
+        "contract_id": "task:v3:38ccfc623b8ece7a1218241506401d4bef3d724a08db478d64f5334a7951a1a6",
+        "name": "structural-gate",
+        "status": "failed",
+        "terminal": true,
+        "ok": false,
+        "outputs_satisfied": false,
+        "blockers": [
+          "terminal:failed"
+        ],
+        "budget_remaining": 0,
+        "projection_hash": "b4addfee03753b47b28c4a220d689e9ac758ddba01925a03402f3b77f498b477",
+        "outputs": {},
+        "silent_failure_risks": [],
+        "rejection_count": 1,
+        "rejections": [
+          "[failed] fail: worker published an explicit fail task"
+        ],
+        "recovery_count": 0,
+        "recoveries": [],
+        "trace_event_count": 5,
+        "token_usage": []
+      },
+      "contract_count": 2,
+      "receipts": [],
+      "failure_reports": [
+        {
+          "name": "_fail_report_task:v3:6b2024b7078b51f057fff3e0e9f474dcd9f3f9f2b6b0d65d22a16b2830b0b3da",
+          "content": "{\"method\": \"fail\", \"parent_contract_id\": \"task:v3:38ccfc623b8ece7a1218241506401d4bef3d724a08db478d64f5334a7951a1a6\", \"parent_contract_name\": \"structural-gate\", \"parent_inputs\": [\"research_result\", \"review_report\"], \"parent_outputs\": [\"structural_receipt\"], \"parent_tool_scope\": [], \"payload\": {\"reason\": \"structural claim check failed: missing-evidence-bindings:claim-1\\nmissing-evidence-bindings:claim-2\\nmissing-evidence-bindings:claim-3\"}}"
+        }
+      ],
+      "rebuild": {
+        "status": "passed",
+        "before_digest": "356185dc3bc9567dc9cfac15f0ec4c0a344a63a322073822e203264ea9add7a6",
+        "after_digest": "356185dc3bc9567dc9cfac15f0ec4c0a344a63a322073822e203264ea9add7a6",
+        "records_unchanged": true,
+        "changed_tables": [
+          "worker_claims",
+          "worker_registrations"
+        ]
+      }
+    },
+    {
+      "name": "claims-taxonomy",
+      "fleet": {
+        "contract_id": "task:v3:38ccfc623b8ece7a1218241506401d4bef3d724a08db478d64f5334a7951a1a6",
+        "status": "failed",
+        "completed": false,
+        "timed_out": false,
+        "worker_errors": []
+      },
+      "task": {
+        "contract_id": "task:v3:38ccfc623b8ece7a1218241506401d4bef3d724a08db478d64f5334a7951a1a6",
+        "name": "structural-gate",
+        "status": "failed",
+        "terminal": true,
+        "ok": false,
+        "outputs_satisfied": false,
+        "blockers": [
+          "terminal:failed"
+        ],
+        "budget_remaining": 0,
+        "projection_hash": "2ecdcc8a912defe5fd045c97a72762cdfc94bd9ac6c7231bc1a1e0ade151ff2f",
+        "outputs": {},
+        "silent_failure_risks": [],
+        "rejection_count": 1,
+        "rejections": [
+          "[failed] fail: worker published an explicit fail task"
+        ],
+        "recovery_count": 0,
+        "recoveries": [],
+        "trace_event_count": 5,
+        "token_usage": []
+      },
+      "contract_count": 2,
+      "receipts": [],
+      "failure_reports": [
+        {
+          "name": "_fail_report_task:v3:6b2024b7078b51f057fff3e0e9f474dcd9f3f9f2b6b0d65d22a16b2830b0b3da",
+          "content": "{\"method\": \"fail\", \"parent_contract_id\": \"task:v3:38ccfc623b8ece7a1218241506401d4bef3d724a08db478d64f5334a7951a1a6\", \"parent_contract_name\": \"structural-gate\", \"parent_inputs\": [\"research_result\", \"review_report\"], \"parent_outputs\": [\"structural_receipt\"], \"parent_tool_scope\": [], \"payload\": {\"reason\": \"structural claim check failed: missing-evidence-bindings:claim-1\\nmissing-evidence-bindings:claim-2\\nmissing-evidence-bindings:claim-3\"}}"
+        }
+      ],
+      "rebuild": {
+        "status": "passed",
+        "before_digest": "ffb8d8af27966b92c9493071a1da97090279e2190576d915d8d9fdf6565aa667",
+        "after_digest": "ffb8d8af27966b92c9493071a1da97090279e2190576d915d8d9fdf6565aa667",
+        "records_unchanged": true,
+        "changed_tables": [
+          "worker_claims",
+          "worker_registrations"
+        ]
+      }
+    }
+  ]
+}

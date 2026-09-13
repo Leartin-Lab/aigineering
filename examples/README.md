@@ -17,6 +17,12 @@ inputs. The linked report records their actual manual outcomes.
 These outcomes show the runtime boundary and the limits of LLM semantic
 verification. They do not establish reliable autonomous correctness.
 
+## Deterministic validation methods
+
+- [`claim-validation`](claim-validation/README.md) packages exact original-text
+  and explicit evidence-binding checks with local Workers and a blocking gate.
+  These checks do not validate free-text semantic support.
+
 ## Existing examples
 
 - [`ai4s`](ai4s/README.md) runs the literature retrieval and synthesis example.

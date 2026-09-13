@@ -1,0 +1,29 @@
+[fleet]
+db_path = ".aig/store.db"
+poll_interval = 0.05
+
+[[workers]]
+id = "claim-original-validator"
+kind = "local"
+worker_factory = "aigineering.business.claim_check_worker:create_original_text_worker"
+capabilities = ["claim.check.original-text"]
+pools = ["validation"]
+capacity = 1
+profile_id = "claim-original-text-v1"
+
+[[workers]]
+id = "claim-evidence-validator"
+kind = "local"
+worker_factory = "aigineering.business.claim_check_worker:create_evidence_bindings_worker"
+capabilities = ["claim.check.evidence-bindings"]
+pools = ["validation"]
+capacity = 1
+profile_id = "claim-evidence-bindings-v1"
+
+[[workers]]
+id = "claim-structural-gate"
+kind = "local"
+worker_factory = "aigineering.business.claim_check_worker:create_structural_gate_worker"
+capabilities = ["claim.check.gate"]
+pools = ["validation"]
+capacity = 1

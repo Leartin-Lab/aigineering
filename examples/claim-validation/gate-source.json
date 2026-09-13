@@ -1,0 +1,22 @@
+{
+  "claims": [
+    {
+      "id": "claim-1",
+      "text": "Seven hours was associated with higher scores."
+    },
+    {
+      "id": "claim-2",
+      "text": "The sample came from two campuses."
+    }
+  ],
+  "source_excerpts": [
+    {
+      "id": "excerpt-results",
+      "text": "The seven-hour group had higher scores."
+    },
+    {
+      "id": "excerpt-design",
+      "text": "The sample came from two campuses."
+    }
+  ]
+}

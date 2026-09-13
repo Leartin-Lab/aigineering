@@ -8,6 +8,7 @@ from pathlib import Path
 import tomllib
 
 from aigineering.agent.llm import LLMWorker
+from aigineering.agent.local_worker import build_local_worker
 from aigineering.agent.tool_registry_loader import (
     load_tool_registry,
     provider_tool_definitions,
@@ -28,6 +29,7 @@ class FleetWorkerSpec:
     provider_capabilities: tuple[str, ...] = ()
     profile_id: str = ""
     tool_registry: str = ""
+    worker_factory: str = ""
     timeout: float = 60.0
     max_retries: int = 3
     max_output_tokens: int = 2048
@@ -38,14 +40,20 @@ class FleetWorkerSpec:
     def __post_init__(self) -> None:
         if not self.worker_id:
             raise ValueError("fleet worker id must not be empty")
-        if self.kind not in {"llm", "tool"}:
-            raise ValueError("fleet worker kind must be 'llm' or 'tool'")
+        if self.kind not in {"llm", "tool", "local"}:
+            raise ValueError("fleet worker kind must be 'llm', 'tool', or 'local'")
         if self.capacity < 1:
             raise ValueError("fleet worker capacity must be at least 1")
         if self.kind == "llm" and not self.model:
             raise ValueError("fleet LLM worker requires model")
         if self.kind == "tool" and not self.tool_registry:
             raise ValueError("fleet tool worker requires tool_registry")
+        if self.kind == "local" and not self.worker_factory:
+            raise ValueError("fleet local worker requires worker_factory")
+        if self.kind != "local" and self.worker_factory:
+            raise ValueError("worker_factory is only valid for local workers")
+        if self.kind == "local" and self.tool_registry:
+            raise ValueError("local workers cannot use tool_registry")
         if self.max_output_tokens < 1:
             raise ValueError("fleet max_output_tokens must be at least 1")
         if self.thinking_mode not in {"", "enabled", "disabled"}:
@@ -96,6 +104,8 @@ def load_fleet_config(path: str | Path) -> LocalFleetConfig:
 
 def build_fleet_worker(spec: FleetWorkerSpec):
     """Build one stateless Worker adapter from an operator-owned profile."""
+    if spec.kind == "local":
+        return build_local_worker(spec.worker_factory, spec)
     registry = load_tool_registry(spec.tool_registry) if spec.tool_registry else None
     if spec.kind == "tool":
         assert registry is not None
@@ -144,6 +154,7 @@ def _worker_spec(raw: object) -> FleetWorkerSpec:
         "provider_capabilities",
         "profile_id",
         "tool_registry",
+        "worker_factory",
         "timeout",
         "max_retries",
         "max_output_tokens",
@@ -177,6 +188,7 @@ def _worker_spec(raw: object) -> FleetWorkerSpec:
         provider_capabilities=tuple(raw.get("provider_capabilities", ())),
         profile_id=str(raw.get("profile_id", "")),
         tool_registry=str(raw.get("tool_registry", "")),
+        worker_factory=str(raw.get("worker_factory", "")),
         timeout=float(raw.get("timeout", 60.0)),
         max_retries=int(raw.get("max_retries", 3)),
         max_output_tokens=int(raw.get("max_output_tokens", 2048)),

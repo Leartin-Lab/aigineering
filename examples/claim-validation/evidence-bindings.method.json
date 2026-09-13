@@ -1,0 +1,26 @@
+{
+  "schema": "method-package-v1",
+  "name": "claim-evidence-binding-check",
+  "version": "1.0.0",
+  "description": "Check that a review report binds every cited excerpt to an exact quote.",
+  "instructions": "Run the evidence-bindings-v1 deterministic check over source and report. Return its check name, passed flag, newline-separated findings, and semantic_checked flag exactly as produced by the checker.",
+  "inputs": ["source", "report"],
+  "outputs": {
+    "assessment": {
+      "check": "nonempty_string",
+      "passed": "boolean",
+      "findings": "string",
+      "semantic_checked": "boolean"
+    }
+  },
+  "requirements": {
+    "tool_scope": [],
+    "worker_capabilities": ["claim.check.evidence-bindings"],
+    "worker_pools": ["validation"],
+    "delegation_capabilities": [],
+    "delegation_pools": []
+  },
+  "dependencies": [],
+  "context_asset_ids": [],
+  "examples": []
+}

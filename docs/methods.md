@@ -144,6 +144,15 @@ SQLite. A copied report or a forged `passed` field is insufficient: reuse
 recomputes the test evidence and requires the exact independent qualification.
 Passing fixtures is bounded evidence, not a general semantic-correctness claim.
 
+## Deterministic validation methods
+
+The [claim-validation example](../examples/claim-validation/README.md) supplies
+exact original-text and explicit evidence-binding checks using ordinary local
+Workers. Its packages use the same test, assessment, independent review and reuse
+commands. An operator configures installed factories in the Fleet; packages grant
+no code-loading authority. A separate structural gate can fail a task on detected
+violations. Structural success does not establish semantic correctness.
+
 ## Scope
 
 The standalone `examples/method-governance` fixture demonstrates the complete

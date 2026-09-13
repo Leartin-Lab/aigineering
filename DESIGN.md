@@ -478,6 +478,13 @@ passes only Contract-scoped definitions to the provider, and hosts tool calls
 on a separately registered capability-routed ToolWorker. Registry code is
 trusted local code and is never loaded by default.
 
+Fleet also accepts operator-configured `kind = "local"` Workers from installed
+`module:factory` references. Loading is explicit, outside method packages, and
+uses the existing WorkerHost and Candidate path. Registration metadata comes
+from the fleet profile. The business claim validators consume disclosed Assets,
+produce structural assessments or terminal gate failures, and never assert
+semantic correctness. See ADR-024.
+
 `ToolSpec` is the local executable tool contract. It binds a deterministic
 input/output JSON-schema subset, version, and maximum UTF-8 result size. The
 registry validates inputs before invoking a handler and validates JSON results
