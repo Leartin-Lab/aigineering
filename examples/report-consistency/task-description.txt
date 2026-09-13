@@ -1,0 +1,36 @@
+Read the exact report_source, draft_report, and check_standard Assets. Your
+first response must be /plan; the root Worker must not publish /exec directly.
+Compile ordinary, independently claimable child tasks for extracting the source
+ledger, checking the draft against the standard, revising the incorrect report,
+and independently verifying the final audit report. Use these stable handoff
+outputs and names: source_ledger, consistency_findings, audit_report, and
+verification_receipt.
+
+Bind every child to the report-consistency Skill label. Route mechanical
+extraction and checking to economy workers, revision and planning to a reasoning
+worker, and verification to a verification worker. Children must retain the
+root's allowed labels and input boundary. Child capability_needs and pool_needs
+must be selected from the delegated scope; child budgets must fit the parent.
+Declare upstream handoffs as inputs and activation dependencies so work waits for
+its evidence. Do not request tools, network access, code execution, or generated code.
+
+The audit_report output must be one serialized JSON object with exactly the
+fields `status`, `corrected_total`, `corrected_months`, `findings`, and
+`source_asset_id`, `report_id`, and `currency`, with no additional fields.
+Preserve the source report_id and currency. corrected_months lists numeric sales
+values in the source month order; corrected_total is their sum. Compute every corrected value from
+report_source and apply every rule in check_standard; do not copy expected
+answers from this task description.
+Use a non-empty findings list that names each mismatch, cites the exact source
+Asset ID, and does not invent evidence. If a source, draft, or standard is
+missing, malformed, or inconsistent, return /replan with the missing exact
+context; do not silently repair inputs.
+
+A separate task requiring report.verify in the verification pool must read the
+source, draft, standard, extraction/check evidence, and audit_report. Its
+description must copy the planning compiler's Parent Contract ID as the
+attestation target. It must check the exact audit_report Asset and declare only
+verification_receipt. It must return /attest for that copied parent Contract and
+exact audit_report Asset only when the corrected values and findings satisfy
+check-standard; otherwise /fail. The verifier must not replace the root output
+or claim that model prose is evidence.

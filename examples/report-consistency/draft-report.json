@@ -1,0 +1,11 @@
+{
+  "report_id": "sales-q1-2026",
+  "currency": "USD",
+  "monthly_sales": [
+    {"month": "2026-01", "sales": 120},
+    {"month": "2026-02", "sales": 150},
+    {"month": "2026-03", "sales": 180}
+  ],
+  "total_sales": 450,
+  "claim": "Quarterly sales were USD 450."
+}

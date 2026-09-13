@@ -69,6 +69,11 @@ continuations. The runtime-only acceptance path also covers staged planning,
 independent `/attest`, root qualification, and SQLite reopen without relying
 on the example audit driver.
 
+Declarative non-tool case studies are indexed in
+[`examples/README.md`](examples/README.md), including report consistency and
+claim-evidence review. Their scenario evidence is collected in
+[`reports/063-runtime-native-cases-2026-09-13.md`](reports/063-runtime-native-cases-2026-09-13.md).
+
 ## Current development
 
 v0.5.11 adds declarative method packages and a local create → test → independently

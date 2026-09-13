@@ -1,0 +1,22 @@
+{
+  "mode": "independent",
+  "policy_version": "claim-evidence-review-v1",
+  "required_attestations": 1,
+  "verifier_capabilities": ["claim.review.verify"],
+  "output_shapes": {
+    "review_report": {
+      "claims": [
+        {
+          "claim_id": "nonempty_string",
+          "original_text": "nonempty_string",
+          "verdict": "nonempty_string",
+          "evidence_excerpt_ids": ["nonempty_string"],
+          "rationale": "nonempty_string",
+          "revised_text": "nonempty_string"
+        }
+      ],
+      "revised_summary": "nonempty_string",
+      "limitations": ["nonempty_string"]
+    }
+  }
+}

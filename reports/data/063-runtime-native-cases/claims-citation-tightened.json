@@ -1,0 +1,364 @@
+{
+  "attestation_and_qualification": [
+    {
+      "payload": {
+        "asset_id": "asset:v1:cc15355d5638dfde547f278a3c59531867b8039fff23275fbfe5629e1d97b34f",
+        "contract_id": "task:v5:23b29db6e6460bfce8678b16fc5113ed744d300bc32618fe57fa1b697d65b4ee",
+        "evidence_asset_ids": [],
+        "output_name": "review_report",
+        "policy_id": "acceptance:v1:d1efd9f52384783f517a1b5b05aef3f62b69f4ccd001e62b0a2737ef63ba9c70",
+        "policy_version": "claim-evidence-review-v1",
+        "rubric_asset_ids": [],
+        "verdict": "accepted",
+        "verifier_actor_id": "claim-review-verifier",
+        "verifier_key_id": "worker-f1bd121e5a73bd14"
+      },
+      "record_id": "record:fc81df8afdb3f8ab319d7fcf82839907cfed5a3cffdd911e19b1c51d7367bb7e",
+      "record_type": "asset.attested",
+      "revision": 168
+    },
+    {
+      "payload": {
+        "asset_id": "asset:v1:cc15355d5638dfde547f278a3c59531867b8039fff23275fbfe5629e1d97b34f",
+        "contract_id": "task:v5:23b29db6e6460bfce8678b16fc5113ed744d300bc32618fe57fa1b697d65b4ee",
+        "output_name": "review_report",
+        "policy_id": "acceptance:v1:d1efd9f52384783f517a1b5b05aef3f62b69f4ccd001e62b0a2737ef63ba9c70",
+        "verifier_actor_ids": [
+          "claim-review-verifier"
+        ]
+      },
+      "record_id": "record:ab64e5e05f847f7ac1e5408cb311843a6d1f9d2f7eda3a0ae72b12923dc0c112",
+      "record_type": "output.qualified",
+      "revision": 169
+    }
+  ],
+  "case": "claims-citation-tightened",
+  "final_output": {
+    "asset_id": "asset:v1:cc15355d5638dfde547f278a3c59531867b8039fff23275fbfe5629e1d97b34f",
+    "content": {
+      "claims": [
+        {
+          "claim_id": "claim-1",
+          "evidence_excerpt_ids": [
+            "excerpt-results",
+            "excerpt-design"
+          ],
+          "original_text": "Students who sleep at least seven hours perform better on examinations.",
+          "rationale": "The results excerpt reports that the at-least-seven-hour group had a higher mean examination score than the less-than-six-hour group, and the design excerpt confirms both sleep duration and examination score were measured in the same cross-sectional survey. This is an associational, group-level comparison, which the claim's wording ('perform better') matches without asserting causation.",
+          "revised_text": "Students who sleep at least seven hours perform better on examinations.",
+          "verdict": "supported"
+        },
+        {
+          "claim_id": "claim-2",
+          "evidence_excerpt_ids": [
+            "excerpt-results",
+            "excerpt-design",
+            "excerpt-limitations"
+          ],
+          "original_text": "Getting at least seven hours of sleep improves examination performance.",
+          "rationale": "The claim asserts a causal effect ('improves'), but the results excerpt explicitly notes no random assignment or longitudinal follow-up was performed, and the design is a cross-sectional survey. The limitations excerpt further cites residual confounding and recall error in self-reported sleep, which preclude causal interpretation.",
+          "revised_text": "Getting at least seven hours of sleep is associated with better examination performance in this cross-sectional survey, though the design cannot establish that sleep improves performance.",
+          "verdict": "unsupported"
+        },
+        {
+          "claim_id": "claim-3",
+          "evidence_excerpt_ids": [
+            "excerpt-results",
+            "excerpt-design",
+            "excerpt-limitations"
+          ],
+          "original_text": "The finding applies broadly to university students because the adjusted association was robust.",
+          "rationale": "The adjusted association did remain after controlling for age, year of study, and self-reported employment hours (excerpt-results), but the design excerpt shows recruitment from only two campuses and the limitations excerpt states that two-campus sampling and the single examination outcome limit population-wide interpretation. Generalizing broadly to all university students is therefore overstated.",
+          "revised_text": "The adjusted association was observed among students recruited from two campuses, but two-campus sampling and the single examination outcome limit generalization to university students broadly.",
+          "verdict": "overstated"
+        }
+      ],
+      "limitations": [
+        "Sampling limitation: participants were recruited from only two campuses, so the sample may not represent university students broadly and population-wide generalization is not supported.",
+        "Self-report limitation: sleep duration was self-reported, which is subject to recall error and may not accurately reflect actual sleep.",
+        "Additional design limitations: the cross-sectional design with no random assignment or longitudinal follow-up, residual confounding, and the single examination outcome preclude causal interpretation."
+      ],
+      "revised_summary": "A cross-sectional survey of 1,248 university students measured self-reported sleep duration and one end-of-term examination score. Students reporting at least seven hours of sleep had higher average scores than students reporting less than six hours, and this association remained after adjustment for age, year of study, and self-reported employment hours. Because the design was cross-sectional with no random assignment or longitudinal follow-up, the results support an association between longer self-reported sleep and higher examination scores rather than a causal effect of sleep on performance. Two-campus sampling, self-reported sleep, residual confounding, and the single examination outcome further limit causal and population-wide interpretation."
+    },
+    "content_type": "text",
+    "created_by": "task:v3:b04c08a4d330beeceb87b703f4dcc5d6928bd40b3e95ba006895d1f147b4fc2b",
+    "name": "review_report",
+    "origin": "worker"
+  },
+  "human_conclusion": "failed_verdict_taxonomy",
+  "productivity": {
+    "continuation_count": 0,
+    "continuation_scheduled_count": 0,
+    "contract_count": 8,
+    "contract_ids": [
+      "task:v5:23b29db6e6460bfce8678b16fc5113ed744d300bc32618fe57fa1b697d65b4ee",
+      "task:v5:613fe7be5045c78dcc615f68a4caea143ca232710755c0b8ab7f8405e574525b",
+      "task:v5:e1caa73bac20b8f50191d154ead237773d349691cfd1a68e0ccbe642674e5860",
+      "task:v3:34c2d9c384dd3f90f8ee0188e79e39fa57cff994ffa9cc067e3137cf205cf71b",
+      "task:v3:3e1ae66856eef9234d3b959f1ebcea88b037a77d652784b4176a8984f1d0cf56",
+      "task:v3:b04c08a4d330beeceb87b703f4dcc5d6928bd40b3e95ba006895d1f147b4fc2b",
+      "task:v3:eb171dd62c6994ee819cfe1f27269a43b7445054087cad1a334b214dffdf5bf8",
+      "task:v5:f71513ad14ee9f1d341bc1ae8beea44c3558b16ab30271216b60000f703ec5de"
+    ],
+    "contract_statuses": {
+      "complete": 8
+    },
+    "contracts": [
+      {
+        "contract_id": "task:v5:23b29db6e6460bfce8678b16fc5113ed744d300bc32618fe57fa1b697d65b4ee",
+        "name": "claim_evidence_review",
+        "origin": "human",
+        "parent_id": null,
+        "status": "complete",
+        "terminal": "complete"
+      },
+      {
+        "contract_id": "task:v5:613fe7be5045c78dcc615f68a4caea143ca232710755c0b8ab7f8405e574525b",
+        "name": "claim_evidence_review.plan.dependencies.04c32beb5c07a0418a697034",
+        "origin": "plugin",
+        "parent_id": "task:v5:23b29db6e6460bfce8678b16fc5113ed744d300bc32618fe57fa1b697d65b4ee",
+        "status": "complete",
+        "terminal": "complete"
+      },
+      {
+        "contract_id": "task:v5:e1caa73bac20b8f50191d154ead237773d349691cfd1a68e0ccbe642674e5860",
+        "name": "claim_evidence_review.plan.compile.04c32beb5c07a0418a697034",
+        "origin": "plugin",
+        "parent_id": "task:v5:23b29db6e6460bfce8678b16fc5113ed744d300bc32618fe57fa1b697d65b4ee",
+        "status": "complete",
+        "terminal": "complete"
+      },
+      {
+        "contract_id": "task:v3:34c2d9c384dd3f90f8ee0188e79e39fa57cff994ffa9cc067e3137cf205cf71b",
+        "name": "extract_evidence_cards",
+        "origin": "plan",
+        "parent_id": "task:v5:e1caa73bac20b8f50191d154ead237773d349691cfd1a68e0ccbe642674e5860",
+        "status": "complete",
+        "terminal": "complete"
+      },
+      {
+        "contract_id": "task:v3:3e1ae66856eef9234d3b959f1ebcea88b037a77d652784b4176a8984f1d0cf56",
+        "name": "verify_review_report",
+        "origin": "plan",
+        "parent_id": "task:v5:e1caa73bac20b8f50191d154ead237773d349691cfd1a68e0ccbe642674e5860",
+        "status": "complete",
+        "terminal": "complete"
+      },
+      {
+        "contract_id": "task:v3:b04c08a4d330beeceb87b703f4dcc5d6928bd40b3e95ba006895d1f147b4fc2b",
+        "name": "revise_and_synthesize_review",
+        "origin": "plan",
+        "parent_id": "task:v5:e1caa73bac20b8f50191d154ead237773d349691cfd1a68e0ccbe642674e5860",
+        "status": "complete",
+        "terminal": "complete"
+      },
+      {
+        "contract_id": "task:v3:eb171dd62c6994ee819cfe1f27269a43b7445054087cad1a334b214dffdf5bf8",
+        "name": "check_claims_against_evidence",
+        "origin": "plan",
+        "parent_id": "task:v5:e1caa73bac20b8f50191d154ead237773d349691cfd1a68e0ccbe642674e5860",
+        "status": "complete",
+        "terminal": "complete"
+      },
+      {
+        "contract_id": "task:v5:f71513ad14ee9f1d341bc1ae8beea44c3558b16ab30271216b60000f703ec5de",
+        "name": "claim_evidence_review.plan.draft.04c32beb5c07a0418a697034",
+        "origin": "plugin",
+        "parent_id": "task:v5:23b29db6e6460bfce8678b16fc5113ed744d300bc32618fe57fa1b697d65b4ee",
+        "status": "complete",
+        "terminal": "complete"
+      }
+    ],
+    "recovery_count": 0,
+    "rejection_count": 0,
+    "rejection_record_count": 0,
+    "rejection_trace_count": 0,
+    "rejections": [],
+    "root_contract_id": "task:v5:23b29db6e6460bfce8678b16fc5113ed744d300bc32618fe57fa1b697d65b4ee",
+    "terminal_count": 8,
+    "terminal_statuses": {
+      "complete": 8
+    },
+    "token_totals": {
+      "completion_tokens": 4542,
+      "prompt_tokens": 19213,
+      "total_tokens": 23755
+    },
+    "tool_calls": {
+      "calls": [],
+      "failed": 0,
+      "pending": 0,
+      "succeeded": 0,
+      "total": 0
+    },
+    "usage_records": [
+      {
+        "contract_id": "task:v5:23b29db6e6460bfce8678b16fc5113ed744d300bc32618fe57fa1b697d65b4ee",
+        "event_type": "candidate_committed",
+        "kind": "llm",
+        "usage": {
+          "completion_tokens": 189,
+          "model": "deepseek-flash",
+          "prompt_tokens": 2464,
+          "provider": "api.deepseek.com",
+          "total_tokens": 2653,
+          "worker_profile": "deepseek-claim-reasoning"
+        },
+        "worker_id": "claim-review-reasoning"
+      },
+      {
+        "contract_id": "task:v5:f71513ad14ee9f1d341bc1ae8beea44c3558b16ab30271216b60000f703ec5de",
+        "event_type": "candidate_committed",
+        "kind": "llm",
+        "usage": {
+          "completion_tokens": 895,
+          "model": "deepseek-flash",
+          "prompt_tokens": 2749,
+          "provider": "api.deepseek.com",
+          "total_tokens": 3644,
+          "worker_profile": "deepseek-claim-reasoning"
+        },
+        "worker_id": "claim-review-reasoning"
+      },
+      {
+        "contract_id": "task:v5:613fe7be5045c78dcc615f68a4caea143ca232710755c0b8ab7f8405e574525b",
+        "event_type": "candidate_committed",
+        "kind": "llm",
+        "usage": {
+          "completion_tokens": 854,
+          "model": "deepseek-flash",
+          "prompt_tokens": 2042,
+          "provider": "api.deepseek.com",
+          "total_tokens": 2896,
+          "worker_profile": "deepseek-claim-reasoning"
+        },
+        "worker_id": "claim-review-reasoning"
+      },
+      {
+        "contract_id": "task:v5:e1caa73bac20b8f50191d154ead237773d349691cfd1a68e0ccbe642674e5860",
+        "event_type": "candidate_committed",
+        "kind": "llm",
+        "usage": {
+          "completion_tokens": 699,
+          "model": "deepseek-flash",
+          "prompt_tokens": 4291,
+          "provider": "api.deepseek.com",
+          "total_tokens": 4990,
+          "worker_profile": "deepseek-claim-reasoning"
+        },
+        "worker_id": "claim-review-reasoning"
+      },
+      {
+        "contract_id": "task:v3:34c2d9c384dd3f90f8ee0188e79e39fa57cff994ffa9cc067e3137cf205cf71b",
+        "event_type": "candidate_committed",
+        "kind": "llm",
+        "usage": {
+          "completion_tokens": 446,
+          "model": "deepseek-flash",
+          "prompt_tokens": 1485,
+          "provider": "api.deepseek.com",
+          "total_tokens": 1931,
+          "worker_profile": "deepseek-claim-economy"
+        },
+        "worker_id": "claim-review-economy"
+      },
+      {
+        "contract_id": "task:v3:eb171dd62c6994ee819cfe1f27269a43b7445054087cad1a334b214dffdf5bf8",
+        "event_type": "candidate_committed",
+        "kind": "llm",
+        "usage": {
+          "completion_tokens": 379,
+          "model": "deepseek-flash",
+          "prompt_tokens": 1892,
+          "provider": "api.deepseek.com",
+          "total_tokens": 2271,
+          "worker_profile": "deepseek-claim-economy"
+        },
+        "worker_id": "claim-review-economy"
+      },
+      {
+        "contract_id": "task:v3:b04c08a4d330beeceb87b703f4dcc5d6928bd40b3e95ba006895d1f147b4fc2b",
+        "event_type": "candidate_committed",
+        "kind": "llm",
+        "usage": {
+          "completion_tokens": 699,
+          "model": "deepseek-flash",
+          "prompt_tokens": 2046,
+          "provider": "api.deepseek.com",
+          "total_tokens": 2745,
+          "worker_profile": "deepseek-claim-reasoning"
+        },
+        "worker_id": "claim-review-reasoning"
+      },
+      {
+        "contract_id": "task:v3:3e1ae66856eef9234d3b959f1ebcea88b037a77d652784b4176a8984f1d0cf56",
+        "event_type": "candidate_committed",
+        "kind": "llm",
+        "usage": {
+          "completion_tokens": 381,
+          "model": "deepseek-flash",
+          "prompt_tokens": 2244,
+          "provider": "api.deepseek.com",
+          "total_tokens": 2625,
+          "worker_profile": "deepseek-claim-verifier"
+        },
+        "worker_id": "claim-review-verifier"
+      }
+    ]
+  },
+  "rebuild": {
+    "after_digest": "3b4a71972f73bc526c7a30718b68ff6aeef147c08123216913c2212b2dbcb970",
+    "before_digest": "3b4a71972f73bc526c7a30718b68ff6aeef147c08123216913c2212b2dbcb970",
+    "changed_tables": [
+      "trace_events",
+      "worker_claims",
+      "worker_registrations"
+    ],
+    "package_version": "0.5.11",
+    "platform": "Darwin",
+    "python": "3.11.15",
+    "records_unchanged": true,
+    "schema_version": 17,
+    "sqlite": "3.53.4",
+    "status": "passed"
+  },
+  "review_note": "Exact original claims, source grounding, citation completeness, direct source inputs, and handoff dependencies passed review. claim-2 was labeled unsupported instead of the predefined oracle label overstated. Its causal calibration and explanation were correct; the prompt had not yet defined the distinction between these labels.",
+  "root_first_worker_action": {
+    "action": "plan",
+    "reason": "The committed research_result input is available and sufficient to compile the evidence-review workflow. I will decompose into: (1) mechanical evidence extraction producing evidence_cards from research_result; (2) mechanical claim checking producing claim_checks from research_result + evidence_cards; (3) reasoning revision/synthesis producing review_report from research_result + claim_checks; (4) independent verification producing verification_receipt from research_result + review_report, attesting the root Contract task:v5:23b29db6e6460bfce8678b16fc5113ed744d300bc32618fe57fa1b697d65b4ee and the exact review_report asset. Each business child declares research_result as a direct input plus its upstream handoff as an activation dependency, preserving exact claim ids/text and verbatim excerpts, with citation completeness enforced across all source_excerpts including limitations.",
+    "worker_id": "claim-review-reasoning"
+  },
+  "schema": "runtime-native-case-evidence-v1",
+  "task": {
+    "blockers": [
+      "terminal:complete"
+    ],
+    "budget_remaining": 0,
+    "contract_id": "task:v5:23b29db6e6460bfce8678b16fc5113ed744d300bc32618fe57fa1b697d65b4ee",
+    "name": "claim_evidence_review",
+    "ok": true,
+    "outputs": {
+      "review_report": "asset:v1:cc15355d5638dfde547f278a3c59531867b8039fff23275fbfe5629e1d97b34f"
+    },
+    "outputs_satisfied": true,
+    "projection_hash": "93c03afdff26bacb03ed71e0f8299607b8b1329a548260ce387192ab0ade7028",
+    "recoveries": [],
+    "recovery_count": 0,
+    "rejection_count": 0,
+    "rejections": [],
+    "silent_failure_risks": [],
+    "status": "completed",
+    "terminal": true,
+    "token_usage": [
+      {
+        "completion_tokens": 189,
+        "model": "deepseek-flash",
+        "prompt_tokens": 2464,
+        "provider": "api.deepseek.com",
+        "total_tokens": 2653,
+        "worker_profile": "deepseek-claim-reasoning"
+      }
+    ],
+    "trace_event_count": 5
+  }
+}

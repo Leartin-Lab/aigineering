@@ -1,0 +1,23 @@
+{
+  "mode": "independent",
+  "policy_version": "report-consistency-v1",
+  "required_attestations": 1,
+  "verifier_capabilities": [
+    "report.verify"
+  ],
+  "output_shapes": {
+    "audit_report": {
+      "status": "nonempty_string",
+      "corrected_total": "number",
+      "corrected_months": [
+        "number"
+      ],
+      "findings": [
+        "nonempty_string"
+      ],
+      "source_asset_id": "nonempty_string",
+      "report_id": "nonempty_string",
+      "currency": "nonempty_string"
+    }
+  }
+}

@@ -1,0 +1,78 @@
+Read the committed research_result input (the root task's activation and input),
+then return /plan. Compile an evidence-review workflow whose work can be
+independently claimed and recovered: extract the relevant evidence for every
+claim, classify whether each claim is supported by the cited excerpts, revise
+wording that exceeds the study design, and synthesize a review report. Use
+stable handoffs named evidence_cards, claim_checks, review_report, and
+verification_receipt. Every downstream task must declare the preceding handoff
+as an input and activation dependency; do not rely on hidden scheduler state.
+The report must preserve claim IDs, include the exact excerpt IDs used for each
+decision, distinguish association from causation, and state the study's
+sampling and measurement limitations.
+
+The root output review_report must be one JSON object with exactly these fields:
+claims (a non-empty list of claim records), revised_summary (a non-empty
+string), and limitations (a non-empty list of strings). Each claim record must
+contain claim_id, original_text, verdict, evidence_excerpt_ids, rationale, and
+revised_text. verdict must be one of supported, overstated, or unsupported;
+evidence_excerpt_ids must refer only to IDs in the committed input; rationale
+must explain the verdict from the cited text; and revised_text must use
+association language when the evidence is observational. Do not invent a
+number, study detail, or citation. If a claim cannot be checked from the input,
+return /replan.
+
+A separate verifier task requiring capability claim.review.verify in pool
+verification must read review_report and the original research_result. It must
+check every claim record against the cited excerpts, reject missing or unknown
+excerpt IDs, reject causal language unsupported by the cross-sectional design,
+and reject a report that omits the stated sampling or self-report limitations.
+It must declare only a verification_receipt output and return /attest for this
+root Contract and the exact review_report Asset after successful checking; it
+must /fail on any mismatch. The verifier description must copy the planning
+compiler's Parent Contract ID as the attestation target.
+
+Use capability_needs to route evidence extraction and claim checking to
+mechanical review workers and revision/synthesis to a reasoning worker. Keep
+the evidence boundary inside the committed input. Evidence review completion
+and independent attestation are the required outcomes.
+
+Evidence preservation is mandatory throughout the plan:
+- Every business child (extract, classify, revise, verify) must include
+  research_result as a direct input in addition to its upstream handoff. Do not
+  substitute a summary for access to the original input.
+- evidence_cards and claim_checks must preserve each input claim's exact id and
+  verbatim text, plus relevant verbatim source excerpts. Do not infer a claim's
+  content from its identifier or invent a replacement claim.
+- review_report.claims must contain each original claim exactly once. original_text
+  must be byte-for-byte the corresponding research_result.claims[].text. revised_text
+  is the only field allowed to rewrite it. Evaluate the original claim, not the revision.
+- The review must consider every source_excerpts entry, including limitations.
+  Do not claim a source detail is absent without checking the original input.
+- The verifier must compare the report's claim-id set and each original_text to
+  research_result, and independently check limitations against the full source.
+  It must /fail if a claim was replaced, if exact text differs, or if the report
+  contradicts an explicit design or sampling fact. Matching a verdict label alone
+  is insufficient for acceptance.
+- Set pool_needs=["economy"] for extract/check, ["reasoning"] for revision,
+  and ["verification"] for verification. The reasoning Worker does not backstop
+  extract/check capabilities in this example.
+
+Citation completeness is a required acceptance condition:
+The allowed excerpt IDs are ALL entries in research_result.source_excerpts. A
+claim's source_excerpt_ids are starting references, not an exclusive whitelist.
+If a rationale uses a statement from any additional excerpt (including the
+limitations excerpt), evidence_excerpt_ids must include that excerpt's exact ID.
+The classifier and reviser must propagate these additional IDs with the rationale.
+The verifier must reject a rationale that refers to or relies on an excerpt whose
+ID is missing from that claim's evidence_excerpt_ids, even if its verdict is right.
+
+Use this verdict taxonomy consistently in classification, revision, and verification:
+- supported: the source supports the claim at its stated strength and scope.
+- overstated: the source supports a narrower or weaker version, but the claim
+  adds unjustified causal strength or population scope. An observed association
+  rewritten as improvement is overstated even though the causal effect itself
+  is not established.
+- unsupported: the source provides no support even for the underlying
+  observation, or contradicts it; calibration alone cannot recover it.
+The verifier must check the verdict against these definitions, as well as the
+claim text, rationale, revision, and citations.

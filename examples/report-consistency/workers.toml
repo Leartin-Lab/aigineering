@@ -1,0 +1,51 @@
+[fleet]
+db_path = ".aig/store.db"
+poll_interval = 0.05
+
+[[workers]]
+id = "report-economy"
+kind = "llm"
+model = "deepseek-flash"
+base_url = "https://api.deepseek.com/v1"
+api_key_env = "DEEPSEEK_API_KEY"
+capabilities = ["report.extract", "report.check"]
+pools = ["economy"]
+capacity = 3
+profile_id = "deepseek-report-economy"
+timeout = 60
+max_retries = 1
+max_output_tokens = 4096
+thinking_mode = "disabled"
+
+[[workers]]
+id = "report-reasoning"
+kind = "llm"
+model = "deepseek-flash"
+base_url = "https://api.deepseek.com/v1"
+api_key_env = "DEEPSEEK_API_KEY"
+capabilities = ["planning", "report.extract", "report.check", "report.revise", "report.replan"]
+pools = ["economy", "reasoning"]
+capacity = 1
+profile_id = "deepseek-report-reasoning"
+version = "1"
+max_output_tokens = 4096
+timeout = 60
+max_retries = 1
+thinking_mode = "disabled"
+
+[[workers]]
+id = "report-verifier"
+kind = "llm"
+model = "deepseek-flash"
+base_url = "https://api.deepseek.com/v1"
+api_key_env = "DEEPSEEK_API_KEY"
+capabilities = ["report.verify"]
+pools = ["verification"]
+capacity = 1
+profile_id = "deepseek-report-verifier"
+version = "1"
+max_output_tokens = 4096
+timeout = 60
+max_retries = 1
+thinking_mode = "disabled"
+effect_capabilities = ["asset.attest", "report.verify"]

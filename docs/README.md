@@ -17,6 +17,7 @@ navigation, not another architecture specification.
 | How does an AI coding worker use this repository? | [`SKILL.md`](../SKILL.md) |
 | How do procedures become reusable, evaluated methods? | [`methods.md`](methods.md) |
 | How does an existing agent harness become a Worker? | [`reference/agent-harness-migration.md`](reference/agent-harness-migration.md) |
+| Where are the declarative runtime-native case studies? | [`examples/README.md`](../examples/README.md) |
 
 ## Reading paths
 

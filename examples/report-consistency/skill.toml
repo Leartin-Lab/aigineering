@@ -1,0 +1,7 @@
+name = "report_consistency"
+version = "0.5.11"
+description = "Check a structured report against an exact source ledger and an independent checking standard."
+capabilities = ["report.extract", "report.check", "report.revise", "report.replan"]
+labels = ["report", "consistency"]
+trust_tier = "configured"
+content_file = "SKILL.md"

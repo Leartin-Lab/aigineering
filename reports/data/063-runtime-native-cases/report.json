@@ -1,0 +1,335 @@
+{
+  "attestation_and_qualification": [
+    {
+      "payload": {
+        "asset_id": "asset:v1:10cc8f66680507550045af02e10140ccd4beee26214cbf0b93eac736a310e579",
+        "contract_id": "task:v5:2dc835b4553bdf524913921698a6a8b7ac4ac5a4daf2ef13adaed0c5eb2e27a0",
+        "evidence_asset_ids": [],
+        "output_name": "audit_report",
+        "policy_id": "acceptance:v1:52b03ddca310f08a54b9967ca41e17021dbb7f877e74bde9116db785f0a19360",
+        "policy_version": "report-consistency-v1",
+        "rubric_asset_ids": [],
+        "verdict": "accepted",
+        "verifier_actor_id": "report-verifier",
+        "verifier_key_id": "worker-23c27bb9b2c7054e"
+      },
+      "record_id": "record:882072b6c0af415b618ac009152d00904f455e95f0961166406e6fc2103ba9a9",
+      "record_type": "asset.attested",
+      "revision": 188
+    },
+    {
+      "payload": {
+        "asset_id": "asset:v1:10cc8f66680507550045af02e10140ccd4beee26214cbf0b93eac736a310e579",
+        "contract_id": "task:v5:2dc835b4553bdf524913921698a6a8b7ac4ac5a4daf2ef13adaed0c5eb2e27a0",
+        "output_name": "audit_report",
+        "policy_id": "acceptance:v1:52b03ddca310f08a54b9967ca41e17021dbb7f877e74bde9116db785f0a19360",
+        "verifier_actor_ids": [
+          "report-verifier"
+        ]
+      },
+      "record_id": "record:ae85b29e5031ffc2e8005f1dc2d5fd6eacfea7c26002a6af4f0ff062cb69832e",
+      "record_type": "output.qualified",
+      "revision": 189
+    }
+  ],
+  "case": "report",
+  "final_output": {
+    "asset_id": "asset:v1:10cc8f66680507550045af02e10140ccd4beee26214cbf0b93eac736a310e579",
+    "content": {
+      "corrected_months": [
+        120,
+        150,
+        200
+      ],
+      "corrected_total": 470,
+      "currency": "USD",
+      "findings": [
+        "monthly_sales[2026-03].sales: draft reports 2026-03 sales as 180, but the source ledger states 200 (source_asset_id=asset:v1:22c545db9b838a5ec48f5693be734ba299abbf5a26f6db2d53a5b4894e50bac6).",
+        "total_sales: draft total 450 does not equal the independently recomputed sum of source rows (120+150+200=470) (source_asset_id=asset:v1:22c545db9b838a5ec48f5693be734ba299abbf5a26f6db2d53a5b4894e50bac6)."
+      ],
+      "report_id": "sales-q1-2026",
+      "source_asset_id": "asset:v1:22c545db9b838a5ec48f5693be734ba299abbf5a26f6db2d53a5b4894e50bac6",
+      "status": "corrected"
+    },
+    "content_type": "text",
+    "created_by": "task:v4:63f253123bf10160e25e0829c685ff2e67e3df7e4ffada7b83bc28a7c247a191",
+    "name": "audit_report",
+    "origin": "worker"
+  },
+  "human_conclusion": "passed",
+  "productivity": {
+    "continuation_count": 0,
+    "continuation_scheduled_count": 0,
+    "contract_count": 8,
+    "contract_ids": [
+      "task:v5:2dc835b4553bdf524913921698a6a8b7ac4ac5a4daf2ef13adaed0c5eb2e27a0",
+      "task:v5:2d1821e602bfe7717976a3daf016e1fa1528339a8b5af647f48e33d0f6cb911e",
+      "task:v5:bfeca3f2d51ac20f89d50ed52f5e9d5dd418ad423d2aa4ef3a7ca3982f4ef200",
+      "task:v5:def6421545ce43d088c40e77492dad825e19e57dc0426d2e999c651fb4d28676",
+      "task:v4:1beaeebeaf012e6915dc4672001a7e1e3d832b668273521a45b9f08ec54e24fe",
+      "task:v4:63f253123bf10160e25e0829c685ff2e67e3df7e4ffada7b83bc28a7c247a191",
+      "task:v4:78d42f2d4e4b05014117d7532f712044be6b91374f1fd666c7a25309e5cd945b",
+      "task:v4:a354bed2d05ca9f755bf6f3732c63910722f5792cf4bb7d014ec300bde410ccb"
+    ],
+    "contract_statuses": {
+      "complete": 8
+    },
+    "contracts": [
+      {
+        "contract_id": "task:v5:2dc835b4553bdf524913921698a6a8b7ac4ac5a4daf2ef13adaed0c5eb2e27a0",
+        "name": "report_consistency_audit",
+        "origin": "human",
+        "parent_id": null,
+        "status": "complete",
+        "terminal": "complete"
+      },
+      {
+        "contract_id": "task:v5:2d1821e602bfe7717976a3daf016e1fa1528339a8b5af647f48e33d0f6cb911e",
+        "name": "report_consistency_audit.plan.draft.e9fb4cf2e1877ccac9b74489",
+        "origin": "plugin",
+        "parent_id": "task:v5:2dc835b4553bdf524913921698a6a8b7ac4ac5a4daf2ef13adaed0c5eb2e27a0",
+        "status": "complete",
+        "terminal": "complete"
+      },
+      {
+        "contract_id": "task:v5:bfeca3f2d51ac20f89d50ed52f5e9d5dd418ad423d2aa4ef3a7ca3982f4ef200",
+        "name": "report_consistency_audit.plan.dependencies.e9fb4cf2e1877ccac9b74489",
+        "origin": "plugin",
+        "parent_id": "task:v5:2dc835b4553bdf524913921698a6a8b7ac4ac5a4daf2ef13adaed0c5eb2e27a0",
+        "status": "complete",
+        "terminal": "complete"
+      },
+      {
+        "contract_id": "task:v5:def6421545ce43d088c40e77492dad825e19e57dc0426d2e999c651fb4d28676",
+        "name": "report_consistency_audit.plan.compile.e9fb4cf2e1877ccac9b74489",
+        "origin": "plugin",
+        "parent_id": "task:v5:2dc835b4553bdf524913921698a6a8b7ac4ac5a4daf2ef13adaed0c5eb2e27a0",
+        "status": "complete",
+        "terminal": "complete"
+      },
+      {
+        "contract_id": "task:v4:1beaeebeaf012e6915dc4672001a7e1e3d832b668273521a45b9f08ec54e24fe",
+        "name": "extract_source_ledger",
+        "origin": "plan",
+        "parent_id": "task:v5:def6421545ce43d088c40e77492dad825e19e57dc0426d2e999c651fb4d28676",
+        "status": "complete",
+        "terminal": "complete"
+      },
+      {
+        "contract_id": "task:v4:63f253123bf10160e25e0829c685ff2e67e3df7e4ffada7b83bc28a7c247a191",
+        "name": "revise_audit_report",
+        "origin": "plan",
+        "parent_id": "task:v5:def6421545ce43d088c40e77492dad825e19e57dc0426d2e999c651fb4d28676",
+        "status": "complete",
+        "terminal": "complete"
+      },
+      {
+        "contract_id": "task:v4:78d42f2d4e4b05014117d7532f712044be6b91374f1fd666c7a25309e5cd945b",
+        "name": "check_draft_against_standard",
+        "origin": "plan",
+        "parent_id": "task:v5:def6421545ce43d088c40e77492dad825e19e57dc0426d2e999c651fb4d28676",
+        "status": "complete",
+        "terminal": "complete"
+      },
+      {
+        "contract_id": "task:v4:a354bed2d05ca9f755bf6f3732c63910722f5792cf4bb7d014ec300bde410ccb",
+        "name": "verify_audit_report",
+        "origin": "plan",
+        "parent_id": "task:v5:def6421545ce43d088c40e77492dad825e19e57dc0426d2e999c651fb4d28676",
+        "status": "complete",
+        "terminal": "complete"
+      }
+    ],
+    "recovery_count": 0,
+    "rejection_count": 0,
+    "rejection_record_count": 0,
+    "rejection_trace_count": 0,
+    "rejections": [],
+    "root_contract_id": "task:v5:2dc835b4553bdf524913921698a6a8b7ac4ac5a4daf2ef13adaed0c5eb2e27a0",
+    "terminal_count": 8,
+    "terminal_statuses": {
+      "complete": 8
+    },
+    "token_totals": {
+      "completion_tokens": 3919,
+      "prompt_tokens": 19105,
+      "total_tokens": 23024
+    },
+    "tool_calls": {
+      "calls": [],
+      "failed": 0,
+      "pending": 0,
+      "succeeded": 0,
+      "total": 0
+    },
+    "usage_records": [
+      {
+        "contract_id": "task:v5:2dc835b4553bdf524913921698a6a8b7ac4ac5a4daf2ef13adaed0c5eb2e27a0",
+        "event_type": "candidate_committed",
+        "kind": "llm",
+        "usage": {
+          "completion_tokens": 82,
+          "model": "deepseek-flash",
+          "prompt_tokens": 2256,
+          "provider": "api.deepseek.com",
+          "total_tokens": 2338,
+          "worker_profile": "deepseek-report-reasoning"
+        },
+        "worker_id": "report-reasoning"
+      },
+      {
+        "contract_id": "task:v5:2d1821e602bfe7717976a3daf016e1fa1528339a8b5af647f48e33d0f6cb911e",
+        "event_type": "candidate_committed",
+        "kind": "llm",
+        "usage": {
+          "completion_tokens": 860,
+          "model": "deepseek-flash",
+          "prompt_tokens": 2432,
+          "provider": "api.deepseek.com",
+          "total_tokens": 3292,
+          "worker_profile": "deepseek-report-reasoning"
+        },
+        "worker_id": "report-reasoning"
+      },
+      {
+        "contract_id": "task:v5:bfeca3f2d51ac20f89d50ed52f5e9d5dd418ad423d2aa4ef3a7ca3982f4ef200",
+        "event_type": "candidate_committed",
+        "kind": "llm",
+        "usage": {
+          "completion_tokens": 912,
+          "model": "deepseek-flash",
+          "prompt_tokens": 2273,
+          "provider": "api.deepseek.com",
+          "total_tokens": 3185,
+          "worker_profile": "deepseek-report-reasoning"
+        },
+        "worker_id": "report-reasoning"
+      },
+      {
+        "contract_id": "task:v5:def6421545ce43d088c40e77492dad825e19e57dc0426d2e999c651fb4d28676",
+        "event_type": "candidate_committed",
+        "kind": "llm",
+        "usage": {
+          "completion_tokens": 879,
+          "model": "deepseek-flash",
+          "prompt_tokens": 4467,
+          "provider": "api.deepseek.com",
+          "total_tokens": 5346,
+          "worker_profile": "deepseek-report-reasoning"
+        },
+        "worker_id": "report-reasoning"
+      },
+      {
+        "contract_id": "task:v4:1beaeebeaf012e6915dc4672001a7e1e3d832b668273521a45b9f08ec54e24fe",
+        "event_type": "candidate_committed",
+        "kind": "llm",
+        "usage": {
+          "completion_tokens": 80,
+          "model": "deepseek-flash",
+          "prompt_tokens": 1370,
+          "provider": "api.deepseek.com",
+          "total_tokens": 1450,
+          "worker_profile": "deepseek-report-reasoning"
+        },
+        "worker_id": "report-reasoning"
+      },
+      {
+        "contract_id": "task:v4:78d42f2d4e4b05014117d7532f712044be6b91374f1fd666c7a25309e5cd945b",
+        "event_type": "candidate_committed",
+        "kind": "llm",
+        "usage": {
+          "completion_tokens": 441,
+          "model": "deepseek-flash",
+          "prompt_tokens": 1717,
+          "provider": "api.deepseek.com",
+          "total_tokens": 2158,
+          "worker_profile": "deepseek-report-reasoning"
+        },
+        "worker_id": "report-reasoning"
+      },
+      {
+        "contract_id": "task:v4:63f253123bf10160e25e0829c685ff2e67e3df7e4ffada7b83bc28a7c247a191",
+        "event_type": "candidate_committed",
+        "kind": "llm",
+        "usage": {
+          "completion_tokens": 275,
+          "model": "deepseek-flash",
+          "prompt_tokens": 1994,
+          "provider": "api.deepseek.com",
+          "total_tokens": 2269,
+          "worker_profile": "deepseek-report-reasoning"
+        },
+        "worker_id": "report-reasoning"
+      },
+      {
+        "contract_id": "task:v4:a354bed2d05ca9f755bf6f3732c63910722f5792cf4bb7d014ec300bde410ccb",
+        "event_type": "candidate_committed",
+        "kind": "llm",
+        "usage": {
+          "completion_tokens": 390,
+          "model": "deepseek-flash",
+          "prompt_tokens": 2596,
+          "provider": "api.deepseek.com",
+          "total_tokens": 2986,
+          "worker_profile": "deepseek-report-verifier"
+        },
+        "worker_id": "report-verifier"
+      }
+    ]
+  },
+  "rebuild": {
+    "after_digest": "e24731ab857ca1ee947fee98479a2620b4382e5f7b20f437484196e73f48432c",
+    "before_digest": "e24731ab857ca1ee947fee98479a2620b4382e5f7b20f437484196e73f48432c",
+    "changed_tables": [
+      "trace_events",
+      "worker_claims",
+      "worker_registrations"
+    ],
+    "package_version": "0.5.11",
+    "platform": "Darwin",
+    "python": "3.11.15",
+    "records_unchanged": true,
+    "schema_version": 17,
+    "sqlite": "3.53.4",
+    "status": "passed"
+  },
+  "review_note": "",
+  "root_first_worker_action": {
+    "action": "plan",
+    "reason": "The root task requires compiling child tasks for extraction, checking, revision, and independent verification, but the current task description does not yet provide the delegated scope details (allowed labels, capability_needs, pool_needs, budgets) needed to bind children correctly. I need to decompose into planning-stage tasks to establish the child contracts and handoffs before any /exec can be published.",
+    "worker_id": "report-reasoning"
+  },
+  "schema": "runtime-native-case-evidence-v1",
+  "task": {
+    "blockers": [
+      "terminal:complete"
+    ],
+    "budget_remaining": 0,
+    "contract_id": "task:v5:2dc835b4553bdf524913921698a6a8b7ac4ac5a4daf2ef13adaed0c5eb2e27a0",
+    "name": "report_consistency_audit",
+    "ok": true,
+    "outputs": {
+      "audit_report": "asset:v1:10cc8f66680507550045af02e10140ccd4beee26214cbf0b93eac736a310e579"
+    },
+    "outputs_satisfied": true,
+    "projection_hash": "eba16a9a8d63344328b3166604af097b6dfbdca073e7aded43552b982073a39f",
+    "recoveries": [],
+    "recovery_count": 0,
+    "rejection_count": 0,
+    "rejections": [],
+    "silent_failure_risks": [],
+    "status": "completed",
+    "terminal": true,
+    "token_usage": [
+      {
+        "completion_tokens": 82,
+        "model": "deepseek-flash",
+        "prompt_tokens": 2256,
+        "provider": "api.deepseek.com",
+        "total_tokens": 2338,
+        "worker_profile": "deepseek-report-reasoning"
+      }
+    ],
+    "trace_event_count": 5
+  }
+}

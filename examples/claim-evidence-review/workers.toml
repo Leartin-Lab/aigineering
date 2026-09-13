@@ -1,0 +1,49 @@
+[fleet]
+db_path = ".aig/store.db"
+poll_interval = 0.05
+
+[[workers]]
+id = "claim-review-economy"
+kind = "llm"
+model = "deepseek-flash"
+base_url = "https://api.deepseek.com/v1"
+api_key_env = "DEEPSEEK_API_KEY"
+capabilities = ["claim.review.extract", "claim.review.check"]
+pools = ["economy"]
+capacity = 3
+profile_id = "deepseek-claim-economy"
+max_output_tokens = 2048
+thinking_mode = "disabled"
+max_retries = 1
+timeout = 60
+
+[[workers]]
+id = "claim-review-reasoning"
+kind = "llm"
+model = "deepseek-flash"
+base_url = "https://api.deepseek.com/v1"
+api_key_env = "DEEPSEEK_API_KEY"
+capabilities = ["planning", "claim.review.revise"]
+pools = ["reasoning"]
+capacity = 1
+profile_id = "deepseek-claim-reasoning"
+max_output_tokens = 4096
+thinking_mode = "disabled"
+max_retries = 1
+timeout = 60
+
+[[workers]]
+id = "claim-review-verifier"
+kind = "llm"
+model = "deepseek-flash"
+base_url = "https://api.deepseek.com/v1"
+api_key_env = "DEEPSEEK_API_KEY"
+capabilities = ["claim.review.verify"]
+pools = ["verification"]
+capacity = 1
+profile_id = "deepseek-claim-verifier"
+max_output_tokens = 2048
+thinking_mode = "disabled"
+max_retries = 1
+timeout = 60
+effect_capabilities = ["asset.attest", "claim.review.verify"]

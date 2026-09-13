@@ -1,0 +1,10 @@
+{
+  "standard_id": "sales-total-v1",
+  "checks": [
+    "corrected_months must contain one numeric sales value per source month, in source month order.",
+    "Each corrected_months value must equal the source sales value for the corresponding month.",
+    "corrected_total must equal the sum of corrected_months, independently recomputed from the source rows.",
+    "The audit must preserve report_id and currency from the source.",
+    "Every finding must identify the checked field and cite the exact source Asset ID."
+  ]
+}
