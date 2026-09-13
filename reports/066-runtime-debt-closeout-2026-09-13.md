@@ -18,7 +18,9 @@ new domain-specific kernel effect, or alternative durable write path was added.
 
 Ruff lint and format checks passed. The full suite passed with **1428 passed,
 3 skipped**. Eight live-store reconstructions preserved materialization digests
-and durable records. The final live root and all descendants have terminal facts.
+and durable records. The final live root and all descendants have terminal facts. Isolated wheel/sdist
+build passed; artifact inspection found no private workspace, credentials or
+SQLite files. Public reference and changed-file link checks passed.
 
 Remaining scope is explicit: failed model compilation can omit usage metadata,
 so report 065 publishes a subtotal; method-context lookup still merits a separate

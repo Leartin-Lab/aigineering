@@ -19,8 +19,11 @@ verification. They do not establish reliable autonomous correctness.
 
 The experimental [`guarded-claim-review`](guarded-claim-review/README.md)
 adapter composes deterministic assessment and gating, one revision generation,
-semantic review, and dedicated acceptance. It is implemented adapter behavior;
-live closed-loop success remains evidence preparation work.
+semantic review, and dedicated acceptance.
+[Report 065](../reports/065-guarded-claim-review-2026-09-13.md) records two
+qualified live runs and six preserved development failures; the final run leaves
+no active descendant Contracts. These are development cases, not a reliability
+benchmark.
 
 ## Deterministic validation methods
 

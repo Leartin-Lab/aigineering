@@ -95,13 +95,15 @@ Implemented in change 021 and ADR-023:
   adapter composition with structural gating and dedicated acceptance.
 
 Local verification is recorded in
-`reports/061-declarative-method-baseline-2026-09-09.md`.
+[report 061](reports/061-declarative-method-baseline-2026-09-09.md),
+[guarded review evidence](reports/065-guarded-claim-review-2026-09-13.md), and
+[debt closeout](reports/066-runtime-debt-closeout-2026-09-13.md).
 This is a functional baseline. Additional cases and controlled experiments on
 context isolation, error propagation and heterogeneous Worker cost/quality will
 prepare v0.6.0. No general productivity improvement is claimed by fixture tests.
-The guarded claim-review case is implemented as an adapter composition, while
-live closed-loop evidence remains v0.6.0 evidence preparation; this does not
-claim that the v0.6.0 release is complete.
+The guarded claim-review case has native live qualification and preserved
+negative evidence. Broader controlled experiments and longer chains remain
+v0.6.0 preparation; the v0.6.0 release is not complete.
 
 ## Release gates
 
