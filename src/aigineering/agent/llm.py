@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import time
 import urllib.error
@@ -24,6 +25,7 @@ logger = logging.getLogger(__name__)
 # support; the worker uses the capability set to decide what to include in
 # API requests and how to interpret responses.
 SUPPORTED_CAPABILITIES = frozenset({"tool_calling", "json_schema"})
+MAX_PROVIDER_RESPONSE_BYTES = 4 * 1024 * 1024
 
 Transport = Callable[
     [str, Mapping[str, str], Mapping[str, object]],
@@ -51,6 +53,62 @@ class LLMConfig:
     capacity: int = 1
     registration_version: str = "1"
 
+    def __post_init__(self) -> None:
+        validate_llm_timeout(self.timeout)
+        validate_llm_max_retries(self.max_retries)
+        validate_llm_retry_backoff(self.retry_backoff)
+        validate_llm_max_output_tokens(self.max_output_tokens)
+        validate_llm_capacity(self.capacity)
+
+
+def validate_llm_timeout(value: object) -> float:
+    """Validate and preserve a provider request timeout in seconds."""
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(float(value))
+        or value <= 0
+    ):
+        raise ValueError("LLM timeout must be a finite positive number")
+    return float(value)
+
+
+def validate_llm_max_retries(value: object) -> int:
+    """Validate a non-negative integer provider retry count."""
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValueError("LLM max_retries must be a non-negative integer")
+    return value
+
+
+def validate_llm_retry_backoff(value: object) -> float:
+    """Validate a finite, non-negative retry delay multiplier."""
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(float(value))
+        or value < 0
+    ):
+        raise ValueError("retry_backoff must be a finite non-negative number")
+    return float(value)
+
+
+def validate_llm_max_output_tokens(value: object) -> int:
+    """Validate the positive integer provider output token limit."""
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError("max_output_tokens must be an integer")
+    if value < 1:
+        raise ValueError("max_output_tokens must be at least 1")
+    return value
+
+
+def validate_llm_capacity(value: object) -> int:
+    """Validate the positive integer worker capacity."""
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError("capacity must be an integer")
+    if value < 1:
+        raise ValueError("capacity must be at least 1")
+    return value
+
 
 class ProviderError(Exception):
     """Classified provider error with retryability information."""
@@ -71,7 +129,7 @@ class LLMWorker:
         base_url: str = "https://api.openai.com/v1",
         worker_id: str | None = None,
         transport: Transport | None = None,
-        timeout: int = 60,
+        timeout: float = 60.0,
         config: LLMConfig | None = None,
         max_retries: int | None = None,
         retry_backoff: float | None = None,
@@ -153,10 +211,13 @@ class LLMWorker:
             self._capacity = capacity if capacity is not None else 1
             self._registration_version = registration_version or "1"
 
-        if self._capacity < 1:
-            raise ValueError("capacity must be at least 1")
-        if self._max_output_tokens < 1:
-            raise ValueError("max_output_tokens must be at least 1")
+        self._capacity = validate_llm_capacity(self._capacity)
+        self._timeout = validate_llm_timeout(self._timeout)
+        self._max_retries = validate_llm_max_retries(self._max_retries)
+        self._max_output_tokens = validate_llm_max_output_tokens(
+            self._max_output_tokens
+        )
+        self._retry_backoff = validate_llm_retry_backoff(self._retry_backoff)
         if self._thinking_mode not in {"", "enabled", "disabled"}:
             raise ValueError("thinking_mode must be 'enabled', 'disabled', or empty")
 
@@ -605,12 +666,22 @@ def _post_json(
     req = urllib.request.Request(url, data=body, headers=dict(headers), method="POST")
     try:
         with urllib.request.urlopen(req, timeout=timeout) as response:  # noqa: S310
-            decoded = response.read().decode("utf-8")
+            raw_response = response.read(MAX_PROVIDER_RESPONSE_BYTES + 1)
     except urllib.error.HTTPError as e:
         raise ProviderError(e.code, f"HTTP {e.code}: {e.reason}") from e
+    if len(raw_response) > MAX_PROVIDER_RESPONSE_BYTES:
+        raise WorkerExecutionError(
+            "response_too_large", "LLM response exceeds the maximum size"
+        )
+    try:
+        decoded = raw_response.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise WorkerExecutionError(
+            "response_invalid_encoding", "LLM response is not valid UTF-8"
+        ) from exc
     try:
         parsed: Any = json.loads(decoded)
-    except json.JSONDecodeError as exc:
+    except (json.JSONDecodeError, RecursionError) as exc:
         raise WorkerExecutionError(
             "response_invalid_json", "LLM response is not valid JSON"
         ) from exc

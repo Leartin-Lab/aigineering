@@ -149,6 +149,59 @@ def test_llmconfig_defaults():
     assert cfg.retry_backoff == 2.0
 
 
+@pytest.mark.parametrize(
+    "kwargs",
+    (
+        {"timeout": 0},
+        {"timeout": float("nan")},
+        {"timeout": float("inf")},
+        {"max_retries": -1},
+        {"max_retries": True},
+        {"retry_backoff": -1},
+        {"retry_backoff": float("nan")},
+        {"retry_backoff": float("inf")},
+        {"retry_backoff": True},
+        {"capacity": 1.5},
+        {"capacity": True},
+        {"max_output_tokens": 1.5},
+        {"max_output_tokens": True},
+    ),
+)
+def test_llmconfig_rejects_invalid_timeout_and_retries(kwargs):
+    with pytest.raises(ValueError):
+        LLMConfig(model="model", **kwargs)
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    (
+        {"timeout": 0},
+        {"max_retries": -1},
+        {"retry_backoff": -1},
+        {"retry_backoff": float("nan")},
+        {"retry_backoff": float("inf")},
+        {"retry_backoff": True},
+        {"capacity": 1.5},
+        {"capacity": True},
+        {"max_output_tokens": 1.5},
+        {"max_output_tokens": True},
+    ),
+)
+def test_llm_worker_rejects_invalid_timeout_and_retries(kwargs):
+    with pytest.raises(ValueError):
+        LLMWorker(model="model", transport=_ok_transport, **kwargs)
+
+
+def test_zero_retry_backoff_is_valid_for_config_and_direct_worker():
+    cfg = LLMConfig(model="model", retry_backoff=0)
+    worker = LLMWorker(
+        model="model", config=cfg, transport=_ok_transport, retry_backoff=0
+    )
+
+    assert cfg.retry_backoff == 0
+    assert worker._retry_backoff == 0.0
+
+
 def test_llm_worker_exposes_routing_registration_without_prompt_injection():
     worker = LLMWorker(
         model="vision-model",

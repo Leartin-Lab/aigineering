@@ -19,7 +19,11 @@ from aigineering.core.runtime_projection import RuntimeProjection
 from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.core.tools import ToolRegistry
 from aigineering.core.worker_routing import WorkerRegistration
-from aigineering.fleet_config import load_fleet_config
+from aigineering.fleet_config import (
+    FleetWorkerSpec,
+    build_fleet_worker,
+    load_fleet_config,
+)
 from aigineering.local_fleet import FleetHost, run_local_fleet
 from aigineering.local_identity import ensure_local_domain, ensure_local_worker_host
 from aigineering.protocol.effect_builders import (
@@ -154,6 +158,45 @@ capacity = 2
     assert parsed.workers[0].thinking_mode == "disabled"
     assert parsed.workers[0].effect_capabilities == ("asset.attest",)
     assert parsed.workers[1].kind == "tool"
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (("capacity", '"2"'), ("max_retries", "true"), ("timeout", '"2"')),
+)
+def test_fleet_config_rejects_coerced_scalar_types(tmp_path, field, value):
+    config = tmp_path / "invalid-workers.toml"
+    config.write_text(
+        f'[[workers]]\nid = "worker"\nkind = "llm"\nmodel = "model"\n{field} = {value}\n',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match=field):
+        load_fleet_config(config)
+
+
+@pytest.mark.parametrize(
+    "field_value",
+    (("timeout", "0.0"), ("timeout", "nan"), ("timeout", "inf"), ("max_retries", "-1")),
+)
+def test_fleet_config_rejects_invalid_retry_and_timeout(field_value, tmp_path):
+    field, value = field_value
+    config = tmp_path / "invalid-workers.toml"
+    config.write_text(
+        f'[[workers]]\nid = "worker"\nkind = "llm"\nmodel = "model"\n{field} = {value}\n',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError):
+        load_fleet_config(config)
+
+
+def test_fleet_worker_preserves_fractional_timeout():
+    worker = build_fleet_worker(
+        FleetWorkerSpec(worker_id="worker", kind="llm", model="model", timeout=0.5)
+    )
+
+    assert worker._timeout == 0.5
 
 
 def test_local_fleet_executes_specialized_tasks_concurrently(tmp_path, monkeypatch):
