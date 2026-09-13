@@ -203,15 +203,37 @@ def evaluate_run(
         if record.record_type == "lifecycle.terminal"
     }
 
+    assets_by_name: dict[str, list[Asset]] = {}
+    for asset in assets:
+        assets_by_name.setdefault(asset.name, []).append(asset)
+
+    contract_cache = {}
+    ancestor_cache: dict[str, frozenset[str]] = {}
+
+    def ancestor_chain(producer: str) -> frozenset[str]:
+        if not producer:
+            return frozenset()
+        cached = ancestor_cache.get(producer)
+        if cached is not None:
+            return cached
+        chain = set()
+        current = producer
+        while current and current not in chain:
+            cached = ancestor_cache.get(current)
+            if cached is not None:
+                chain.update(cached)
+                break
+            chain.add(current)
+            if current not in contract_cache:
+                contract_cache[current] = get_contract(current)
+            contract = contract_cache[current]
+            current = contract.parent_id if contract is not None else ""
+        result = frozenset(chain)
+        ancestor_cache[producer] = result
+        return result
+
     def descendant(producer: str, ancestor: str) -> bool:
-        seen = set()
-        while producer and producer not in seen:
-            if producer == ancestor:
-                return True
-            seen.add(producer)
-            contract = get_contract(producer)
-            producer = contract.parent_id if contract is not None else ""
-        return False
+        return bool(producer) and ancestor in ancestor_chain(producer)
 
     results = []
     for row, case in zip(run["cases"], suite["cases"], strict=True):
@@ -226,9 +248,8 @@ def evaluate_run(
         for slot, output_name in row["outputs"].items():
             matches = [
                 asset
-                for asset in assets
-                if asset.name == output_name
-                and descendant(asset.created_by, contract_id)
+                for asset in assets_by_name.get(output_name, ())
+                if descendant(asset.created_by, contract_id)
             ]
             if len(matches) != 1:
                 passed = False
