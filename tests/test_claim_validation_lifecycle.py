@@ -41,7 +41,8 @@ def _publish(store, asset):
     ).assets[0]
 
 
-def test_claim_validation_methods_run_in_local_fleet_and_rebuild(tmp_path):
+def test_claim_validation_methods_run_in_local_fleet_and_rebuild(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
     db = tmp_path / "store.db"
     store = SQLiteStore(str(db))
     ensure_local_domain(store)
@@ -84,10 +85,16 @@ def test_claim_validation_methods_run_in_local_fleet_and_rebuild(tmp_path):
             )
         ).accepted
         source = _publish(
-            store, build_control_plane_asset(name="source", content="source")
+            store,
+            build_control_plane_asset(
+                name="source", content=(pkg_dir / "gate-source.json").read_text()
+            ),
         )
         report = _publish(
-            store, build_control_plane_asset(name="report", content="report")
+            store,
+            build_control_plane_asset(
+                name="report", content=(pkg_dir / "gate-report.json").read_text()
+            ),
         )
         reused = service.instantiate(
             original.id,
@@ -97,14 +104,19 @@ def test_claim_validation_methods_run_in_local_fleet_and_rebuild(tmp_path):
             budget=1,
             evaluation_id=evaluation.id,
         )
-        assert reused.id in {c.id for c in store.get_all_contracts()}
+        reused_result = run_local_fleet(
+            str(db), hosts, target_contract_id=reused.id, timeout=3, poll_interval=0.01
+        )
+        assert reused_result.completed
+        assert json.loads(store.get_assets_by_name("assessment")[0].content)["passed"]
         before = store.runtime_materialization_digest()
         assert store.rebuild_runtime_materializations() == before
     finally:
         store.close()
 
 
-def test_structural_gate_failure_is_durable_and_has_no_receipt(tmp_path):
+def test_structural_gate_failure_is_durable_and_has_no_receipt(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
     db = tmp_path / "gate.db"
     store = SQLiteStore(str(db))
     ensure_local_domain(store)

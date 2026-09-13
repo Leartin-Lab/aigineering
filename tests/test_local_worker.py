@@ -93,6 +93,7 @@ def test_local_factory_import_is_deferred_until_build(tmp_path, monkeypatch):
 
 
 def test_local_worker_uses_canonical_worker_host(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
     module = ModuleType("host_local")
     module.factory = lambda *, worker_id: _Worker(worker_id)
     monkeypatch.setitem(sys.modules, "host_local", module)
