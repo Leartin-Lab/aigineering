@@ -178,26 +178,82 @@ class MethodService:
         package, _ = resolve_package(method_id, self.store.get_asset)
         suite = parse_cases(visible_asset(suite_id, self.store.get_asset).content)
         validate_cases(suite, package)
-        case_input_ids = []
+        input_proposals = []
+        proposal_input_ids = []
         for index, case in enumerate(suite["cases"]):
             bindings = {}
             for slot, content in case["inputs"].items():
-                asset = self._asset(
-                    build_control_plane_asset(
-                        name=f"{name}.input{index}.{slot}",
-                        content=content,
-                        origin="method-test",
-                        trust_tier="untrusted",
-                    )
+                asset = build_control_plane_asset(
+                    name=f"{name}.input{index}.{slot}",
+                    content=content,
+                    origin="method-test",
+                    trust_tier="untrusted",
                 )
+                input_proposals.append(asset)
                 bindings[slot] = asset.id
-            case_input_ids.append(bindings)
+            proposal_input_ids.append(bindings)
+
+        proposal_assets = {asset.id: asset for asset in input_proposals}
+
+        def get_proposal_or_asset(asset_id):
+            return proposal_assets.get(asset_id) or self.store.get_asset(asset_id)
+
+        # Compile against the uncommitted proposals first, so all deterministic
+        # validation completes before any test input becomes durable.
         root, children, manifest = compile_test_contracts(
             method_id,
             suite_id,
             name=name,
             budget=budget,
-            case_input_ids=case_input_ids,
+            case_input_ids=proposal_input_ids,
+            get_asset=get_proposal_or_asset,
+            allowed_tools=allowed_tools,
+        )
+
+        # Context Assets must already exist when a Contract is committed. Commit
+        # all inputs together, then rebuild the Contracts from the IDs returned
+        # by the Store rather than assuming proposal IDs are final.
+        if input_proposals:
+            decision = self._commit(assets=tuple(input_proposals))
+            committed = {
+                (
+                    asset.name,
+                    asset.content,
+                    asset.content_type,
+                    asset.origin,
+                    asset.trust_tier,
+                ): asset
+                for asset in decision.assets
+            }
+            if len(committed) != len(input_proposals):
+                raise ValueError(
+                    "method test input publication did not preserve identity"
+                )
+        else:
+            committed = {}
+        real_input_ids = []
+        for proposal_bindings in proposal_input_ids:
+            bindings = {}
+            for slot, proposal_id in proposal_bindings.items():
+                proposal = proposal_assets[proposal_id]
+                key = (
+                    proposal.name,
+                    proposal.content,
+                    proposal.content_type,
+                    proposal.origin,
+                    proposal.trust_tier,
+                )
+                committed_asset = committed.get(key)
+                if committed_asset is None:
+                    raise ValueError("method test input publication changed identity")
+                bindings[slot] = committed_asset.id
+            real_input_ids.append(bindings)
+        root, children, manifest = compile_test_contracts(
+            method_id,
+            suite_id,
+            name=name,
+            budget=budget,
+            case_input_ids=real_input_ids,
             get_asset=self.store.get_asset,
             allowed_tools=allowed_tools,
         )

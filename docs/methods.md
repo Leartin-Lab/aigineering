@@ -123,7 +123,11 @@ aig method instantiate METHOD_ASSET_ID \
 ```
 
 `test` prepares ordinary case tasks and a root obligation; it does not execute a
-private loop. Case Workers receive input contents, method instructions and exact
+private loop. It validates the complete plan before publishing its input Assets,
+then publishes inputs in one batch and binds their durable IDs into the tasks.
+The command still uses separate signed publications for inputs, tasks and the run
+manifest; an interruption or later commitment rejection can leave earlier facts.
+Case Workers receive input contents, method instructions and exact
 dependencies, not the suite's expected answers. `assess` uses a deterministic
 Worker to publish exact-comparison evidence. Assessment is not independent
 acceptance: an authorized actor with `method.verify` must attest the exact report.
