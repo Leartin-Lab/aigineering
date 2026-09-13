@@ -158,17 +158,28 @@ def claim_next_package(
     """Claim the next ready contract and return its worker package."""
     store = require_operational_store(store)
     process_expired_claims(store, candidate_publishers=candidate_publishers)
-    available_names = {a.name for a in store.get_all_assets()}
     registered_worker = store.get_worker_registration(worker_id)
     policy_blockers: list[DisclosurePolicyError] = []
+    if contract_id is None:
+        contracts = store.get_all_contracts()
+    else:
+        selected = store.get_contract(contract_id)
+        contracts = [] if selected is None else [selected]
+    routed_contracts = [
+        contract
+        for contract in contracts
+        if _worker_can_claim(contract, registered_worker)
+    ]
+    if not routed_contracts:
+        return None
+    available_names = {a.name for a in store.get_all_assets()}
     projection = RuntimeProjection(
         store,
         store,
         runtime_records=tuple(store.scan_runtime_records()),
+        available_names=available_names,
     )
-    for contract in store.get_all_contracts():
-        if contract_id is not None and contract.id != contract_id:
-            continue
+    for contract in routed_contracts:
         if contract.activation and not check_activation(
             contract.activation, available_names
         ):
@@ -178,9 +189,6 @@ def claim_next_package(
             continue
 
         remaining_budget = view.budget_remaining
-
-        if not _worker_can_claim(contract, registered_worker):
-            continue
 
         try:
             disclosed = tuple(compute_disclosure(contract, store))

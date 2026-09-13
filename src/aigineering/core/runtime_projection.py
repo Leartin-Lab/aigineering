@@ -71,6 +71,7 @@ class RuntimeProjection:
         as_of: str | None = None,
         as_of_revision: int | None = None,
         runtime_records: tuple[tuple[int, RuntimeRecord], ...] | None = None,
+        available_names: set[str] | frozenset[str] | None = None,
     ) -> None:
         if as_of is not None and as_of_revision is not None:
             raise ValueError("choose either as_of timestamp or as_of_revision")
@@ -79,12 +80,18 @@ class RuntimeProjection:
         self._as_of = as_of
         self._as_of_revision = as_of_revision
         self._runtime_records = runtime_records
+        self._available_names = (
+            frozenset(available_names) if available_names is not None else None
+        )
 
     def contract_view(self, contract: Contract) -> ContractView:
         historical = self._historical_facts(contract)
         if historical is None:
-            assets = self._store.get_all_assets()
-            available_names = {asset.name for asset in assets}
+            if self._available_names is None:
+                assets = self._store.get_all_assets()
+                available_names = {asset.name for asset in assets}
+            else:
+                available_names = self._available_names
             outputs_satisfied = bool(contract.outputs) and all_outputs_satisfied(
                 contract, self._store
             )
