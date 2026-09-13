@@ -1,0 +1,45 @@
+{
+  "claims": [
+    {
+      "claim_id": "claim-1",
+      "evidence_excerpt_ids": [
+        "excerpt-results",
+        "excerpt-design"
+      ],
+      "original_text": "The at-least-seven-hour sleep group had a higher mean examination score than the less-than-six-hour group, and this association remained after controlling for age, year of study, and self-reported employment hours.",
+      "rationale": "The cited excerpts report a higher mean examination score in the at-least-seven-hour group and an adjusted association that persisted after controlling for age, year of study, and self-reported employment hours. Because the design excerpt confirms a cross-sectional survey with no random assignment or longitudinal follow-up, this is supported only as an association, not as causation.",
+      "revised_text": "In this cross-sectional survey, the at-least-seven-hour sleep group had a higher mean examination score than the less-than-six-hour group, and this association remained after controlling for age, year of study, and self-reported employment hours; the design does not support a causal interpretation.",
+      "verdict": "supported"
+    },
+    {
+      "claim_id": "claim-2",
+      "evidence_excerpt_ids": [
+        "excerpt-results",
+        "excerpt-design"
+      ],
+      "original_text": "Longer sleep duration causes or improves examination scores.",
+      "rationale": "The cited excerpts report a cross-sectional survey with self-reported sleep and no random assignment or longitudinal follow-up. Causal or directional language such as sleep duration causing or improving examination scores goes beyond the cited association evidence and is therefore overstated.",
+      "revised_text": "Longer sleep duration was associated with higher examination scores in this cross-sectional survey, but the design does not establish that sleep duration causes or improves examination scores.",
+      "verdict": "overstated"
+    },
+    {
+      "claim_id": "claim-3",
+      "evidence_excerpt_ids": [
+        "excerpt-results",
+        "excerpt-design"
+      ],
+      "original_text": "Sleep duration produces a specific causal mechanism, temporal direction, or effect size that improves examination performance.",
+      "rationale": "The cited excerpts provide only a cross-sectional association between sleep duration and examination score, with no random assignment or longitudinal follow-up. Any claim asserting a causal mechanism, temporal direction, or effect size not reported in the excerpts is unsupported by the cited text.",
+      "revised_text": "The cited excerpts support only a cross-sectional association between sleep duration and examination score; they do not support claims about a causal mechanism, temporal direction, or a specific effect size.",
+      "verdict": "unsupported"
+    }
+  ],
+  "limitations": [
+    "The evidence comes from a cross-sectional survey, so it cannot establish temporal order or causation between sleep duration and examination scores.",
+    "Sleep duration and employment hours were self-reported, which may introduce recall or reporting bias.",
+    "The sampling method and sample representativeness are not described in the cited excerpts, limiting generalizability.",
+    "No random assignment or longitudinal follow-up was used, so unmeasured confounding cannot be ruled out.",
+    "Effect sizes and confidence intervals are not reported in the cited excerpts, so the magnitude and precision of the association are unknown."
+  ],
+  "revised_summary": "The cited evidence supports an association between longer sleep duration and higher examination scores in a cross-sectional survey, including an adjusted association after controlling for age, year of study, and self-reported employment hours. The evidence does not support causal, directional, or mechanism claims, and any such language should be revised to association language."
+}

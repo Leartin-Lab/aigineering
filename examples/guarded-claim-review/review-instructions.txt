@@ -1,0 +1,53 @@
+Native planning contract interfaces (mandatory in the final planning_blueprint):
+Every child has labels [research_result, draft_report, review_policy, review_instructions].
+Every child has exactly its listed inputs; do not omit frozen base inputs even
+when a stage could appear to need only its immediate predecessor.
+
+assessor: inputs [research_result, draft_report, review_policy, review_instructions]; output draft_checks; capability claim.review.assess; pool validation.
+reviser: inputs [research_result, draft_report, review_policy, review_instructions, draft_checks]; output review_report; capability claim.review.revise; pool reasoning.
+gate: inputs [research_result, draft_report, review_policy, review_instructions, draft_checks, review_report]; output structural_receipt; capability claim.review.gate; pool validation.
+semantic: inputs [research_result, draft_report, review_policy, review_instructions, draft_checks, review_report, structural_receipt]; output semantic_review; capability claim.review.semantic; pool verification.
+acceptor: inputs [research_result, draft_report, review_policy, review_instructions, draft_checks, review_report, structural_receipt, semantic_review]; output acceptance_receipt; capability claim.review.accept; pool verification.
+Every activation is the AND conjunction of ALL listed input names. Allocate at
+least one budget unit per child. Preserve these exact interfaces during drafting,
+dependency analysis and compilation. The acceptor description must name the
+actual independently accepted original root Contract ID exposed by plan compile,
+not the intermediate compile task ID.
+
+This frozen interface document applies to the reviser and semantic reviewer.
+Read the original research_result and all of its source_excerpts. Review the
+three source claims; do not replace their propositions with claims from the draft.
+
+The review_report is a JSON object with claims, revised_summary, and limitations.
+Every claims item MUST contain all of:
+- claim_id: exact source claim id
+- original_text: exact source claim text
+- verdict: supported, overstated, or unsupported
+- evidence_excerpt_ids: nonempty unique source excerpt IDs for ALL evidence
+  used in this item's rationale and revised_text, including any limitations cited
+- evidence_bindings: nonempty array of objects with EXACT keys excerpt_id and
+  quote. The field is literally named "quote", never "excerpt_text". quote is a
+  nonempty literal substring of the corresponding source excerpt's text.
+  Include bindings for every evidence_excerpt_id, and no other excerpt IDs.
+- rationale: explanation grounded in the cited excerpts
+- revised_text: a scientifically defensible version of the same claim
+
+Supported means the proposition is supported within the scope of the evidence.
+Overstated means the evidence supports a weaker related proposition, while the
+claim strengthens causality, scope, certainty, or magnitude beyond that evidence.
+Unsupported means no adequate support for the stated proposition is present.
+An observational association upgraded to a causal effect is overstated. Do not
+infer probabilities from group mean scores. Distinguish population coverage from
+adjustment for observed covariates. Do not say a source fact is absent when it is
+present. The structural gate checks identity and literal bindings only.
+
+For semantic_review, inspect the actual review_report against research_result.
+Return a JSON object with EXACTLY these seven fields:
+{"schema":"claim-semantic-review-v1","source_asset_id":"copy research_result Asset ID","report_asset_id":"copy review_report Asset ID","policy_asset_id":"copy review_policy Asset ID","gate_receipt_asset_id":"copy structural_receipt Asset ID","verdict":"accepted or rejected","reason":"nonempty explanation"}
+Accept only if the report has all required fields, preserves the actual claims,
+uses appropriate verdicts, supports its rationale and revisions with complete
+citations, and respects causal and population limits. Reject semantic errors even
+when structural_receipt passed. Neither a passing gate nor another model's prior
+acceptance is evidence of scientific truth. Copy IDs from disclosed Asset headers.
+
+The acceptor child description must name the actual original independently accepted root Contract ID as its attestation target. Copy the exact task:v5:... ID exposed by plan compile. Do not leave placeholders; do not include any other Contract IDs. The acceptor checks the unique target ID in its signed description, regardless of prose or JSON presentation.

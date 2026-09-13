@@ -1,0 +1,80 @@
+Read the frozen review_instructions Asset directly in every model-backed stage. Every child must additionally declare review_instructions as an input and include the review_instructions label, preserving its exact root context ID. It specifies the authoritative report and semantic-review field interfaces; do not paraphrase away those requirements.
+
+Read the three committed root inputs research_result, draft_report, and
+review_policy, then return /plan. The root Contract has exactly one business
+output, review_report. Its three base inputs are operator-submitted and frozen
+in root context by the labels research_result, draft_report, and review_policy;
+every child must declare all three base inputs and inherit all three labels.
+
+Compile these bounded, independently claimable stages through the normal
+planner mechanism. The stable stage handoffs, required routing, and activation
+dependencies are:
+
+- assessor: required capability claim.review.assess in pool validation;
+  activation is research_result AND draft_report AND review_policy. It receives
+  the base inputs, runs deterministic checks, and publishes the exact
+  claim-draft-checks-v1 receipt as draft_checks.
+- reviser: required capability claim.review.revise in pool reasoning; activation
+  is research_result AND draft_report AND review_policy AND draft_checks. It is the only
+  model-backed revision stage and may invoke the model once per attempt. It may return only
+  /exec review_report or /fail; it may not /plan or /replan. It must preserve
+  each original claim's exact ID and text, attach explicit evidence_bindings
+  with excerpt_id and literal quote, and never invent information absent from
+  research_result.
+- gate: required capability claim.review.gate in pool validation; activation is
+  research_result AND draft_report AND review_policy AND draft_checks AND
+  review_report. It performs the deterministic final structural checks and
+  accepts only one revision depth, publishing structural_receipt.
+- semantic: required capability claim.review.semantic in pool verification;
+  activation is research_result AND draft_report AND review_policy AND
+  draft_checks AND review_report AND structural_receipt. It may invoke the model once and may
+  return only /exec semantic_review or /fail. It must check exact original text,
+  complete citation bindings, causal language, mean-versus-probability claims,
+  and the two-campus sampling limits. Its JSON must have exactly these fields:
+  schema claim-semantic-review-v1, source_asset_id, report_asset_id,
+  policy_asset_id, gate_receipt_asset_id, verdict (accepted or rejected), and
+  a non-empty reason. IDs must be copied from disclosed assets; do not put
+  signed_by or other identity fields in the JSON.
+- acceptor: required capability claim.review.accept in pool verification;
+  activation is research_result AND draft_report AND review_policy AND
+  draft_checks AND review_report AND structural_receipt AND semantic_review.
+  It must
+  validate the semantic review and return /attest for the root Contract's exact
+  review_report output with policy version claim-review-closure-v1 and evidence
+  asset IDs exactly [research_result, draft_report, review_policy]. It alone
+  has asset.attest authority.
+
+The review_policy input must have exactly schema claim-review-policy-v1,
+max_revisions 1, and five distinct actors: claim-assessor, claim-reviser,
+claim-gate, claim-semantic, and claim-acceptor. No actor may perform another
+stage. The root acceptance policy is independent, versioned
+claim-review-closure-v1, requires claim.review.accept, and names the three base
+Asset IDs as evidence_asset_ids when the operator creates the root task.
+
+The report is a JSON object with exactly claims, revised_summary, and
+limitations. Each claim record contains claim_id, original_text, verdict,
+evidence_excerpt_ids, rationale, revised_text, and evidence_bindings
+([{excerpt_id, quote}]). Claims preserve source IDs and original text exactly;
+revised_summary and limitations are non-empty. The verdict taxonomy is:
+supported means the source supports the claim at its stated strength and scope;
+overstated means the source supports a narrower or weaker version, including
+upgrading an observational association to a causal effect; unsupported means
+the source does not support even the underlying observation or contradicts it.
+Do not encode specific claim answers in this task description. Structural stages
+can prove explicit binding and literal quote membership; they cannot prove that
+free-form rationale is semantically persuasive. Semantic review is the separate
+model-backed check.
+
+One revision is allowed. A normal protocol retry may recover a failed stage,
+but it must not consume or silently replace an already published revision.
+If the gate fails, it can publish a durable failure report and leave the root
+without qualification; this is an explicit blocked outcome, not an automatic
+repair controller. Do not claim that the workflow guarantees semantic truth.
+
+The exact output names above are mandatory: in particular, the acceptor output
+is acceptance_receipt (do not rename it to review_report_acceptance). Copy the
+complete report field requirements into the reviser child description, including
+evidence_excerpt_ids and rationale for every claim. Copy the full semantic
+receipt schema into the semantic child description.
+
+The acceptor child description must name the actual original independently accepted root Contract ID as its attestation target. Copy the exact task:v5:... ID exposed by plan compile. Do not leave placeholders; do not include any other Contract IDs. The acceptor checks the unique target ID in its signed description, regardless of prose or JSON presentation.

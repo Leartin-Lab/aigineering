@@ -1,0 +1,1298 @@
+{
+  "case": "repair-routed",
+  "model": "deepseek-flash",
+  "provider": "api.deepseek.com",
+  "root_contract_id": "task:v5:e3c49acac6fc7b706227ffbae43cf7e0c3c35bbf7a5ca2a673aabeaf3c188848",
+  "fleet_result": {
+    "contract_id": "task:v5:e3c49acac6fc7b706227ffbae43cf7e0c3c35bbf7a5ca2a673aabeaf3c188848",
+    "status": "timed_out",
+    "completed": false,
+    "timed_out": true,
+    "worker_errors": []
+  },
+  "audit": {
+    "task": {
+      "contract_id": "task:v5:e3c49acac6fc7b706227ffbae43cf7e0c3c35bbf7a5ca2a673aabeaf3c188848",
+      "name": "guarded_claim_review",
+      "status": "expanded",
+      "terminal": false,
+      "ok": false,
+      "outputs_satisfied": false,
+      "blockers": [
+        "claim:submitted"
+      ],
+      "budget_remaining": 3,
+      "projection_hash": "447f7d750807e75c21a771cf7d732d53399462767cddfae40b4f69b6a5be3e02",
+      "outputs": {
+        "review_report": "asset:v1:be52793232627581552714e03916c5272a973d0747581f6171e3c7ccf5cdebaa"
+      },
+      "silent_failure_risks": [
+        {
+          "code": "descendant_cancelled",
+          "message": "descendant task task:v4:d1a1cab14d039ed0fa1a630a94694194dabd67d285b72cfa34660ce1b5ddcb5f (gate_stage) is cancelled"
+        },
+        {
+          "code": "descendant_cancelled",
+          "message": "descendant task task:v4:d61332598dec8680a33145a031134600a0cfbc6e3964650dae37062d57095406 (semantic_stage) is cancelled"
+        }
+      ],
+      "rejection_count": 0,
+      "rejections": [],
+      "recovery_count": 0,
+      "recoveries": [],
+      "trace_event_count": 4,
+      "token_usage": [
+        {
+          "prompt_tokens": 3311,
+          "completion_tokens": 99,
+          "total_tokens": 3410,
+          "model": "deepseek-flash",
+          "provider": "api.deepseek.com",
+          "worker_profile": "claim-review-planner"
+        }
+      ]
+    },
+    "inputs": [
+      "research_result",
+      "draft_report",
+      "review_policy"
+    ],
+    "outputs_declared": [
+      "review_report"
+    ],
+    "labels": [
+      "research_result",
+      "draft_report",
+      "review_policy"
+    ],
+    "tool_scope": [],
+    "trace": [
+      {
+        "id": "event:94435ceeb2aa60cc1d69a506e78c0e94937d349a3a1dc6dcfd5df489bf9aa133",
+        "parent_id": null,
+        "contract_id": "task:v5:e3c49acac6fc7b706227ffbae43cf7e0c3c35bbf7a5ca2a673aabeaf3c188848",
+        "event_type": "worker_routed",
+        "disclosed_assets": [],
+        "worker_id": "claim-planner",
+        "candidate_raw": null,
+        "accepted_fragments": [],
+        "accepted_asset_names": [],
+        "rejected_fragments": [],
+        "authority_policy": null,
+        "authority_result": null,
+        "budget_remaining": 30,
+        "relation_type": "worker_profile",
+        "relation_target": "claim-review-planner@1",
+        "timestamp": "2026-09-13T13:16:21.561539+00:00",
+        "usage_metadata": null
+      },
+      {
+        "id": "event:56fb318a3a6b99b8e3aaa655f0cfa6039d1d12d325d282fa86021b54005e1320",
+        "parent_id": "candidate:v1:45cc9cd42013d046e9f61d4506706f853ab85c53c3678791bfb1045bf3eeef32",
+        "contract_id": "task:v5:e3c49acac6fc7b706227ffbae43cf7e0c3c35bbf7a5ca2a673aabeaf3c188848",
+        "event_type": "candidate_committed",
+        "disclosed_assets": [],
+        "worker_id": "claim-planner",
+        "candidate_raw": null,
+        "accepted_fragments": [
+          "{\"candidate_id\": \"candidate:v1:45cc9cd42013d046e9f61d4506706f853ab85c53c3678791bfb1045bf3eeef32\", \"effect_type\": \"contract.declare\", \"relation_target\": \"task:v5:ab196d783fed7530e55c4c2c7d9792ce3862d61686a851d7e3159fc075dbe008\"}",
+          "{\"candidate_id\": \"candidate:v1:45cc9cd42013d046e9f61d4506706f853ab85c53c3678791bfb1045bf3eeef32\", \"effect_type\": \"contract.declare\", \"relation_target\": \"task:v5:6958a5551b8b3e1728673a86fc0707699d335299fc2d76a25452ab863370bd62\"}",
+          "{\"candidate_id\": \"candidate:v1:45cc9cd42013d046e9f61d4506706f853ab85c53c3678791bfb1045bf3eeef32\", \"effect_type\": \"contract.declare\", \"relation_target\": \"task:v5:feca76f736f546ac57fd7c88c3e09f84131fe6f8ad6fd1201485a25cce150a05\"}"
+        ],
+        "accepted_asset_names": [],
+        "rejected_fragments": [],
+        "authority_policy": null,
+        "authority_result": "accepted",
+        "budget_remaining": 0,
+        "relation_type": null,
+        "relation_target": "candidate:v1:45cc9cd42013d046e9f61d4506706f853ab85c53c3678791bfb1045bf3eeef32",
+        "timestamp": "",
+        "usage_metadata": {
+          "prompt_tokens": 3311,
+          "completion_tokens": 99,
+          "total_tokens": 3410,
+          "model": "deepseek-flash",
+          "provider": "api.deepseek.com",
+          "worker_profile": "claim-review-planner"
+        }
+      },
+      {
+        "id": "event:7425727a9419c9f0ce586c41627d15354ba054eb23ff6a503d8eea6a03355566",
+        "parent_id": null,
+        "contract_id": "task:v5:e3c49acac6fc7b706227ffbae43cf7e0c3c35bbf7a5ca2a673aabeaf3c188848",
+        "event_type": "expanded",
+        "disclosed_assets": [],
+        "worker_id": null,
+        "candidate_raw": null,
+        "accepted_fragments": [],
+        "accepted_asset_names": [],
+        "rejected_fragments": [],
+        "authority_policy": null,
+        "authority_result": "accepted",
+        "budget_remaining": 0,
+        "relation_type": "candidate",
+        "relation_target": "candidate:v1:45cc9cd42013d046e9f61d4506706f853ab85c53c3678791bfb1045bf3eeef32",
+        "timestamp": "",
+        "usage_metadata": null
+      },
+      {
+        "id": "event:2e02cc531731c10ef152d4dc4ce3b4b62a580e5a8cb667586f06c797332e6876",
+        "parent_id": "asset:v1:be52793232627581552714e03916c5272a973d0747581f6171e3c7ccf5cdebaa",
+        "contract_id": "task:v5:e3c49acac6fc7b706227ffbae43cf7e0c3c35bbf7a5ca2a673aabeaf3c188848",
+        "event_type": "output_satisfied",
+        "disclosed_assets": [],
+        "worker_id": null,
+        "candidate_raw": null,
+        "accepted_fragments": [],
+        "accepted_asset_names": [],
+        "rejected_fragments": [],
+        "authority_policy": null,
+        "authority_result": null,
+        "budget_remaining": 0,
+        "relation_type": null,
+        "relation_target": "review_report",
+        "timestamp": "",
+        "usage_metadata": null
+      }
+    ],
+    "productivity": {
+      "root_contract_id": "task:v5:e3c49acac6fc7b706227ffbae43cf7e0c3c35bbf7a5ca2a673aabeaf3c188848",
+      "contract_count": 9,
+      "contract_ids": [
+        "task:v5:e3c49acac6fc7b706227ffbae43cf7e0c3c35bbf7a5ca2a673aabeaf3c188848",
+        "task:v5:6958a5551b8b3e1728673a86fc0707699d335299fc2d76a25452ab863370bd62",
+        "task:v5:ab196d783fed7530e55c4c2c7d9792ce3862d61686a851d7e3159fc075dbe008",
+        "task:v5:feca76f736f546ac57fd7c88c3e09f84131fe6f8ad6fd1201485a25cce150a05",
+        "task:v4:7f849b2d810cf29c591a414d222d7562ed4113e852510262117d68d176b020c1",
+        "task:v4:c38b65fe416fd76193d91e58e82052eb88f0d5e89bb55d6f5f9293f5133e3caa",
+        "task:v4:d1a1cab14d039ed0fa1a630a94694194dabd67d285b72cfa34660ce1b5ddcb5f",
+        "task:v4:d61332598dec8680a33145a031134600a0cfbc6e3964650dae37062d57095406",
+        "task:v4:e27351bfcb012be03ad5241f39efd10b35fb67e7b8ebf31f11c532d403481c54"
+      ],
+      "contracts": [
+        {
+          "contract_id": "task:v5:e3c49acac6fc7b706227ffbae43cf7e0c3c35bbf7a5ca2a673aabeaf3c188848",
+          "parent_id": null,
+          "name": "guarded_claim_review",
+          "origin": "human",
+          "status": "active",
+          "terminal": null
+        },
+        {
+          "contract_id": "task:v5:6958a5551b8b3e1728673a86fc0707699d335299fc2d76a25452ab863370bd62",
+          "parent_id": "task:v5:e3c49acac6fc7b706227ffbae43cf7e0c3c35bbf7a5ca2a673aabeaf3c188848",
+          "name": "guarded_claim_review.plan.dependencies.130f62058dd0fe2beaae8549",
+          "origin": "plugin",
+          "status": "complete",
+          "terminal": "complete"
+        },
+        {
+          "contract_id": "task:v5:ab196d783fed7530e55c4c2c7d9792ce3862d61686a851d7e3159fc075dbe008",
+          "parent_id": "task:v5:e3c49acac6fc7b706227ffbae43cf7e0c3c35bbf7a5ca2a673aabeaf3c188848",
+          "name": "guarded_claim_review.plan.draft.130f62058dd0fe2beaae8549",
+          "origin": "plugin",
+          "status": "complete",
+          "terminal": "complete"
+        },
+        {
+          "contract_id": "task:v5:feca76f736f546ac57fd7c88c3e09f84131fe6f8ad6fd1201485a25cce150a05",
+          "parent_id": "task:v5:e3c49acac6fc7b706227ffbae43cf7e0c3c35bbf7a5ca2a673aabeaf3c188848",
+          "name": "guarded_claim_review.plan.compile.130f62058dd0fe2beaae8549",
+          "origin": "plugin",
+          "status": "complete",
+          "terminal": "complete"
+        },
+        {
+          "contract_id": "task:v4:7f849b2d810cf29c591a414d222d7562ed4113e852510262117d68d176b020c1",
+          "parent_id": "task:v5:feca76f736f546ac57fd7c88c3e09f84131fe6f8ad6fd1201485a25cce150a05",
+          "name": "reviser_stage",
+          "origin": "plan",
+          "status": "complete",
+          "terminal": "complete"
+        },
+        {
+          "contract_id": "task:v4:c38b65fe416fd76193d91e58e82052eb88f0d5e89bb55d6f5f9293f5133e3caa",
+          "parent_id": "task:v5:feca76f736f546ac57fd7c88c3e09f84131fe6f8ad6fd1201485a25cce150a05",
+          "name": "acceptor_stage",
+          "origin": "plan",
+          "status": "active",
+          "terminal": null
+        },
+        {
+          "contract_id": "task:v4:d1a1cab14d039ed0fa1a630a94694194dabd67d285b72cfa34660ce1b5ddcb5f",
+          "parent_id": "task:v5:feca76f736f546ac57fd7c88c3e09f84131fe6f8ad6fd1201485a25cce150a05",
+          "name": "gate_stage",
+          "origin": "plan",
+          "status": "cancelled",
+          "terminal": "cancelled"
+        },
+        {
+          "contract_id": "task:v4:d61332598dec8680a33145a031134600a0cfbc6e3964650dae37062d57095406",
+          "parent_id": "task:v5:feca76f736f546ac57fd7c88c3e09f84131fe6f8ad6fd1201485a25cce150a05",
+          "name": "semantic_stage",
+          "origin": "plan",
+          "status": "cancelled",
+          "terminal": "cancelled"
+        },
+        {
+          "contract_id": "task:v4:e27351bfcb012be03ad5241f39efd10b35fb67e7b8ebf31f11c532d403481c54",
+          "parent_id": "task:v5:feca76f736f546ac57fd7c88c3e09f84131fe6f8ad6fd1201485a25cce150a05",
+          "name": "assessor_stage",
+          "origin": "plan",
+          "status": "complete",
+          "terminal": "complete"
+        }
+      ],
+      "contract_statuses": {
+        "active": 2,
+        "cancelled": 2,
+        "complete": 5
+      },
+      "terminal_count": 7,
+      "terminal_statuses": {
+        "cancelled": 2,
+        "complete": 5
+      },
+      "tool_calls": {
+        "total": 0,
+        "succeeded": 0,
+        "failed": 0,
+        "pending": 0,
+        "calls": []
+      },
+      "continuation_count": 0,
+      "continuation_scheduled_count": 0,
+      "recovery_count": 0,
+      "rejection_count": 2,
+      "rejection_record_count": 0,
+      "rejection_trace_count": 2,
+      "rejections": [],
+      "usage_records": [
+        {
+          "contract_id": "task:v5:e3c49acac6fc7b706227ffbae43cf7e0c3c35bbf7a5ca2a673aabeaf3c188848",
+          "event_type": "candidate_committed",
+          "worker_id": "claim-planner",
+          "kind": "llm",
+          "usage": {
+            "completion_tokens": 99,
+            "model": "deepseek-flash",
+            "prompt_tokens": 3311,
+            "provider": "api.deepseek.com",
+            "total_tokens": 3410,
+            "worker_profile": "claim-review-planner"
+          }
+        },
+        {
+          "contract_id": "task:v5:ab196d783fed7530e55c4c2c7d9792ce3862d61686a851d7e3159fc075dbe008",
+          "event_type": "candidate_committed",
+          "worker_id": "claim-planner",
+          "kind": "llm",
+          "usage": {
+            "completion_tokens": 1154,
+            "model": "deepseek-flash",
+            "prompt_tokens": 3648,
+            "provider": "api.deepseek.com",
+            "total_tokens": 4802,
+            "worker_profile": "claim-review-planner"
+          }
+        },
+        {
+          "contract_id": "task:v5:6958a5551b8b3e1728673a86fc0707699d335299fc2d76a25452ab863370bd62",
+          "event_type": "candidate_committed",
+          "worker_id": "claim-planner",
+          "kind": "llm",
+          "usage": {
+            "completion_tokens": 771,
+            "model": "deepseek-flash",
+            "prompt_tokens": 3701,
+            "provider": "api.deepseek.com",
+            "total_tokens": 4472,
+            "worker_profile": "claim-review-planner"
+          }
+        },
+        {
+          "contract_id": "task:v5:feca76f736f546ac57fd7c88c3e09f84131fe6f8ad6fd1201485a25cce150a05",
+          "event_type": "candidate_committed",
+          "worker_id": "claim-planner",
+          "kind": "llm",
+          "usage": {
+            "completion_tokens": 1185,
+            "model": "deepseek-flash",
+            "prompt_tokens": 5349,
+            "provider": "api.deepseek.com",
+            "total_tokens": 6534,
+            "worker_profile": "claim-review-planner"
+          }
+        },
+        {
+          "contract_id": "task:v4:7f849b2d810cf29c591a414d222d7562ed4113e852510262117d68d176b020c1",
+          "event_type": "candidate_committed",
+          "worker_id": "claim-reviser",
+          "kind": "llm",
+          "usage": {
+            "completion_tokens": 858,
+            "model": "deepseek-flash",
+            "prompt_tokens": 2768,
+            "provider": "api.deepseek.com",
+            "total_tokens": 3626,
+            "worker_profile": "openai-compatible-v1"
+          }
+        }
+      ],
+      "token_totals": {
+        "prompt_tokens": 18777,
+        "completion_tokens": 4067,
+        "total_tokens": 22844
+      }
+    }
+  },
+  "contracts": [
+    {
+      "id": "task:v5:e3c49acac6fc7b706227ffbae43cf7e0c3c35bbf7a5ca2a673aabeaf3c188848",
+      "parent_id": null,
+      "name": "guarded_claim_review",
+      "description": "Read the three committed root inputs research_result, draft_report, and\nreview_policy, then return /plan. The root Contract has exactly one business\noutput, review_report. Its three base inputs are operator-submitted and frozen\nin root context by the labels research_result, draft_report, and review_policy;\nevery child must declare all three base inputs and inherit all three labels.\n\nCompile these bounded, independently claimable stages through the normal\nplanner mechanism. The stable stage handoffs, required routing, and activation\ndependencies are:\n\n- assessor: required capability claim.review.assess in pool validation;\n  activation is research_result AND draft_report AND review_policy. It receives\n  the base inputs, runs deterministic checks, and publishes the exact\n  claim-draft-checks-v1 receipt as draft_checks.\n- reviser: required capability claim.review.revise in pool reasoning; activation\n  is research_result AND draft_report AND review_policy AND draft_checks. It is the only\n  model-backed revision stage and may invoke the model once. It may return only\n  /exec review_report or /fail; it may not /plan or /replan. It must preserve\n  each original claim's exact ID and text, attach explicit evidence_bindings\n  with excerpt_id and literal quote, and never invent information absent from\n  research_result.\n- gate: required capability claim.review.gate in pool validation; activation is\n  research_result AND draft_report AND review_policy AND draft_checks AND\n  review_report. It performs the deterministic final structural checks and\n  accepts only one revision depth, publishing structural_receipt.\n- semantic: required capability claim.review.semantic in pool verification;\n  activation is research_result AND draft_report AND review_policy AND\n  draft_checks AND review_report AND structural_receipt. It may invoke the model once and may\n  return only /exec semantic_review or /fail. It must check exact original text,\n  complete citation bindings, causal language, mean-versus-probability claims,\n  and the two-campus sampling limits. Its JSON must have exactly these fields:\n  schema claim-semantic-review-v1, source_asset_id, report_asset_id,\n  policy_asset_id, gate_receipt_asset_id, verdict (accepted or rejected), and\n  a non-empty reason. IDs must be copied from disclosed assets; do not put\n  signed_by or other identity fields in the JSON.\n- acceptor: required capability claim.review.accept in pool verification;\n  activation is research_result AND draft_report AND review_policy AND\n  draft_checks AND review_report AND structural_receipt AND semantic_review.\n  It must\n  validate the semantic review and return /attest for the root Contract's exact\n  review_report output with policy version claim-review-closure-v1 and evidence\n  asset IDs exactly [research_result, draft_report, review_policy]. It alone\n  has asset.attest authority.\n\nThe review_policy input must have exactly schema claim-review-policy-v1,\nmax_revisions 1, and five distinct actors: claim-assessor, claim-reviser,\nclaim-gate, claim-semantic, and claim-acceptor. No actor may perform another\nstage. The root acceptance policy is independent, versioned\nclaim-review-closure-v1, requires claim.review.accept, and names the three base\nAsset IDs as evidence_asset_ids when the operator creates the root task.\n\nThe report is a JSON object with exactly claims, revised_summary, and\nlimitations. Each claim record contains claim_id, original_text, verdict,\nevidence_excerpt_ids, rationale, revised_text, and evidence_bindings\n([{excerpt_id, quote}]). Claims preserve source IDs and original text exactly;\nrevised_summary and limitations are non-empty. The verdict taxonomy is:\nsupported means the source supports the claim at its stated strength and scope;\noverstated means the source supports a narrower or weaker version, including\nupgrading an observational association to a causal effect; unsupported means\nthe source does not support even the underlying observation or contradicts it.\nDo not encode specific claim answers in this task description. Structural stages\ncan prove explicit binding and literal quote membership; they cannot prove that\nfree-form rationale is semantically persuasive. Semantic review is the separate\nmodel-backed check.\n\nOne revision is allowed. A normal protocol retry may recover a failed stage,\nbut it must not consume or silently replace an already published revision.\nIf the gate fails, it can publish a durable failure report and leave the root\nwithout qualification; this is an explicit blocked outcome, not an automatic\nrepair controller. Do not claim that the workflow guarantees semantic truth.\n",
+      "inputs": [
+        "research_result",
+        "draft_report",
+        "review_policy"
+      ],
+      "outputs": [
+        "review_report"
+      ],
+      "context_asset_ids": [
+        "asset:v1:1f706235784187af6103250bff0fbb027c7d9a801cc47c288879d61fc0c335ea",
+        "asset:v1:777dced8b2d5ce99a408ee37e727e2fa02bb4c3f44640f46a573441d8a4c6a60",
+        "asset:v1:e1d579aa9ac4ed7a4f61a1658d0220dc9ab2d2ada054f70011dbd9343f414e66"
+      ],
+      "worker_capabilities": [
+        "planning"
+      ],
+      "acceptance_policy": {
+        "evidence_asset_ids": [
+          "asset:v1:1f706235784187af6103250bff0fbb027c7d9a801cc47c288879d61fc0c335ea",
+          "asset:v1:777dced8b2d5ce99a408ee37e727e2fa02bb4c3f44640f46a573441d8a4c6a60",
+          "asset:v1:e1d579aa9ac4ed7a4f61a1658d0220dc9ab2d2ada054f70011dbd9343f414e66"
+        ],
+        "mode": "independent",
+        "policy_version": "claim-review-closure-v1",
+        "required_attestations": 1,
+        "verifier_capabilities": [
+          "claim.review.accept"
+        ]
+      },
+      "terminal": null
+    },
+    {
+      "id": "task:v5:ab196d783fed7530e55c4c2c7d9792ce3862d61686a851d7e3159fc075dbe008",
+      "parent_id": "task:v5:e3c49acac6fc7b706227ffbae43cf7e0c3c35bbf7a5ca2a673aabeaf3c188848",
+      "name": "guarded_claim_review.plan.draft.130f62058dd0fe2beaae8549",
+      "description": "{\"goal\": \"Read the three committed root inputs research_result, draft_report, and\\nreview_policy, then return /plan. The root Contract has exactly one business\\noutput, review_report. Its three base inputs are operator-submitted and frozen\\nin root context by the labels research_result, draft_report, and review_policy;\\nevery child must declare all three base inputs and inherit all three labels.\\n\\nCompile these bounded, independently claimable stages through the normal\\nplanner mechanism. The stable stage handoffs, required routing, and activation\\ndependencies are:\\n\\n- assessor: required capability claim.review.assess in pool validation;\\n  activation is research_result AND draft_report AND review_policy. It receives\\n  the base inputs, runs deterministic checks, and publishes the exact\\n  claim-draft-checks-v1 receipt as draft_checks.\\n- reviser: required capability claim.review.revise in pool reasoning; activation\\n  is research_result AND draft_report AND review_policy AND draft_checks. It is the only\\n  model-backed revision stage and may invoke the model once. It may return only\\n  /exec review_report or /fail; it may not /plan or /replan. It must preserve\\n  each original claim's exact ID and text, attach explicit evidence_bindings\\n  with excerpt_id and literal quote, and never invent information absent from\\n  research_result.\\n- gate: required capability claim.review.gate in pool validation; activation is\\n  research_result AND draft_report AND review_policy AND draft_checks AND\\n  review_report. It performs the deterministic final structural checks and\\n  accepts only one revision depth, publishing structural_receipt.\\n- semantic: required capability claim.review.semantic in pool verification;\\n  activation is research_result AND draft_report AND review_policy AND\\n  draft_checks AND review_report AND structural_receipt. It may invoke the model once and may\\n  return only /exec semantic_review or /fail. It must check exact original text,\\n  complete citation bindings, causal language, mean-versus-probability claims,\\n  and the two-campus sampling limits. Its JSON must have exactly these fields:\\n  schema claim-semantic-review-v1, source_asset_id, report_asset_id,\\n  policy_asset_id, gate_receipt_asset_id, verdict (accepted or rejected), and\\n  a non-empty reason. IDs must be copied from disclosed assets; do not put\\n  signed_by or other identity fields in the JSON.\\n- acceptor: required capability claim.review.accept in pool verification;\\n  activation is research_result AND draft_report AND review_policy AND\\n  draft_checks AND review_report AND structural_receipt AND semantic_review.\\n  It must\\n  validate the semantic review and return /attest for the root Contract's exact\\n  review_report output with policy version claim-review-closure-v1 and evidence\\n  asset IDs exactly [research_result, draft_report, review_policy]. It alone\\n  has asset.attest authority.\\n\\nThe review_policy input must have exactly schema claim-review-policy-v1,\\nmax_revisions 1, and five distinct actors: claim-assessor, claim-reviser,\\nclaim-gate, claim-semantic, and claim-acceptor. No actor may perform another\\nstage. The root acceptance policy is independent, versioned\\nclaim-review-closure-v1, requires claim.review.accept, and names the three base\\nAsset IDs as evidence_asset_ids when the operator creates the root task.\\n\\nThe report is a JSON object with exactly claims, revised_summary, and\\nlimitations. Each claim record contains claim_id, original_text, verdict,\\nevidence_excerpt_ids, rationale, revised_text, and evidence_bindings\\n([{excerpt_id, quote}]). Claims preserve source IDs and original text exactly;\\nrevised_summary and limitations are non-empty. The verdict taxonomy is:\\nsupported means the source supports the claim at its stated strength and scope;\\noverstated means the source supports a narrower or weaker version, including\\nupgrading an observational association to a causal effect; unsupported means\\nthe source does not support even the underlying observation or contradicts it.\\nDo not encode specific claim answers in this task description. Structural stages\\ncan prove explicit binding and literal quote membership; they cannot prove that\\nfree-form rationale is semantically persuasive. Semantic review is the separate\\nmodel-backed check.\\n\\nOne revision is allowed. A normal protocol retry may recover a failed stage,\\nbut it must not consume or silently replace an already published revision.\\nIf the gate fails, it can publish a durable failure report and leave the root\\nwithout qualification; this is an explicit blocked outcome, not an automatic\\nrepair controller. Do not claim that the workflow guarantees semantic truth.\\n\", \"invocation\": {\"reason\": \"The root Contract requires compiling five bounded stages (assessor, reviser, gate, semantic, acceptor) with distinct capabilities, pools, activation dependencies, and handoff receipts. The three base inputs are disclosed and frozen, but the stage decomposition, capability routing, and activation wiring must be created through the planner mechanism before any stage can execute. This requires planning-stage tasks to establish the assessor stage first, since its draft_checks receipt gates all downstream stages.\"}, \"required_outputs\": [\"review_report\"], \"stage\": \"draft\", \"task\": \"Describe goals, evidence needs, uncertainty and candidate steps. Do not emit Contract wire objects.\"}",
+      "inputs": [
+        "research_result",
+        "draft_report",
+        "review_policy"
+      ],
+      "outputs": [
+        "plan_draft_130f62058dd0fe2beaae8549"
+      ],
+      "context_asset_ids": [
+        "asset:v1:1f706235784187af6103250bff0fbb027c7d9a801cc47c288879d61fc0c335ea",
+        "asset:v1:777dced8b2d5ce99a408ee37e727e2fa02bb4c3f44640f46a573441d8a4c6a60",
+        "asset:v1:e1d579aa9ac4ed7a4f61a1658d0220dc9ab2d2ada054f70011dbd9343f414e66"
+      ],
+      "worker_capabilities": [],
+      "acceptance_policy": {
+        "mode": "mechanical",
+        "required_attestations": 1
+      },
+      "terminal": "complete"
+    },
+    {
+      "id": "task:v5:6958a5551b8b3e1728673a86fc0707699d335299fc2d76a25452ab863370bd62",
+      "parent_id": "task:v5:e3c49acac6fc7b706227ffbae43cf7e0c3c35bbf7a5ca2a673aabeaf3c188848",
+      "name": "guarded_claim_review.plan.dependencies.130f62058dd0fe2beaae8549",
+      "description": "{\"required_outputs\": [\"review_report\"], \"stage\": \"dependencies\", \"task\": \"Map producers and consumers; detect missing inputs, cycles, invalid activation, capability, authority and allowance needs.\"}",
+      "inputs": [
+        "plan_draft_130f62058dd0fe2beaae8549"
+      ],
+      "outputs": [
+        "plan_dependencies_130f62058dd0fe2beaae8549"
+      ],
+      "context_asset_ids": [
+        "asset:v1:1f706235784187af6103250bff0fbb027c7d9a801cc47c288879d61fc0c335ea",
+        "asset:v1:777dced8b2d5ce99a408ee37e727e2fa02bb4c3f44640f46a573441d8a4c6a60",
+        "asset:v1:e1d579aa9ac4ed7a4f61a1658d0220dc9ab2d2ada054f70011dbd9343f414e66"
+      ],
+      "worker_capabilities": [],
+      "acceptance_policy": {
+        "mode": "mechanical",
+        "required_attestations": 1
+      },
+      "terminal": "complete"
+    },
+    {
+      "id": "task:v5:feca76f736f546ac57fd7c88c3e09f84131fe6f8ad6fd1201485a25cce150a05",
+      "parent_id": "task:v5:e3c49acac6fc7b706227ffbae43cf7e0c3c35bbf7a5ca2a673aabeaf3c188848",
+      "name": "guarded_claim_review.plan.compile.130f62058dd0fe2beaae8549",
+      "description": "{\"allowed_inputs\": [\"draft_report\", \"research_result\", \"review_policy\"], \"parent_acceptance_policy\": {\"evidence_asset_ids\": [\"asset:v1:1f706235784187af6103250bff0fbb027c7d9a801cc47c288879d61fc0c335ea\", \"asset:v1:777dced8b2d5ce99a408ee37e727e2fa02bb4c3f44640f46a573441d8a4c6a60\", \"asset:v1:e1d579aa9ac4ed7a4f61a1658d0220dc9ab2d2ada054f70011dbd9343f414e66\"], \"mode\": \"independent\", \"policy_version\": \"claim-review-closure-v1\", \"required_attestations\": 1, \"verifier_capabilities\": [\"claim.review.accept\"]}, \"required_outputs\": [\"review_report\"], \"stage\": \"compile\", \"task\": \"Compile the accepted draft and dependency analysis into the exact structured planning schema without inventing evidence or weakening parent constraints.\"}",
+      "inputs": [
+        "research_result",
+        "draft_report",
+        "review_policy",
+        "plan_draft_130f62058dd0fe2beaae8549",
+        "plan_dependencies_130f62058dd0fe2beaae8549"
+      ],
+      "outputs": [
+        "review_report"
+      ],
+      "context_asset_ids": [
+        "asset:v1:1f706235784187af6103250bff0fbb027c7d9a801cc47c288879d61fc0c335ea",
+        "asset:v1:777dced8b2d5ce99a408ee37e727e2fa02bb4c3f44640f46a573441d8a4c6a60",
+        "asset:v1:e1d579aa9ac4ed7a4f61a1658d0220dc9ab2d2ada054f70011dbd9343f414e66"
+      ],
+      "worker_capabilities": [],
+      "acceptance_policy": {
+        "mode": "mechanical",
+        "required_attestations": 1
+      },
+      "terminal": "complete"
+    },
+    {
+      "id": "task:v4:e27351bfcb012be03ad5241f39efd10b35fb67e7b8ebf31f11c532d403481c54",
+      "parent_id": "task:v5:feca76f736f546ac57fd7c88c3e09f84131fe6f8ad6fd1201485a25cce150a05",
+      "name": "assessor_stage",
+      "description": "Perform deterministic draft checks on the disclosed draft_report against research_result and review_policy, verifying claim IDs, verdict taxonomy alignment, and evidence_excerpt_ids membership; publish the claim-draft-checks-v1 receipt as draft_checks.",
+      "inputs": [
+        "draft_report",
+        "research_result",
+        "review_policy"
+      ],
+      "outputs": [
+        "draft_checks"
+      ],
+      "context_asset_ids": [
+        "asset:v1:1f706235784187af6103250bff0fbb027c7d9a801cc47c288879d61fc0c335ea",
+        "asset:v1:777dced8b2d5ce99a408ee37e727e2fa02bb4c3f44640f46a573441d8a4c6a60",
+        "asset:v1:e1d579aa9ac4ed7a4f61a1658d0220dc9ab2d2ada054f70011dbd9343f414e66"
+      ],
+      "worker_capabilities": [
+        "claim.review.assess"
+      ],
+      "acceptance_policy": null,
+      "terminal": "complete"
+    },
+    {
+      "id": "task:v4:7f849b2d810cf29c591a414d222d7562ed4113e852510262117d68d176b020c1",
+      "parent_id": "task:v5:feca76f736f546ac57fd7c88c3e09f84131fe6f8ad6fd1201485a25cce150a05",
+      "name": "reviser_stage",
+      "description": "Produce the required review_report by revising the draft_report using only grounded evidence from research_result and review_policy, preserving each original claim's exact ID and text, attaching explicit evidence_bindings with excerpt_id and literal quote, and never inventing information absent from the disclosed inputs.",
+      "inputs": [
+        "draft_report",
+        "research_result",
+        "review_policy",
+        "draft_checks"
+      ],
+      "outputs": [
+        "review_report"
+      ],
+      "context_asset_ids": [
+        "asset:v1:1f706235784187af6103250bff0fbb027c7d9a801cc47c288879d61fc0c335ea",
+        "asset:v1:777dced8b2d5ce99a408ee37e727e2fa02bb4c3f44640f46a573441d8a4c6a60",
+        "asset:v1:e1d579aa9ac4ed7a4f61a1658d0220dc9ab2d2ada054f70011dbd9343f414e66"
+      ],
+      "worker_capabilities": [
+        "claim.review.revise"
+      ],
+      "acceptance_policy": null,
+      "terminal": "complete"
+    },
+    {
+      "id": "task:v4:d1a1cab14d039ed0fa1a630a94694194dabd67d285b72cfa34660ce1b5ddcb5f",
+      "parent_id": "task:v5:feca76f736f546ac57fd7c88c3e09f84131fe6f8ad6fd1201485a25cce150a05",
+      "name": "gate_stage",
+      "description": "Perform deterministic final structural checks on review_report against draft_report, research_result, review_policy, and draft_checks, accepting only one revision depth per max_revisions 1; publish structural_receipt and, on failure, a durable failure report leaving the root unqualified.",
+      "inputs": [
+        "draft_report",
+        "research_result",
+        "review_policy",
+        "draft_checks",
+        "review_report"
+      ],
+      "outputs": [
+        "structural_receipt"
+      ],
+      "context_asset_ids": [
+        "asset:v1:1f706235784187af6103250bff0fbb027c7d9a801cc47c288879d61fc0c335ea",
+        "asset:v1:777dced8b2d5ce99a408ee37e727e2fa02bb4c3f44640f46a573441d8a4c6a60",
+        "asset:v1:e1d579aa9ac4ed7a4f61a1658d0220dc9ab2d2ada054f70011dbd9343f414e66"
+      ],
+      "worker_capabilities": [
+        "claim.review.gate"
+      ],
+      "acceptance_policy": null,
+      "terminal": "cancelled"
+    },
+    {
+      "id": "task:v4:d61332598dec8680a33145a031134600a0cfbc6e3964650dae37062d57095406",
+      "parent_id": "task:v5:feca76f736f546ac57fd7c88c3e09f84131fe6f8ad6fd1201485a25cce150a05",
+      "name": "semantic_stage",
+      "description": "Perform the separate model-backed semantic check on review_report against research_result, draft_report, review_policy, draft_checks, and structural_receipt, checking exact original text, complete citation bindings, causal language, mean-versus-probability claims, and two-campus sampling limits; publish semantic_review with the exact claim-semantic-review-v1 JSON fields.",
+      "inputs": [
+        "draft_report",
+        "research_result",
+        "review_policy",
+        "draft_checks",
+        "review_report",
+        "structural_receipt"
+      ],
+      "outputs": [
+        "semantic_review"
+      ],
+      "context_asset_ids": [
+        "asset:v1:1f706235784187af6103250bff0fbb027c7d9a801cc47c288879d61fc0c335ea",
+        "asset:v1:777dced8b2d5ce99a408ee37e727e2fa02bb4c3f44640f46a573441d8a4c6a60",
+        "asset:v1:e1d579aa9ac4ed7a4f61a1658d0220dc9ab2d2ada054f70011dbd9343f414e66"
+      ],
+      "worker_capabilities": [
+        "claim.review.semantic"
+      ],
+      "acceptance_policy": null,
+      "terminal": "cancelled"
+    },
+    {
+      "id": "task:v4:c38b65fe416fd76193d91e58e82052eb88f0d5e89bb55d6f5f9293f5133e3caa",
+      "parent_id": "task:v5:feca76f736f546ac57fd7c88c3e09f84131fe6f8ad6fd1201485a25cce150a05",
+      "name": "acceptor_stage",
+      "description": "Validate the semantic review and independently accept the root Contract's review_report output by returning /attest against parent Contract task:v5:e3c49acac6fc7b706227ffbae43cf7e0c3c35bbf7a5ca2a673aabeaf3c188848 with policy version claim-review-closure-v1 and evidence asset IDs exactly [asset:v1:e1d579aa9ac4ed7a4f61a1658d0220dc9ab2d2ada054f70011dbd9343f414e66, asset:v1:1f706235784187af6103250bff0fbb027c7d9a801cc47c288879d61fc0c335ea, asset:v1:777dced8b2d5ce99a408ee37e727e2fa02bb4c3f44640f46a573441d8a4c6a60]; publish review_report_acceptance receipt.",
+      "inputs": [
+        "draft_report",
+        "research_result",
+        "review_policy",
+        "draft_checks",
+        "review_report",
+        "structural_receipt",
+        "semantic_review"
+      ],
+      "outputs": [
+        "review_report_acceptance"
+      ],
+      "context_asset_ids": [
+        "asset:v1:1f706235784187af6103250bff0fbb027c7d9a801cc47c288879d61fc0c335ea",
+        "asset:v1:777dced8b2d5ce99a408ee37e727e2fa02bb4c3f44640f46a573441d8a4c6a60",
+        "asset:v1:e1d579aa9ac4ed7a4f61a1658d0220dc9ab2d2ada054f70011dbd9343f414e66"
+      ],
+      "worker_capabilities": [
+        "claim.review.accept"
+      ],
+      "acceptance_policy": null,
+      "terminal": null
+    }
+  ],
+  "assets": [
+    {
+      "id": "asset:v1:e1d579aa9ac4ed7a4f61a1658d0220dc9ab2d2ada054f70011dbd9343f414e66",
+      "name": "research_result",
+      "created_by": "human:owner",
+      "signed_by": "human:owner",
+      "content": {
+        "title": "Short sleep and examination performance: a synthetic study summary",
+        "abstract": "A cross-sectional survey of 1,248 university students measured self-reported sleep duration and one end-of-term examination score. Students reporting at least seven hours of sleep had higher average scores than students reporting less than six hours. The association remained after adjustment for age, year of study, and self-reported employment hours.",
+        "claims": [
+          {
+            "id": "claim-1",
+            "text": "Students who sleep at least seven hours perform better on examinations.",
+            "source_excerpt_ids": [
+              "excerpt-results",
+              "excerpt-design"
+            ]
+          },
+          {
+            "id": "claim-2",
+            "text": "Getting at least seven hours of sleep improves examination performance.",
+            "source_excerpt_ids": [
+              "excerpt-results",
+              "excerpt-design"
+            ]
+          },
+          {
+            "id": "claim-3",
+            "text": "The finding applies broadly to university students because the adjusted association was robust.",
+            "source_excerpt_ids": [
+              "excerpt-results",
+              "excerpt-design"
+            ]
+          }
+        ],
+        "source_excerpts": [
+          {
+            "id": "excerpt-design",
+            "text": "Design: cross-sectional survey; sleep duration and examination score were collected during the same end-of-term questionnaire. Sleep was self-reported. The sample was recruited from two campuses.",
+            "role": "study-design"
+          },
+          {
+            "id": "excerpt-results",
+            "text": "Results: the at-least-seven-hour group had a higher mean examination score than the less-than-six-hour group. The adjusted association remained after controlling for age, year of study, and self-reported employment hours. No random assignment or longitudinal follow-up was performed.",
+            "role": "study-results"
+          },
+          {
+            "id": "excerpt-limitations",
+            "text": "Limitations: residual confounding, recall error in self-reported sleep, two-campus sampling, and the single examination outcome limit causal and population-wide interpretation.",
+            "role": "limitations"
+          }
+        ]
+      }
+    },
+    {
+      "id": "asset:v1:1f706235784187af6103250bff0fbb027c7d9a801cc47c288879d61fc0c335ea",
+      "name": "draft_report",
+      "created_by": "human:owner",
+      "signed_by": "human:owner",
+      "content": {
+        "claims": [
+          {
+            "claim_id": "claim-1",
+            "evidence_excerpt_ids": [
+              "excerpt-results",
+              "excerpt-design"
+            ],
+            "original_text": "The at-least-seven-hour sleep group had a higher mean examination score than the less-than-six-hour group, and this association remained after controlling for age, year of study, and self-reported employment hours.",
+            "rationale": "The cited excerpts report a higher mean examination score in the at-least-seven-hour group and an adjusted association that persisted after controlling for age, year of study, and self-reported employment hours. Because the design excerpt confirms a cross-sectional survey with no random assignment or longitudinal follow-up, this is supported only as an association, not as causation.",
+            "revised_text": "In this cross-sectional survey, the at-least-seven-hour sleep group had a higher mean examination score than the less-than-six-hour group, and this association remained after controlling for age, year of study, and self-reported employment hours; the design does not support a causal interpretation.",
+            "verdict": "supported"
+          },
+          {
+            "claim_id": "claim-2",
+            "evidence_excerpt_ids": [
+              "excerpt-results",
+              "excerpt-design"
+            ],
+            "original_text": "Longer sleep duration causes or improves examination scores.",
+            "rationale": "The cited excerpts report a cross-sectional survey with self-reported sleep and no random assignment or longitudinal follow-up. Causal or directional language such as sleep duration causing or improving examination scores goes beyond the cited association evidence and is therefore overstated.",
+            "revised_text": "Longer sleep duration was associated with higher examination scores in this cross-sectional survey, but the design does not establish that sleep duration causes or improves examination scores.",
+            "verdict": "overstated"
+          },
+          {
+            "claim_id": "claim-3",
+            "evidence_excerpt_ids": [
+              "excerpt-results",
+              "excerpt-design"
+            ],
+            "original_text": "Sleep duration produces a specific causal mechanism, temporal direction, or effect size that improves examination performance.",
+            "rationale": "The cited excerpts provide only a cross-sectional association between sleep duration and examination score, with no random assignment or longitudinal follow-up. Any claim asserting a causal mechanism, temporal direction, or effect size not reported in the excerpts is unsupported by the cited text.",
+            "revised_text": "The cited excerpts support only a cross-sectional association between sleep duration and examination score; they do not support claims about a causal mechanism, temporal direction, or a specific effect size.",
+            "verdict": "unsupported"
+          }
+        ],
+        "limitations": [
+          "The evidence comes from a cross-sectional survey, so it cannot establish temporal order or causation between sleep duration and examination scores.",
+          "Sleep duration and employment hours were self-reported, which may introduce recall or reporting bias.",
+          "The sampling method and sample representativeness are not described in the cited excerpts, limiting generalizability.",
+          "No random assignment or longitudinal follow-up was used, so unmeasured confounding cannot be ruled out.",
+          "Effect sizes and confidence intervals are not reported in the cited excerpts, so the magnitude and precision of the association are unknown."
+        ],
+        "revised_summary": "The cited evidence supports an association between longer sleep duration and higher examination scores in a cross-sectional survey, including an adjusted association after controlling for age, year of study, and self-reported employment hours. The evidence does not support causal, directional, or mechanism claims, and any such language should be revised to association language."
+      }
+    },
+    {
+      "id": "asset:v1:777dced8b2d5ce99a408ee37e727e2fa02bb4c3f44640f46a573441d8a4c6a60",
+      "name": "review_policy",
+      "created_by": "human:owner",
+      "signed_by": "human:owner",
+      "content": {
+        "schema": "claim-review-policy-v1",
+        "max_revisions": 1,
+        "actors": {
+          "assessor": "claim-assessor",
+          "reviser": "claim-reviser",
+          "gate": "claim-gate",
+          "semantic": "claim-semantic",
+          "acceptor": "claim-acceptor"
+        }
+      }
+    },
+    {
+      "id": "asset:v1:77d277c6354b5d06c41ed3d94e3dacec47d9e8459fa21f32ac37bfb58e2ec757",
+      "name": "draft_checks",
+      "created_by": "task:v4:e27351bfcb012be03ad5241f39efd10b35fb67e7b8ebf31f11c532d403481c54",
+      "signed_by": "claim-assessor",
+      "content": {
+        "checks": [
+          {
+            "check": "original-text-v1",
+            "findings": "original-text-mismatch:claim-1\noriginal-text-mismatch:claim-2\noriginal-text-mismatch:claim-3",
+            "passed": false,
+            "semantic_checked": false
+          },
+          {
+            "check": "evidence-bindings-v1",
+            "findings": "missing-evidence-bindings:claim-1\nmissing-evidence-bindings:claim-2\nmissing-evidence-bindings:claim-3",
+            "passed": false,
+            "semantic_checked": false
+          }
+        ],
+        "draft_asset_id": "asset:v1:1f706235784187af6103250bff0fbb027c7d9a801cc47c288879d61fc0c335ea",
+        "max_revisions": 1,
+        "passed": false,
+        "policy_asset_id": "asset:v1:777dced8b2d5ce99a408ee37e727e2fa02bb4c3f44640f46a573441d8a4c6a60",
+        "schema": "claim-draft-checks-v1",
+        "source_asset_id": "asset:v1:e1d579aa9ac4ed7a4f61a1658d0220dc9ab2d2ada054f70011dbd9343f414e66"
+      }
+    },
+    {
+      "id": "asset:v1:be52793232627581552714e03916c5272a973d0747581f6171e3c7ccf5cdebaa",
+      "name": "review_report",
+      "created_by": "task:v4:7f849b2d810cf29c591a414d222d7562ed4113e852510262117d68d176b020c1",
+      "signed_by": "claim-reviser",
+      "content": {
+        "claims": [
+          {
+            "claim_id": "claim-1",
+            "evidence_bindings": [
+              {
+                "excerpt_id": "excerpt-results",
+                "quote": "the at-least-seven-hour group had a higher mean examination score than the less-than-six-hour group. The adjusted association remained after controlling for age, year of study, and self-reported employment hours."
+              },
+              {
+                "excerpt_id": "excerpt-design",
+                "quote": "Design: cross-sectional survey; sleep duration and examination score were collected during the same end-of-term questionnaire. Sleep was self-reported."
+              }
+            ],
+            "original_text": "Students who sleep at least seven hours perform better on examinations.",
+            "revised_text": "In this cross-sectional survey, students who reported sleeping at least seven hours had a higher mean examination score than students reporting less than six hours, and this association remained after adjustment for age, year of study, and self-reported employment hours; the design does not support a causal interpretation.",
+            "verdict": "supported"
+          },
+          {
+            "claim_id": "claim-2",
+            "evidence_bindings": [
+              {
+                "excerpt_id": "excerpt-results",
+                "quote": "No random assignment or longitudinal follow-up was performed."
+              },
+              {
+                "excerpt_id": "excerpt-design",
+                "quote": "Design: cross-sectional survey; sleep duration and examination score were collected during the same end-of-term questionnaire."
+              }
+            ],
+            "original_text": "Getting at least seven hours of sleep improves examination performance.",
+            "revised_text": "Getting at least seven hours of sleep was associated with higher examination performance in this cross-sectional survey, but the design does not establish that sleep duration improves examination performance.",
+            "verdict": "overstated"
+          },
+          {
+            "claim_id": "claim-3",
+            "evidence_bindings": [
+              {
+                "excerpt_id": "excerpt-limitations",
+                "quote": "Limitations: residual confounding, recall error in self-reported sleep, two-campus sampling, and the single examination outcome limit causal and population-wide interpretation."
+              },
+              {
+                "excerpt_id": "excerpt-design",
+                "quote": "The sample was recruited from two campuses."
+              }
+            ],
+            "original_text": "The finding applies broadly to university students because the adjusted association was robust.",
+            "revised_text": "The cited excerpts support only a cross-sectional association between sleep duration and examination score in a two-campus sample; they do not support broad application to university students.",
+            "verdict": "unsupported"
+          }
+        ],
+        "draft_asset_id": "asset:v1:1f706235784187af6103250bff0fbb027c7d9a801cc47c288879d61fc0c335ea",
+        "limitations": [
+          "The evidence comes from a cross-sectional survey, so it cannot establish temporal order or causation between sleep duration and examination scores.",
+          "Sleep duration and employment hours were self-reported, which may introduce recall or reporting bias.",
+          "The sampling method and sample representativeness are not described in the cited excerpts, limiting generalizability.",
+          "No random assignment or longitudinal follow-up was used, so unmeasured confounding cannot be ruled out.",
+          "Effect sizes and confidence intervals are not reported in the cited excerpts, so the magnitude and precision of the association are unknown."
+        ],
+        "max_revisions": 1,
+        "policy_asset_id": "asset:v1:777dced8b2d5ce99a408ee37e727e2fa02bb4c3f44640f46a573441d8a4c6a60",
+        "revised_summary": "The cited evidence supports an association between longer sleep duration and higher examination scores in a cross-sectional survey, including an adjusted association after controlling for age, year of study, and self-reported employment hours. The evidence does not support causal, directional, or population-wide claims, and any such language should be revised to association language.",
+        "schema": "claim-review-report-v1",
+        "source_asset_id": "asset:v1:e1d579aa9ac4ed7a4f61a1658d0220dc9ab2d2ada054f70011dbd9343f414e66"
+      }
+    }
+  ],
+  "records": [
+    {
+      "revision": 2,
+      "record_type": "candidate.received",
+      "payload": {
+        "actor_id": "human:owner",
+        "candidate_id": "candidate:v1:fa6c86773d698a5ec64d5f3aa1f92ae425d20f387a946641fd910de131a29b76",
+        "domain_id": "genesis:4ba32ae4682d7a7fa69034ec11154aaab5960b3df4957ea52e946441c68c2d40",
+        "effect_types": [
+          "asset.propose"
+        ],
+        "key_id": "root-1",
+        "metadata": {},
+        "signature": "ed25519:n+xven1oL9UkL1NN4hvXf0SWrRJtXixmzJXV6rLeP2Sy1f0HJT61r6SSQDv8cGHerkZNSTNEhVc4cEUjOiN3DQ==",
+        "signature_kind": "ed25519"
+      }
+    },
+    {
+      "revision": 7,
+      "record_type": "candidate.received",
+      "payload": {
+        "actor_id": "human:owner",
+        "candidate_id": "candidate:v1:13920d79fe3883d9d7a136586aaa85b047cf0e3cb9bc3b7a75964a8370148517",
+        "domain_id": "genesis:4ba32ae4682d7a7fa69034ec11154aaab5960b3df4957ea52e946441c68c2d40",
+        "effect_types": [
+          "asset.propose"
+        ],
+        "key_id": "root-1",
+        "metadata": {},
+        "signature": "ed25519:DMsB25lb/uvCctly9oE8N4rUrqOkfD1HoIa0dISh/aaN6C3KLkRFdWFy6ybZM6ROm7YMmVK79hSbsZClh9W1DQ==",
+        "signature_kind": "ed25519"
+      }
+    },
+    {
+      "revision": 12,
+      "record_type": "candidate.received",
+      "payload": {
+        "actor_id": "human:owner",
+        "candidate_id": "candidate:v1:e9982eff75210e67d0e4b869e73d46ff0685c041921278653b100b68eb9b8e42",
+        "domain_id": "genesis:4ba32ae4682d7a7fa69034ec11154aaab5960b3df4957ea52e946441c68c2d40",
+        "effect_types": [
+          "asset.propose"
+        ],
+        "key_id": "root-1",
+        "metadata": {},
+        "signature": "ed25519:Z4fbL9TRZ3vh/6rjwq9MZGM37mEv1baUsQSt3kQO9naJBCo6PvamKrLL9Jr5ca35wlA/touWg0MhDEVz0BZtAg==",
+        "signature_kind": "ed25519"
+      }
+    },
+    {
+      "revision": 17,
+      "record_type": "candidate.received",
+      "payload": {
+        "actor_id": "human:owner",
+        "candidate_id": "candidate:v1:cc9b2bbd3e9981bc11194ad7982aae05f05b8bf159da1c75a94111ea1f81d6f9",
+        "domain_id": "genesis:4ba32ae4682d7a7fa69034ec11154aaab5960b3df4957ea52e946441c68c2d40",
+        "effect_types": [
+          "contract.declare"
+        ],
+        "key_id": "root-1",
+        "metadata": {},
+        "signature": "ed25519:0DCGJy/uUAd7FnoOfrqlbHxAEo6qvAWBEmblGEbOK+AWneRKUFb4b29kjZRHGiQfwdAnldi69qhMuuAc7yj5Aw==",
+        "signature_kind": "ed25519"
+      }
+    },
+    {
+      "revision": 18,
+      "record_type": "candidate.rejected",
+      "payload": {
+        "candidate_id": "candidate:v1:cc9b2bbd3e9981bc11194ad7982aae05f05b8bf159da1c75a94111ea1f81d6f9",
+        "effect_types": [
+          "contract.declare"
+        ],
+        "reason": "Contract acceptance_policy.evidence_asset_ids must be sorted and unique"
+      }
+    },
+    {
+      "revision": 20,
+      "record_type": "candidate.received",
+      "payload": {
+        "actor_id": "human:owner",
+        "candidate_id": "candidate:v1:6aa9727df9110af5bb791094c4ce7569b9d1f33e1b4a2f70415650fe8c5bb802",
+        "domain_id": "genesis:4ba32ae4682d7a7fa69034ec11154aaab5960b3df4957ea52e946441c68c2d40",
+        "effect_types": [
+          "contract.declare"
+        ],
+        "key_id": "root-1",
+        "metadata": {},
+        "signature": "ed25519:KuBnMIMmdQcVdr3vekbjs502b2PQV9IehxDbIMfaO4W1rohYS8U7MjwOoDQtXz0n17gMSmljoURIHhiBOoMiAw==",
+        "signature_kind": "ed25519"
+      }
+    },
+    {
+      "revision": 25,
+      "record_type": "candidate.received",
+      "payload": {
+        "actor_id": "human:owner",
+        "candidate_id": "candidate:v1:6b003c4ee7ea81f8293cde9e8dd9b25928a572d170c47ea4054f6df7891cb5d5",
+        "domain_id": "genesis:4ba32ae4682d7a7fa69034ec11154aaab5960b3df4957ea52e946441c68c2d40",
+        "effect_types": [
+          "actor.authorize"
+        ],
+        "key_id": "root-1",
+        "metadata": {},
+        "signature": "ed25519:NlE5jD5FgFvRw3rkvGRGWWtJJT1lr+4KC7sc+g41cKaH+4Vz3n6to/AN7lRzh74a49ZjibQxvdI3H9BmdwQgBg==",
+        "signature_kind": "ed25519"
+      }
+    },
+    {
+      "revision": 29,
+      "record_type": "candidate.received",
+      "payload": {
+        "actor_id": "human:owner",
+        "candidate_id": "candidate:v1:c4bc0bfa7247a0d5a996ad3f4566183f8268d0a299081a60877a3311ea6d7057",
+        "domain_id": "genesis:4ba32ae4682d7a7fa69034ec11154aaab5960b3df4957ea52e946441c68c2d40",
+        "effect_types": [
+          "actor.authorize"
+        ],
+        "key_id": "root-1",
+        "metadata": {},
+        "signature": "ed25519:xIii3zx1K5b4iQzqiOd4NN9dS7O6dx3rxdZjbnLyac61Fyzbfk0gs4F5yy1YC5YK14LnBSpb7m8RbBe5E+NXCQ==",
+        "signature_kind": "ed25519"
+      }
+    },
+    {
+      "revision": 33,
+      "record_type": "candidate.received",
+      "payload": {
+        "actor_id": "human:owner",
+        "candidate_id": "candidate:v1:b5f4c914d7cf03b179c0d8d47d4f325a20387a006028ec298ff54a9ed7c27db8",
+        "domain_id": "genesis:4ba32ae4682d7a7fa69034ec11154aaab5960b3df4957ea52e946441c68c2d40",
+        "effect_types": [
+          "actor.authorize"
+        ],
+        "key_id": "root-1",
+        "metadata": {},
+        "signature": "ed25519:bmIBeVEJZtBWtd7UUpuNURZF94/krLrRDjyfd1vyFv6yV/ga028DjHmZODZX+1pcRPXZy7hU4RVbFJMqeXREDA==",
+        "signature_kind": "ed25519"
+      }
+    },
+    {
+      "revision": 37,
+      "record_type": "candidate.received",
+      "payload": {
+        "actor_id": "human:owner",
+        "candidate_id": "candidate:v1:ba1f5094fac8e83cb5135f052901e9ec91175b4fea3442b268523d10438851e6",
+        "domain_id": "genesis:4ba32ae4682d7a7fa69034ec11154aaab5960b3df4957ea52e946441c68c2d40",
+        "effect_types": [
+          "actor.authorize"
+        ],
+        "key_id": "root-1",
+        "metadata": {},
+        "signature": "ed25519:B07Ib0KVk+qemL1g6tGekPGLJzLM8kZXhwKk4aaxN04SpCGYIC5Zpb9kXS200bGjialf68sghI5REca1miuwAw==",
+        "signature_kind": "ed25519"
+      }
+    },
+    {
+      "revision": 41,
+      "record_type": "candidate.received",
+      "payload": {
+        "actor_id": "human:owner",
+        "candidate_id": "candidate:v1:2aae6bd6dcba64faff8e1441967a3a2e924da5a48c02ea6fa45a267c3fc8b70a",
+        "domain_id": "genesis:4ba32ae4682d7a7fa69034ec11154aaab5960b3df4957ea52e946441c68c2d40",
+        "effect_types": [
+          "actor.authorize",
+          "worker.register"
+        ],
+        "key_id": "root-1",
+        "metadata": {},
+        "signature": "ed25519:cOJm/j6eAkxEYAbgDXRnB2uo1SQGkIDYVaCCWHwQyyFawfcuuj33tetJamGr2uJ73GSYE6ktrZpsjaV5rKoZBA==",
+        "signature_kind": "ed25519"
+      }
+    },
+    {
+      "revision": 46,
+      "record_type": "candidate.received",
+      "payload": {
+        "actor_id": "human:owner",
+        "candidate_id": "candidate:v1:71bc3fb516b1a99f7ca52219f87db3ba818015a4008fb35f97451b8753caf280",
+        "domain_id": "genesis:4ba32ae4682d7a7fa69034ec11154aaab5960b3df4957ea52e946441c68c2d40",
+        "effect_types": [
+          "actor.authorize",
+          "worker.register"
+        ],
+        "key_id": "root-1",
+        "metadata": {},
+        "signature": "ed25519:d7cb93eWe3E3xnoGouw1fhQfjFhaTgad8Jj34MTD6x3cKXbo/4UM6iKQAaH4cCiiSWXnPuN476mUTvuHXsfsDA==",
+        "signature_kind": "ed25519"
+      }
+    },
+    {
+      "revision": 51,
+      "record_type": "candidate.received",
+      "payload": {
+        "actor_id": "human:owner",
+        "candidate_id": "candidate:v1:9832e90875be3d21f16e764ab3569e52bae4acf785a0f8ea4441b03192580237",
+        "domain_id": "genesis:4ba32ae4682d7a7fa69034ec11154aaab5960b3df4957ea52e946441c68c2d40",
+        "effect_types": [
+          "actor.authorize",
+          "worker.register"
+        ],
+        "key_id": "root-1",
+        "metadata": {},
+        "signature": "ed25519:i5BRuegwmqFgLyv8b3PbNCA43wJUkFraqTx+yDoEx6S317GDVea+77oPWObSBW+/rcALZ0WjkAUumdr4QDqhBA==",
+        "signature_kind": "ed25519"
+      }
+    },
+    {
+      "revision": 56,
+      "record_type": "candidate.received",
+      "payload": {
+        "actor_id": "human:owner",
+        "candidate_id": "candidate:v1:313024da372ccd230a15224a4ed795c3400a41e8b76d4b865eeae1bf1240f345",
+        "domain_id": "genesis:4ba32ae4682d7a7fa69034ec11154aaab5960b3df4957ea52e946441c68c2d40",
+        "effect_types": [
+          "actor.authorize",
+          "worker.register"
+        ],
+        "key_id": "root-1",
+        "metadata": {},
+        "signature": "ed25519:OS0nxBKoGWTzunepYOtFGX+DKZK6KLDx/+9LwSbpEG2G5ptSczlyVHOn/THZ7JK7fItePsqr6F9pFlLde551Dg==",
+        "signature_kind": "ed25519"
+      }
+    },
+    {
+      "revision": 61,
+      "record_type": "candidate.received",
+      "payload": {
+        "actor_id": "human:owner",
+        "candidate_id": "candidate:v1:5f973ae01719faae80cce5aafa60982b82240e7232a7d75d9e9a85dd5a532b73",
+        "domain_id": "genesis:4ba32ae4682d7a7fa69034ec11154aaab5960b3df4957ea52e946441c68c2d40",
+        "effect_types": [
+          "actor.authorize",
+          "worker.register"
+        ],
+        "key_id": "root-1",
+        "metadata": {},
+        "signature": "ed25519:NKQU5kcP+BSyAb1jrEPc7znBf2EDLN6+MxtQwl8uN86tlCJ+izANK/Jy3CUJWiATjiYbWTSvzPget8JdFBAEAA==",
+        "signature_kind": "ed25519"
+      }
+    },
+    {
+      "revision": 66,
+      "record_type": "candidate.received",
+      "payload": {
+        "actor_id": "human:owner",
+        "candidate_id": "candidate:v1:21f19b7f916ef9e1425018cd68f6571c786108e8d34d08eb18f63f435e106740",
+        "domain_id": "genesis:4ba32ae4682d7a7fa69034ec11154aaab5960b3df4957ea52e946441c68c2d40",
+        "effect_types": [
+          "actor.authorize",
+          "worker.register"
+        ],
+        "key_id": "root-1",
+        "metadata": {},
+        "signature": "ed25519:Lkkdl0xPKM9c1Av/N2A8FJp6pzwzLtN1XYMVf0+rqtWR6Ubyq3oZ5o7Mt75LZ9GbR06SbEw7xIQKQJJfCkpkAA==",
+        "signature_kind": "ed25519"
+      }
+    },
+    {
+      "revision": 73,
+      "record_type": "candidate.received",
+      "payload": {
+        "actor_id": "claim-planner",
+        "candidate_id": "candidate:v1:45cc9cd42013d046e9f61d4506706f853ab85c53c3678791bfb1045bf3eeef32",
+        "claim_id": "lease:94fb21fd69be51cc1be89d4e3e23783ba564345871869b49b6f7084a0ed1f2fb",
+        "contract_id": "task:v5:e3c49acac6fc7b706227ffbae43cf7e0c3c35bbf7a5ca2a673aabeaf3c188848",
+        "domain_id": "genesis:4ba32ae4682d7a7fa69034ec11154aaab5960b3df4957ea52e946441c68c2d40",
+        "effect_types": [
+          "contract.declare",
+          "contract.declare",
+          "contract.declare"
+        ],
+        "key_id": "worker-2645b953f3584043",
+        "metadata": {
+          "completion_tokens": 99,
+          "model": "deepseek-flash",
+          "prompt_tokens": 3311,
+          "provider": "api.deepseek.com",
+          "total_tokens": 3410,
+          "worker_profile": "claim-review-planner"
+        },
+        "raw_output": "/plan {\"reason\": \"The root Contract requires compiling five bounded stages (assessor, reviser, gate, semantic, acceptor) with distinct capabilities, pools, activation dependencies, and handoff receipts. The three base inputs are disclosed and frozen, but the stage decomposition, capability routing, and activation wiring must be created through the planner mechanism before any stage can execute. This requires planning-stage tasks to establish the assessor stage first, since its draft_checks receipt gates all downstream stages.\"}",
+        "signature": "ed25519:CSu/3+UCxnm391wS/gPzYIMxMZnn7pHmpksFXTVtWqfA9JChi+5EBvmiPpfCe29Qtskp6JohQ3O9AzbXCt/5Dw==",
+        "signature_kind": "ed25519"
+      }
+    },
+    {
+      "revision": 90,
+      "record_type": "candidate.received",
+      "payload": {
+        "actor_id": "claim-planner",
+        "candidate_id": "candidate:v1:a6a7b3fa9aa367482844e5708942343b6aa4120e4a745d53cf497ac08d6b5eb9",
+        "claim_id": "lease:09c62a4c934477a60a99aaa99e6fdedbdd1f09ab2849e3e85f4259c8e04456e7",
+        "contract_id": "task:v5:ab196d783fed7530e55c4c2c7d9792ce3862d61686a851d7e3159fc075dbe008",
+        "domain_id": "genesis:4ba32ae4682d7a7fa69034ec11154aaab5960b3df4957ea52e946441c68c2d40",
+        "effect_types": [
+          "asset.content.publish",
+          "asset.definition.publish",
+          "asset.assert"
+        ],
+        "key_id": "worker-2645b953f3584043",
+        "metadata": {
+          "completion_tokens": 1154,
+          "model": "deepseek-flash",
+          "prompt_tokens": 3648,
+          "provider": "api.deepseek.com",
+          "total_tokens": 4802,
+          "worker_profile": "claim-review-planner"
+        },
+        "raw_output": "/exec {\"outputs\":{\"plan_draft_130f62058dd0fe2beaae8549\":\"{\\\"goals\\\": [\\\"Compile the five bounded stages (assessor, reviser, gate, semantic, acceptor) with distinct capabilities, pools, activation dependencies, and handoff receipts, so that the root Contract's single business output review_report can be produced and independently accepted.\\\", \\\"Establish the assessor stage first because its draft_checks receipt gates all downstream stages.\\\", \\\"Ensure the reviser is the only model-backed revision stage, preserving each original claim's exact ID and text and attaching explicit evidence_bindings with excerpt_id and literal quote.\\\", \\\"Ensure the gate performs deterministic final structural checks and accepts only one revision depth, publishing structural_receipt.\\\", \\\"Ensure the semantic stage performs the separate model-backed semantic check with the exact claim-semantic-review-v1 JSON fields.\\\", \\\"Ensure the acceptor validates the semantic review and returns /attest for the root review_report output with policy version claim-review-closure-v1 and evidence asset IDs exactly [research_result, draft_report, review_policy].\\\"], \\\"evidence_needs\\\": [\\\"research_result: source claims, excerpts (excerpt-design, excerpt-results, excerpt-limitations) for literal quote membership and evidence binding checks.\\\", \\\"draft_report: claims with claim_id, original_text, verdict, evidence_excerpt_ids, rationale, revised_text, evidence_bindings; revised_summary; limitations.\\\", \\\"review_policy: schema claim-review-policy-v1, max_revisions 1, five distinct actors (claim-assessor, claim-reviser, claim-gate, claim-semantic, claim-acceptor).\\\", \\\"draft_checks receipt (claim-draft-checks-v1) from assessor for downstream activation.\\\", \\\"structural_receipt from gate for semantic and acceptor activation.\\\", \\\"semantic_review (claim-semantic-review-v1) from semantic stage for acceptor activation.\\\"], \\\"uncertainties\\\": [\\\"Whether the draft_report's claim original_text values match the research_result claim texts exactly, since the draft_report original_text differs from the research_result claim text; the reviser must preserve each original claim's exact ID and text.\\\", \\\"Whether the draft_report's evidence_bindings are present and contain literal quotes matching research_result excerpts, since the disclosed draft_report claims do not show evidence_bindings fields.\\\", \\\"Whether the draft_report's verdict taxonomy assignments align with the policy definitions (supported/overstated/unsupported) and whether the gate will accept exactly one revision depth.\\\", \\\"Whether the semantic stage will accept the report given causal language, mean-versus-probability claims, and two-campus sampling limits.\\\", \\\"Whether a normal protocol retry could consume or silently replace an already published revision, which must be avoided.\\\"], \\\"proposed_steps\\\": [\\\"Create the assessor stage task with required capability claim.review.assess in pool validation, activation research_result AND draft_report AND review_policy, receiving the three base inputs, running deterministic checks, and publishing the exact claim-draft-checks-v1 receipt as draft_checks.\\\", \\\"Create the reviser stage task with required capability claim.review.revise in pool reasoning, activation research_result AND draft_report AND review_policy AND draft_checks, allowed to invoke the model once and return only /exec review_report or /fail, preserving each original claim's exact ID and text, attaching explicit evidence_bindings with excerpt_id and literal quote, and never inventing information absent from research_result.\\\", \\\"Create the gate stage task with required capability claim.review.gate in pool validation, activation research_result AND draft_report AND review_policy AND draft_checks AND review_report, performing deterministic final structural checks, accepting only one revision depth, and publishing structural_receipt.\\\", \\\"Create the semantic stage task with required capability claim.review.semantic in pool verification, activation research_result AND draft_report AND review_policy AND draft_checks AND review_report AND structural_receipt, allowed to invoke the model once and return only /exec semantic_review or /fail, checking exact original text, complete citation bindings, causal language, mean-versus-probability claims, and two-campus sampling limits, with JSON fields schema claim-semantic-review-v1, source_asset_id, report_asset_id, policy_asset_id, gate_receipt_asset_id, verdict, and non-empty reason.\\\", \\\"Create the acceptor stage task with required capability claim.review.accept in pool verification, activation research_result AND draft_report AND review_policy AND draft_checks AND review_report AND structural_receipt AND semantic_review, validating the semantic review and returning /attest for the root Contract's exact review_report output with policy version claim-review-closure-v1 and evidence asset IDs exactly [research_result, draft_report, review_policy].\\\", \\\"Wire the stable stage handoffs and activation dependencies so that draft_checks gates all downstream stages, structural_receipt gates semantic and acceptor, and semantic_review gates acceptor.\\\", \\\"Ensure the root acceptance policy is independent, versioned claim-review-closure-v1, requires claim.review.accept, and names the three base Asset IDs as evidence_asset_ids.\\\", \\\"Ensure no actor performs another stage and that a normal protocol retry may recover a failed stage without consuming or silently replacing an already published revision.\\\", \\\"If the gate fails, allow it to publish a durable failure report and leave the root without qualification as an explicit blocked outcome, not an automatic repair controller.\\\"]}\"}}",
+        "signature": "ed25519:YacqYpCNsCXNL3lRVBnXUbegn+CXK0WZP0fG7MqReA3dHLCTA8N62UgO8AvdPEZ3uJAJPJg7sB+Cpv/fOONVDw==",
+        "signature_kind": "ed25519"
+      }
+    },
+    {
+      "revision": 98,
+      "record_type": "lifecycle.terminal",
+      "payload": {
+        "contract_id": "task:v5:ab196d783fed7530e55c4c2c7d9792ce3862d61686a851d7e3159fc075dbe008",
+        "terminal": "complete"
+      }
+    },
+    {
+      "revision": 106,
+      "record_type": "candidate.received",
+      "payload": {
+        "actor_id": "claim-planner",
+        "candidate_id": "candidate:v1:1e8a5624a646e4943fc2d3f5703333350e9f68e327633b770e62750809a9a102",
+        "claim_id": "lease:758532b673d90d362e325c39f0defb4e86f66a8646cc172e4176f4a931089005",
+        "contract_id": "task:v5:6958a5551b8b3e1728673a86fc0707699d335299fc2d76a25452ab863370bd62",
+        "domain_id": "genesis:4ba32ae4682d7a7fa69034ec11154aaab5960b3df4957ea52e946441c68c2d40",
+        "effect_types": [
+          "asset.content.publish",
+          "asset.definition.publish",
+          "asset.assert"
+        ],
+        "key_id": "worker-2645b953f3584043",
+        "metadata": {
+          "completion_tokens": 771,
+          "model": "deepseek-flash",
+          "prompt_tokens": 3701,
+          "provider": "api.deepseek.com",
+          "total_tokens": 4472,
+          "worker_profile": "claim-review-planner"
+        },
+        "raw_output": "/exec {\"outputs\":{\"plan_dependencies_130f62058dd0fe2beaae8549\":\"{\\\"producers\\\": {\\\"research_result\\\": \\\"external base asset (no producer stage)\\\", \\\"draft_report\\\": \\\"external base asset (no producer stage)\\\", \\\"review_policy\\\": \\\"external base asset (no producer stage)\\\", \\\"draft_checks\\\": \\\"assessor stage (capability claim.review.assess, pool validation)\\\", \\\"review_report\\\": \\\"reviser stage (capability claim.review.revise, pool reasoning)\\\", \\\"structural_receipt\\\": \\\"gate stage (capability claim.review.gate, pool validation)\\\", \\\"semantic_review\\\": \\\"semantic stage (capability claim.review.semantic, pool verification)\\\", \\\"review_report_acceptance\\\": \\\"acceptor stage (capability claim.review.accept, pool verification)\\\"}, \\\"consumers\\\": {\\\"research_result\\\": [\\\"assessor\\\", \\\"reviser\\\", \\\"gate\\\", \\\"semantic\\\", \\\"acceptor\\\"], \\\"draft_report\\\": [\\\"assessor\\\", \\\"reviser\\\", \\\"gate\\\", \\\"semantic\\\", \\\"acceptor\\\"], \\\"review_policy\\\": [\\\"assessor\\\", \\\"reviser\\\", \\\"gate\\\", \\\"semantic\\\", \\\"acceptor\\\"], \\\"draft_checks\\\": [\\\"reviser\\\", \\\"gate\\\", \\\"semantic\\\", \\\"acceptor\\\"], \\\"review_report\\\": [\\\"gate\\\", \\\"semantic\\\", \\\"acceptor\\\"], \\\"structural_receipt\\\": [\\\"semantic\\\", \\\"acceptor\\\"], \\\"semantic_review\\\": [\\\"acceptor\\\"]}, \\\"missing_inputs\\\": [\\\"draft_report claims lack evidence_bindings fields (excerpt_id + literal quote) required by the reviser; reviser must construct them from research_result excerpts.\\\", \\\"draft_report original_text values differ from research_result claim texts; reviser must preserve each original claim's exact ID and text per policy, so the authoritative original text source must be fixed before revision.\\\", \\\"No disclosed artifact confirms draft_report verdict taxonomy alignment with policy definitions (supported/overstated/unsupported) prior to gate evaluation.\\\"], \\\"cycles\\\": [], \\\"parallel_groups\\\": [[\\\"assessor\\\"], [\\\"reviser\\\"], [\\\"gate\\\"], [\\\"semantic\\\"], [\\\"acceptor\\\"]], \\\"capability_needs\\\": [\\\"claim.review.assess (pool validation)\\\", \\\"claim.review.revise (pool reasoning, single model invocation)\\\", \\\"claim.review.gate (pool validation, deterministic)\\\", \\\"claim.review.semantic (pool verification, single model invocation)\\\", \\\"claim.review.accept (pool verification)\\\"], \\\"authority_risks\\\": [\\\"Reviser must not invent information absent from research_result; evidence_bindings must use literal quotes from disclosed excerpts.\\\", \\\"Gate must accept exactly one revision depth (max_revisions 1) and must not auto-repair; on failure it publishes a durable failure report leaving root unqualified.\\\", \\\"Acceptor must attest only the root review_report with policy version claim-review-closure-v1 and evidence asset IDs exactly [research_result, draft_report, review_policy].\\\", \\\"No actor may perform another stage's function; stage isolation must be enforced.\\\", \\\"A normal protocol retry must not consume or silently replace an already published revision.\\\"], \\\"allowance_needs\\\": [\\\"1 causal allowance unit consumed for this dependency-mapping stage.\\\", \\\"Downstream stages require separate allowances: assessor, reviser, gate, semantic, acceptor each need their own execution allowance; planning-stage tasks would require >=3 units each if invoked.\\\"]}\"}}",
+        "signature": "ed25519:pl7H2ZNQLaKi99gohjfOENTXeN+mPciAaeUXqx9lJF2zAKkoropiu92Axa2xqHfR6TxCnReU7dxq7VWHWiaPBQ==",
+        "signature_kind": "ed25519"
+      }
+    },
+    {
+      "revision": 114,
+      "record_type": "lifecycle.terminal",
+      "payload": {
+        "contract_id": "task:v5:6958a5551b8b3e1728673a86fc0707699d335299fc2d76a25452ab863370bd62",
+        "terminal": "complete"
+      }
+    },
+    {
+      "revision": 122,
+      "record_type": "candidate.received",
+      "payload": {
+        "actor_id": "claim-planner",
+        "candidate_id": "candidate:v1:fca60f2f714a28099997b98f0031ead423ad6154032fe0a1c18b8de04b177da6",
+        "claim_id": "lease:03a3d8b1dbd5cd393cfb28ff3144d0fb6239b7ee80715aa05c026df10e21783f",
+        "contract_id": "task:v5:feca76f736f546ac57fd7c88c3e09f84131fe6f8ad6fd1201485a25cce150a05",
+        "domain_id": "genesis:4ba32ae4682d7a7fa69034ec11154aaab5960b3df4957ea52e946441c68c2d40",
+        "effect_types": [
+          "contract.declare",
+          "contract.declare",
+          "contract.declare",
+          "contract.declare",
+          "contract.declare"
+        ],
+        "key_id": "worker-2645b953f3584043",
+        "metadata": {
+          "completion_tokens": 1185,
+          "model": "deepseek-flash",
+          "prompt_tokens": 5349,
+          "provider": "api.deepseek.com",
+          "total_tokens": 6534,
+          "worker_profile": "claim-review-planner"
+        },
+        "raw_output": "/exec {\"outputs\":{\"planning_blueprint\":\"{\\\"contracts\\\":[{\\\"activation\\\":\\\"draft_report AND research_result AND review_policy\\\",\\\"budget\\\":1,\\\"capability_needs\\\":[\\\"claim.review.assess\\\"],\\\"delegation_capabilities\\\":[],\\\"delegation_pools\\\":[],\\\"description\\\":\\\"Perform deterministic draft checks on the disclosed draft_report against research_result and review_policy, verifying claim IDs, verdict taxonomy alignment, and evidence_excerpt_ids membership; publish the claim-draft-checks-v1 receipt as draft_checks.\\\",\\\"inputs\\\":[\\\"draft_report\\\",\\\"research_result\\\",\\\"review_policy\\\"],\\\"labels\\\":[\\\"draft_report\\\",\\\"research_result\\\",\\\"review_policy\\\"],\\\"name\\\":\\\"assessor_stage\\\",\\\"outputs\\\":[\\\"draft_checks\\\"],\\\"pool_needs\\\":[\\\"validation\\\"],\\\"tool_scope\\\":[]},{\\\"activation\\\":\\\"draft_report AND research_result AND review_policy AND draft_checks\\\",\\\"budget\\\":1,\\\"capability_needs\\\":[\\\"claim.review.revise\\\"],\\\"delegation_capabilities\\\":[],\\\"delegation_pools\\\":[],\\\"description\\\":\\\"Produce the required review_report by revising the draft_report using only grounded evidence from research_result and review_policy, preserving each original claim's exact ID and text, attaching explicit evidence_bindings with excerpt_id and literal quote, and never inventing information absent from the disclosed inputs.\\\",\\\"inputs\\\":[\\\"draft_report\\\",\\\"research_result\\\",\\\"review_policy\\\",\\\"draft_checks\\\"],\\\"labels\\\":[\\\"draft_report\\\",\\\"research_result\\\",\\\"review_policy\\\"],\\\"name\\\":\\\"reviser_stage\\\",\\\"outputs\\\":[\\\"review_report\\\"],\\\"pool_needs\\\":[\\\"reasoning\\\"],\\\"tool_scope\\\":[]},{\\\"activation\\\":\\\"draft_report AND research_result AND review_policy AND draft_checks AND review_report\\\",\\\"budget\\\":1,\\\"capability_needs\\\":[\\\"claim.review.gate\\\"],\\\"delegation_capabilities\\\":[],\\\"delegation_pools\\\":[],\\\"description\\\":\\\"Perform deterministic final structural checks on review_report against draft_report, research_result, review_policy, and draft_checks, accepting only one revision depth per max_revisions 1; publish structural_receipt and, on failure, a durable failure report leaving the root unqualified.\\\",\\\"inputs\\\":[\\\"draft_report\\\",\\\"research_result\\\",\\\"review_policy\\\",\\\"draft_checks\\\",\\\"review_report\\\"],\\\"labels\\\":[\\\"draft_report\\\",\\\"research_result\\\",\\\"review_policy\\\"],\\\"name\\\":\\\"gate_stage\\\",\\\"outputs\\\":[\\\"structural_receipt\\\"],\\\"pool_needs\\\":[\\\"validation\\\"],\\\"tool_scope\\\":[]},{\\\"activation\\\":\\\"draft_report AND research_result AND review_policy AND draft_checks AND review_report AND structural_receipt\\\",\\\"budget\\\":1,\\\"capability_needs\\\":[\\\"claim.review.semantic\\\"],\\\"delegation_capabilities\\\":[],\\\"delegation_pools\\\":[],\\\"description\\\":\\\"Perform the separate model-backed semantic check on review_report against research_result, draft_report, review_policy, draft_checks, and structural_receipt, checking exact original text, complete citation bindings, causal language, mean-versus-probability claims, and two-campus sampling limits; publish semantic_review with the exact claim-semantic-review-v1 JSON fields.\\\",\\\"inputs\\\":[\\\"draft_report\\\",\\\"research_result\\\",\\\"review_policy\\\",\\\"draft_checks\\\",\\\"review_report\\\",\\\"structural_receipt\\\"],\\\"labels\\\":[\\\"draft_report\\\",\\\"research_result\\\",\\\"review_policy\\\"],\\\"name\\\":\\\"semantic_stage\\\",\\\"outputs\\\":[\\\"semantic_review\\\"],\\\"pool_needs\\\":[\\\"verification\\\"],\\\"tool_scope\\\":[]},{\\\"activation\\\":\\\"draft_report AND research_result AND review_policy AND draft_checks AND review_report AND structural_receipt AND semantic_review\\\",\\\"budget\\\":1,\\\"capability_needs\\\":[\\\"claim.review.accept\\\"],\\\"delegation_capabilities\\\":[],\\\"delegation_pools\\\":[],\\\"description\\\":\\\"Validate the semantic review and independently accept the root Contract's review_report output by returning /attest against parent Contract task:v5:e3c49acac6fc7b706227ffbae43cf7e0c3c35bbf7a5ca2a673aabeaf3c188848 with policy version claim-review-closure-v1 and evidence asset IDs exactly [asset:v1:e1d579aa9ac4ed7a4f61a1658d0220dc9ab2d2ada054f70011dbd9343f414e66, asset:v1:1f706235784187af6103250bff0fbb027c7d9a801cc47c288879d61fc0c335ea, asset:v1:777dced8b2d5ce99a408ee37e727e2fa02bb4c3f44640f46a573441d8a4c6a60]; publish review_report_acceptance receipt.\\\",\\\"inputs\\\":[\\\"draft_report\\\",\\\"research_result\\\",\\\"review_policy\\\",\\\"draft_checks\\\",\\\"review_report\\\",\\\"structural_receipt\\\",\\\"semantic_review\\\"],\\\"labels\\\":[\\\"draft_report\\\",\\\"research_result\\\",\\\"review_policy\\\"],\\\"name\\\":\\\"acceptor_stage\\\",\\\"outputs\\\":[\\\"review_report_acceptance\\\"],\\\"pool_needs\\\":[\\\"verification\\\"],\\\"tool_scope\\\":[]}]}\"}}",
+        "signature": "ed25519:sSkQsgG865d35KRZaekhvr9lo1oGaGOuvRmG9baO0YRH3nJ+cQIpH2ST1RCTMnuW7WawJEg1Cs9EHEOC1OmtDg==",
+        "signature_kind": "ed25519"
+      }
+    },
+    {
+      "revision": 145,
+      "record_type": "candidate.received",
+      "payload": {
+        "actor_id": "claim-assessor",
+        "candidate_id": "candidate:v1:eec08130bfa816bf061b0dd51d9d0557a09e296992b87efcd9e8c09fe9b08441",
+        "claim_id": "lease:75f2ff1facc7000dc0afe55734372ddc574f47f5e3100db2e95daa443c435388",
+        "contract_id": "task:v4:e27351bfcb012be03ad5241f39efd10b35fb67e7b8ebf31f11c532d403481c54",
+        "domain_id": "genesis:4ba32ae4682d7a7fa69034ec11154aaab5960b3df4957ea52e946441c68c2d40",
+        "effect_types": [
+          "asset.content.publish",
+          "asset.definition.publish",
+          "asset.assert"
+        ],
+        "key_id": "worker-85cd60129fe9c42b",
+        "metadata": {},
+        "raw_output": "/exec {\"outputs\": {\"draft_checks\": \"{\\\"checks\\\": [{\\\"check\\\": \\\"original-text-v1\\\", \\\"findings\\\": \\\"original-text-mismatch:claim-1\\\\noriginal-text-mismatch:claim-2\\\\noriginal-text-mismatch:claim-3\\\", \\\"passed\\\": false, \\\"semantic_checked\\\": false}, {\\\"check\\\": \\\"evidence-bindings-v1\\\", \\\"findings\\\": \\\"missing-evidence-bindings:claim-1\\\\nmissing-evidence-bindings:claim-2\\\\nmissing-evidence-bindings:claim-3\\\", \\\"passed\\\": false, \\\"semantic_checked\\\": false}], \\\"draft_asset_id\\\": \\\"asset:v1:1f706235784187af6103250bff0fbb027c7d9a801cc47c288879d61fc0c335ea\\\", \\\"max_revisions\\\": 1, \\\"passed\\\": false, \\\"policy_asset_id\\\": \\\"asset:v1:777dced8b2d5ce99a408ee37e727e2fa02bb4c3f44640f46a573441d8a4c6a60\\\", \\\"schema\\\": \\\"claim-draft-checks-v1\\\", \\\"source_asset_id\\\": \\\"asset:v1:e1d579aa9ac4ed7a4f61a1658d0220dc9ab2d2ada054f70011dbd9343f414e66\\\"}\"}}",
+        "signature": "ed25519:bIcEa+p0eqSbbhWIaD6KXx4kmkpm3znMoEuj1e7JCqEYey9HhYcAVxwzMQoyl4TcTnp8CG78E3g+CgqIpI6eCQ==",
+        "signature_kind": "ed25519"
+      }
+    },
+    {
+      "revision": 153,
+      "record_type": "lifecycle.terminal",
+      "payload": {
+        "contract_id": "task:v4:e27351bfcb012be03ad5241f39efd10b35fb67e7b8ebf31f11c532d403481c54",
+        "terminal": "complete"
+      }
+    },
+    {
+      "revision": 161,
+      "record_type": "candidate.received",
+      "payload": {
+        "actor_id": "claim-reviser",
+        "candidate_id": "candidate:v1:1a3d10136e74b26724c0db975ade0007f88cb929398d030c259c846a51c22c53",
+        "claim_id": "lease:704aa72716566ce10cc810a55e54f481220fcdbd6df3e73992cc83ff10f7ce9a",
+        "contract_id": "task:v4:7f849b2d810cf29c591a414d222d7562ed4113e852510262117d68d176b020c1",
+        "domain_id": "genesis:4ba32ae4682d7a7fa69034ec11154aaab5960b3df4957ea52e946441c68c2d40",
+        "effect_types": [
+          "asset.content.publish",
+          "asset.definition.publish",
+          "asset.assert"
+        ],
+        "key_id": "worker-49d83cae763f36ca",
+        "metadata": {
+          "completion_tokens": 858,
+          "model": "deepseek-flash",
+          "prompt_tokens": 2768,
+          "provider": "api.deepseek.com",
+          "total_tokens": 3626,
+          "worker_profile": "openai-compatible-v1"
+        },
+        "raw_output": "/exec {\"outputs\":{\"review_report\":\"{\\\"claims\\\":[{\\\"claim_id\\\":\\\"claim-1\\\",\\\"evidence_bindings\\\":[{\\\"excerpt_id\\\":\\\"excerpt-results\\\",\\\"quote\\\":\\\"the at-least-seven-hour group had a higher mean examination score than the less-than-six-hour group. The adjusted association remained after controlling for age, year of study, and self-reported employment hours.\\\"},{\\\"excerpt_id\\\":\\\"excerpt-design\\\",\\\"quote\\\":\\\"Design: cross-sectional survey; sleep duration and examination score were collected during the same end-of-term questionnaire. Sleep was self-reported.\\\"}],\\\"original_text\\\":\\\"Students who sleep at least seven hours perform better on examinations.\\\",\\\"revised_text\\\":\\\"In this cross-sectional survey, students who reported sleeping at least seven hours had a higher mean examination score than students reporting less than six hours, and this association remained after adjustment for age, year of study, and self-reported employment hours; the design does not support a causal interpretation.\\\",\\\"verdict\\\":\\\"supported\\\"},{\\\"claim_id\\\":\\\"claim-2\\\",\\\"evidence_bindings\\\":[{\\\"excerpt_id\\\":\\\"excerpt-results\\\",\\\"quote\\\":\\\"No random assignment or longitudinal follow-up was performed.\\\"},{\\\"excerpt_id\\\":\\\"excerpt-design\\\",\\\"quote\\\":\\\"Design: cross-sectional survey; sleep duration and examination score were collected during the same end-of-term questionnaire.\\\"}],\\\"original_text\\\":\\\"Getting at least seven hours of sleep improves examination performance.\\\",\\\"revised_text\\\":\\\"Getting at least seven hours of sleep was associated with higher examination performance in this cross-sectional survey, but the design does not establish that sleep duration improves examination performance.\\\",\\\"verdict\\\":\\\"overstated\\\"},{\\\"claim_id\\\":\\\"claim-3\\\",\\\"evidence_bindings\\\":[{\\\"excerpt_id\\\":\\\"excerpt-limitations\\\",\\\"quote\\\":\\\"Limitations: residual confounding, recall error in self-reported sleep, two-campus sampling, and the single examination outcome limit causal and population-wide interpretation.\\\"},{\\\"excerpt_id\\\":\\\"excerpt-design\\\",\\\"quote\\\":\\\"The sample was recruited from two campuses.\\\"}],\\\"original_text\\\":\\\"The finding applies broadly to university students because the adjusted association was robust.\\\",\\\"revised_text\\\":\\\"The cited excerpts support only a cross-sectional association between sleep duration and examination score in a two-campus sample; they do not support broad application to university students.\\\",\\\"verdict\\\":\\\"unsupported\\\"}],\\\"draft_asset_id\\\":\\\"asset:v1:1f706235784187af6103250bff0fbb027c7d9a801cc47c288879d61fc0c335ea\\\",\\\"limitations\\\":[\\\"The evidence comes from a cross-sectional survey, so it cannot establish temporal order or causation between sleep duration and examination scores.\\\",\\\"Sleep duration and employment hours were self-reported, which may introduce recall or reporting bias.\\\",\\\"The sampling method and sample representativeness are not described in the cited excerpts, limiting generalizability.\\\",\\\"No random assignment or longitudinal follow-up was used, so unmeasured confounding cannot be ruled out.\\\",\\\"Effect sizes and confidence intervals are not reported in the cited excerpts, so the magnitude and precision of the association are unknown.\\\"],\\\"max_revisions\\\":1,\\\"policy_asset_id\\\":\\\"asset:v1:777dced8b2d5ce99a408ee37e727e2fa02bb4c3f44640f46a573441d8a4c6a60\\\",\\\"revised_summary\\\":\\\"The cited evidence supports an association between longer sleep duration and higher examination scores in a cross-sectional survey, including an adjusted association after controlling for age, year of study, and self-reported employment hours. The evidence does not support causal, directional, or population-wide claims, and any such language should be revised to association language.\\\",\\\"schema\\\":\\\"claim-review-report-v1\\\",\\\"source_asset_id\\\":\\\"asset:v1:e1d579aa9ac4ed7a4f61a1658d0220dc9ab2d2ada054f70011dbd9343f414e66\\\"}\"}}",
+        "signature": "ed25519:lLMxZ1RE+uuJJUIog4IBK2/Xc/yFlxGAMkMAMblVdZv+cp8Vcs9Z9GvVrIc5hyhCM8G2uf9J4SPTAfUigOj6BA==",
+        "signature_kind": "ed25519"
+      }
+    },
+    {
+      "revision": 169,
+      "record_type": "lifecycle.terminal",
+      "payload": {
+        "contract_id": "task:v4:7f849b2d810cf29c591a414d222d7562ed4113e852510262117d68d176b020c1",
+        "terminal": "complete"
+      }
+    },
+    {
+      "revision": 170,
+      "record_type": "lifecycle.terminal",
+      "payload": {
+        "contract_id": "task:v5:feca76f736f546ac57fd7c88c3e09f84131fe6f8ad6fd1201485a25cce150a05",
+        "terminal": "complete"
+      }
+    },
+    {
+      "revision": 171,
+      "record_type": "lifecycle.terminal",
+      "payload": {
+        "contract_id": "task:v4:d1a1cab14d039ed0fa1a630a94694194dabd67d285b72cfa34660ce1b5ddcb5f",
+        "terminal": "cancelled"
+      }
+    },
+    {
+      "revision": 172,
+      "record_type": "lifecycle.terminal",
+      "payload": {
+        "contract_id": "task:v4:d61332598dec8680a33145a031134600a0cfbc6e3964650dae37062d57095406",
+        "terminal": "cancelled"
+      }
+    }
+  ],
+  "reconstruction": {
+    "status": "passed",
+    "before_digest": "02745938f2b5760aa62d8e25ec172947d595a817831dbceea78c77504898dfa7",
+    "after_digest": "02745938f2b5760aa62d8e25ec172947d595a817831dbceea78c77504898dfa7",
+    "records_unchanged": true
+  }
+}

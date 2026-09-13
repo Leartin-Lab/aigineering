@@ -300,6 +300,12 @@ def materialize_qualification_facts(
     }
     traces: list[TraceEntry] = []
     records: list[RuntimeRecord] = []
+    completed_contracts = []
+    terminal_contracts.update(
+        str(record.payload.get("contract_id", ""))
+        for record in pending_records
+        if record.record_type == "lifecycle.terminal"
+    )
     for contract_id in sorted(causal_ids):
         if contract_id in terminal_contracts:
             continue
@@ -329,4 +335,25 @@ def materialize_qualification_facts(
         trace_fact = trace_record(entry, causal_parents=(terminal.id,))
         traces.append(entry)
         records.extend((terminal, trace_fact))
+        completed_contracts.append(contract)
+        terminal_contracts.add(contract.id)
+    from aigineering.core.fact_reducer import FactReducer
+    from aigineering.core.fact_materialization import (
+        materialize_fact_reduction,
+        trace_records,
+    )
+
+    reducer = FactReducer(store)
+    for contract in completed_contracts:
+        events = reducer.on_contract_completed(
+            contract, terminal_contract_ids=terminal_contracts
+        )
+        child_traces, child_records = materialize_fact_reduction(events, ())
+        traces.extend(child_traces)
+        records.extend((*child_records, *trace_records(child_traces)))
+        terminal_contracts.update(
+            str(record.payload["contract_id"])
+            for record in child_records
+            if record.record_type == "lifecycle.terminal"
+        )
     return tuple(traces), tuple(records)

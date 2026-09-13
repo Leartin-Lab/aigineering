@@ -1,0 +1,11 @@
+{
+  "schema": "claim-review-policy-v1",
+  "max_revisions": 1,
+  "actors": {
+    "assessor": "claim-assessor",
+    "reviser": "claim-reviser",
+    "gate": "claim-gate",
+    "semantic": "claim-semantic",
+    "acceptor": "claim-acceptor"
+  }
+}

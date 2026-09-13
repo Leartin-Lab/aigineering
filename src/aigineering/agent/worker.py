@@ -342,11 +342,11 @@ def _compile_attestation_action(
         raise ValueError("/attest must bind an exact disclosed Asset ID and name")
     rubric_ids = payload.get("rubric_asset_ids", [])
     evidence_ids = payload.get("evidence_asset_ids", [])
-    if not isinstance(rubric_ids, list) or not all(
+    if not isinstance(rubric_ids, (list, tuple)) or not all(
         isinstance(value, str) and value for value in rubric_ids
     ):
         raise ValueError("/attest rubric_asset_ids must be a list of strings")
-    if not isinstance(evidence_ids, list) or not all(
+    if not isinstance(evidence_ids, (list, tuple)) or not all(
         isinstance(value, str) and value for value in evidence_ids
     ):
         raise ValueError("/attest evidence_asset_ids must be a list of strings")

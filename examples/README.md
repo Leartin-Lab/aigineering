@@ -17,6 +17,11 @@ inputs. The linked report records their actual manual outcomes.
 These outcomes show the runtime boundary and the limits of LLM semantic
 verification. They do not establish reliable autonomous correctness.
 
+The experimental [`guarded-claim-review`](guarded-claim-review/README.md)
+adapter composes deterministic assessment and gating, one revision generation,
+semantic review, and dedicated acceptance. It is implemented adapter behavior;
+live closed-loop success remains evidence preparation work.
+
 ## Deterministic validation methods
 
 - [`claim-validation`](claim-validation/README.md) packages exact original-text

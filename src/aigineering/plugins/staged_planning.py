@@ -101,14 +101,11 @@ class StagedPlanningPlugin:
             minting_authority=(),
             tool_scope=(),
         )
-        compile_policy = dict(policy)
-        parent_shapes = (
-            parent.acceptance_policy.get("output_shapes", {})
+        compile_policy = (
+            deep_thaw(parent.acceptance_policy)
             if parent.acceptance_policy is not None
-            else {}
+            else dict(policy)
         )
-        if parent_shapes:
-            compile_policy["output_shapes"] = deep_thaw(parent_shapes)
         compile_contract = _stage_contract(
             parent,
             mode=self.mode,

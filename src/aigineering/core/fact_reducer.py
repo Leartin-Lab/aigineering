@@ -106,9 +106,12 @@ class FactReducer:
     any other shared state.  State changes happen in the caller.
     """
 
-    def __init__(self, store: StoreProtocol, trace: TraceStoreProtocol) -> None:
+    def __init__(
+        self, store: StoreProtocol, trace: TraceStoreProtocol | None = None
+    ) -> None:
         self._store = store
-        self._trace = trace
+        # Kept as an optional compatibility argument; reduction reads facts only.
+        del trace
 
     # -- Public API ---------------------------------------------------------
 
@@ -158,6 +161,18 @@ class FactReducer:
             )
 
         return events
+
+    def on_contract_completed(
+        self, contract: Contract, *, terminal_contract_ids: set[str]
+    ) -> list[FactReducerEvent]:
+        """Reuse child cancellation for a pending independent completion.
+
+        The caller supplies committed and same-batch terminal IDs so an accepted
+        verifier receipt cannot be cancelled while it completes atomically.
+        """
+        return self._detect_unfinished_children(
+            contract, set(), terminal_contract_ids, self._contracts_with(())
+        )
 
     # -- Method result detection --------------------------------------------
 

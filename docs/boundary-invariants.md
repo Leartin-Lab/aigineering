@@ -153,3 +153,11 @@ range, and derivation version, and verification recomputes content from the
 committed source. Invalid ranges, UTF-8 byte splits, mismatched content, or an
 unsupported derivation version fail closed. Semantic similarity cannot satisfy
 an exact derivation policy.
+
+## Acceptance through intermediate plans
+
+A planning compile Contract retains its parent's complete acceptance policy;
+unqualified business output cannot complete that intermediate obligation and
+cancel its prerequisite verification work. Independent root completion uses the
+same unfinished-child cancellation rules as ordinary output completion, in the
+same commitment transaction.

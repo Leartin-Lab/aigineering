@@ -12,6 +12,9 @@ def test_local_validation_adapters_do_not_import_runtime_or_store():
         "src/aigineering/agent/local_worker.py",
         "src/aigineering/business/claim_check_worker.py",
         "src/aigineering/business/claim_checks.py",
+        "src/aigineering/business/claim_review_contracts.py",
+        "src/aigineering/business/claim_review_workers.py",
+        "src/aigineering/business/claim_review_acceptance.py",
     ):
         tree = ast.parse((ROOT / relative).read_text())
         for node in ast.walk(tree):

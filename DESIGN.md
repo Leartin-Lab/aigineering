@@ -483,7 +483,25 @@ Fleet also accepts operator-configured `kind = "local"` Workers from installed
 uses the existing WorkerHost and Candidate path. Registration metadata comes
 from the fleet profile. The business claim validators consume disclosed Assets,
 produce structural assessments or terminal gate failures, and never assert
-semantic correctness. See ADR-024.
+semantic correctness. A local factory is trusted installed code and an explicit
+operator authority; it is not downloaded or selected by a task or model. See
+ADR-024.
+
+The guarded claim-review adapter composes five ordinary stages: a deterministic
+draft assessor, one model-backed revision generation, a deterministic structural
+gate, one model-backed semantic review, and a dedicated acceptor. The acceptor
+attests only after checking exact input and handoff Asset IDs and their
+committed producers. The adapter proves literal evidence bindings and quote
+membership; it does not prove semantic truth. One revision generation is the
+workflow bound, while normal runtime retries remain protocol attempts rather
+than a promise of one HTTP request forever.
+
+Fleet TOML parsing is strict: worker kinds, list fields, capacities, timeout
+values, and retry counts are validated before launch. Timeouts must be finite
+and positive and retries must be non-negative integers. The default network LLM
+adapter reads at most 4 MiB plus one byte to classify an oversized response;
+custom decoded `Transport` mappings are trusted adapter inputs and do not pass
+through that wire-byte bound.
 
 `ToolSpec` is the local executable tool contract. It binds a deterministic
 input/output JSON-schema subset, version, and maximum UTF-8 result size. The
@@ -578,3 +596,9 @@ v0.5.11 extends the local reference runtime. It does not provide:
 
 The release claim is bounded by the tests, conformance vectors, artifact checks,
 and real-LLM scenarios recorded in `reports/`.
+
+Planning compile stages retain the original parent's full acceptance policy.
+Independent qualification and ordinary output completion share unfinished-child
+cancellation, including the intermediate compile task, within commitment.
+See [ADR-025](docs/adr/ADR-025-guarded-review-closure.md) and
+[guarded review evidence](reports/065-guarded-claim-review-2026-09-13.md).

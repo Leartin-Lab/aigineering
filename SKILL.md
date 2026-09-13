@@ -49,6 +49,15 @@ replaceable operator configuration. Fleet capacity creates independent
 pull/claim/submit slots; it does not bypass the Store or create a second task
 queue.
 
+Fleet profiles may also use `kind = "local"` with an installed
+`module:factory` `worker_factory`. This is trusted operator-configured code with
+the same WorkerHost, claim, signed Candidate, and commitment path; it is never
+installed or selected by task output. Fleet configuration validates worker
+types, capacities, finite positive timeouts, and non-negative integer retry
+counts before launch. The default network LLM adapter bounds HTTP response
+reads at 4 MiB plus one byte; custom decoded Transport mappings are trusted
+adapter inputs and are outside that wire-byte bound.
+
 When an LLM task needs local tools, load an operator-reviewed registry
 explicitly. Aigineering publishes descriptors as Candidates, discloses only
 the current Contract's tool scope, and routes execution to a separate Worker:
@@ -197,3 +206,7 @@ to later model tasks without exposing raw values.
 The executable [`examples/ai4s/`](examples/ai4s/README.md) run demonstrates a
 Skill-guided root task, capability-routed local Fleet, runtime-compiled child
 graph, tool evidence, recovery, and SQLite reconstruction.
+The experimental [`guarded-claim-review`](examples/guarded-claim-review/README.md)
+composition demonstrates deterministic assessment and structural gating around
+one revision generation, a separate semantic review, and a dedicated acceptor.
+Literal evidence binding is structural evidence; it is not semantic truth.

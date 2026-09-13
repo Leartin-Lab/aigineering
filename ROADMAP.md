@@ -90,12 +90,18 @@ Implemented in change 021 and ADR-023:
   qualification before exact-version reuse;
 - local CLI and an explicit-fixture end-to-end example, including SQLite reopen
   and reconstruction.
+- reusable deterministic claim-validation methods for exact original text and
+  literal evidence bindings, plus the experimental guarded claim-review
+  adapter composition with structural gating and dedicated acceptance.
 
 Local verification is recorded in
 `reports/061-declarative-method-baseline-2026-09-09.md`.
 This is a functional baseline. Additional cases and controlled experiments on
 context isolation, error propagation and heterogeneous Worker cost/quality will
 prepare v0.6.0. No general productivity improvement is claimed by fixture tests.
+The guarded claim-review case is implemented as an adapter composition, while
+live closed-loop evidence remains v0.6.0 evidence preparation; this does not
+claim that the v0.6.0 release is complete.
 
 ## Release gates
 

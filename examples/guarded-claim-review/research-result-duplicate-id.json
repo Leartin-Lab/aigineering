@@ -1,0 +1,55 @@
+{
+  "title": "Short sleep and examination performance: a synthetic study summary",
+  "abstract": "A cross-sectional survey of 1,248 university students measured self-reported sleep duration and one end-of-term examination score. Students reporting at least seven hours of sleep had higher average scores than students reporting less than six hours. The association remained after adjustment for age, year of study, and self-reported employment hours.",
+  "claims": [
+    {
+      "id": "claim-1",
+      "text": "Students who sleep at least seven hours perform better on examinations.",
+      "source_excerpt_ids": [
+        "excerpt-results",
+        "excerpt-design"
+      ]
+    },
+    {
+      "id": "claim-2",
+      "text": "Getting at least seven hours of sleep improves examination performance.",
+      "source_excerpt_ids": [
+        "excerpt-results",
+        "excerpt-design"
+      ]
+    },
+    {
+      "id": "claim-3",
+      "text": "The finding applies broadly to university students because the adjusted association was robust.",
+      "source_excerpt_ids": [
+        "excerpt-results",
+        "excerpt-design"
+      ]
+    },
+    {
+      "id": "claim-1",
+      "text": "Students who sleep at least seven hours perform better on examinations.",
+      "source_excerpt_ids": [
+        "excerpt-results",
+        "excerpt-design"
+      ]
+    }
+  ],
+  "source_excerpts": [
+    {
+      "id": "excerpt-design",
+      "text": "Design: cross-sectional survey; sleep duration and examination score were collected during the same end-of-term questionnaire. Sleep was self-reported. The sample was recruited from two campuses.",
+      "role": "study-design"
+    },
+    {
+      "id": "excerpt-results",
+      "text": "Results: the at-least-seven-hour group had a higher mean examination score than the less-than-six-hour group. The adjusted association remained after controlling for age, year of study, and self-reported employment hours. No random assignment or longitudinal follow-up was performed.",
+      "role": "study-results"
+    },
+    {
+      "id": "excerpt-limitations",
+      "text": "Limitations: residual confounding, recall error in self-reported sleep, two-campus sampling, and the single examination outcome limit causal and population-wide interpretation.",
+      "role": "limitations"
+    }
+  ]
+}

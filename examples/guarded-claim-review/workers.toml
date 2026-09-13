@@ -1,0 +1,64 @@
+[fleet]
+db_path = ".aig/store.db"
+poll_interval = 0.05
+
+[[workers]]
+id = "claim-planner"
+kind = "llm"
+model = "deepseek-flash"
+base_url = "https://api.deepseek.com/v1"
+api_key_env = "DEEPSEEK_API_KEY"
+capabilities = ["planning"]
+pools = ["planning"]
+capacity = 1
+profile_id = "claim-review-planner"
+max_output_tokens = 4096
+thinking_mode = "disabled"
+
+[[workers]]
+id = "claim-assessor"
+kind = "local"
+worker_factory = "aigineering.business.claim_review_workers:create_assessor_worker"
+capabilities = ["claim.review.assess"]
+pools = ["validation"]
+capacity = 1
+profile_id = "claim-review-assessor"
+
+[[workers]]
+id = "claim-reviser"
+kind = "local"
+worker_factory = "aigineering.business.claim_review_workers:create_revision_worker"
+capabilities = ["claim.review.revise"]
+pools = ["reasoning"]
+capacity = 1
+profile_id = "claim-review-reviser"
+max_output_tokens = 8192
+
+[[workers]]
+id = "claim-gate"
+kind = "local"
+worker_factory = "aigineering.business.claim_review_workers:create_review_gate_worker"
+capabilities = ["claim.review.gate"]
+pools = ["validation"]
+capacity = 1
+profile_id = "claim-review-gate"
+
+[[workers]]
+id = "claim-semantic"
+kind = "local"
+worker_factory = "aigineering.business.claim_review_workers:create_semantic_worker"
+capabilities = ["claim.review.semantic"]
+pools = ["verification"]
+capacity = 1
+profile_id = "claim-review-semantic"
+max_output_tokens = 8192
+
+[[workers]]
+id = "claim-acceptor"
+kind = "local"
+worker_factory = "aigineering.business.claim_review_acceptance:create_acceptance_worker"
+capabilities = ["claim.review.accept"]
+pools = ["verification"]
+capacity = 1
+profile_id = "claim-review-acceptor"
+effect_capabilities = ["asset.attest", "claim.review.accept"]
