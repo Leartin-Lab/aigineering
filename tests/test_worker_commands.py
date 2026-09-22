@@ -3,7 +3,7 @@
 import json
 
 from click.testing import CliRunner
-from conftest import hosted_worker
+from conftest import candidate_runtime, hosted_worker
 
 from aigineering.cli.main import cli
 from aigineering.core.ids import (
@@ -15,6 +15,7 @@ from aigineering.core.provenance import sign_asset
 from aigineering.core.signing import Ed25519Signer
 from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.core.domain import load_genesis
+from aigineering.core.trace import create_entry
 from aigineering.protocol.candidate import (
     CandidateClaimBinding,
     candidate_proposal_to_dict,
@@ -32,7 +33,11 @@ from aigineering.plugins.base import PluginRequest
 from aigineering.protocol.package import WorkerPackage
 from aigineering.protocol.types import Asset, Contract, TraceEntry
 from aigineering.protocol.types import Candidate
-from aigineering.runtime import claim_next_package, execute_claimed_package
+from aigineering.runtime import (
+    _method_context_assets_for,
+    claim_next_package,
+    execute_claimed_package,
+)
 
 
 def _seed_contract(store: SQLiteStore) -> Contract:
@@ -425,6 +430,110 @@ def test_worker_package_includes_continuation_method_context():
         assert [a["name"] for a in data["method_context_assets"]] == [obs.name]
         assert "content" not in data["method_context_assets"][0]
         assert obs.content not in result.output
+
+
+def test_method_context_asset_lookup_uses_relation_target_query():
+    store = SQLiteStore(":memory:")
+    try:
+        _parent, continuation, obs = _seed_continuation_with_method_context(store)
+        store.append_trace_entry(
+            TraceEntry(
+                id="evt_context_prepared",
+                contract_id="contract_parent",
+                event_type="method_continuation_context_prepared",
+                relation_type="tool",
+                relation_target=continuation.id,
+                disclosed_assets=[obs.id, "missing-asset", obs.id],
+            )
+        )
+
+        def fail_get_all():
+            raise AssertionError("continuation context must use targeted trace query")
+
+        store.get_all = fail_get_all
+        assets = _method_context_assets_for(continuation, store)
+        assert [asset.id for asset in assets] == [obs.id]
+    finally:
+        store.close()
+
+
+def test_method_context_survives_file_reopen_and_materialization_rebuild(tmp_path):
+    path = tmp_path / "store.db"
+    store = SQLiteStore(str(path))
+    setup = candidate_runtime(store)
+    contract = setup.accept_contract(
+        Contract(id="context-root", name="root", outputs=["report"])
+    )
+    original = setup.accept_asset(
+        Asset(
+            id="context-original", name="original", content="visible", origin="system"
+        )
+    )
+    redacted = setup.accept_asset(
+        Asset(
+            id="context-redacted",
+            name="redacted",
+            content="secret",
+            origin="system",
+            disclosure_view="redacted",
+        )
+    )
+    store.append_trace_entry(
+        create_entry(
+            contract.id,
+            "method_continuation_scheduled",
+            sequence=100,
+            relation_target=contract.id,
+            disclosed_assets=[original.id, "missing-asset", original.id],
+        )
+    )
+    store.append_trace_entry(
+        create_entry(
+            contract.id,
+            "method_continuation_context_prepared",
+            sequence=101,
+            relation_target=contract.id,
+            disclosed_assets=[redacted.id],
+        )
+    )
+    store.append_trace_entry(
+        create_entry(
+            contract.id,
+            "other_event",
+            sequence=102,
+            relation_target=contract.id,
+            disclosed_assets=["should-not-be-read"],
+        )
+    )
+
+    def snapshot(current_store):
+        current_contract = current_store.get_contract(contract.id)
+        assert current_contract is not None
+        assets = _method_context_assets_for(current_contract, current_store)
+        return (
+            [(asset.id, asset.name, asset.content) for asset in assets],
+            current_store.runtime_materialization_digest(),
+            current_store.schema_version,
+        )
+
+    before = snapshot(store)
+    assert before[0] == [
+        (original.id, original.name, original.content),
+        (redacted.id, redacted.name, "[redacted]"),
+    ]
+    assert before[2] == 17
+    store.close()
+
+    reopened = SQLiteStore(str(path))
+    try:
+        after_reopen = snapshot(reopened)
+        assert after_reopen == before
+        rebuilt_digest = reopened.rebuild_runtime_materializations()
+        after_rebuild = snapshot(reopened)
+        assert rebuilt_digest == before[1]
+        assert after_rebuild == before
+    finally:
+        reopened.close()
 
 
 def test_worker_package_never_emits_method_context_content():
@@ -862,6 +971,9 @@ def test_local_worker_invocation_receives_continuation_method_context():
 
     store = SQLiteStore(":memory:")
     _parent, continuation, obs = _seed_continuation_with_method_context(store)
+    store.get_all = lambda: (_ for _ in ()).throw(
+        AssertionError("continuation context must not scan the full trace")
+    )
     worker = CapturingWorker()
     host = hosted_worker(store, worker)
     claimed = claim_next_package(

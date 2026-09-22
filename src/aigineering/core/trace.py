@@ -118,6 +118,7 @@ class TraceStoreProtocol(Protocol):
     ) -> TraceEntry: ...
     def get_by_contract(self, contract_id: str) -> list[TraceEntry]: ...
     def get_by_event_type(self, event_type: str) -> list[TraceEntry]: ...
+    def get_by_relation_target(self, relation_target: str) -> list[TraceEntry]: ...
     def get_all(self) -> list[TraceEntry]: ...
     def get_reverse_lineage(self, asset_id: str) -> list[TraceEntry]: ...
 
@@ -190,6 +191,9 @@ class MemoryTraceStore:
 
     def get_by_event_type(self, event_type: str) -> list[TraceEntry]:
         return [e for e in self.entries if e.event_type == event_type]
+
+    def get_by_relation_target(self, relation_target: str) -> list[TraceEntry]:
+        return [e for e in self.entries if e.relation_target == relation_target]
 
     def get_all(self) -> list[TraceEntry]:
         return list(self.entries)
@@ -290,6 +294,9 @@ class JsonLTraceStore:
 
     def get_by_event_type(self, event_type: str) -> list[TraceEntry]:
         return [e for e in self._entries if e.event_type == event_type]
+
+    def get_by_relation_target(self, relation_target: str) -> list[TraceEntry]:
+        return [e for e in self._entries if e.relation_target == relation_target]
 
     def get_all(self) -> list[TraceEntry]:
         return list(self._entries)

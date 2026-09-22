@@ -16,7 +16,7 @@ from aigineering.agent.llm import (
     _extract_tool_calls,
     _extract_usage,
 )
-from aigineering.agent.worker import Worker
+from aigineering.agent.worker import Worker, WorkerExecutionError
 from aigineering.protocol.actions import parse_action
 from aigineering.protocol.types import Asset, Contract
 
@@ -430,12 +430,15 @@ def test_usage_metadata_partial_tokens():
 
     worker = LLMWorker(model="test-model", transport=transport)
     candidate = worker.invoke(_min_contract(), [])
-    # _extract_usage returns None for partial, but _build_usage_metadata
-    # still includes model and provider.
+    # A valid total-only response retains total usage while missing fields stay
+    # absent.
     assert candidate.metadata is not None
     metadata = dict(candidate.metadata)
     assert metadata["model"] == "test-model"
     assert "provider" in metadata
+    assert metadata["total_tokens"] == 100
+    assert "prompt_tokens" not in metadata
+    assert "completion_tokens" not in metadata
 
 
 def test_usage_metadata_drops_non_integer_partial_token_fields():
@@ -449,6 +452,40 @@ def test_usage_metadata_drops_non_integer_partial_token_fields():
 
     assert metadata["prompt_tokens"] == 12
     assert "completion_tokens" not in metadata
+
+
+@pytest.mark.parametrize("value", [-1, (1 << 53), True, None])
+def test_usage_metadata_drops_unsafe_token_counts(value):
+    response = {
+        "choices": [{"message": {"content": '/exec {"result":"ok"}'}}],
+        "usage": {
+            "prompt_tokens": value,
+            "completion_tokens": 2,
+            "total_tokens": 2,
+        },
+    }
+    worker = LLMWorker(model="test-model", transport=lambda *_args: response)
+
+    metadata = dict(worker.invoke(_min_contract(), []).metadata or {})
+
+    assert "prompt_tokens" not in metadata
+    assert metadata["completion_tokens"] == 2
+    assert metadata["total_tokens"] == 2
+
+
+def test_postprocessing_error_carries_reported_usage():
+    worker = LLMWorker(
+        model="test-model",
+        transport=lambda *_args: {
+            "choices": [],
+            "usage": {"prompt_tokens": 5, "completion_tokens": 1},
+        },
+    )
+
+    with pytest.raises(WorkerExecutionError) as raised:
+        worker.invoke(_min_contract(), [])
+
+    assert dict(raised.value.usage_metadata or {})["prompt_tokens"] == 5
 
 
 def test_extract_usage_valid():
@@ -731,6 +768,39 @@ def test_map_tool_calls_invalid_json_arguments():
     ]
     with pytest.raises(ValueError, match="not valid JSON"):
         LLMWorker._map_tool_calls_to_actions(tc)
+
+
+def test_tool_mapping_error_carries_reported_usage():
+    response = {
+        "choices": [
+            {
+                "message": {
+                    "tool_calls": [
+                        {
+                            "type": "function",
+                            "function": {"name": "lookup", "arguments": "{"},
+                        }
+                    ]
+                }
+            }
+        ],
+        "usage": {"total_tokens": 13},
+    }
+    worker = LLMWorker(
+        model="test-model",
+        transport=lambda *_args: response,
+        capabilities=frozenset({"tool_calling"}),
+    )
+
+    with pytest.raises(WorkerExecutionError) as raised:
+        worker.invoke(_min_contract(), [])
+
+    assert dict(raised.value.usage_metadata or {}) == {
+        "total_tokens": 13,
+        "model": "test-model",
+        "provider": "api.openai.com",
+        "worker_profile": "openai-compatible-v1",
+    }
 
 
 @pytest.mark.parametrize("arguments", ['["not", "an", "object"]', 1])

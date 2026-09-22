@@ -284,23 +284,32 @@ class LLMWorker:
             provider=self._provider_name(),
             worker_profile=self.profile_id,
         )
+        try:
+            tool_calls = _extract_tool_calls(response)
+            if tool_calls is not None:
+                raw_output, parsed_action = self._map_tool_calls_to_actions(tool_calls)
+                return Candidate(
+                    worker_id=self.worker_id,
+                    raw_output=raw_output,
+                    parsed_action=parsed_action,
+                    metadata=usage_metadata,
+                )
 
-        tool_calls = _extract_tool_calls(response)
-        if tool_calls is not None:
-            raw_output, parsed_action = self._map_tool_calls_to_actions(tool_calls)
             return Candidate(
                 worker_id=self.worker_id,
-                raw_output=raw_output,
-                parsed_action=parsed_action,
+                raw_output=_normalize_provider_action(
+                    _extract_message_content(response)
+                ),
+                parsed_action=None,
                 metadata=usage_metadata,
             )
-
-        return Candidate(
-            worker_id=self.worker_id,
-            raw_output=_normalize_provider_action(_extract_message_content(response)),
-            parsed_action=None,
-            metadata=usage_metadata,
-        )
+        except WorkerExecutionError as exc:
+            # Preserve well-formed reported usage on post-response failures (for
+            # example malformed choices or tool arguments).  Runtime owns the
+            # durable failure record; this exception only carries the data.
+            if exc.usage_metadata is None and usage_metadata is not None:
+                exc.usage_metadata = usage_metadata
+            raise
 
     def registration(self) -> WorkerRegistration:
         """Return trusted routing metadata for this stateless LLM worker.
@@ -617,16 +626,19 @@ def _extract_usage(response: Mapping[str, object]) -> MappingProxyType | None:
     prompt_tokens = usage.get("prompt_tokens")
     completion_tokens = usage.get("completion_tokens")
     total_tokens = usage.get("total_tokens")
-    if type(prompt_tokens) is not int and type(completion_tokens) is not int:
-        return None
     result: dict[str, object] = {}
-    if type(prompt_tokens) is int:
+    if _valid_usage_count(prompt_tokens):
         result["prompt_tokens"] = prompt_tokens
-    if type(completion_tokens) is int:
+    if _valid_usage_count(completion_tokens):
         result["completion_tokens"] = completion_tokens
-    if type(total_tokens) is int:
+    if _valid_usage_count(total_tokens):
         result["total_tokens"] = total_tokens
-    return MappingProxyType(result)
+    return MappingProxyType(result) if result else None
+
+
+def _valid_usage_count(value: object) -> bool:
+    """Accept only interoperable, non-negative provider token counts."""
+    return type(value) is int and 0 <= value <= (1 << 53) - 1
 
 
 def _build_usage_metadata(

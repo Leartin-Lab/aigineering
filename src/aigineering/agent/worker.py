@@ -34,9 +34,18 @@ from aigineering.protocol.types import Asset, Candidate, Contract
 class WorkerExecutionError(ValueError):
     """Expected, safely reportable failure before Candidate production."""
 
-    def __init__(self, code: str, message: str | None = None) -> None:
+    def __init__(
+        self,
+        code: str,
+        message: str | None = None,
+        *,
+        usage_metadata: Mapping[str, object] | None = None,
+    ) -> None:
         super().__init__(message or code)
         self.code = code
+        # Adapters may attach already-normalized provider usage when failure
+        # occurs after the provider returned but before a Candidate exists.
+        self.usage_metadata = usage_metadata
 
 
 @runtime_checkable

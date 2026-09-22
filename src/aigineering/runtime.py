@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
+from collections.abc import Mapping
 import sqlite3
 from threading import Event, Thread
 
@@ -376,6 +377,12 @@ def execute_claimed_package(
                     if isinstance(exc, WorkerExecutionError) and candidate is not None
                     else None
                 ),
+                usage_metadata=(
+                    exc.usage_metadata
+                    if isinstance(exc, WorkerExecutionError)
+                    else None
+                )
+                or (candidate.metadata if candidate is not None else None),
                 diagnostic=(
                     str(exc) if isinstance(exc, WorkerExecutionError) else None
                 ),
@@ -400,6 +407,9 @@ def execute_claimed_package(
                 category=f"worker_error:{phase}_failure",
                 raw_output=(
                     candidate.raw_output if candidate_processing_failure else None
+                ),
+                usage_metadata=(
+                    candidate.metadata if candidate_processing_failure else None
                 ),
                 diagnostic=(str(exc) if candidate_processing_failure else None),
             )
@@ -826,9 +836,11 @@ def _record_worker_invocation_failure(
     category: str,
     raw_output: str | None = None,
     diagnostic: str | None = None,
+    usage_metadata: Mapping[str, object] | None = None,
 ) -> None:
     existing = store.get_by_contract(claimed.contract.id)
     parent_id = existing[-1].id if existing else None
+    safe_usage = _safe_failure_usage_metadata(usage_metadata)
     entry = create_entry(
         claimed.contract.id,
         "worker_invocation_failed",
@@ -837,6 +849,7 @@ def _record_worker_invocation_failure(
         rejected_fragments=[f"[{category}] status={status_code} retryable={retryable}"],
         authority_result="rejected",
         budget_remaining=claimed.package.budget_remaining,
+        usage_metadata=safe_usage,
     )
     payload = {
         "claim_id": claimed.package.claim_id,
@@ -851,6 +864,8 @@ def _record_worker_invocation_failure(
         payload["raw_output"] = raw_output[:4000]
     if diagnostic is not None:
         payload["diagnostic"] = diagnostic[:1000]
+    if safe_usage is not None:
+        payload["usage_metadata"] = safe_usage
     failure = create_runtime_record(
         "worker.invocation_failed",
         payload,
@@ -869,6 +884,36 @@ def _record_worker_invocation_failure(
         package_id=claimed.package.package_id,
         claim_epoch=claimed.package.claim_epoch,
     )
+
+
+def _safe_failure_usage_metadata(
+    metadata: Mapping[str, object] | None,
+) -> dict[str, object] | None:
+    """Keep only the bounded usage fields while recording a worker failure.
+
+    Failure recording must remain durable even when a custom Worker supplied
+    malformed metadata.  This boundary deliberately drops unknown fields so
+    credentials or arbitrary adapter payloads cannot enter trace or audit.
+    """
+    if not isinstance(metadata, Mapping):
+        return None
+
+    allowed_counts = {"prompt_tokens", "completion_tokens", "total_tokens"}
+    allowed_identity = {"model", "provider", "worker_profile"}
+    result: dict[str, object] = {}
+    for key in allowed_counts:
+        value = metadata.get(key)
+        if type(value) is int and 0 <= value <= (1 << 53) - 1:
+            result[key] = value
+    for key in allowed_identity:
+        value = metadata.get(key)
+        if isinstance(value, str) and value and len(value) <= 256:
+            try:
+                value.encode("utf-8")
+            except UnicodeEncodeError:
+                continue
+            result[key] = value
+    return result or None
 
 
 def process_worker_failures(store, *, candidate_publishers=None) -> list[str]:
@@ -991,15 +1036,11 @@ def _method_context_assets_for(contract: Contract, store) -> tuple[Asset, ...]:
     store = require_operational_store(store)
     assets: list[Asset] = []
     seen: set[str] = set()
-    for entry in store.get_all():
-        if (
-            entry.event_type
-            not in {
-                "method_continuation_context_prepared",
-                "method_continuation_scheduled",
-            }
-            or entry.relation_target != contract.id
-        ):
+    for entry in store.get_by_relation_target(contract.id):
+        if entry.event_type not in {
+            "method_continuation_context_prepared",
+            "method_continuation_scheduled",
+        }:
             continue
         for asset_id in entry.disclosed_assets:
             asset = store.get_asset(asset_id)

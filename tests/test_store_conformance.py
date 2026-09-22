@@ -7,7 +7,7 @@ from aigineering.core.provenance import sign_asset
 from conftest import candidate_runtime
 from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.core.store import MemoryStore
-from aigineering.core.trace import MemoryTraceStore, create_entry
+from aigineering.core.trace import JsonLTraceStore, MemoryTraceStore, create_entry
 from aigineering.protocol.types import Asset, Contract
 from aigineering.protocol.wire import asset_to_dict, contract_to_dict
 
@@ -116,6 +116,57 @@ def test_memory_and_sqlite_trace_replay_semantics_match():
     assert memory.sequence == 1
     assert len(sqlite.get_all()) == 1
     sqlite.close()
+
+
+def test_trace_relation_target_query_matches_across_adapters(tmp_path):
+    entries = [
+        create_entry("c1", "unrelated", sequence=0, relation_target="target"),
+        create_entry("c2", "scheduled", sequence=1, relation_target="other"),
+        create_entry("c3", "prepared", sequence=2, relation_target="target"),
+    ]
+    memory = MemoryTraceStore()
+    sqlite = SQLiteStore(":memory:")
+    jsonl = JsonLTraceStore(str(tmp_path / "trace.jsonl"))
+    try:
+        for trace in (memory, sqlite, jsonl):
+            for entry in entries:
+                trace.append(entry)
+            assert [entry.id for entry in trace.get_by_relation_target("target")] == [
+                entries[0].id,
+                entries[2].id,
+            ]
+            assert trace.get_by_relation_target("missing") == []
+    finally:
+        sqlite.close()
+
+
+def test_sqlite_relation_target_index_is_created_when_reopening_existing_db(tmp_path):
+    path = tmp_path / "store.db"
+    first = SQLiteStore(str(path))
+    first._conn.execute("DROP INDEX idx_trace_events_relation_target")
+    assert not any(
+        row[1] == "idx_trace_events_relation_target"
+        for row in first._conn.execute("PRAGMA index_list(trace_events)").fetchall()
+    )
+    first.close()
+
+    reopened = SQLiteStore(str(path))
+    try:
+        indexes = {
+            row[1]
+            for row in reopened._conn.execute(
+                "PRAGMA index_list(trace_events)"
+            ).fetchall()
+        }
+        assert "idx_trace_events_relation_target" in indexes
+        plan = reopened._conn.execute(
+            "EXPLAIN QUERY PLAN "
+            "SELECT * FROM trace_events WHERE relation_target = ? ORDER BY rowid",
+            ("target",),
+        ).fetchall()
+        assert any("idx_trace_events_relation_target" in row[3] for row in plan)
+    finally:
+        reopened.close()
 
 
 def test_ingress_appends_typed_facts_on_both_adapters():

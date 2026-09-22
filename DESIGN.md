@@ -426,6 +426,19 @@ durable Worker failures, rejected submissions, and task-completion projection.
 The surrounding loops own only polling and termination policy; they do not own
 task truth.
 
+When a provider has returned well-formed usage, a later response-extraction,
+tool-mapping, or Candidate-envelope failure retains that usage in the same
+durable failure trace and RuntimeRecord. The failure path applies an explicit
+usage allowlist and does not synthesize zero usage when the provider reports
+none.
+
+Continuation method-context lookup reads trace events by their
+`relation_target`, then applies the existing event-type, asset, ordering, and
+disclosure rules. SQLite initializes an ordinary relation-target index when a
+store opens, including an existing database; this does not add a fact or change
+the schema version. Operational Store adapters provide the same targeted trace
+read capability.
+
 The local Fleet launcher applies the same protocol within one process. Each
 capacity slot owns an independent SQLite connection and repeats only the normal
 pull, claim, invoke, and submit operations. It does not own a task queue or

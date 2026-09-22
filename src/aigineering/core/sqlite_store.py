@@ -1133,6 +1133,13 @@ class SQLiteStore:
         )
         return [self._row_to_trace_entry(row) for row in cur.fetchall()]
 
+    def get_by_relation_target(self, relation_target: str) -> list[TraceEntry]:
+        cur = self._conn.execute(
+            "SELECT * FROM trace_events WHERE relation_target = ? ORDER BY rowid",
+            (relation_target,),
+        )
+        return [self._row_to_trace_entry(row) for row in cur.fetchall()]
+
     def get_all(self) -> list[TraceEntry]:
         return self.get_trace_events()
 

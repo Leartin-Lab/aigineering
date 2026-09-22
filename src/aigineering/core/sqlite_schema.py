@@ -236,6 +236,7 @@ DDL_INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_contracts_parent_id ON contracts(parent_id)",
     "CREATE INDEX IF NOT EXISTS idx_trace_events_contract_id ON trace_events(contract_id)",
     "CREATE INDEX IF NOT EXISTS idx_trace_events_event_type ON trace_events(event_type)",
+    "CREATE INDEX IF NOT EXISTS idx_trace_events_relation_target ON trace_events(relation_target)",
     "CREATE INDEX IF NOT EXISTS idx_worker_claims_contract_status ON worker_claims(contract_id, status)",
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_worker_claims_one_active ON worker_claims(contract_id) WHERE status = 'active'",
     "CREATE INDEX IF NOT EXISTS idx_idempotency_contract ON idempotency_records(contract_id)",

@@ -6,11 +6,12 @@ import sqlite3
 import time
 
 import pytest
-from conftest import hosted_worker
+from conftest import candidate_runtime, hosted_worker
 
 from aigineering.agent.llm import LLMWorker, ProviderError
 from aigineering.agent.prompt import contract_prompt
 from aigineering.cli.task_state import project_task_status
+from aigineering.core.task_productivity import project_task_productivity
 from aigineering.runtime import (
     WorkerInvocationError,
     claim_next_package,
@@ -662,7 +663,9 @@ def test_malformed_provider_response_releases_claim_and_recovers():
     worker = LLMWorker(
         model="test",
         api_key="test-only",
-        transport=lambda _url, _headers, _payload: {},
+        transport=lambda _url, _headers, _payload: {
+            "usage": {"prompt_tokens": 11, "completion_tokens": 3, "total_tokens": 14}
+        },
     )
     publishers = _recovery_publishers(store, "malformed-response")
 
@@ -677,8 +680,84 @@ def test_malformed_provider_response_releases_claim_and_recovers():
     assert store.get_claim(contract.id)["status"] == "released"
     failure = store.scan_runtime_records(record_type="worker.invocation_failed")
     assert failure[-1][1].payload["category"] == "worker_error:response_missing_choices"
+    assert failure[-1][1].payload["usage_metadata"]["total_tokens"] == 14
+    status = project_task_status(contract, store)
+    assert status["token_usage"] == [
+        {
+            "model": "test",
+            "provider": "api.openai.com",
+            "worker_profile": "openai-compatible-v1",
+            "prompt_tokens": 11,
+            "completion_tokens": 3,
+            "total_tokens": 14,
+        }
+    ]
     assert any(child.origin == "recovery" for child in store.get_all_contracts())
     store.close()
+
+
+def test_failed_usage_survives_sqlite_reopen_and_runtime_rebuild(tmp_path):
+    db_path = tmp_path / "usage-failure.db"
+    store = SQLiteStore(str(db_path))
+    setup = candidate_runtime(store)
+    contract = setup.accept_contract(
+        Contract(id="task:usage-reopen", outputs=("report",), budget=1)
+    )
+    worker = LLMWorker(
+        model="test",
+        api_key="test-only",
+        transport=lambda _url, _headers, _payload: {
+            "choices": [],
+            "usage": {"total_tokens": 9},
+        },
+    )
+    host = hosted_worker(
+        store,
+        worker,
+        genesis=setup.genesis,
+        authority_key=setup.actor_key,
+        authority_signer=setup.signer,
+    )
+    claimed = claim_next_package(store, worker_id=host.worker_id)
+    assert claimed is not None
+    with pytest.raises(WorkerInvocationError):
+        execute_claimed_package(claimed, host, store)
+
+    before_status = project_task_status(contract, store)
+    before_audit = project_task_productivity(contract, store)
+    assert before_status["token_usage"] == [
+        {
+            "model": "test",
+            "provider": "api.openai.com",
+            "worker_profile": "openai-compatible-v1",
+            "total_tokens": 9,
+        }
+    ]
+    assert before_audit["token_totals"]["total_tokens"] == 9
+    assert len(before_audit["usage_records"]) == 1
+    digest = store.runtime_materialization_digest()
+    store.close()
+
+    reopened = SQLiteStore(str(db_path))
+    try:
+        restored = reopened.get_contract(contract.id)
+        assert restored is not None
+        assert (
+            project_task_status(restored, reopened)["token_usage"]
+            == before_status["token_usage"]
+        )
+        assert (
+            project_task_productivity(restored, reopened)["usage_records"]
+            == before_audit["usage_records"]
+        )
+        assert reopened.rebuild_runtime_materializations() == digest
+        rebuilt_status = project_task_status(restored, reopened)
+        rebuilt_audit = project_task_productivity(restored, reopened)
+        assert rebuilt_status["token_usage"] == before_status["token_usage"]
+        assert len(rebuilt_audit["usage_records"]) == 1
+        assert rebuilt_audit["token_totals"]["total_tokens"] == 9
+    finally:
+        reopened.close()
 
 
 def test_worker_encoding_failure_preserves_repairable_output_and_budget():
@@ -690,6 +769,15 @@ def test_worker_encoding_failure_preserves_repairable_output_and_budget():
             return Candidate(
                 worker_id=self.worker_id,
                 raw_output='/parallel_tool {"calls": [{"name": "lookup"}]}',
+                metadata={
+                    "model": "local",
+                    "total_tokens": 19,
+                    "prompt_tokens": True,
+                    "completion_tokens": -1,
+                    "api_key": "secret",
+                    "provider": "\ud800",
+                    "ignored": {"password": "secret"},
+                },
             )
 
     store = SQLiteStore(":memory:")
@@ -758,6 +846,12 @@ def test_worker_encoding_failure_preserves_repairable_output_and_budget():
     failure = store.scan_runtime_records(record_type="worker.invocation_failed")[-1][1]
     assert failure.payload["raw_output"].startswith("/parallel_tool")
     assert "between 2 and 8" in failure.payload["diagnostic"]
+    assert failure.payload["usage_metadata"]["total_tokens"] == 19
+    assert failure.payload["usage_metadata"] == {
+        "model": "local",
+        "total_tokens": 19,
+    }
+    assert project_task_status(contract, store)["token_usage"][-1]["total_tokens"] == 19
     recovery = next(
         child for child in store.get_all_contracts() if child.origin == "recovery"
     )
