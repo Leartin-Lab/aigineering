@@ -1,0 +1,40 @@
+{
+  "commit": "be7aec0",
+  "environment": {
+    "platform": "macOS",
+    "python": "3.11.15",
+    "sqlite": "3.53.4"
+  },
+  "pytest": {
+    "passed": 1439,
+    "skipped": 3,
+    "warnings": 6,
+    "elapsed_seconds": 52.83
+  },
+  "ruff": {
+    "files": 300,
+    "check": "passed",
+    "format_check": "passed"
+  },
+  "artifacts": {
+    "build": "passed",
+    "twine_check": "passed",
+    "wheel_sha256": "1da528622b8c7d480cde0db202c8ee79b52abf6a701fa422860921b660d48547",
+    "sdist_sha256": "46efc860f307966f47551cb4e40248bbc63f63d727dd13ccf1235a5f17277b48"
+  },
+  "installed_smoke": {
+    "status": "passed",
+    "fixture_method_governance": "complete",
+    "rebuild_match": true
+  },
+  "diagnostics": {
+    "records_unchanged": true,
+    "digest": "db83054ceb16c1243e9fbc018f2ed05eed7fe5ef944467ee5ee39521dc6916c6"
+  },
+  "release": {
+    "tagged": false,
+    "published_to_pypi": false,
+    "schema_version": 17,
+    "live_provider_credentials": false
+  }
+}
