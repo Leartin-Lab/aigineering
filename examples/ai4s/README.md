@@ -8,6 +8,20 @@ SQLite. The example contains no hand-written DAG driver.
 
 From an empty working directory:
 
+The fleet loads `examples.ai4s.tools` from the checkout, so keep the checkout
+root on `PYTHONPATH` even when Aigineering is installed. When running the CLI
+from source, also add its `src` directory. For example:
+
+```bash
+export AIGINEERING_CHECKOUT=/path/to/aigineering
+export PYTHONPATH="$AIGINEERING_CHECKOUT:$PYTHONPATH"
+# Add this line when Aigineering is not installed:
+export PYTHONPATH="$AIGINEERING_CHECKOUT/src:$PYTHONPATH"
+```
+
+The fixture and example files below are referenced by their absolute checkout
+paths so the working directory can remain empty.
+
 ```bash
 export DEEPSEEK_API_KEY=replace-me
 export AIGINEERING_AI4S_OPENALEX_FIXTURE=/path/to/aigineering/examples/literature-evidence/assets/openalex-response.json

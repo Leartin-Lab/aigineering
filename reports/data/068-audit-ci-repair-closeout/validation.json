@@ -1,0 +1,52 @@
+{
+  "pytest": {
+    "passed": 1482,
+    "skipped": 3,
+    "skipped_reason": "Redis integration tests skipped because AIG_REDIS_TEST_URL was not configured",
+    "warnings": 6,
+    "warning_category": "dependency deprecation"
+  },
+  "ruff": {
+    "files": 310,
+    "check": "passed",
+    "format_check": "passed",
+    "scope": ["src", "tests", "scripts"]
+  },
+  "distributions": {
+    "wheel_build": "passed",
+    "sdist_build": "passed",
+    "twine_check": "passed",
+    "wheel_python_files": 160,
+    "wheel_sources_byte_match": true,
+    "local_artifact_exclusion": [
+      "environment files",
+      "Git metadata",
+      "virtual environments",
+      "database files",
+      "private keys"
+    ]
+  },
+  "installed_smoke": {
+    "status": "passed",
+    "environment": "fresh temporary virtual environment",
+    "process": "independent CLI process"
+  },
+  "diagnostics": {
+    "status": "passed",
+    "records_unchanged": true,
+    "before_digest": "cacced3a46ce9e917db5447efb2adc1a3bfb377e30e7207477b3cca26c6441a8",
+    "after_digest": "cacced3a46ce9e917db5447efb2adc1a3bfb377e30e7207477b3cca26c6441a8"
+  },
+  "method_governance_fixture": {
+    "status": "complete",
+    "rebuild_match": true
+  },
+  "release": {
+    "package_version": "0.5.11",
+    "sqlite_schema_version": 17,
+    "live_provider_used": false,
+    "tag_created": false,
+    "published_to_pypi": false
+  },
+  "remote_ci": "not_included_in_local_evidence"
+}

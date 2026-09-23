@@ -423,8 +423,12 @@ reconstruct task progress and continue without restoring an Engine snapshot.
 
 CLI, local Fleet, and nested Workers share one stateless maintenance step for
 durable Worker failures, rejected submissions, and task-completion projection.
-The surrounding loops own only polling and termination policy; they do not own
-task truth.
+Target-pool cycle summaries scan the bounded RuntimeRecord revision window and
+resolve trace ownership through typed Contract references, including
+commitment traces joined through committed records. They list unproven trace
+IDs separately and preserve cycles that contain events but no provable
+Contract. The surrounding loops own only polling and termination policy; they
+do not own task truth.
 
 When a provider has returned well-formed usage, a later response-extraction,
 tool-mapping, or Candidate-envelope failure retains that usage in the same
@@ -432,12 +436,46 @@ durable failure trace and RuntimeRecord. The failure path applies an explicit
 usage allowlist and does not synthesize zero usage when the provider reports
 none.
 
+Usage metadata has one protocol-owned allowlist and validator. Local LLM and
+tool adapters filter unknown or malformed fields before building a signed
+CandidateEnvelope; direct envelope and harness inputs are validated strictly.
+Signed Candidates with invalid usage are rejected without rewriting their
+signed payload, and a sanitized receipt preserves observable claim closure and
+recovery. Invalid usage cannot suppress terminal failure evidence. Counts are
+non-boolean integers from zero through `2^53-1`; strings are bounded UTF-8.
+Raw metadata and usage records preserve absent usage separately from explicit
+zero; identity-only LLM metadata does not create a usage record when no usage
+amount is present. Productivity token totals aggregate known counts: an empty
+aggregate is zero, and a total may be derived by adding known prompt and
+completion counts. Neither an empty aggregate nor a zero total proves that
+the provider charged nothing. Usage reports are not a complete billing ledger.
+
 Continuation method-context lookup reads trace events by their
 `relation_target`, then applies the existing event-type, asset, ordering, and
 disclosure rules. SQLite initializes an ordinary relation-target index when a
 store opens, including an existing database; this does not add a fact or change
 the schema version. Operational Store adapters provide the same targeted trace
 read capability.
+
+Quick-run session manifests describe the selected root Contract and its
+descendants. Their evidence Asset IDs come from frozen context bindings and
+exact Asset IDs referenced by tree traces, not from looking up every Asset
+with a matching input name. `produced_asset_ids` separately identifies Assets
+committed during the run's revision window. The manifest records the
+exclusive start and inclusive end RuntimeRecord revisions; session JSONL
+exports only trace records from that bounded window whose Contract ownership
+is proven by typed record references. Commitment traces without a claim
+binding are attributed through their committed record links, never by treating
+the `commitment` label as a Contract. Unattributed commitment trace IDs remain
+explicitly unassigned. Old manifests load as `legacy_unscoped` because their
+former whole-store membership cannot be recovered from the file alone.
+
+SQLite runtime-record scans accept an optional inclusive upper revision bound.
+`SQLiteStore.snapshot()` copies a live connection through SQLite backup;
+`snapshot_from_path()` opens source files read-only and rejects schema
+mismatches without applying a migration. Newly written trace JSON uses stable
+key ordering in SQLite rows and JSONL exports. Existing stored rows are not
+rewritten, and these changes do not alter the SQLite schema version.
 
 The local Fleet launcher applies the same protocol within one process. Each
 capacity slot owns an independent SQLite connection and repeats only the normal
@@ -528,11 +566,30 @@ Each observation Candidate
 includes structured execution metadata for tool version, duration, result
 bytes, error type, and retryability.
 
-The read-only `task audit --json` productivity projection walks the immutable
-Contract lineage and durable RuntimeRecords/trace. It reports tool calls,
-continuations, recoveries, rejections, terminal statuses, and usage metadata;
-it is an operator view, not a scheduler, budget owner, or alternate
-commitment path.
+The read-only `task status` and `task audit --json` commands use a consistent,
+read-only SQLite snapshot. A terminal `task wait` result is checked against
+its snapshot; a timed-out wait explicitly reports that terminal integrity was
+not checked. The local integrity result validates RuntimeRecord content
+addresses and compares materialized runtime views with a strict rebuild on an
+independent in-memory snapshot. A failed check leaves projected business
+status visible, marks `ok` false, and returns a nonzero CLI status. Findings
+include categories and IDs, not record payloads.
+
+Task audit supplements Contract-scoped trace output with
+`related_runtime_traces`: commitment-sentinel trace records are included only
+when their candidate and committed-record links prove a reference to the
+requested Contract. Entries report trace and RuntimeRecord IDs, event type,
+revision, and record timestamp; an unproven sentinel is not attributed.
+
+These checks establish consistency only among the available records and local
+materialized views. They do not prove runtime-log completeness, prevent a
+coordinated database rewrite, or verify actor signatures against trusted
+Genesis and authorized keys. Those guarantees require an external trusted
+checkpoint and signature verification. The productivity projection walks the
+immutable Contract lineage and durable RuntimeRecords/trace; it reports tool
+calls, continuations, recoveries, rejections, terminal statuses, and known
+usage metadata. It remains an operator view, not a scheduler, budget owner, or
+alternate commitment path.
 
 The runtime-only AI4S acceptance path can therefore use the public Fleet and
 WorkerHost path for staged `/plan` compilation, a tool observation,

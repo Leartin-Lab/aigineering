@@ -1,7 +1,8 @@
 # Runtime stability closeout — 2026-09-22
 
 Commit `be7aec0` closes the approved S1/S2 runtime stability scope on macOS
-with Python 3.11.15 and SQLite 3.53.4. The runtime remains schema version 17;
+with Python 3.11.15 and SQLite 3.53.4. This evidence applies to `be7aec0`, not
+the later repository state at `70442e4`. The runtime remains schema version 17;
 this work adds no data or schema migration.
 
 S1 preserves well-formed provider usage when response extraction, tool mapping,
@@ -27,9 +28,9 @@ Validation completed:
 - `pytest -q`: **1439 passed, 3 skipped, 6 warnings** in 52.83s.
 - `ruff check` and `ruff format --check`: passed for 300 files.
 - Isolated `python -m build`: wheel and sdist succeeded; `twine check` passed.
-- Wheel and sdist excluded `.internal-docs`, `.env`, `.git`, `.venv`, database
-  files, and private keys; wheel Python sources matched the source tree byte for
-  byte.
+- Wheel and sdist excluded environment files, Git metadata, virtual
+  environments, database files, and private keys; wheel Python sources matched
+  the source tree byte for byte.
 - Installed smoke validation passed, including `fixture` method governance
   `complete` and `rebuild_match=true`.
 - Diagnostics reported `records_unchanged=true` and matching digest
