@@ -5,6 +5,7 @@ import json
 from click.testing import CliRunner
 
 from aigineering.cli.main import cli
+from aigineering.core.session import SessionStore
 
 
 def test_run_json_output():
@@ -23,6 +24,47 @@ def test_run_json_output():
         assert "status" in data
         assert data["status"] == "complete"
         assert "session_id" in data
+
+
+def test_run_session_contains_only_root_tree_window():
+    """A later run does not inherit unrelated contracts or trace history."""
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        first = runner.invoke(cli, ["run", "first", "--worker", "mock", "--json"])
+        second = runner.invoke(cli, ["run", "second", "--worker", "mock", "--json"])
+        assert first.exit_code == second.exit_code == 0
+        first_data = json.loads(first.output)
+        second_data = json.loads(second.output)
+        by_id = {session.id: session for session in SessionStore().list_sessions()}
+        first_session = by_id[first_data["session_id"]]
+        second_session = by_id[second_data["session_id"]]
+
+        assert first_session.scope == second_session.scope == "root_tree"
+        assert first_session.execution_start_revision is not None
+        assert (
+            first_session.execution_end_revision
+            >= first_session.execution_start_revision
+        )
+        assert (
+            second_session.execution_start_revision
+            >= first_session.execution_end_revision
+        )
+        assert first_session.contract_ids == (first_data["contract_id"],)
+        assert second_session.contract_ids == (second_data["contract_id"],)
+        assert set(second_session.produced_asset_ids) <= set(second_session.asset_ids)
+        assert not set(first_session.produced_asset_ids) & set(
+            second_session.produced_asset_ids
+        )
+        assert set(first_session.contract_ids).isdisjoint(second_session.contract_ids)
+        # The second run may reuse an output satisfied before it starts. That
+        # historical asset is not attributed unless this run disclosed it.
+        assert not set(first_session.produced_asset_ids) & set(second_session.asset_ids)
+        assert set(first_data["trace_ids"]).isdisjoint(second_data["trace_ids"])
+
+        trace_file = f".aig/traces/{second_data['session_id']}.jsonl"
+        with open(trace_file, encoding="utf-8") as stream:
+            trace_ids = {json.loads(line)["id"] for line in stream if line.strip()}
+        assert trace_ids == set(second_session.trace_ids)
 
 
 def test_trace_json_output():
@@ -193,7 +235,7 @@ def test_replay_json_error_message():
             cli,
             ["replay", "nonexistent_session", "--json"],
         )
-        assert result.exit_code == 0
+        assert result.exit_code == 1
         data = json.loads(result.output)
         assert "error" in data
 

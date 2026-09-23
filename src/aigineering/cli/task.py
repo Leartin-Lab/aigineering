@@ -5,12 +5,18 @@ from __future__ import annotations
 import json
 import time
 from pathlib import Path
+from collections.abc import Mapping
 
 import click
 
-from aigineering.cli._common import _output_json, _persistent_store, _query_projection
+from aigineering.cli._common import (
+    _output_json,
+    _persistent_snapshot,
+    _persistent_store,
+)
 from aigineering.cli._candidate import commit_local_effect, require_accepted
 from aigineering.cli.task_state import project_task_status
+from aigineering.core.session import runtime_record_contract_references
 from aigineering.core.control_plane import (
     bind_contract_label_assets,
     build_control_plane_contract,
@@ -152,19 +158,25 @@ def task_create(
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON.")
 def task_status(contract_id: str, as_json: bool) -> None:
     """Show a projected task status."""
-    store = _persistent_store()
-    query = _query_projection(store)
-    contract = query.get_contract(contract_id)
-    if contract is None:
-        _emit_error(f"Task '{contract_id}' not found.", as_json)
+    try:
+        store = _persistent_snapshot()
+        try:
+            contract = store.get_contract(contract_id)
+            if contract is None:
+                _emit_error(f"Task '{contract_id}' not found.", as_json)
+                return
+            status = project_task_status(contract, store, check_integrity=True)
+        finally:
+            store.close()
+    except click.ClickException:
+        raise
+    except Exception as error:
+        _emit_inspection_error(error, as_json)
         return
-    status = query.memoize_json(
-        "task.status",
-        contract.id,
-        lambda: project_task_status(contract, store),
-    )
     if as_json:
         _output_json(status)
+        if not status["integrity"]["consistent"]:
+            raise click.exceptions.Exit(1)
         return
     click.echo(f"{status['contract_id']} {status['status']}")
     if status["outputs"]:
@@ -174,6 +186,10 @@ def task_status(contract_id: str, as_json: bool) -> None:
         click.echo(f"  rejections: {status['rejection_count']}")
     if status["recovery_count"]:
         click.echo(f"  recoveries: {status['recovery_count']}")
+    click.echo(f"  integrity: {status['integrity']['status']}")
+    if not status["integrity"]["consistent"]:
+        click.echo("  projected status is untrusted")
+        raise click.exceptions.Exit(1)
 
 
 @task_group.command("wait")
@@ -193,30 +209,49 @@ def task_wait(
     deadline = time.monotonic() + timeout_seconds
     last_status: dict | None = None
     while True:
-        store = _persistent_store()
-        query = _query_projection(store)
-        contract = query.get_contract(contract_id)
-        if contract is None:
-            _emit_error(f"Task '{contract_id}' not found.", as_json)
-            return
-        last_status = query.memoize_json(
-            "task.status",
-            contract.id,
-            lambda: project_task_status(contract, store),
-        )
-        if last_status["terminal"]:
-            if as_json:
-                _output_json(last_status)
-            else:
-                click.echo(f"{contract_id} {last_status['status']}")
-            return
-        if time.monotonic() >= deadline:
-            payload = dict(last_status)
-            payload["timed_out"] = True
-            if as_json:
-                _output_json(payload)
-            else:
-                click.echo(f"{contract_id} {last_status['status']} (timed out)")
+        try:
+            store = _persistent_snapshot()
+            try:
+                contract = store.get_contract(contract_id)
+                if contract is None:
+                    _emit_error(f"Task '{contract_id}' not found.", as_json)
+                    return
+                last_status = project_task_status(contract, store)
+                if last_status["terminal"]:
+                    last_status = project_task_status(
+                        contract, store, check_integrity=True
+                    )
+                    if as_json:
+                        _output_json(last_status)
+                    else:
+                        click.echo(f"{contract_id} {last_status['status']}")
+                        click.echo(f"integrity: {last_status['integrity']['status']}")
+                    if not last_status["integrity"]["consistent"]:
+                        raise click.exceptions.Exit(1)
+                    return
+                if time.monotonic() >= deadline:
+                    payload = dict(last_status)
+                    payload["timed_out"] = True
+                    payload["integrity"] = {
+                        "status": "not_checked",
+                        "consistent": None,
+                        "checked": [],
+                        "not_checked": [
+                            "terminal_local_runtime_record_and_materialization_check"
+                        ],
+                    }
+                    payload["ok"] = False
+                    if as_json:
+                        _output_json(payload)
+                    else:
+                        click.echo(f"{contract_id} {last_status['status']} (timed out)")
+                    return
+            finally:
+                store.close()
+        except (click.exceptions.Exit, click.ClickException):
+            raise
+        except Exception as error:
+            _emit_inspection_error(error, as_json)
             return
         time.sleep(max(interval, 0.05))
 
@@ -226,35 +261,70 @@ def task_wait(
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON.")
 def task_audit(contract_id: str, as_json: bool) -> None:
     """Show an audit projection for a task."""
-    store = _persistent_store()
-    query = _query_projection(store)
-    contract = query.get_contract(contract_id)
-    if contract is None:
-        _emit_error(f"Task '{contract_id}' not found.", as_json)
+    try:
+        store = _persistent_snapshot()
+        try:
+            contract = store.get_contract(contract_id)
+            if contract is None:
+                _emit_error(f"Task '{contract_id}' not found.", as_json)
+                return
+            entries = store.get_by_contract(contract.id)
+            runtime_records = store.scan_runtime_records()
+            record_index = {record.id: record for _, record in runtime_records}
+            related_runtime_traces = []
+            for revision, record in runtime_records:
+                if record.record_type != "trace.recorded":
+                    continue
+                trace = record.payload.get("trace")
+                if not isinstance(trace, Mapping):
+                    continue
+                if trace.get("contract_id") != "commitment":
+                    continue
+                if contract.id not in runtime_record_contract_references(
+                    record, record_index
+                ):
+                    continue
+                related_runtime_traces.append(
+                    {
+                        "trace_id": trace.get("id"),
+                        "event_type": trace.get("event_type"),
+                        "record_id": record.id,
+                        "recorded_at": record.recorded_at,
+                        "revision": revision,
+                    }
+                )
+            status = project_task_status(contract, store, check_integrity=True)
+            productivity = project_task_productivity(contract, store)
+            payload = {
+                "task": status,
+                "inputs": list(contract.inputs),
+                "outputs_declared": list(contract.outputs),
+                "labels": list(contract.labels),
+                "tool_scope": list(contract.tool_scope),
+                "trace": [trace_entry_to_dict(entry) for entry in entries],
+                "related_runtime_traces": related_runtime_traces,
+                "productivity": productivity,
+            }
+        finally:
+            store.close()
+    except click.ClickException:
+        raise
+    except Exception as error:
+        _emit_inspection_error(error, as_json)
         return
-    entries = store.get_by_contract(contract.id)
-    status = query.memoize_json(
-        "task.status",
-        contract.id,
-        lambda: project_task_status(contract, store),
-    )
-    productivity = project_task_productivity(contract, store)
-    payload = {
-        "task": status,
-        "inputs": list(contract.inputs),
-        "outputs_declared": list(contract.outputs),
-        "labels": list(contract.labels),
-        "tool_scope": list(contract.tool_scope),
-        "trace": [trace_entry_to_dict(entry) for entry in entries],
-        "productivity": productivity,
-    }
     if as_json:
         _output_json(payload)
+        if not status["integrity"]["consistent"]:
+            raise click.exceptions.Exit(1)
         return
     click.echo(f"{contract.id} {status['status']}")
     click.echo(f"inputs: {list(contract.inputs)}")
     click.echo(f"outputs: {status['outputs']}")
     click.echo(f"trace_events: {len(entries)}")
+    click.echo(f"integrity: {status['integrity']['status']}")
+    if not status["integrity"]["consistent"]:
+        click.echo("projected status is untrusted")
+        raise click.exceptions.Exit(1)
 
 
 def _emit_error(message: str, as_json: bool) -> None:
@@ -262,3 +332,17 @@ def _emit_error(message: str, as_json: bool) -> None:
         _output_json({"ok": False, "error": message})
     else:
         raise click.ClickException(message)
+
+
+def _emit_inspection_error(error: Exception, as_json: bool) -> None:
+    """Report only an exception category; it may contain sealed row data."""
+    payload = {
+        "ok": False,
+        "error": "Unable to inspect task state",
+        "error_type": type(error).__name__,
+    }
+    if as_json:
+        _output_json(payload)
+    else:
+        click.echo(f"{payload['error']} ({payload['error_type']})")
+    raise click.exceptions.Exit(1)

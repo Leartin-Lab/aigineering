@@ -1,6 +1,7 @@
 """Tests for agent-facing task CLI commands."""
 
 import json
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -68,6 +69,82 @@ def test_task_create_status_json():
         assert data["contract_id"] == contract_id
         assert data["status"] == "ready"
         assert data["terminal"] is False
+
+
+def test_task_audit_includes_typed_candidate_declaration_trace():
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        contract_id = _seed_build_report_task(runner)
+        result = runner.invoke(cli, ["task", "audit", contract_id, "--json"])
+
+        assert result.exit_code == 0, result.output
+        payload = json.loads(result.output)
+        related = payload["related_runtime_traces"]
+        assert related
+        assert all(item["trace_id"] for item in related)
+        assert all(item["record_id"] for item in related)
+        assert all(item["recorded_at"] for item in related)
+        assert all(item["revision"] > 0 for item in related)
+
+
+def test_task_status_fails_closed_on_malformed_contract_json():
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        contract_id = _seed_build_report_task(runner)
+        with sqlite3.connect(".aig/store.db") as connection:
+            connection.execute(
+                "UPDATE contracts SET outputs='PRIVATE_MALFORMED_SENTINEL' WHERE id=?",
+                (contract_id,),
+            )
+
+        result = runner.invoke(cli, ["task", "status", contract_id, "--json"])
+
+        assert result.exit_code == 1
+        payload = json.loads(result.output)
+        assert payload["ok"] is False
+        assert payload["error"] == "Unable to inspect task state"
+        assert payload["error_type"] == "JSONDecodeError"
+        assert "PRIVATE_MALFORMED_SENTINEL" not in result.output
+
+
+def test_task_status_and_audit_do_not_pass_tampered_materialization():
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        contract_id = _seed_build_report_task(runner)
+        with sqlite3.connect(".aig/store.db") as connection:
+            connection.execute(
+                "UPDATE contracts SET description='tampered' WHERE id=?",
+                (contract_id,),
+            )
+
+        status = runner.invoke(cli, ["task", "status", contract_id, "--json"])
+        assert status.exit_code == 1
+        status_payload = json.loads(status.output)
+        assert status_payload["status"] == "ready"
+        assert status_payload["integrity"]["consistent"] is False
+        assert status_payload["ok"] is False
+
+        audit = runner.invoke(cli, ["task", "audit", contract_id, "--json"])
+        assert audit.exit_code == 1
+        audit_payload = json.loads(audit.output)
+        assert audit_payload["task"]["integrity"]["consistent"] is False
+        assert audit_payload["task"]["ok"] is False
+
+
+def test_timed_out_task_wait_states_integrity_was_not_checked():
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        contract_id = _seed_build_report_task(runner)
+        result = runner.invoke(
+            cli,
+            ["task", "wait", contract_id, "--timeout", "0", "--json"],
+        )
+
+        assert result.exit_code == 0, result.output
+        payload = json.loads(result.output)
+        assert payload["timed_out"] is True
+        assert payload["integrity"]["status"] == "not_checked"
+        assert payload["ok"] is False
 
 
 def test_run_once_executes_next_ready_task():
@@ -290,6 +367,60 @@ def test_parent_status_projects_staged_descendants_without_wait_state():
         )
 
 
+def test_parent_status_names_failed_descendant_and_limits_cause_claims():
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        created = runner.invoke(
+            cli,
+            ["task", "create", "--name", "root", "--output", "report", "--json"],
+        )
+        root_id = json.loads(created.output)["contract_id"]
+        runner.invoke(
+            cli,
+            [
+                "run",
+                "--once",
+                "--worker",
+                "mock",
+                "--mock-preset",
+                'root=/plan {"reason":"decompose"}',
+                "--json",
+            ],
+        )
+        store = SQLiteStore(".aig/store.db")
+        child = next(
+            item for item in store.get_all_contracts() if item.parent_id == root_id
+        )
+        store.close()
+
+        failed = runner.invoke(
+            cli,
+            [
+                "run",
+                "--task",
+                child.id,
+                "--worker",
+                "mock",
+                "--mock-preset",
+                f'{child.name}=/fail {{"reason":"declared failure"}}',
+                "--json",
+            ],
+        )
+        assert failed.exit_code == 1, failed.output
+
+        status = runner.invoke(cli, ["task", "status", root_id, "--json"])
+        payload = json.loads(status.output)
+
+        assert payload["status"] == "expanded"
+        assert any(
+            item.startswith("descendant_failed:") for item in payload["blockers"]
+        )
+        assert payload["failure_details"]
+        assert payload["failure_details"][0]["status"] == "failed"
+        assert "cause_events" in payload["failure_details"][0]
+        assert "related_tool_failures" in payload["failure_details"][0]
+
+
 def test_run_once_provider_failure_is_json_and_has_no_traceback(monkeypatch):
     def fail_provider(self, contract, disclosed_assets):
         del self, contract, disclosed_assets
@@ -361,11 +492,13 @@ def test_task_wait_and_audit_json_after_run():
         assert wait_result.exit_code == 0, wait_result.output
         wait_data = json.loads(wait_result.output)
         assert wait_data["status"] == "completed"
+        assert wait_data["integrity"]["consistent"] is True
 
         assert audit_result.exit_code == 0, audit_result.output
         audit_data = json.loads(audit_result.output)
         assert audit_data["task"]["contract_id"] == contract_id
         assert audit_data["task"]["outputs"]["final_report"]
+        assert audit_data["task"]["integrity"]["consistent"] is True
         assert len(audit_data["trace"]) > 0
         assert audit_data["productivity"]["root_contract_id"] == contract_id
         assert audit_data["productivity"]["contract_count"] == 1

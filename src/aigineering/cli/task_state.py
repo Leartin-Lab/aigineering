@@ -14,7 +14,9 @@ from aigineering.protocol.immutability import deep_thaw
 from aigineering.protocol.types import Contract, TraceEntry
 
 
-def project_task_status(contract: Contract, store) -> dict:
+def project_task_status(
+    contract: Contract, store, *, check_integrity: bool = False
+) -> dict:
     """Return a JSON-serializable task status projection.
 
     This is a read-only view over durable contracts, assets, and trace records.
@@ -49,17 +51,28 @@ def project_task_status(contract: Contract, store) -> dict:
     status = _status_from_entries(
         contract, store, entries, terminal, view, attempt_outcome
     )
+    failure_details = _descendant_failure_details(
+        contract,
+        store,
+        include_contract=status in {"failed", "cancelled", "unreachable", "stalled"},
+    )
+    blockers = list(view.blockers)
+    if status not in {"completed", "failed", "cancelled", "unreachable"}:
+        blockers.extend(
+            f"descendant_{item['status']}:{item['contract_id']}"
+            for item in failure_details
+        )
     risks = _silent_failure_risks(contract, store, entries, status, view=view)
     if status not in {"completed", "failed", "cancelled", "unreachable"}:
         risks.extend(_descendant_failure_risks(contract, store))
-    return {
+    result = {
         "contract_id": contract.id,
         "name": contract.name,
         "status": status,
         "terminal": status in TERMINAL_EVENTS or status == "completed",
         "ok": status == "completed",
         "outputs_satisfied": all_outputs_satisfied(contract, store),
-        "blockers": list(view.blockers),
+        "blockers": blockers,
         "budget_remaining": view.budget_remaining,
         "projection_hash": view.projection_hash,
         "outputs": output_assets,
@@ -70,7 +83,14 @@ def project_task_status(contract: Contract, store) -> dict:
         "recoveries": recoveries,
         "trace_event_count": len(entries),
         "token_usage": usage,
+        "failure_details": failure_details,
     }
+    if check_integrity:
+        from aigineering.core.integrity import check_store_integrity
+
+        result["integrity"] = check_store_integrity(store)
+        result["ok"] = result["ok"] and result["integrity"]["consistent"]
+    return result
 
 
 def _trace_entries(store, contract_id: str) -> list[TraceEntry]:
@@ -312,3 +332,148 @@ def _descendant_failure_risks(contract: Contract, store) -> list[dict[str, str]]
                 )
             pending.append(child.id)
     return risks
+
+
+def _descendant_failure_details(
+    contract: Contract, store, *, include_contract: bool = False
+) -> list[dict[str, object]]:
+    """Expose bounded failure facts and separately labeled related tool errors."""
+    contracts = store.get_all_contracts()
+    contracts_by_id = {candidate.id: candidate for candidate in contracts}
+    children: dict[str, list[Contract]] = {}
+    for candidate in contracts:
+        if candidate.parent_id is not None:
+            children.setdefault(candidate.parent_id, []).append(candidate)
+    projection = RuntimeProjection(store, store)
+    details: list[dict[str, object]] = []
+    pending = ([contract] if include_contract else []) + list(
+        children.get(contract.id, ())
+    )
+    visited: set[str] = set()
+    while pending:
+        child = pending.pop(0)
+        if child.id in visited:
+            continue
+        visited.add(child.id)
+        entries = _trace_entries(store, child.id)
+        view = projection.contract_view(child)
+        status = _status_from_entries(
+            child,
+            store,
+            entries,
+            _latest_terminal(entries),
+            view,
+            _latest_attempt_outcome(store, child.id),
+        )
+        if status in {"failed", "cancelled", "unreachable", "stalled"}:
+            branch_root = child
+            ancestor_ids = {branch_root.id}
+            while branch_root.parent_id != contract.id:
+                parent = contracts_by_id.get(branch_root.parent_id or "")
+                if parent is None or parent.id in ancestor_ids:
+                    break
+                ancestor_ids.add(parent.id)
+                branch_root = parent
+            branch_contracts: list[Contract] = []
+            branch_pending = [branch_root]
+            branch_visited: set[str] = set()
+            while branch_pending:
+                branch_item = branch_pending.pop()
+                if branch_item.id in branch_visited:
+                    continue
+                branch_visited.add(branch_item.id)
+                branch_contracts.append(branch_item)
+                branch_pending.extend(children.get(branch_item.id, ()))
+            detail: dict[str, object] = {
+                "contract_id": child.id,
+                "name": child.name,
+                "status": status,
+                "tool": None,
+                "error_type": None,
+                "retryable": None,
+                "observation_asset_ids": [],
+                "cause_events": [],
+                "related_tool_failures": [],
+            }
+            direct_entries = _trace_entries(store, child.id)
+            for entry in direct_entries:
+                metadata = (
+                    deep_thaw(entry.usage_metadata)
+                    if entry.usage_metadata is not None
+                    else {}
+                )
+                if not metadata.get("error_type"):
+                    continue
+                cause = {
+                    "source_contract_id": child.id,
+                    "trace_id": entry.id,
+                    "tool": metadata.get("tool"),
+                    "error_type": metadata.get("error_type"),
+                    "retryable": metadata.get("retryable"),
+                    "observation_asset_ids": [],
+                }
+                cause["observation_asset_ids"] = _observation_asset_ids(entry, store)
+                detail["cause_events"].append(cause)
+                for key in ("tool", "error_type", "retryable"):
+                    detail[key] = cause[key]
+                detail["observation_asset_ids"].extend(
+                    item
+                    for item in cause["observation_asset_ids"]
+                    if item not in detail["observation_asset_ids"]
+                )
+
+            for related_contract in branch_contracts:
+                if related_contract.id == child.id:
+                    continue
+                for entry in _trace_entries(store, related_contract.id):
+                    metadata = (
+                        deep_thaw(entry.usage_metadata)
+                        if entry.usage_metadata is not None
+                        else {}
+                    )
+                    if not metadata.get("error_type"):
+                        continue
+                    detail["related_tool_failures"].append(
+                        {
+                            "source_contract_id": related_contract.id,
+                            "trace_id": entry.id,
+                            "tool": metadata.get("tool"),
+                            "error_type": metadata.get("error_type"),
+                            "retryable": metadata.get("retryable"),
+                            "observation_asset_ids": _observation_asset_ids(
+                                entry, store
+                            ),
+                        }
+                    )
+            details.append(detail)
+        pending.extend(children.get(child.id, ()))
+    return details
+
+
+def _observation_asset_ids(entry: TraceEntry, store) -> list[str]:
+    """Resolve observation references without interpreting effect descriptors."""
+    ids: list[str] = []
+    if entry.event_type in {"projection", "tool_executed", "fail_reported"}:
+        for asset_id in entry.accepted_fragments or ():
+            asset = store.get_asset(asset_id)
+            if asset is not None and (
+                asset.name.startswith("_tool_obs_")
+                or asset.origin in {"tool_observation", "tool"}
+            ):
+                ids.append(asset.id)
+    # Modern Candidate traces carry accepted names while immutable Asset facts
+    # carry IDs. Resolve by name and source Contract, never by JSON fragments.
+    for name in entry.accepted_asset_names or ():
+        if not name.startswith(("_tool_obs_", "tool_observation_")):
+            continue
+        for asset in store.get_assets_by_name(name):
+            is_observation = asset.name.startswith(
+                ("_tool_obs_", "tool_observation_")
+            ) or asset.origin in {"tool_observation", "tool"}
+            if (
+                is_observation
+                and asset.created_by == entry.contract_id
+                and asset.id not in ids
+            ):
+                ids.append(asset.id)
+    return ids
