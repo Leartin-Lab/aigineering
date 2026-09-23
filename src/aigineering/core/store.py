@@ -42,6 +42,7 @@ from aigineering.core.store_capabilities import (
     CandidateCommitStore,
     ContractReader as ContractReader,
     RuntimeRecordReader as RuntimeRecordReader,
+    TraceReader,
     WorkerClaimStore,
 )
 
@@ -69,14 +70,9 @@ class StoreProtocol(CandidateCommitStore, Protocol):
 
 
 @runtime_checkable
-class OperationalStoreProtocol(
-    StoreProtocol, CandidateCommitStore, WorkerClaimStore, Protocol
-):
+class OperationalStoreProtocol(StoreProtocol, WorkerClaimStore, TraceReader, Protocol):
     """Required transactional surface for claim/package/submit execution."""
 
-    def get_by_contract(self, contract_id: str) -> list: ...
-    def get_by_relation_target(self, relation_target: str) -> list: ...
-    def get_all(self) -> list: ...
     def new_entry(self, contract_id: str, event_type: str, **kwargs): ...
     def get_idempotency(
         self, contract_id: str, idempotency_key: str
@@ -275,12 +271,17 @@ class MemoryStore(_ProjectionIndexMixin):
         return existing[1] if existing is not None else None
 
     def scan_runtime_records(
-        self, *, after_revision: int = 0, record_type: str | None = None
+        self,
+        *,
+        after_revision: int = 0,
+        through_revision: int | None = None,
+        record_type: str | None = None,
     ) -> list[tuple[int, RuntimeRecord]]:
         return [
             (revision, record)
             for revision, record in self._runtime_records.values()
             if revision > after_revision
+            and (through_revision is None or revision <= through_revision)
             and (record_type is None or record.record_type == record_type)
         ]
 

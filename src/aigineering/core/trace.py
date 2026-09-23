@@ -24,6 +24,7 @@ from aigineering.protocol.immutability import deep_thaw
 from aigineering.protocol.types import TraceEntry
 from aigineering.protocol.runtime_record import RuntimeRecord, create_runtime_record
 from aigineering.protocol.wire import trace_entry_from_dict, trace_entry_to_dict
+from aigineering.core.store_capabilities import TraceReader
 
 _logger = logging.getLogger(__name__)
 
@@ -109,18 +110,13 @@ def create_entry(
 
 
 @runtime_checkable
-class TraceStoreProtocol(Protocol):
+class TraceStoreProtocol(TraceReader, Protocol):
     """Protocol that any trace store (in-memory or persistent) must satisfy."""
 
     def append(self, entry: TraceEntry) -> None: ...
     def new_entry(
         self, contract_id: str, event_type: str, **kwargs: object
     ) -> TraceEntry: ...
-    def get_by_contract(self, contract_id: str) -> list[TraceEntry]: ...
-    def get_by_event_type(self, event_type: str) -> list[TraceEntry]: ...
-    def get_by_relation_target(self, relation_target: str) -> list[TraceEntry]: ...
-    def get_all(self) -> list[TraceEntry]: ...
-    def get_reverse_lineage(self, asset_id: str) -> list[TraceEntry]: ...
 
 
 class PostCommitTraceExporter(Protocol):
@@ -145,7 +141,44 @@ class TraceStoreExportAdapter:
             self.destination.append(entry)
 
 
-class MemoryTraceStore:
+class _TraceReadMixin:
+    """Shared read queries over each trace adapter's in-memory view."""
+
+    def _trace_entries(self) -> list[TraceEntry]:
+        entries = getattr(self, "entries", None)
+        if entries is None:
+            entries = self._entries
+        return entries
+
+    def get_by_contract(self, contract_id: str) -> list[TraceEntry]:
+        return [
+            entry for entry in self._trace_entries() if entry.contract_id == contract_id
+        ]
+
+    def get_by_event_type(self, event_type: str) -> list[TraceEntry]:
+        return [
+            entry for entry in self._trace_entries() if entry.event_type == event_type
+        ]
+
+    def get_by_relation_target(self, relation_target: str) -> list[TraceEntry]:
+        return [
+            entry
+            for entry in self._trace_entries()
+            if entry.relation_target == relation_target
+        ]
+
+    def get_all(self) -> list[TraceEntry]:
+        return list(self._trace_entries())
+
+    def get_reverse_lineage(self, asset_id: str) -> list[TraceEntry]:
+        return [
+            entry
+            for entry in self._trace_entries()
+            if entry_references_asset(entry, asset_id)
+        ]
+
+
+class MemoryTraceStore(_TraceReadMixin):
     def __init__(self) -> None:
         self.entries: list[TraceEntry] = []
         self._seq: int = 0
@@ -186,25 +219,8 @@ class MemoryTraceStore:
         self.append(entry)
         return entry
 
-    def get_by_contract(self, contract_id: str) -> list[TraceEntry]:
-        return [e for e in self.entries if e.contract_id == contract_id]
 
-    def get_by_event_type(self, event_type: str) -> list[TraceEntry]:
-        return [e for e in self.entries if e.event_type == event_type]
-
-    def get_by_relation_target(self, relation_target: str) -> list[TraceEntry]:
-        return [e for e in self.entries if e.relation_target == relation_target]
-
-    def get_all(self) -> list[TraceEntry]:
-        return list(self.entries)
-
-    def get_reverse_lineage(self, asset_id: str) -> list[TraceEntry]:
-        return [
-            entry for entry in self.entries if entry_references_asset(entry, asset_id)
-        ]
-
-
-class JsonLTraceStore:
+class JsonLTraceStore(_TraceReadMixin):
     """Persistent JSONL trace store — one JSON object per line."""
 
     def __init__(self, file_path: str) -> None:
@@ -247,7 +263,15 @@ class JsonLTraceStore:
         return entries
 
     def _write_line(self, entry: TraceEntry) -> None:
-        line = json.dumps(trace_entry_to_dict(entry), ensure_ascii=False) + "\n"
+        line = (
+            json.dumps(
+                trace_entry_to_dict(entry),
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            + "\n"
+        )
         with open(self._file_path, "a", encoding="utf-8") as f:
             f.write(line)
             f.flush()
@@ -288,23 +312,6 @@ class JsonLTraceStore:
         )
         self.append(entry)
         return entry
-
-    def get_by_contract(self, contract_id: str) -> list[TraceEntry]:
-        return [e for e in self._entries if e.contract_id == contract_id]
-
-    def get_by_event_type(self, event_type: str) -> list[TraceEntry]:
-        return [e for e in self._entries if e.event_type == event_type]
-
-    def get_by_relation_target(self, relation_target: str) -> list[TraceEntry]:
-        return [e for e in self._entries if e.relation_target == relation_target]
-
-    def get_all(self) -> list[TraceEntry]:
-        return list(self._entries)
-
-    def get_reverse_lineage(self, asset_id: str) -> list[TraceEntry]:
-        return [
-            entry for entry in self._entries if entry_references_asset(entry, asset_id)
-        ]
 
 
 # Backward compatibility: TraceStore alias points to MemoryTraceStore

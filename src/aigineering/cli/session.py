@@ -50,7 +50,13 @@ def session_show(session_id: str) -> None:
     click.echo(f"root_contract_id:  {s.root_contract_id}")
     click.echo(f"contract_ids:      {s.contract_ids}")
     click.echo(f"asset_ids:         {s.asset_ids}")
+    click.echo(f"produced_asset_ids:{s.produced_asset_ids}")
     click.echo(f"trace_ids:         {s.trace_ids}")
+    click.echo(f"unassigned_trace_ids: {s.unassigned_trace_ids}")
+    click.echo(f"scope:             {s.scope}")
+    click.echo(
+        f"execution_revision: {s.execution_start_revision}..{s.execution_end_revision}"
+    )
     redacted = _redact_sealed(
         {
             "config_snapshot": dict(s.config_snapshot or {}),

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import time
+from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
@@ -14,6 +16,7 @@ from aigineering.core.ids import (
     hash_asset_content,
     hash_asset_definition,
 )
+from aigineering.core.session import runtime_record_contract_references
 from aigineering.application import (
     build_worker,
     default_completion_registry,
@@ -38,6 +41,95 @@ from aigineering.protocol.effect_builders import (
     contract_declaration_effect,
 )
 from aigineering.protocol.types import Asset, Contract, TraceEntry
+from aigineering.protocol.wire import trace_entry_from_dict
+
+
+@dataclass(frozen=True)
+class _RunSessionScope:
+    contract_ids: tuple[str, ...]
+    asset_ids: tuple[str, ...]
+    produced_asset_ids: tuple[str, ...]
+    trace_ids: tuple[str, ...]
+    unassigned_trace_ids: tuple[str, ...]
+    start_revision: int
+    end_revision: int
+
+
+def _session_scope_for_run(
+    store: StoreProtocol,
+    trace_store: TraceStoreProtocol,
+    root_contract_id: str,
+    start_revision: int,
+    end_revision: int,
+) -> _RunSessionScope:
+    """Export and describe only this run's root tree and referenced evidence."""
+    records = store.scan_runtime_records(
+        after_revision=start_revision, through_revision=end_revision
+    )
+    contracts = {item.id: item for item in store.get_all_contracts()}
+    contract_ids = {root_contract_id} if root_contract_id in contracts else set()
+    changed = True
+    while changed:
+        changed = False
+        for contract in contracts.values():
+            if contract.parent_id in contract_ids and contract.id not in contract_ids:
+                contract_ids.add(contract.id)
+                changed = True
+
+    records_by_id = {record.id: record for _, record in records}
+
+    assets: set[str] = set()
+    produced_assets: set[str] = set()
+    for contract_id in contract_ids:
+        contract = contracts[contract_id]
+        assets.update(
+            asset_id
+            for asset_id in contract.context_asset_ids
+            if store.get_asset(asset_id) is not None
+        )
+
+    for _, record in records:
+        if record.record_type != "asset.committed":
+            continue
+        raw_asset = record.payload.get("asset")
+        if not isinstance(raw_asset, Mapping):
+            continue
+        asset_id = raw_asset.get("id")
+        if raw_asset.get("created_by") in contract_ids and isinstance(asset_id, str):
+            if store.get_asset(asset_id) is not None:
+                produced_assets.add(asset_id)
+                assets.add(asset_id)
+
+    trace_ids: list[str] = []
+    unassigned_trace_ids: list[str] = []
+    for _, record in records:
+        if record.record_type != "trace.recorded":
+            continue
+        raw_trace = record.payload.get("trace")
+        if not isinstance(raw_trace, Mapping):
+            continue
+        entry = trace_entry_from_dict(dict(raw_trace))
+        references = runtime_record_contract_references(record, records_by_id)
+        belongs_to_tree = bool(references & contract_ids)
+        if not belongs_to_tree:
+            if entry.contract_id == "commitment" and not references:
+                unassigned_trace_ids.append(entry.id)
+            continue
+        trace_store.append(entry)
+        trace_ids.append(entry.id)
+        for asset_id in (*entry.disclosed_assets, *entry.accepted_fragments):
+            if store.get_asset(asset_id) is not None:
+                assets.add(asset_id)
+
+    return _RunSessionScope(
+        contract_ids=tuple(sorted(contract_ids)),
+        asset_ids=tuple(sorted(assets)),
+        produced_asset_ids=tuple(sorted(produced_assets)),
+        trace_ids=tuple(trace_ids),
+        unassigned_trace_ids=tuple(unassigned_trace_ids),
+        start_revision=start_revision,
+        end_revision=end_revision,
+    )
 
 
 def _get_trace_dir() -> Path:
@@ -53,6 +145,11 @@ def _get_store_dir() -> Path:
 def _persistent_store() -> SQLiteStore:
     """Create the default local persistent store (SQLite-backed)."""
     return persistent_store()
+
+
+def _persistent_snapshot(db_path: str | Path = ".aig/store.db") -> SQLiteStore:
+    """Open a read-only snapshot of the configured local SQLite Store."""
+    return SQLiteStore.snapshot_from_path(db_path)
 
 
 def _query_projection(store: StoreProtocol):
@@ -134,13 +231,15 @@ def _run_demo(
     max_retries: int = 3,
     capabilities: frozenset[str] | None = None,
     behavior_labels: tuple[str, ...] = (),
-) -> tuple[StoreProtocol, TraceStoreProtocol, Contract]:
+) -> tuple[StoreProtocol, TraceStoreProtocol, Contract, _RunSessionScope]:
     """Run a bounded quick-goal task graph through the normal Worker pool."""
     if store is None:
         store = SQLiteStore(":memory:")
     store = require_operational_store(store)
     if trace_store is None:
         trace_store = store
+
+    start_revision = store.get_runtime_revision()
 
     try:
         ensure_local_domain(store)
@@ -281,14 +380,19 @@ def _run_demo(
             f"risks={status.get('silent_failure_risks', [])}"
         )
 
-    # Session JSONL is an audit export of the durable runtime trace, not an
-    # independent execution store.
-    exported_trace_ids = {entry.id for entry in trace_store.get_all()}
-    for entry in store.get_all():
-        if entry.id not in exported_trace_ids:
-            trace_store.append(entry)
-
-    return store, trace_store, contract
+    # Export from a stable, bounded runtime-record revision window. Contract
+    # ownership determines root-tree membership; global trace counts do not.
+    snapshot_factory = getattr(store, "snapshot", None)
+    scope_store = snapshot_factory() if callable(snapshot_factory) else store
+    try:
+        end_revision = scope_store.get_runtime_revision()
+        scope = _session_scope_for_run(
+            scope_store, trace_store, contract.id, start_revision, end_revision
+        )
+    finally:
+        if scope_store is not store:
+            scope_store.close()
+    return store, trace_store, contract, scope
 
 
 def _redact_sealed(data: dict) -> dict:

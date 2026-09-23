@@ -5,9 +5,9 @@
    Session manifests are **READ MODELS** — projections over contracts, assets,
    and trace.  They are **NOT** authoritative lifecycle state.  Deleting or
    rebuilding a session manifest does not change runtime facts.  The canonical
-   truth lives in the append-only trace (``trace.py``) and the durable store
-   (``StoreProtocol``).  The session manifest is a convenience snapshot
-   rebuilt on demand from those sources.
+   truth lives in immutable runtime records in the durable Store
+   (``StoreProtocol``). Trace stores expose committed trace-record projections;
+   the session manifest is a convenience snapshot rebuilt from those facts.
 """
 
 from __future__ import annotations
@@ -15,14 +15,103 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import re
+from collections.abc import Mapping
 from typing import Optional
 
 from aigineering.core.ids import now_iso
 from aigineering.protocol.types import Session
 from aigineering.protocol.wire import session_from_dict, session_to_dict
+from aigineering.protocol.runtime_record import RuntimeRecord
 
 
 _SESSION_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}\Z")
+
+
+def runtime_record_contract_references(
+    record: RuntimeRecord,
+    records_by_id: Mapping[str, RuntimeRecord] | None = None,
+) -> frozenset[str]:
+    """Return Contract IDs explicitly referenced by a typed runtime record.
+
+    Candidate commitment traces without a claim binding use the historical
+    ``commitment`` label. They are attributed only when the trace's candidate
+    ID joins to a committed record whose committed record IDs resolve to a
+    declared Contract; the label itself never grants ownership.
+    """
+    return _runtime_record_contract_references(record, records_by_id or {}, set())
+
+
+def _runtime_record_contract_references(
+    record: RuntimeRecord,
+    index: Mapping[str, RuntimeRecord],
+    visited: set[str],
+) -> frozenset[str]:
+    if record.id in visited:
+        return frozenset()
+    visited.add(record.id)
+    payload = record.payload
+    references: set[str] = set()
+    for key in ("contract_id", "source_contract_id", "parent_contract_id"):
+        value = payload.get(key)
+        if isinstance(value, str):
+            references.add(value)
+
+    if record.record_type == "contract.declared":
+        contract = payload.get("contract")
+        if isinstance(contract, Mapping):
+            for key in ("id", "parent_id"):
+                value = contract.get(key)
+                if isinstance(value, str):
+                    references.add(value)
+    elif record.record_type == "asset.committed":
+        asset = payload.get("asset")
+        if isinstance(asset, Mapping):
+            creator = asset.get("created_by")
+            if isinstance(creator, str):
+                references.add(creator)
+    elif record.record_type == "trace.recorded":
+        trace = payload.get("trace")
+        if isinstance(trace, Mapping):
+            contract_id = trace.get("contract_id")
+            if isinstance(contract_id, str) and contract_id != "commitment":
+                references.add(contract_id)
+            elif contract_id == "commitment":
+                candidate_ids: set[str] = set()
+                for fragment in trace.get("accepted_fragments", ()):
+                    if not isinstance(fragment, str):
+                        continue
+                    try:
+                        candidate_id = json.loads(fragment).get("candidate_id")
+                    except (TypeError, ValueError, AttributeError):
+                        continue
+                    if isinstance(candidate_id, str):
+                        candidate_ids.add(candidate_id)
+                for candidate_record in index.values():
+                    if (
+                        candidate_record.record_type != "candidate.committed"
+                        or candidate_record.payload.get("candidate_id")
+                        not in candidate_ids
+                    ):
+                        continue
+                    for committed_id in candidate_record.payload.get(
+                        "committed_record_ids", ()
+                    ):
+                        committed = index.get(committed_id)
+                        if committed is not None:
+                            references.update(
+                                _runtime_record_contract_references(
+                                    committed, index, visited
+                                )
+                            )
+    elif record.record_type == "candidate.committed":
+        for committed_id in payload.get("committed_record_ids", ()):
+            committed = index.get(committed_id)
+            if committed is not None:
+                references.update(
+                    _runtime_record_contract_references(committed, index, visited)
+                )
+
+    return frozenset(references)
 
 
 def validate_session_id(session_id: str) -> str:
@@ -76,6 +165,11 @@ class SessionStore:
                 config_snapshot=session.config_snapshot,
                 worker_snapshot=session.worker_snapshot,
                 created_at=now_iso(),
+                scope=session.scope,
+                execution_start_revision=session.execution_start_revision,
+                execution_end_revision=session.execution_end_revision,
+                produced_asset_ids=session.produced_asset_ids,
+                unassigned_trace_ids=session.unassigned_trace_ids,
             )
         payload = session_to_dict(session)
         with open(self._file_path(session.id), "w", encoding="utf-8") as f:

@@ -204,6 +204,11 @@ def session_to_dict(session: Session) -> dict[str, Any]:
         "config_snapshot": deep_thaw(session.config_snapshot),
         "worker_snapshot": deep_thaw(session.worker_snapshot),
         "created_at": session.created_at,
+        "scope": session.scope,
+        "execution_start_revision": session.execution_start_revision,
+        "execution_end_revision": session.execution_end_revision,
+        "produced_asset_ids": session.produced_asset_ids,
+        "unassigned_trace_ids": session.unassigned_trace_ids,
     }
 
 
@@ -217,4 +222,9 @@ def session_from_dict(data: dict[str, Any]) -> Session:
         config_snapshot=data.get("config_snapshot", {}),
         worker_snapshot=data.get("worker_snapshot", {}),
         created_at=data.get("created_at", ""),
+        scope=data.get("scope", "legacy_unscoped"),
+        execution_start_revision=data.get("execution_start_revision"),
+        execution_end_revision=data.get("execution_end_revision"),
+        produced_asset_ids=data.get("produced_asset_ids", []),
+        unassigned_trace_ids=data.get("unassigned_trace_ids", []),
     )

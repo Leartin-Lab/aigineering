@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import tomllib
 from pathlib import Path
 
 from click.testing import CliRunner
@@ -196,7 +197,7 @@ class _RuntimeVerifier:
 
 def _write_fleet_config(path: Path, registry_ref: str) -> None:
     path.write_text(
-        """
+        f"""
 [fleet]
 db_path = ".aig/store.db"
 poll_interval = 0.01
@@ -211,7 +212,7 @@ pools = ["reasoning"]
 [[workers]]
 id = "runtime:tools"
 kind = "tool"
-tool_registry = "{registry_ref}"
+tool_registry = {json.dumps(registry_ref)}
 
 [[workers]]
 id = "runtime:verifier"
@@ -220,9 +221,19 @@ model = "offline-fixture"
 capabilities = ["runtime.verify"]
 pools = ["verification"]
 effect_capabilities = ["asset.attest", "runtime.verify"]
-""".format(registry_ref=registry_ref).strip(),
+""".strip(),
         encoding="utf-8",
     )
+
+
+def test_fleet_config_preserves_windows_registry_path(tmp_path: Path) -> None:
+    config_path = tmp_path / "workers.toml"
+    registry_ref = r"C:\tools\aigineering\registry.py:build_registry"
+
+    _write_fleet_config(config_path, registry_ref)
+
+    parsed = tomllib.loads(config_path.read_text(encoding="utf-8"))
+    assert parsed["workers"][1]["tool_registry"] == registry_ref
 
 
 def test_runtime_ai4s_tool_continuation_attest_reopen_via_fleet_cli(

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Optional
 
@@ -38,6 +39,7 @@ from aigineering.runtime import (
     run_runtime_maintenance_step,
 )
 from aigineering.core.session import SessionStore
+from aigineering.core.session import runtime_record_contract_references
 from aigineering.core.trace import JsonLTraceStore
 from aigineering.protocol.types import Session
 from aigineering.core.capability_descriptors import create_tool_descriptor
@@ -231,7 +233,7 @@ def run(
     trace_path = _get_trace_dir() / f"{session_id}.jsonl"
     jsonl_store = JsonLTraceStore(str(trace_path))
     try:
-        store, trace_store, contract = _run_demo(
+        store, trace_store, contract, scope = _run_demo(
             goal,
             trace_store=jsonl_store,
             store=_persistent_store(),
@@ -247,17 +249,20 @@ def run(
     except (RuntimeError, WorkerInvocationError) as exc:
         raise click.ClickException(str(exc)) from exc
     entries = trace_store.get_by_contract(contract.id)
-    trace_ids = [e.id for e in jsonl_store.get_all()]
+    trace_ids = list(scope.trace_ids)
 
     # ── Session manifest ───────────────────────────────────────────────────
-    contract_ids = [c.id for c in store.get_all_contracts()]
-    asset_ids = [a.id for a in store.get_all_assets()]
     session = Session(
         id=session_id,
         root_contract_id=contract.id,
-        contract_ids=contract_ids,
-        asset_ids=asset_ids,
+        contract_ids=scope.contract_ids,
+        asset_ids=scope.asset_ids,
         trace_ids=trace_ids,
+        scope="root_tree",
+        execution_start_revision=scope.start_revision,
+        execution_end_revision=scope.end_revision,
+        produced_asset_ids=scope.produced_asset_ids,
+        unassigned_trace_ids=scope.unassigned_trace_ids,
     )
     session_store = SessionStore()
     session_store.create_session(session)
@@ -538,7 +543,7 @@ def _run_target_pool(
     json_output: bool,
 ) -> None:
     while True:
-        before_trace_count = len(store.get_all())
+        before_revision = store.get_runtime_revision()
         maintenance = run_runtime_maintenance_step(
             store, registry, candidate_publishers=candidate_publishers
         )
@@ -566,13 +571,22 @@ def _run_target_pool(
         processed_after = process_task_completions(
             store, registry, candidate_publishers=candidate_publishers
         )
-        new_entries = store.get_all()[before_trace_count:]
-        touched_contracts = sorted({entry.contract_id for entry in new_entries})
-        if touched_contracts:
+        end_revision = store.get_runtime_revision()
+        window_records = list(
+            store.scan_runtime_records(
+                after_revision=before_revision,
+                through_revision=end_revision,
+            )
+        )
+        touched_contracts, unassigned_trace_ids, trace_count = _cycle_trace_scope(
+            window_records
+        )
+        if trace_count:
             cycles.append(
                 {
                     "contracts": touched_contracts,
-                    "trace_events": len(new_entries),
+                    "unassigned_trace_ids": unassigned_trace_ids,
+                    "trace_events": trace_count,
                     "submission_status": (
                         submissions[-1].get("status") if submissions else None
                     ),
@@ -620,6 +634,28 @@ def _run_target_pool(
                 raise click.exceptions.Exit(1)
             return
         time.sleep(max(interval, 0.05))
+
+
+def _cycle_trace_scope(window_records) -> tuple[list[str], list[str], int]:
+    """Resolve cycle trace ownership from the complete bounded record window."""
+    records = [record for _, record in window_records]
+    records_by_id = {record.id: record for record in records}
+    trace_records = [
+        record for record in records if record.record_type == "trace.recorded"
+    ]
+    contracts: set[str] = set()
+    unassigned_trace_ids: list[str] = []
+    for record in trace_records:
+        references = runtime_record_contract_references(record, records_by_id)
+        contracts.update(references)
+        if references:
+            continue
+        trace_payload = record.payload.get("trace")
+        if isinstance(trace_payload, Mapping):
+            trace_id = trace_payload.get("id")
+            if isinstance(trace_id, str):
+                unassigned_trace_ids.append(trace_id)
+    return sorted(contracts), sorted(unassigned_trace_ids), len(trace_records)
 
 
 def _claim_for_pool_host(store, pool_host, candidate_publishers):
@@ -725,7 +761,7 @@ def demo(
     """Run a quick goal through a real LLM Worker by default."""
     capabilities = _parse_capabilities(capabilities_str)
     try:
-        store, trace_store, contract = _run_demo(
+        store, trace_store, contract, _scope = _run_demo(
             goal,
             worker_kind=worker_kind,
             model=model,

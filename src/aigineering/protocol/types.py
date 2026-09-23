@@ -297,10 +297,19 @@ class Session:
     config_snapshot: Mapping[str, Any] = field(default_factory=dict)
     worker_snapshot: Mapping[str, Any] = field(default_factory=dict)
     created_at: str = ""
+    scope: str = "legacy_unscoped"
+    execution_start_revision: Optional[int] = None
+    execution_end_revision: Optional[int] = None
+    produced_asset_ids: tuple[str, ...] = field(default_factory=tuple)
+    unassigned_trace_ids: tuple[str, ...] = field(default_factory=tuple)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "contract_ids", tuple(self.contract_ids))
         object.__setattr__(self, "asset_ids", tuple(self.asset_ids))
         object.__setattr__(self, "trace_ids", tuple(self.trace_ids))
+        object.__setattr__(self, "produced_asset_ids", tuple(self.produced_asset_ids))
+        object.__setattr__(
+            self, "unassigned_trace_ids", tuple(self.unassigned_trace_ids)
+        )
         object.__setattr__(self, "config_snapshot", deep_freeze(self.config_snapshot))
         object.__setattr__(self, "worker_snapshot", deep_freeze(self.worker_snapshot))

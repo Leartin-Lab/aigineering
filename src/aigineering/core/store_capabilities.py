@@ -43,7 +43,11 @@ class RuntimeRecordReader(Protocol):
 
     def get_runtime_record(self, record_id: str) -> RuntimeRecord | None: ...
     def scan_runtime_records(
-        self, *, after_revision: int = 0, record_type: str | None = None
+        self,
+        *,
+        after_revision: int = 0,
+        through_revision: int | None = None,
+        record_type: str | None = None,
     ) -> list[tuple[int, RuntimeRecord]]: ...
     def get_runtime_revision(self) -> int: ...
 

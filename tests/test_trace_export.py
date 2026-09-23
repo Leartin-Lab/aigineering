@@ -1,3 +1,8 @@
+import os
+from pathlib import Path
+import subprocess
+import sys
+
 import pytest
 
 from aigineering.core.sqlite_store import SQLiteStore
@@ -52,3 +57,50 @@ def test_jsonl_trace_export_runs_only_after_sqlite_commit(tmp_path):
     exported = {entry.id for entry in export.get_all()}
     assert exported
     assert exported <= authoritative
+
+
+def test_jsonl_trace_serialization_is_hashseed_independent(tmp_path):
+    script = """
+import sys
+import sqlite3
+from dataclasses import replace
+from aigineering.core.sqlite_store import SQLiteStore
+from aigineering.core.trace import JsonLTraceStore, create_entry
+
+metadata = {key: key for key in {"zeta", "alpha", "middle"}}
+entry = replace(
+    create_entry("root", "usage", usage_metadata=metadata),
+    timestamp="fixed",
+)
+JsonLTraceStore(sys.argv[1]).append(entry)
+store = SQLiteStore(sys.argv[2])
+store.append_trace_entry(entry)
+store.close()
+with sqlite3.connect(sys.argv[2]) as connection:
+    print(connection.execute(
+        "SELECT usage_metadata FROM trace_events WHERE id = ?", (entry.id,)
+    ).fetchone()[0])
+"""
+    source_path = Path(__file__).parents[1] / "src"
+    outputs = []
+    sqlite_values = []
+    for seed in ("17", "841"):
+        trace_path = tmp_path / f"trace-{seed}.jsonl"
+        database_path = tmp_path / f"store-{seed}.db"
+        env = os.environ.copy()
+        env["PYTHONHASHSEED"] = seed
+        env["PYTHONPATH"] = os.pathsep.join(
+            [str(source_path), env.get("PYTHONPATH", "")]
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", script, str(trace_path), str(database_path)],
+            check=True,
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+        outputs.append(trace_path.read_bytes())
+        sqlite_values.append(result.stdout)
+
+    assert outputs[0] == outputs[1]
+    assert sqlite_values[0] == sqlite_values[1]

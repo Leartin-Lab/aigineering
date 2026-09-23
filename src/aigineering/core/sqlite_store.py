@@ -126,6 +126,64 @@ class SQLiteStore:
             self._conn.close()
             raise
 
+    def snapshot(self) -> SQLiteStore:
+        """Return an independent in-memory copy of this store.
+
+        SQLite's backup API takes a consistent database snapshot, including
+        committed WAL contents, without rebuilding or otherwise mutating the
+        source projections. The returned store has its own connection and
+        should be closed by its caller.
+        """
+        snapshot = SQLiteStore(":memory:")
+        try:
+            self._conn.backup(snapshot._conn)
+        except Exception:
+            snapshot.close()
+            raise
+        return snapshot
+
+    @classmethod
+    def snapshot_from_path(cls, db_path: str | Path) -> SQLiteStore:
+        """Open a read-only source database and copy it to an in-memory Store.
+
+        The source is connected with SQLite ``mode=ro`` so construction cannot
+        apply schema upgrades or repair materialized tables. A schema mismatch
+        fails closed; callers receive only the isolated copy.
+        """
+        source_path = Path(db_path).resolve()
+        if not source_path.is_file():
+            raise FileNotFoundError("SQLite source database does not exist")
+        source_uri = f"{source_path.as_uri()}?mode=ro"
+        source = sqlite3.connect(source_uri, uri=True, check_same_thread=False)
+        snapshot: SQLiteStore | None = None
+        try:
+            snapshot = cls(":memory:")
+            source.backup(snapshot._conn)
+            try:
+                version = current_schema_version(snapshot._conn)
+                tables = {
+                    str(row[0])
+                    for row in snapshot._conn.execute(
+                        "SELECT name FROM sqlite_master WHERE type = 'table'"
+                    )
+                }
+            except sqlite3.Error as exc:
+                raise ValueError(
+                    "SQLite source database schema is incompatible for read-only snapshot"
+                ) from exc
+            required_tables = {"assets", "contracts", "trace_events", "runtime_records"}
+            if version != CURRENT_SCHEMA_VERSION or not required_tables <= tables:
+                raise ValueError(
+                    "SQLite source database schema is incompatible for read-only snapshot"
+                )
+            return snapshot
+        except Exception:
+            if snapshot is not None:
+                snapshot.close()
+            raise
+        finally:
+            source.close()
+
     # ── Immutable runtime-record envelope ────────────────────────────────
 
     def append_runtime_record(self, record: RuntimeRecord) -> int:
@@ -376,18 +434,32 @@ class SQLiteStore:
         return self._row_to_runtime_record(row) if row is not None else None
 
     def scan_runtime_records(
-        self, *, after_revision: int = 0, record_type: str | None = None
+        self,
+        *,
+        after_revision: int = 0,
+        through_revision: int | None = None,
+        record_type: str | None = None,
     ) -> list[tuple[int, RuntimeRecord]]:
+        upper_clause = "" if through_revision is None else " AND revision <= ?"
+        values: tuple[object, ...] = (after_revision,)
+        if through_revision is not None:
+            values += (through_revision,)
         if record_type is None:
             rows = self._conn.execute(
-                "SELECT * FROM runtime_records WHERE revision > ? ORDER BY revision",
-                (after_revision,),
+                "SELECT * FROM runtime_records WHERE revision > ?"
+                + upper_clause
+                + " ORDER BY revision",
+                values,
             ).fetchall()
         else:
             rows = self._conn.execute(
                 "SELECT * FROM runtime_records "
-                "WHERE revision > ? AND record_type = ? ORDER BY revision",
-                (after_revision, record_type),
+                "WHERE revision > ? AND record_type = ?"
+                + upper_clause
+                + " ORDER BY revision",
+                (after_revision, record_type)
+                if through_revision is None
+                else (after_revision, record_type, through_revision),
             ).fetchall()
         return [
             (int(row["revision"]), self._row_to_runtime_record(row)) for row in rows
@@ -1098,7 +1170,14 @@ class SQLiteStore:
                     :relation_type, :relation_target, :timestamp, :usage_metadata
                 )""",
                 {
-                    k: json.dumps(v) if isinstance(v, (list, dict, tuple)) else v
+                    k: json.dumps(
+                        v,
+                        ensure_ascii=False,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    )
+                    if isinstance(v, (list, dict, tuple))
+                    else v
                     for k, v in d.items()
                 },
             )
