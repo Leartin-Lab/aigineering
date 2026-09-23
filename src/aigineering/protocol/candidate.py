@@ -14,6 +14,7 @@ from typing import Any, Callable, Mapping
 from aigineering.protocol.identity import canonical_json, compute_content_hash
 from aigineering.protocol.signing import Signer, Verifier, create_verifier
 from aigineering.protocol.immutability import deep_freeze, deep_thaw
+from aigineering.protocol.usage import normalize_usage_metadata, validate_usage_metadata
 from aigineering.protocol.runtime_record import RuntimeRecord, create_runtime_record
 
 
@@ -417,6 +418,27 @@ def verify_candidate_proposal(
         raise ValueError("Candidate signature verification failed")
 
 
+def validate_candidate_usage_metadata(candidate: CandidateProposal) -> None:
+    """Validate signed usage fields while preserving the Candidate bytes."""
+    metadata = deep_thaw(candidate.metadata)
+    metadata.pop(WORKER_RAW_OUTPUT_METADATA_KEY, None)
+    purpose_present = "purpose" in metadata
+    purpose = metadata.pop("purpose", None)
+    if purpose_present and not _valid_candidate_purpose(purpose):
+        raise ValueError("Candidate metadata contains an invalid purpose")
+    validate_usage_metadata(metadata)
+
+
+def _valid_candidate_purpose(value: object) -> bool:
+    if not isinstance(value, str) or not value or len(value) > 256:
+        return False
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return True
+
+
 def candidate_received_record(
     candidate: CandidateProposal,
     genesis: GenesisManifest,
@@ -431,8 +453,20 @@ def candidate_received_record(
         verifier_factory=verifier_factory,
         actor_keys=actor_keys,
     )
-    metadata = deep_thaw(candidate.metadata)
-    raw_output = metadata.pop(WORKER_RAW_OUTPUT_METADATA_KEY, "")
+    signed_metadata = deep_thaw(candidate.metadata)
+    raw_output = signed_metadata.pop(WORKER_RAW_OUTPUT_METADATA_KEY, "")
+    purpose_present = "purpose" in signed_metadata
+    purpose = signed_metadata.pop("purpose", None)
+    validation_failed = False
+    try:
+        if purpose_present and not _valid_candidate_purpose(purpose):
+            raise ValueError("Candidate metadata contains an invalid purpose")
+        validate_usage_metadata(signed_metadata)
+    except ValueError:
+        validation_failed = True
+    metadata = normalize_usage_metadata(signed_metadata) or {}
+    if purpose_present and _valid_candidate_purpose(purpose):
+        metadata["purpose"] = purpose
     payload = {
         "actor_id": candidate.actor_id,
         "candidate_id": candidate.id,
@@ -443,6 +477,8 @@ def candidate_received_record(
         "signature": candidate.signature,
         "signature_kind": candidate.signature_kind,
     }
+    if validation_failed:
+        payload["metadata_validation_failed"] = True
     if candidate.claim_binding is not None:
         payload["contract_id"] = candidate.claim_binding.contract_id
         payload["claim_id"] = candidate.claim_binding.claim_id
@@ -458,4 +494,5 @@ def candidate_usage_metadata(candidate: CandidateProposal) -> dict[str, Any]:
     """Return operator usage metadata without internal replay evidence."""
     metadata = deep_thaw(candidate.metadata)
     metadata.pop(WORKER_RAW_OUTPUT_METADATA_KEY, None)
-    return metadata
+    metadata.pop("purpose", None)
+    return normalize_usage_metadata(metadata) or {}

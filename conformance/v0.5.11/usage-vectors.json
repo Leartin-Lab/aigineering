@@ -1,0 +1,101 @@
+{
+  "schema": "aigineering-usage-v1",
+  "cases": [
+    {
+      "name": "explicit-zero-token-count",
+      "input": {"total_tokens": 0},
+      "normalized": {"total_tokens": 0},
+      "valid": true
+    },
+    {
+      "name": "valid-tool-usage",
+      "input": {
+        "tool": "lookup",
+        "tool_version": "1.0.0",
+        "duration_ms": 0,
+        "result_bytes": 12,
+        "error_type": "",
+        "retryable": false
+      },
+      "normalized": {
+        "tool": "lookup",
+        "tool_version": "1.0.0",
+        "duration_ms": 0,
+        "result_bytes": 12,
+        "error_type": "",
+        "retryable": false
+      },
+      "valid": true
+    },
+    {
+      "name": "empty-usage-object",
+      "input": {},
+      "normalized": {},
+      "valid": true
+    },
+    {
+      "name": "missing-usage",
+      "input": null,
+      "normalized": null,
+      "valid": true
+    },
+    {
+      "name": "boolean-is-not-an-integer-token-count",
+      "input": {"prompt_tokens": true},
+      "valid": false
+    },
+    {
+      "name": "unsafe-integer-token-count",
+      "input": {"total_tokens": 9007199254740992},
+      "valid": false
+    },
+    {
+      "name": "safe-integer-upper-bound",
+      "input": {
+        "total_tokens": 9007199254740991
+      },
+      "normalized": {
+        "total_tokens": 9007199254740991
+      },
+      "valid": true
+    },
+    {
+      "name": "negative-token-count",
+      "input": {
+        "total_tokens": -1
+      },
+      "valid": false
+    },
+    {
+      "name": "nested-object-is-not-a-usage-value",
+      "input": {
+        "model": {
+          "name": "fixture"
+        }
+      },
+      "valid": false
+    },
+    {
+      "name": "string-limit-256-unicode-characters",
+      "input": {
+        "model": "界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界"
+      },
+      "normalized": {
+        "model": "界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界"
+      },
+      "valid": true
+    },
+    {
+      "name": "string-limit-exceeded-257-unicode-characters",
+      "input": {
+        "model": "界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界"
+      },
+      "valid": false
+    },
+    {
+      "name": "unknown-field",
+      "input": {"api_key": "secret"},
+      "valid": false
+    }
+  ]
+}

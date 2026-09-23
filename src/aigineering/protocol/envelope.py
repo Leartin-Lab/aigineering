@@ -12,6 +12,7 @@ from typing import Any, Optional
 
 from aigineering.protocol.identity import compute_content_hash
 from aigineering.protocol.immutability import deep_freeze, deep_thaw
+from aigineering.protocol.usage import validate_usage_metadata
 
 CURRENT_ENVELOPE_VERSION = 2
 
@@ -59,8 +60,7 @@ class CandidateEnvelope:
                 raise ValueError("parsed_action must be a JSON object")
             object.__setattr__(self, "parsed_action", deep_freeze(self.parsed_action))
         if self.usage_metadata is not None:
-            if not isinstance(self.usage_metadata, Mapping):
-                raise ValueError("usage_metadata must be a JSON object")
+            validate_usage_metadata(self.usage_metadata)
             object.__setattr__(self, "usage_metadata", deep_freeze(self.usage_metadata))
 
     @property

@@ -48,6 +48,7 @@ from aigineering.protocol.candidate import (
     candidate_received_record,
     candidate_usage_metadata,
     validate_genesis_manifest,
+    validate_candidate_usage_metadata,
 )
 from aigineering.protocol.runtime_record import RuntimeRecord, create_runtime_record
 
@@ -90,6 +91,10 @@ def reduce_candidate(
         )
     except ValueError as exc:
         return authentication_rejection_decision(candidate, str(exc))
+    try:
+        validate_candidate_usage_metadata(candidate)
+    except ValueError as exc:
+        return candidate_rejection_decision(candidate, receipt, str(exc))
     try:
         projection = project_effect_batch(
             candidate,

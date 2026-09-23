@@ -18,6 +18,10 @@ from aigineering.agent.prompt import contract_prompt, system_prompt
 from aigineering.agent.worker import WorkerExecutionError
 from aigineering.core.worker_routing import WorkerRegistration
 from aigineering.protocol.types import Asset, Candidate, Contract
+from aigineering.protocol.usage import (
+    TOKEN_USAGE_FIELDS,
+    normalize_usage_metadata,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -623,22 +627,13 @@ def _extract_usage(response: Mapping[str, object]) -> MappingProxyType | None:
     usage = response.get("usage")
     if not isinstance(usage, Mapping):
         return None
-    prompt_tokens = usage.get("prompt_tokens")
-    completion_tokens = usage.get("completion_tokens")
-    total_tokens = usage.get("total_tokens")
-    result: dict[str, object] = {}
-    if _valid_usage_count(prompt_tokens):
-        result["prompt_tokens"] = prompt_tokens
-    if _valid_usage_count(completion_tokens):
-        result["completion_tokens"] = completion_tokens
-    if _valid_usage_count(total_tokens):
-        result["total_tokens"] = total_tokens
-    return MappingProxyType(result) if result else None
-
-
-def _valid_usage_count(value: object) -> bool:
-    """Accept only interoperable, non-negative provider token counts."""
-    return type(value) is int and 0 <= value <= (1 << 53) - 1
+    result = {
+        token_field: usage[token_field]
+        for token_field in TOKEN_USAGE_FIELDS
+        if token_field in usage
+    }
+    normalized = normalize_usage_metadata(result)
+    return MappingProxyType(normalized) if normalized else None
 
 
 def _build_usage_metadata(
@@ -652,20 +647,11 @@ def _build_usage_metadata(
 
     API keys are never included in the returned metadata.
     """
-    usage = _extract_usage(response)
-    if usage is None:
-        result: dict[str, object] = {
-            "model": model,
-            "provider": provider,
-            "worker_profile": worker_profile,
-        }
-        return MappingProxyType(result)
-
-    result = dict(usage)
+    result = dict(_extract_usage(response) or {})
     result["model"] = model
     result["provider"] = provider
     result["worker_profile"] = worker_profile
-    return MappingProxyType(result)
+    return MappingProxyType(normalize_usage_metadata(result) or {})
 
 
 def _post_json(

@@ -21,11 +21,12 @@ from aigineering.core.store_capabilities import (
 )
 from aigineering.protocol.immutability import deep_thaw
 from aigineering.protocol.types import Contract, TraceEntry
+from aigineering.protocol.usage import TOKEN_USAGE_FIELDS, normalize_usage_metadata
 from aigineering.protocol.wire import trace_entry_from_dict
 
 _TOOL_METHODS = frozenset({"tool", "parallel_tool_item"})
 _FAILURE_TERMINALS = frozenset({"failed", "cancelled", "unreachable", "stalled"})
-_TOKEN_FIELDS = ("prompt_tokens", "completion_tokens", "total_tokens")
+_TOKEN_FIELDS = TOKEN_USAGE_FIELDS
 
 
 class ProductivityReader(AssetReader, ContractReader, RuntimeRecordReader, Protocol):
@@ -265,11 +266,14 @@ def _usage_projection(
         metadata = trace.usage_metadata
         if metadata is None:
             continue
-        usage = deep_thaw(metadata)
-        if not isinstance(usage, Mapping):
+        usage_dict = normalize_usage_metadata(deep_thaw(metadata))
+        if usage_dict is None:
             continue
-        usage_dict = dict(usage)
         kind = _usage_kind(trace, methods.get(trace.contract_id, ""), usage_dict)
+        if kind == "llm" and not any(
+            field in usage_dict for field in TOKEN_USAGE_FIELDS
+        ):
+            continue
         usage_records.append(
             {
                 "contract_id": trace.contract_id,
@@ -280,18 +284,12 @@ def _usage_projection(
             }
         )
         for field in _TOKEN_FIELDS:
-            value = usage_dict.get(field)
-            if type(value) is int and value >= 0:
-                totals[field] += value
+            if field in usage_dict:
+                totals[field] += usage_dict[field]
         if "total_tokens" not in usage_dict:
             prompt = usage_dict.get("prompt_tokens")
             completion = usage_dict.get("completion_tokens")
-            if (
-                type(prompt) is int
-                and prompt >= 0
-                and type(completion) is int
-                and completion >= 0
-            ):
+            if prompt is not None and completion is not None:
                 totals["total_tokens"] += prompt + completion
     return usage_records, totals
 
@@ -302,16 +300,7 @@ def _usage_kind(trace: TraceEntry, method: str, usage: Mapping[str, Any]) -> str
     worker_id = str(trace.worker_id or "")
     if worker_id.startswith(("tool_worker", "mcp_worker")):
         return "tool"
-    if any(
-        key in usage
-        for key in (
-            "model",
-            "provider",
-            "prompt_tokens",
-            "completion_tokens",
-            "total_tokens",
-        )
-    ):
+    if any(key in usage for key in ("model", "provider", *TOKEN_USAGE_FIELDS)):
         return "llm"
     return "worker"
 

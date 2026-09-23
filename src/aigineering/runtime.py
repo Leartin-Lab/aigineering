@@ -39,6 +39,7 @@ from aigineering.protocol.candidate import CandidateClaimBinding
 from aigineering.protocol.envelope import CandidateEnvelope
 from aigineering.protocol.package import WorkerPackage
 from aigineering.protocol.runtime_record import create_runtime_record
+from aigineering.protocol.usage import normalize_usage_metadata
 from aigineering.protocol.types import Asset, Contract
 from aigineering.protocol.wire import (
     asset_to_dict,
@@ -344,7 +345,7 @@ def execute_claimed_package(
                 claim_id=claimed.package.claim_id,
                 claim_epoch=claimed.package.claim_epoch,
                 idempotency_key=f"run-{claimed.package.package_id}",
-                usage_metadata=candidate.metadata,
+                usage_metadata=normalize_usage_metadata(candidate.metadata),
             )
             phase = "candidate_encoding"
             proposal = (
@@ -380,9 +381,11 @@ def execute_claimed_package(
                 usage_metadata=(
                     exc.usage_metadata
                     if isinstance(exc, WorkerExecutionError)
+                    and exc.usage_metadata is not None
+                    else candidate.metadata
+                    if candidate is not None
                     else None
-                )
-                or (candidate.metadata if candidate is not None else None),
+                ),
                 diagnostic=(
                     str(exc) if isinstance(exc, WorkerExecutionError) else None
                 ),
@@ -430,6 +433,7 @@ def execute_claimed_package(
                 status_code=0,
                 retryable=True,
                 category="worker_error:claim_renewal_failed",
+                usage_metadata=candidate.metadata if candidate is not None else None,
             )
         except sqlite3.Error as exc:
             raise WorkerSubmissionCommitError(
@@ -449,6 +453,7 @@ def execute_claimed_package(
             status_code=0,
             retryable=False,
             category="worker_error:unsigned_adapter",
+            usage_metadata=candidate.metadata if candidate is not None else None,
         )
         if candidate_publishers is not None:
             process_worker_failures(store, candidate_publishers=candidate_publishers)
@@ -840,7 +845,7 @@ def _record_worker_invocation_failure(
 ) -> None:
     existing = store.get_by_contract(claimed.contract.id)
     parent_id = existing[-1].id if existing else None
-    safe_usage = _safe_failure_usage_metadata(usage_metadata)
+    safe_usage = normalize_usage_metadata(usage_metadata)
     entry = create_entry(
         claimed.contract.id,
         "worker_invocation_failed",
@@ -884,36 +889,6 @@ def _record_worker_invocation_failure(
         package_id=claimed.package.package_id,
         claim_epoch=claimed.package.claim_epoch,
     )
-
-
-def _safe_failure_usage_metadata(
-    metadata: Mapping[str, object] | None,
-) -> dict[str, object] | None:
-    """Keep only the bounded usage fields while recording a worker failure.
-
-    Failure recording must remain durable even when a custom Worker supplied
-    malformed metadata.  This boundary deliberately drops unknown fields so
-    credentials or arbitrary adapter payloads cannot enter trace or audit.
-    """
-    if not isinstance(metadata, Mapping):
-        return None
-
-    allowed_counts = {"prompt_tokens", "completion_tokens", "total_tokens"}
-    allowed_identity = {"model", "provider", "worker_profile"}
-    result: dict[str, object] = {}
-    for key in allowed_counts:
-        value = metadata.get(key)
-        if type(value) is int and 0 <= value <= (1 << 53) - 1:
-            result[key] = value
-    for key in allowed_identity:
-        value = metadata.get(key)
-        if isinstance(value, str) and value and len(value) <= 256:
-            try:
-                value.encode("utf-8")
-            except UnicodeEncodeError:
-                continue
-            result[key] = value
-    return result or None
 
 
 def process_worker_failures(store, *, candidate_publishers=None) -> list[str]:
