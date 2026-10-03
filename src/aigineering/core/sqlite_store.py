@@ -76,6 +76,7 @@ from aigineering.protocol.wire import (
 )
 
 _logger = logging.getLogger(__name__)
+_ASSET_ID_QUERY_CHUNK_SIZE = 900
 
 
 class WorkerBindingConflict(ValueError):
@@ -609,6 +610,30 @@ class SQLiteStore:
         cur = self._conn.execute("SELECT * FROM assets WHERE id = ?", (asset_id,))
         row = cur.fetchone()
         return self._row_to_asset(row) if row else None
+
+    def get_assets_by_ids(self, asset_ids: tuple[str, ...] | list[str]) -> list[Asset]:
+        """Read existing Assets for IDs in request order using bounded queries."""
+        ordered_ids = tuple(dict.fromkeys(asset_ids))
+        if not ordered_ids:
+            return []
+
+        found: dict[str, Asset] = {}
+        parameter_limit = self._conn.getlimit(sqlite3.SQLITE_LIMIT_VARIABLE_NUMBER)
+        if parameter_limit < 1:
+            raise sqlite3.OperationalError(
+                "SQLite variable limit does not permit Asset ID lookup"
+            )
+        chunk_size = min(_ASSET_ID_QUERY_CHUNK_SIZE, parameter_limit)
+        for start in range(0, len(ordered_ids), chunk_size):
+            chunk = ordered_ids[start : start + chunk_size]
+            placeholders = ", ".join("?" for _ in chunk)
+            cur = self._conn.execute(
+                f"SELECT * FROM assets WHERE id IN ({placeholders})", chunk
+            )
+            for row in cur.fetchall():
+                asset = self._row_to_asset(row)
+                found[asset.id] = asset
+        return [found[asset_id] for asset_id in ordered_ids if asset_id in found]
 
     def get_assets_by_name(self, name: str) -> list[Asset]:
         cur = self._conn.execute("SELECT * FROM assets WHERE name = ?", (name,))

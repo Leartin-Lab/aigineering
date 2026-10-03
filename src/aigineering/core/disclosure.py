@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 from collections.abc import Mapping
 
+from aigineering.core.asset_reads import read_assets_by_ids
 from aigineering.core.labels import BEHAVIOR_LABEL_PREFIX, is_behavior_asset_allowed
 from aigineering.core.store_capabilities import AssetReader
 from aigineering.core.trust_policy import TrustPolicy
@@ -56,8 +57,8 @@ def compute_disclosure(contract: Contract, store: AssetReader) -> list[Asset]:
     if contract.id.startswith(("task:v4:", "task:v5:")):
         label_assets = tuple(
             asset
-            for asset_id in contract.context_asset_ids
-            if (asset := store.get_asset(asset_id)) is not None
+            for asset in read_assets_by_ids(store, contract.context_asset_ids)
+            if asset is not None
         )
     else:
         # Historical v3 Contracts retain their original name-resolved behavior.

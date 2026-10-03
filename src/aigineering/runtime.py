@@ -12,6 +12,7 @@ from aigineering.agent.llm import LLMWorker, ProviderError
 from aigineering.agent.mock import MockWorker
 from aigineering.agent.worker import WorkerExecutionError, WorkerHost
 from aigineering.core.activation import check_activation
+from aigineering.core.asset_reads import read_assets_by_ids
 from aigineering.core.disclosure import (
     DisclosurePolicyError,
     compute_disclosure,
@@ -1011,16 +1012,17 @@ def _method_context_assets_for(contract: Contract, store) -> tuple[Asset, ...]:
     store = require_operational_store(store)
     assets: list[Asset] = []
     seen: set[str] = set()
+    asset_ids: list[str] = []
     for entry in store.get_by_relation_target(contract.id):
         if entry.event_type not in {
             "method_continuation_context_prepared",
             "method_continuation_scheduled",
         }:
             continue
-        for asset_id in entry.disclosed_assets:
-            asset = store.get_asset(asset_id)
-            if asset is None or asset.id in seen:
-                continue
-            assets.append(redact_for_disclosure(asset))
-            seen.add(asset.id)
+        asset_ids.extend(entry.disclosed_assets)
+    for asset in read_assets_by_ids(store, asset_ids):
+        if asset is None or asset.id in seen:
+            continue
+        assets.append(redact_for_disclosure(asset))
+        seen.add(asset.id)
     return tuple(assets)

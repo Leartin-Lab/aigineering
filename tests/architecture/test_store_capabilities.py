@@ -8,6 +8,7 @@ from aigineering.core.store_capabilities import (
     RuntimeRecordReader,
     WorkerClaimStore,
 )
+from aigineering.core.store import OperationalStoreProtocol
 
 ROOT = Path(__file__).parents[2]
 
@@ -18,6 +19,11 @@ def test_store_capabilities_separate_reads_from_authoritative_writes():
     assert "commit_ingress_batch" not in RuntimeRecordReader.__dict__
     assert "commit_ingress_batch" in CandidateCommitStore.__dict__
     assert "claim_contract" in WorkerClaimStore.__dict__
+
+
+def test_batch_asset_read_remains_an_optional_adapter_capability():
+    assert not hasattr(AssetReader, "get_assets_by_ids")
+    assert not hasattr(OperationalStoreProtocol, "get_assets_by_ids")
 
 
 def test_plugins_do_not_import_candidate_commit_capability():
