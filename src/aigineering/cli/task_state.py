@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 from aigineering.core.runtime_projection import (
     TERMINAL_EVENTS,
     ContractView,
@@ -34,14 +36,7 @@ def project_task_status(
         for entry in entries
         for fragment in tuple(entry.rejected_fragments or ())
     ]
-    recoveries = [
-        c.id
-        for c in store.get_all_contracts()
-        if c.origin == "recovery"
-        and (
-            c.parent_id == contract.id or c.name.startswith(f"{contract.name}.recover")
-        )
-    ]
+    recoveries = recovery_successor_ids(contract, store)
     usage = [
         deep_thaw(entry.usage_metadata)
         for entry in entries
@@ -95,6 +90,67 @@ def project_task_status(
 
 def _trace_entries(store, contract_id: str) -> list[TraceEntry]:
     return list(store.get_by_contract(contract_id))
+
+
+def recovery_successor_ids(
+    contract: Contract, store, *, contracts: list[Contract] | None = None
+) -> list[str]:
+    """Resolve recovery successors through durable identity relations only."""
+    return recovery_successor_map(
+        store, contracts, source_contract_ids={contract.id}
+    ).get(contract.id, [])
+
+
+def recovery_successor_map(
+    store,
+    contracts: list[Contract] | None = None,
+    *,
+    source_contract_ids: set[str] | None = None,
+) -> dict[str, list[str]]:
+    """Build exact failed-task to recovery relations from durable identities."""
+    contracts = contracts if contracts is not None else store.get_all_contracts()
+    recoveries = [item for item in contracts if item.origin == "recovery"]
+    if not recoveries:
+        return {}
+    contract_ids = {item.id for item in contracts}
+    recovery_ids = {item.id for item in recoveries}
+    successors: dict[str, set[str]] = {}
+    for item in recoveries:
+        if item.parent_id in contract_ids:
+            successors.setdefault(item.parent_id, set()).add(item.id)
+        context_ids = {
+            name.removeprefix("_fail_context_")
+            for name in item.inputs
+            if name.startswith("_fail_context_")
+        }
+        try:
+            description = json.loads(item.description)
+        except (RecursionError, TypeError, json.JSONDecodeError):
+            description = None
+        reference_ids = set(context_ids)
+        if isinstance(description, dict):
+            described_id = description.get("failed_contract_id")
+            if isinstance(described_id, str):
+                reference_ids.add(described_id)
+        if len(reference_ids) == 1:
+            failed_id = next(iter(reference_ids))
+            if failed_id in contract_ids:
+                successors.setdefault(failed_id, set()).add(item.id)
+
+    related_events = {"recovery_scheduled", "method_recovery_scheduled", "failed"}
+    for contract in contracts:
+        if source_contract_ids is not None and contract.id not in source_contract_ids:
+            continue
+        for entry in _trace_entries(store, contract.id):
+            if (
+                entry.event_type in related_events
+                and entry.relation_target in recovery_ids
+            ):
+                successors.setdefault(contract.id, set()).add(entry.relation_target)
+    return {
+        contract_id: sorted(recovery_ids)
+        for contract_id, recovery_ids in successors.items()
+    }
 
 
 def _latest_terminal(entries: list[TraceEntry]) -> str:
@@ -256,31 +312,17 @@ def _has_unfinished_descendant(contract: Contract, store) -> bool:
 
 
 def _has_active_recovery(contract: Contract, store) -> bool:
-    for candidate in store.get_all_contracts():
-        if candidate.origin != "recovery":
-            continue
-        if candidate.parent_id == contract.id or candidate.name.startswith(
-            f"{contract.name}.recover"
-        ):
-            return True
-    return False
+    return bool(recovery_successor_ids(contract, store))
 
 
 def _descendant_failure_risks(contract: Contract, store) -> list[dict[str, str]]:
     contracts = store.get_all_contracts()
     children: dict[str, list[Contract]] = {}
-    contracts_by_name = {candidate.name: candidate.id for candidate in contracts}
-    active_recovery_for: set[str] = set()
+    recovery_map = recovery_successor_map(store, contracts)
     for candidate in contracts:
         if candidate.parent_id is not None:
             children.setdefault(candidate.parent_id, []).append(candidate)
-        if candidate.origin == "recovery":
-            if candidate.parent_id is not None:
-                active_recovery_for.add(candidate.parent_id)
-            base_name = candidate.name.split(".recover", 1)[0]
-            parent_id = contracts_by_name.get(base_name)
-            if parent_id is not None:
-                active_recovery_for.add(parent_id)
+    active_recovery_for = set(recovery_map)
 
     risks: list[dict[str, str]] = []
     visited: set[str] = {contract.id}

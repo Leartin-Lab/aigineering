@@ -19,7 +19,35 @@ provider once; LLM is the normal execution default:
 export AIGINEERING_API_KEY="..."
 export AIGINEERING_MODEL="provider-model"
 export AIGINEERING_BASE_URL="https://provider.example/v1"
-aig run "produce a cited release review" --json
+aig run "produce a cited release review" --json \
+  --input evidence=notes.md --output review.md
+```
+
+`aig run GOAL` uses the goal and only files explicitly named by repeatable
+`--input NAME=PATH` options. It does not scan the workspace or fetch sources
+from the network. Files must be non-empty UTF-8 and no larger than 1 MiB each.
+Quick-goal runs do not load operator tools; use an existing task and an explicit
+tool registry when local tool execution is required. A successful exportable
+text output is written to Markdown at `--output PATH` (default:
+`.aig/outputs/<session>.md`). An existing destination is never overwritten.
+`aig demo` uses the built-in sample flow; MockWorker remains an explicit
+dry-run/test facility.
+Choose exactly one of GOAL, `--once`, or `--task`. `--input` and `--output`
+require GOAL, as do `--behavior-label` and `--save-config`; quick-goal mode
+rejects a tool registry and mock-output overrides.
+
+For the configured DeepSeek Flash endpoint, keep the key in an environment
+variable. `--json` selects CLI output while `--response-format json_object`
+selects the provider wire format:
+
+```bash
+export AIGINEERING_API_KEY="$DEEPSEEK_API_KEY"
+export AIGINEERING_MODEL="deepseek-flash"
+export AIGINEERING_BASE_URL="https://api.deepseek.com"
+aig run "基于 README 中的实现说明，生成中文能力、操作步骤和局限报告。" \
+  --input readme=README.md --output report.md \
+  --thinking-mode disabled --max-output-tokens 8192 \
+  --response-format json_object
 ```
 
 Use a custom pull Worker when an existing Codex, Claude Code, LangGraph, SDK,
@@ -35,14 +63,25 @@ aig run "exercise the boundary" --worker mock --json
 
 Never present mock output as production or acceptance evidence.
 
-Quick-goal `aig run GOAL` and `aig demo GOAL` assign a distinct output name to
-each invocation and claim only work in that root task's descendant tree.
+Quick-goal `aig run GOAL` assigns a distinct output name to each invocation and
+claims only work in that root task's descendant tree.
 Ordinary declared outputs may still be satisfied by an intentionally shared
 same-name Asset in the local domain. For `aig run GOAL --json`, use the returned
 `contract_id` to read the root's `outputs`, and use the session manifest's
 `produced_asset_ids` to identify Assets committed by that run. A failed root
 remains terminal; run its separate recovery successor explicitly with
 `aig run --task <contract_id>`.
+
+For a target task, `aig run --task ID` claims only that Contract and its
+immutable descendants. It checks an already terminal target before executing
+work. `aig run --once` still claims one enabled task from the domain-wide pool;
+runtime maintenance remains domain-wide for both commands. A target run's JSON
+and human output include the projected status and blockers, a `stop_reason`
+(`terminal`, `idle`, `timeout`, or `worker_failure`), and a suggested `next_step`.
+It does not automatically execute a root recovery successor. `completed` means
+the declared output obligation is satisfied; it does not establish independent
+semantic truth. `--wait-timeout`, `--interval`, and provider `--timeout` must
+be finite positive numbers.
 
 Use a local Fleet when independent tasks need different model or tool
 capabilities. Declare requirements on tasks and delegated scope on their
@@ -169,6 +208,8 @@ replayed, recovered, or accepted.
 - `expanded`, `ready`, `claimed`, `submitted`, `blocked`, and `stalled` are not
   success.
 - A timeout is not completion; read `task status` and `task audit`.
+- `output_truncated` and `empty_response` are durable Worker failure categories;
+  inspect `task audit` and the recorded recovery before continuing.
 - Any rejection requires audit before trusting downstream results.
 - Missing usage after a provider failure does not prove zero external cost.
 - Parent completion depends on declared outputs, not on every descendant

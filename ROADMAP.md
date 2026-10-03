@@ -1,11 +1,52 @@
 # Aigineering Roadmap
 
-## Current release
+## Next usability slice
 
-Version: **v0.5.11**
+The current source version is **v0.5.12**. Its deterministic, package,
+installed-artifact, long-chain, and nested-replanning gates have passed for
+local release preparation. It is not a published or tagged release. The
+implemented ordinary workflow runs from explicit file inputs through a
+readable report, task audit, and explicit failure recovery while preserving
+the signed Candidate, authority, and output-acceptance boundaries. Current
+implementation notes are in
+[changes 033](changes/033-usable-goal-cli.md),
+[034](changes/034-target-task-cli.md),
+[035](changes/035-provider-output-diagnostics.md), and
+[036](changes/036-provider-json-action-wire.md); integrated evidence is in
+[`report 070`](reports/070-usable-cli-stabilization-2026-10-03.md).
 
-v0.5.11 is the current local development version of the single-machine reference
-runtime. The documented local runtime and protocol surface do not imply an
+Current live evidence includes three initial DeepSeek Flash calls: two retained
+failures and one successful explicit recovery; a JSON-wire quick-goal report
+that omitted required task IDs from its audit commands; a corrected
+21-checkpoint chain after an earlier failed attempt and a later exact
+integer-type oracle failure; and three failed nested profiles, followed by a
+recovery continuation whose business output completed but whose planning graph
+failed the exact recipe. A separate nested profile passed the planning graph
+before claims, completed recovery from a declared conflict in synthetic
+acceptance inputs, and matched the independent rebuild. All failures remain visible in the
+[release evidence](reports/070-usable-cli-stabilization-2026-10-03.md).
+
+The work order is:
+
+1. Add unified export for existing task and recovery results with an exact
+   output slot/Asset reference and no file overwrite.
+2. Make quick-goal allowance configurable and observable at exhaustion, then
+   connect real source material → report → task audit/recovery → ordinary,
+   policy-bound independent acceptance.
+3. Extend operator-selected read-only repository and external source tools
+   with exact provenance and evidence links; preserve explicit source
+   selection and prevent tool observations from satisfying business outputs.
+4. Keep controlled productivity/quality experiments, distributed identity,
+   and schema migration as later work with separate hypotheses and acceptance
+   evidence.
+
+## Current local release preparation
+
+Version: **v0.5.12**; local release-preparation runtime gates passed.
+
+v0.5.12 is the locally verified preparation version of the single-machine
+reference runtime; no package publication or tag is implied. The
+documented local runtime and protocol surface do not imply an
 external security audit or public-network deployment hardening.
 
 Implemented:

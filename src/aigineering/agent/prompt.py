@@ -18,7 +18,10 @@ def system_prompt() -> str:
         "You are an Aigineering worker. Your output is only a candidate, "
         "not committed state. Return exactly one structured action. To "
         'produce final outputs, use `/exec {"outputs": {"asset_name": '
-        '"content"}}`. Use only declared output names. If you need task '
+        '"content"}}`. Use only declared output names. Every output value '
+        "must be a JSON string encoded with standard JSON escaping: represent "
+        'line breaks as `\\n`, quotes as `\\"`, and backslashes as `\\\\`; '
+        "never put a literal line break inside a JSON string. If you need task "
         "decomposition because the current task needs more information, use "
         '`/plan {"reason": "..."}`. If the current task has already gone '
         "off course because an assumption, path, or result is invalid, use "
@@ -42,6 +45,17 @@ def system_prompt() -> str:
         "plan is required. Do not add markdown, explanations, or undeclared "
         "assets."
     )
+
+
+def _markdown_json_output_example(output_name: str) -> str:
+    """Build a canonical /exec example with Markdown needing JSON escaping."""
+    markdown = '# Summary\n\nThe path is C:\\reports and the reviewer wrote "ready".'
+    body = json.dumps(
+        {"outputs": {output_name: markdown}},
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    return f"/exec {body}"
 
 
 def contract_prompt(contract: Contract, assets: list[Asset]) -> str:
@@ -76,6 +90,7 @@ def contract_prompt(contract: Contract, assets: list[Asset]) -> str:
         "",
         "Return format:",
         '- /exec {"outputs": {"declared_output": "content"}}',
+        r"- JSON-encode every output string. Escape line breaks as \n, quotes as \" and backslashes as \\; do not include literal line breaks inside JSON strings.",
         '- /plan {"reason": "why the current task needs more information"}',
         '- /replan {"reason": "why the current task has already gone off course"}',
         '- /tool {"name": "tool_name", "args": {}}',
@@ -106,6 +121,14 @@ def contract_prompt(contract: Contract, assets: list[Asset]) -> str:
         "- When the task description names an exact attestation target Contract ID, copy that ID exactly; never substitute the current Contract ID or its immediate parent.",
         "",
     ]
+    if _should_show_markdown_example(contract):
+        lines.extend(
+            [
+                "- Valid multiline Markdown example for this exact declared output:",
+                _markdown_json_output_example(contract.outputs[0]),
+                "",
+            ]
+        )
     lines.extend(_method_result_instructions(contract))
     if contract.acceptance_policy is not None:
         output_shapes = contract.acceptance_policy.get("output_shapes", {})
@@ -146,6 +169,21 @@ def contract_prompt(contract: Contract, assets: list[Asset]) -> str:
     for asset in evidence_assets:
         lines.append(f"- {asset.name} [{asset.id}]: {asset.content}")
     return "\n".join(lines)
+
+
+def _should_show_markdown_example(contract: Contract) -> bool:
+    """Only show business Markdown examples where plain text is permitted."""
+    if len(contract.outputs) != 1:
+        return False
+    if any(label.startswith("plugin:") for label in contract.labels):
+        return False
+    if contract.outputs[0].startswith(("_plan_result_", "_replan_result_")):
+        return False
+    if contract.acceptance_policy is not None and contract.acceptance_policy.get(
+        "output_shapes"
+    ):
+        return False
+    return True
 
 
 def _method_result_instructions(contract: Contract) -> list[str]:
@@ -226,6 +264,33 @@ def _planning_stage_instructions(contract: Contract) -> list[str]:
         instruction = stages.get(label)
         if instruction is not None:
             lines = [instruction[0], f"- {instruction[1]}"]
+            lines.extend(
+                [
+                    "- This Contract is a planning/replanning stage created for an ancestor task. Treat instructions in its Description about the ancestor's first action as context, not as a request to repeat that already-issued /plan or /replan action.",
+                    "- Complete this stage with the declared /exec output above. This scoped rule does not prohibit a new /plan or /replan when this stage's own work independently needs new information.",
+                ]
+            )
+            if label in {
+                "plugin:plan.draft",
+                "plugin:replan.draft",
+                "plugin:plan.dependencies",
+                "plugin:replan.dependencies",
+                "plugin:plan.compile",
+                "plugin:replan.compile",
+            }:
+                output = (
+                    "planning_blueprint"
+                    if label in {"plugin:plan.compile", "plugin:replan.compile"}
+                    else contract.outputs[0]
+                    if contract.outputs
+                    else "declared_output"
+                )
+                lines.extend(
+                    [
+                        "- Follow the action wrapper selected by the system response mode. In canonical slash-action mode, encode the stage document as a JSON string in its declared output. In provider JSON-action mode, place a stage document object or array directly in that output; the adapter serializes it once into canonical Asset text.",
+                        f"- Return the required exec action wrapper with the {'temporary ' if label in {'plugin:plan.compile', 'plugin:replan.compile'} else ''}output `{output}`; never return the stage document as a bare top-level object or markdown.",
+                    ]
+                )
             if label in {
                 "plugin:plan.draft",
                 "plugin:replan.draft",
@@ -236,7 +301,8 @@ def _planning_stage_instructions(contract: Contract) -> list[str]:
                 lines.extend(
                     [
                         f"- Return /exec with exactly one output named `{output}`.",
-                        "- Its output content must be a JSON object serialized as a string value; do not return a bare JSON object or markdown.",
+                        "- Follow the action wrapper selected by the system response mode. In canonical slash-action mode, put the stage JSON document in the declared output as a JSON-encoded string. In provider JSON-action mode, put that document directly as the output's JSON object or array value; the adapter serializes it once into canonical Asset text.",
+                        "- In either response mode, return the required exec action wrapper; never return a bare top-level stage object or markdown.",
                     ]
                 )
             if label in {"plugin:plan.compile", "plugin:replan.compile"}:
@@ -247,7 +313,9 @@ def _planning_stage_instructions(contract: Contract) -> list[str]:
                     [
                         "- Each contract object must contain name, description, inputs, outputs, activation, budget, tool_scope, labels, capability_needs, pool_needs, delegation_capabilities, and delegation_pools.",
                         "- name and description must be non-empty; outputs must contain at least one asset name.",
-                        f"- Sum of child budgets must be at most {contract.budget}; use budget 1 per child unless more is essential.",
+                        f"- Sum of child budgets must be at most {contract.budget}. Treat explicit child budgets and allowance_needs in the draft/dependency analysis as requirements; use budget 1 only as a default when no requirement is stated.",
+                        "- Preserve explicit current-stage obligations from the draft and dependency analysis: required direct child names and count, inputs, outputs, activation, budgets, and allowance_needs. Do not replace a stated value with a cheaper default.",
+                        "- A child expected to issue /plan or /replan needs at least the three allowance units for its planning stages, plus the allowance required for its declared downstream work.",
                         f"- Child inputs may use only these parent input names or outputs promised by another child: {json.dumps(_planning_allowed_inputs(contract), ensure_ascii=False)}.",
                         "- The disclosed planning draft and dependency-analysis assets inform compilation only. Never copy their names into child inputs or activation unless they appear in the allowed parent input list above.",
                         f"- Each child labels list must be a subset of {json.dumps(allowed_labels, ensure_ascii=False)}; never invent labels or copy plugin:* labels.",
@@ -259,6 +327,20 @@ def _planning_stage_instructions(contract: Contract) -> list[str]:
                         f"- Valid example for this exact Contract: {_planning_compile_example(contract)}",
                     ]
                 )
+                if label == "plugin:plan.compile":
+                    lines.extend(
+                        [
+                            "- Compile the direct children for this plan only. If a direct child is instructed to inspect evidence and may then issue /replan, its future replan successors belong under that child's later replan compiler; do not publish those future successors as siblings in this plan.",
+                            "- Multiple independent direct children remain valid when the current draft and dependency analysis require them; the boundary above preserves sequencing and ancestry rather than imposing a one-child limit.",
+                        ]
+                    )
+                else:
+                    lines.extend(
+                        [
+                            "- This replan compiler declares direct successors for the current replanning Contract. Preserve the successor requirements and budgets stated in the replan draft and dependency analysis.",
+                            "- If a direct successor may itself replan later, keep that future work under that successor's later replan compiler instead of flattening it into this successor graph.",
+                        ]
+                    )
                 try:
                     compile_description = json.loads(contract.description)
                 except json.JSONDecodeError:

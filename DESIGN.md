@@ -1,8 +1,11 @@
 # Aigineering Design
 
-Status: implemented truth for v0.5.11
+Status: implemented truth for v0.5.12
 
-This document describes the v0.5.11 implementation in this source tree.
+This document describes the v0.5.12 implementation in this source tree.
+Runtime release-preparation gates passed for local verification; this is not a
+published release. See the
+[stabilization report](reports/070-usable-cli-stabilization-2026-10-03.md).
 Future designs do not belong here until their implementation, tests, migration,
 and release evidence are complete.
 
@@ -34,6 +37,13 @@ Provider adapters may remove a complete reasoning-only wrapper or serialize a
 JSON-valued output as canonical text before action parsing. This is wire-shape
 normalization only: the result must still pass the same strict action,
 authority, projection, and commitment boundaries.
+
+The OpenAI-compatible adapter classifies a completion marked
+`finish_reason="length"` as `output_truncated`, including when the partial
+content parses as an action. Empty or whitespace-only message content is
+classified as `empty_response`; neither case treats reasoning-only fields as
+executable output. Validated provider usage follows the durable Worker failure
+path when available.
 
 The action adapter may also unwrap one syntactically valid method action that a
 provider accidentally quoted as the sole `/exec` key/value pair. Ambiguous,
@@ -528,17 +538,35 @@ execution, trace, audit, replay, recovery, and status views. The optional
 FastAPI adapter creates one Store connection per request and closes it
 deterministically.
 
-Quick-goal `aig run GOAL` and `aig demo GOAL` calls assign a unique declared
-output name to each invocation and claim only that root Contract or its current
-descendants. This keeps a same-name Asset from an earlier quick run from
-completing the new root. Ordinary task outputs still use domain-wide
-same-name satisfaction, so explicitly shared Assets remain reusable. Runtime
-maintenance and expired-claim processing remain domain-wide; quick-run claim
-selection does not isolate every Store side effect. A failed root remains
-terminal; its recovery successor is a separate task and must be run explicitly
-with `aig run --task <contract_id>`. For `aig run GOAL --json`, find the result
-slot through the returned Contract's `outputs` and the session's
-`produced_asset_ids`, rather than assuming a fixed output name.
+Quick-goal `aig run GOAL` assigns a unique declared output name to each
+invocation. It uses the goal and only the UTF-8 files explicitly supplied with
+`--input NAME=PATH` (each at most 1 MiB); it does not scan the workspace, fetch
+network sources, or load operator tools. Successful exportable text is saved as
+Markdown to `--output PATH`, defaulting to `.aig/outputs/<session>.md`; existing
+destinations are not overwritten. Each quick run claims only its root Contract
+or current descendants. Ordinary task outputs still use domain-wide same-name
+satisfaction, so explicitly shared Assets remain reusable. Runtime maintenance
+and expired-claim processing remain domain-wide; quick-run claim selection does
+not isolate every Store side effect. A failed root remains terminal; its
+recovery successor is a separate task and must be run explicitly with
+`aig run --task <contract_id>`. For `aig run GOAL --json`, use the returned
+Contract's `outputs` and session `produced_asset_ids`, rather than assuming a
+fixed output name.
+
+`aig run --task CONTRACT_ID` checks an already terminal target before executing
+Worker work and claims only that Contract and its immutable descendants.
+`aig run --once` still claims one task from the domain-wide local pool. Both
+commands retain domain-wide runtime maintenance. Target-run output preserves
+the projected status and blockers and adds a stop reason and operator next
+step; a root recovery successor remains an explicit separate run. Timeout and
+poll interval inputs must be finite positive numbers. `--max-output-tokens`,
+`--thinking-mode`, and optional `--response-format json_object` configure the
+LLM adapter. JSON wire mode asks the provider for a complete JSON response and
+then compiles only the canonical action wrapper; strict parsing still rejects
+malformed or unknown fields. It cannot be combined with `--tool-registry`.
+These controls affect provider execution only; they do not change output
+authority or independently validate meaning. `--json` remains a CLI output
+selection and is unrelated to provider wire mode.
 
 An operator may explicitly load a local `ToolRegistry` factory for `aig run`.
 The adapter publishes its public descriptors through Candidate commitment,
@@ -672,7 +700,7 @@ terminal, or replay owner.
 
 ## Release limits
 
-v0.5.11 extends the local reference runtime. It does not provide:
+v0.5.12 extends the local reference runtime. It does not provide:
 
 - a cross-machine distributed Store;
 - a consensus implementation;

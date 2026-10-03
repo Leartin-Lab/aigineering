@@ -1,7 +1,7 @@
 [project]
 name = "aigineering"
-version = "0.5.11"
-description = "Agent Runtime — structural hallucination containment for LLM-based agents"
+version = "0.5.12"
+description = "Zero Trust agent runtime for auditable AI-assisted engineering and research."
 requires-python = ">=3.11"
 license = "MIT"
 readme = "README.md"

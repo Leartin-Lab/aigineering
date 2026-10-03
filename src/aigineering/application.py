@@ -56,6 +56,9 @@ def build_worker(
     base_url: str | None = None,
     timeout: float = 60.0,
     max_retries: int = 3,
+    max_output_tokens: int = 2048,
+    thinking_mode: str | None = None,
+    response_format: str | None = None,
     capabilities: frozenset[str] | None = None,
     tool_definitions: list[dict[str, object]] | None = None,
     routing_capabilities: frozenset[str] | None = None,
@@ -77,8 +80,11 @@ def build_worker(
                 or os.getenv("AIGINEERING_BASE_URL")
                 or "https://api.openai.com/v1"
             ),
-            timeout=int(timeout),
+            timeout=timeout,
             max_retries=max_retries,
+            max_output_tokens=max_output_tokens,
+            thinking_mode=thinking_mode,
+            response_format=response_format,
             capabilities=capabilities or frozenset(),
             tool_definitions=tool_definitions,
             routing_capabilities=routing_capabilities,

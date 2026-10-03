@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -138,6 +139,98 @@ def method_governance_smoke(
     return output
 
 
+def quick_goal_smoke(
+    aig: Path,
+    *,
+    cwd: Path,
+    env: dict[str, str],
+) -> dict:
+    """Check installed quick-goal input, session JSON, export, and no-overwrite."""
+    goal = "Summarize the supplied field notes as Markdown."
+    input_path = cwd / "quick-goal-input.txt"
+    output_path = cwd / "quick-goal-output.md"
+    input_bytes = "研究记录：温度为 21°C。\nSecond line: naïve café.\n".encode("utf-8")
+    input_path.write_bytes(input_bytes)
+
+    result = json.loads(
+        run(
+            [
+                str(aig),
+                "run",
+                goal,
+                "--worker",
+                "mock",
+                "--input",
+                f"field_notes={input_path.name}",
+                "--output",
+                str(output_path),
+                "--json",
+            ],
+            cwd=cwd,
+            env=env,
+        )
+    )
+    outputs = result.get("outputs")
+    if (
+        result.get("ok") is not True
+        or result.get("status") != "complete"
+        or not isinstance(result.get("session_id"), str)
+        or not result["session_id"]
+        or not isinstance(outputs, list)
+        or len(outputs) != 1
+        or outputs[0].get("exportable") is not True
+        or not output_path.is_file()
+    ):
+        raise RuntimeError("installed quick-goal JSON result/session was incomplete")
+    markdown = outputs[0].get("content")
+    expected_markdown = (
+        markdown
+        if isinstance(markdown, str) and markdown.endswith("\n")
+        else f"{markdown}\n"
+    )
+    if not isinstance(
+        markdown, str
+    ) or output_path.read_bytes() != expected_markdown.encode("utf-8"):
+        raise RuntimeError("quick-goal Markdown export did not match its JSON output")
+
+    before = output_path.read_bytes()
+    collision = subprocess.run(
+        [
+            str(aig),
+            "run",
+            goal,
+            "--worker",
+            "mock",
+            "--input",
+            f"field_notes={input_path.name}",
+            "--output",
+            str(output_path),
+            "--json",
+        ],
+        cwd=cwd,
+        env=env,
+        check=False,
+        text=True,
+        capture_output=True,
+    )
+    if collision.returncode == 0 or output_path.read_bytes() != before:
+        raise RuntimeError("existing quick-goal Markdown output was overwritten")
+
+    evidence = {
+        "evidence_kind": "fixture",
+        "worker": "mock",
+        "input_encoding": "utf-8",
+        "input_sha256": hashlib.sha256(input_bytes).hexdigest(),
+        "session_id": result["session_id"],
+        "contract_id": result.get("contract_id"),
+        "output_slots": [item.get("slot") for item in outputs],
+        "markdown_exported": True,
+        "existing_output_preserved": True,
+        "provider_calls": 0,
+    }
+    return evidence
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--wheel", type=Path, required=True)
@@ -260,6 +353,11 @@ def main() -> int:
             if options.evidence_dir
             else workdir / "reconstruction-evidence"
         )
+        quick_goal_result = quick_goal_smoke(
+            aig,
+            cwd=workdir,
+            env=env,
+        )
         method_result = method_governance_smoke(
             python, source_root, cwd=workdir, env=env
         )
@@ -276,6 +374,9 @@ def main() -> int:
             or report.get("status") != "passed"
         ):
             raise RuntimeError("reconstruction evidence is missing or incomplete")
+        with (evidence_dir / "quick-goal.json").open("x", encoding="utf-8") as stream:
+            json.dump(quick_goal_result, stream, ensure_ascii=False, sort_keys=True)
+            stream.write("\n")
         (evidence_dir / "method-governance.json").write_text(
             json.dumps(method_result, sort_keys=True) + "\n", encoding="utf-8"
         )

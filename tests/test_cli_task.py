@@ -574,7 +574,7 @@ def test_run_task_rejected_output_closes_failed_and_publishes_new_recovery():
                 "--mock-preset",
                 "write_report=wrong_output: nope",
                 "--wait-timeout",
-                "0",
+                "0.01",
                 "--json",
             ],
         )

@@ -39,7 +39,38 @@ def test_config_snapshot_created():
     assert content["timeout"] == 60.0
     assert content["max_retries"] == 3
     assert content["capabilities"] == ["json_schema", "streaming", "tool_calling"]
+    assert content["max_output_tokens"] == 2048
+    assert content["thinking_mode"] is None
+    assert content["response_format"] is None
     assert content["sealed_config_ref"] == ""
+
+
+def test_provider_snapshot_records_output_and_thinking_configuration():
+    snapshot = create_provider_config_snapshot(
+        provider_name="deepseek",
+        base_url="https://api.deepseek.com/v1",
+        model="deepseek-chat",
+        max_output_tokens=8192,
+        thinking_mode="disabled",
+        response_format="json_object",
+    )
+    content = json.loads(snapshot.content)
+    assert content["max_output_tokens"] == 8192
+    assert content["thinking_mode"] == "disabled"
+    assert content["response_format"] == "json_object"
+
+
+def test_provider_snapshot_preserves_positional_trust_tier_argument():
+    snapshot = create_provider_config_snapshot(
+        "provider",
+        "https://provider.invalid/v1",
+        "fixture-model",
+        30.0,
+        0,
+        (),
+        "human",
+    )
+    assert snapshot.trust_tier == "human"
 
 
 # ---------------------------------------------------------------------------

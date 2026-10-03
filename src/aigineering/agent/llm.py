@@ -17,6 +17,7 @@ from typing import Any
 from aigineering.agent.prompt import contract_prompt, system_prompt
 from aigineering.agent.worker import WorkerExecutionError
 from aigineering.core.worker_routing import WorkerRegistration
+from aigineering.protocol.actions import ActionParseError, action_from_dict
 from aigineering.protocol.types import Asset, Candidate, Contract
 from aigineering.protocol.usage import (
     TOKEN_USAGE_FIELDS,
@@ -56,6 +57,7 @@ class LLMConfig:
     profile_id: str = "openai-compatible-v1"
     capacity: int = 1
     registration_version: str = "1"
+    response_format: str = ""
 
     def __post_init__(self) -> None:
         validate_llm_timeout(self.timeout)
@@ -63,6 +65,7 @@ class LLMConfig:
         validate_llm_retry_backoff(self.retry_backoff)
         validate_llm_max_output_tokens(self.max_output_tokens)
         validate_llm_capacity(self.capacity)
+        validate_llm_response_format(self.response_format)
 
 
 def validate_llm_timeout(value: object) -> float:
@@ -114,6 +117,13 @@ def validate_llm_capacity(value: object) -> int:
     return value
 
 
+def validate_llm_response_format(value: object) -> str:
+    """Validate the optional provider response format mode."""
+    if not isinstance(value, str) or value not in {"", "json_object"}:
+        raise ValueError("response_format must be '' or 'json_object'")
+    return value
+
+
 class ProviderError(Exception):
     """Classified provider error with retryability information."""
 
@@ -146,6 +156,7 @@ class LLMWorker:
         registration_version: str | None = None,
         max_output_tokens: int | None = None,
         thinking_mode: str | None = None,
+        response_format: str | None = None,
     ) -> None:
         if config is not None:
             self.model = config.model
@@ -192,6 +203,11 @@ class LLMWorker:
                 if registration_version is not None
                 else config.registration_version
             )
+            self._response_format = validate_llm_response_format(
+                response_format
+                if response_format is not None
+                else config.response_format
+            )
         else:
             self.model = model
             self.api_key = (
@@ -214,6 +230,9 @@ class LLMWorker:
             self.profile_id = profile_id or "openai-compatible-v1"
             self._capacity = capacity if capacity is not None else 1
             self._registration_version = registration_version or "1"
+            self._response_format = validate_llm_response_format(
+                response_format if response_format is not None else ""
+            )
 
         self._capacity = validate_llm_capacity(self._capacity)
         self._timeout = validate_llm_timeout(self._timeout)
@@ -249,13 +268,18 @@ class LLMWorker:
             "temperature": 0,
             "max_tokens": self._max_output_tokens,
             "messages": [
-                {"role": "system", "content": system_prompt()},
+                {
+                    "role": "system",
+                    "content": _system_prompt_for_format(self._response_format),
+                },
                 {
                     "role": "user",
                     "content": contract_prompt(contract, disclosed_assets),
                 },
             ],
         }
+        if self._response_format == "json_object":
+            payload["response_format"] = {"type": "json_object"}
         if self._thinking_mode:
             payload["thinking"] = {"type": self._thinking_mode}
 
@@ -269,6 +293,11 @@ class LLMWorker:
                 contract.tool_scope,
             )
             if scoped_tools:
+                if self._response_format == "json_object":
+                    raise WorkerExecutionError(
+                        "json_object_with_tools_unsupported",
+                        "JSON object response mode cannot be combined with native tools",
+                    )
                 payload["tools"] = scoped_tools
 
         headers = {"Content-Type": "application/json"}
@@ -289,8 +318,19 @@ class LLMWorker:
             worker_profile=self.profile_id,
         )
         try:
+            if _response_was_truncated(response):
+                raise WorkerExecutionError(
+                    "output_truncated",
+                    "LLM response reached the provider output limit",
+                )
+
             tool_calls = _extract_tool_calls(response)
             if tool_calls is not None:
+                if self._response_format == "json_object":
+                    raise WorkerExecutionError(
+                        "json_object_tool_call_response",
+                        "JSON object response mode requires one JSON action object",
+                    )
                 raw_output, parsed_action = self._map_tool_calls_to_actions(tool_calls)
                 return Candidate(
                     worker_id=self.worker_id,
@@ -299,11 +339,23 @@ class LLMWorker:
                     metadata=usage_metadata,
                 )
 
+            content = _extract_message_content(response)
+            if self._response_format == "json_object" and not content.strip():
+                raise WorkerExecutionError(
+                    "empty_response", "LLM response content is empty"
+                )
+            normalized_content = (
+                _normalize_json_action_wire(content)
+                if self._response_format == "json_object"
+                else _normalize_provider_action(content)
+            )
+            if not normalized_content.strip():
+                raise WorkerExecutionError(
+                    "empty_response", "LLM response content is empty"
+                )
             return Candidate(
                 worker_id=self.worker_id,
-                raw_output=_normalize_provider_action(
-                    _extract_message_content(response)
-                ),
+                raw_output=normalized_content,
                 parsed_action=None,
                 metadata=usage_metadata,
             )
@@ -492,6 +544,10 @@ def _extract_message_content(response: Mapping[str, object]) -> str:
     message = first.get("message")
     if isinstance(message, Mapping):
         content = message.get("content")
+        if "content" in message and content is None:
+            raise WorkerExecutionError(
+                "empty_response", "LLM response content is empty"
+            )
         if isinstance(content, str):
             return content
 
@@ -502,6 +558,99 @@ def _extract_message_content(response: Mapping[str, object]) -> str:
     raise WorkerExecutionError(
         "response_missing_content", "LLM response missing message content"
     )
+
+
+def _response_was_truncated(response: Mapping[str, object]) -> bool:
+    """Return whether the first completion explicitly hit its output limit."""
+    choices = response.get("choices")
+    if not isinstance(choices, list) or not choices:
+        return False
+    first = choices[0]
+    return isinstance(first, Mapping) and first.get("finish_reason") == "length"
+
+
+_JSON_ACTION_INSTRUCTIONS = """For this response mode, these instructions replace the slash-action examples above. Return exactly one JSON object and no markdown or prose. Do not return slash commands. For final output use {"type":"exec","outputs":{"report":"first line\\n**second line**","structured":{"items":[1,2]}}}; output strings remain strings, and JSON-valued outputs should be objects or arrays directly, not JSON encoded inside a string. For a planning action use {"type":"plan","payload":{"reason":"..."}}; for a changed invalid assumption use {"type":"replan","payload":{"reason":"..."}}. Other canonical actions use the same type/payload shape. The runtime accepts only supported canonical action types and declared output names."""
+
+
+def _system_prompt_for_format(response_format: str) -> str:
+    if response_format == "json_object":
+        return system_prompt() + "\n\n" + _JSON_ACTION_INSTRUCTIONS
+    return system_prompt()
+
+
+def _unique_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate JSON object key")
+        result[key] = value
+    return result
+
+
+def _reject_json_constant(value: str) -> None:
+    raise ValueError(f"invalid JSON constant: {value}")
+
+
+def _normalize_json_action_wire(content: str) -> str:
+    """Validate strict JSON action wire and translate to the canonical parser."""
+    try:
+        wire = json.loads(
+            content,
+            object_pairs_hook=_unique_json_object,
+            parse_constant=_reject_json_constant,
+        )
+        if not isinstance(wire, Mapping) or not isinstance(wire.get("type"), str):
+            raise ValueError("action must be a JSON object with a string type")
+
+        action_type = wire["type"]
+        if action_type == "exec":
+            if set(wire) != {"type", "outputs"} or not isinstance(
+                wire["outputs"], Mapping
+            ):
+                raise ValueError("exec action requires only an outputs object")
+            outputs: dict[str, str] = {}
+            for name, value in wire["outputs"].items():
+                if isinstance(value, str):
+                    outputs[name] = value
+                else:
+                    outputs[name] = json.dumps(
+                        value,
+                        ensure_ascii=False,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                        allow_nan=False,
+                    )
+            action = action_from_dict({"type": "exec", "outputs": outputs})
+            canonical = {"outputs": dict(action.outputs)}
+        else:
+            if set(wire) != {"type", "payload"} or not isinstance(
+                wire["payload"], Mapping
+            ):
+                raise ValueError("non-exec action requires only a payload object")
+            action = action_from_dict(
+                {"type": action_type, "payload": dict(wire["payload"])}
+            )
+            canonical = dict(action.payload)
+
+        encoded = json.dumps(
+            canonical,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        )
+        return f"/{action.type} {encoded}"
+    except (
+        ActionParseError,
+        RecursionError,
+        TypeError,
+        ValueError,
+        json.JSONDecodeError,
+    ) as exc:
+        raise WorkerExecutionError(
+            "malformed_json_action",
+            "LLM response was not one valid canonical JSON action",
+        ) from exc
 
 
 def _normalize_provider_action(raw_output: str) -> str:

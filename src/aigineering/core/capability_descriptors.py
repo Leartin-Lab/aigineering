@@ -273,6 +273,10 @@ def create_provider_config_snapshot(
     max_retries: int = 3,
     capabilities: tuple[str, ...] = (),
     trust_tier: str = "configured",
+    *,
+    max_output_tokens: int = 2048,
+    thinking_mode: str | None = None,
+    response_format: str | None = None,
 ) -> Asset:
     """Create a traceable provider config snapshot asset.
 
@@ -294,6 +298,12 @@ def create_provider_config_snapshot(
         Maximum retry count for transient errors (default ``3``).
     capabilities : tuple[str, ...]
         Provider capabilities (e.g. ``("json_schema", "tool_calling", "streaming")``).
+    max_output_tokens : int
+        Maximum output tokens allowed per provider response.
+    thinking_mode : str | None
+        Explicit provider thinking mode; ``None`` preserves provider defaults.
+    response_format : str | None
+        Explicit provider wire format; ``None`` preserves provider defaults.
     trust_tier : str
         Trust tier for the provider config (default ``"configured"``).
 
@@ -309,6 +319,9 @@ def create_provider_config_snapshot(
         "timeout": timeout,
         "max_retries": max_retries,
         "capabilities": sorted(capabilities),
+        "max_output_tokens": max_output_tokens,
+        "thinking_mode": thinking_mode,
+        "response_format": response_format,
         "sealed_config_ref": "",
     }
 

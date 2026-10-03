@@ -124,12 +124,14 @@ def test_run_persists_assets_contracts_and_session_manifest():
             c
             for c in store.get_all_contracts()
             if c.name == "build_report"
-            and c.description == "Build a report for goal: test"
+            and c.description.startswith("Goal: test\nInput slots: ")
         ]
         assert len(contracts) == 1, "quick run root Contract must exist"
         root = contracts[0]
         assert len(root.outputs) == 1
         assert root.outputs[0].startswith("final_report_")
+        assert len(root.inputs) == 1
+        assert root.inputs[0].startswith("aig_input_")
         assets = store.get_assets_by_name(root.outputs[0])
         assert assets, "quick run output Asset must exist under its root output name"
         assert any(asset.created_by == root.id for asset in assets)

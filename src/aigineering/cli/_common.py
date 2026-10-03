@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 import uuid
 from collections.abc import Mapping
@@ -43,6 +44,82 @@ from aigineering.protocol.effect_builders import (
 )
 from aigineering.protocol.types import Asset, Contract, TraceEntry
 from aigineering.protocol.wire import trace_entry_from_dict
+
+_QUICK_INPUT_MAX_BYTES = 1_048_576
+_QUICK_INPUT_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_.:-]*\Z")
+
+
+def _load_quick_goal_inputs(
+    goal: str, input_specs: tuple[str, ...], run_key: str
+) -> tuple[list[Asset], str]:
+    """Read and validate all goal inputs before the caller opens a Store."""
+    sources: list[tuple[str, str]] = [("goal", goal)]
+    seen: set[str] = set()
+    for spec in input_specs:
+        source_name, separator, raw_path = spec.partition("=")
+        if not separator or not source_name or not raw_path:
+            raise click.BadParameter(
+                "expected NAME=PATH with a non-empty asset name and file path",
+                param_hint="--input",
+            )
+        if _QUICK_INPUT_NAME.fullmatch(source_name) is None:
+            raise click.BadParameter(
+                f"invalid input name {source_name!r}; use letters, digits, '_', '.', ':' or '-'",
+                param_hint="--input",
+            )
+        if source_name in seen:
+            raise click.BadParameter(
+                f"duplicate input name {source_name!r}", param_hint="--input"
+            )
+        seen.add(source_name)
+        path = Path(raw_path)
+        if not path.is_file():
+            raise click.BadParameter(
+                f"input file is not a regular file: {raw_path}", param_hint="--input"
+            )
+        try:
+            with path.open("rb") as stream:
+                data = stream.read(_QUICK_INPUT_MAX_BYTES + 1)
+        except OSError as exc:
+            raise click.BadParameter(
+                f"cannot read input file {raw_path}: {exc.strerror or type(exc).__name__}",
+                param_hint="--input",
+            ) from exc
+        if len(data) > _QUICK_INPUT_MAX_BYTES:
+            raise click.BadParameter(
+                f"input file exceeds {_QUICK_INPUT_MAX_BYTES} bytes: {raw_path}",
+                param_hint="--input",
+            )
+        try:
+            content = data.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise click.BadParameter(
+                f"input file must be valid UTF-8: {raw_path}", param_hint="--input"
+            ) from exc
+        if not content.strip():
+            raise click.BadParameter(
+                f"input file is empty: {raw_path}", param_hint="--input"
+            )
+        sources.append((source_name, content))
+
+    assets: list[Asset] = []
+    slot_sources: list[str] = []
+    for index, (source_name, content) in enumerate(sources):
+        slot = f"aig_input_{run_key}_{index}"
+        content_hash = hash_asset_content(slot, content)
+        assets.append(
+            Asset(
+                id=content_hash,
+                name=slot,
+                content=content,
+                definition_hash=hash_asset_definition(slot),
+                content_hash=content_hash,
+                origin="human",
+                trust_tier="human",
+            )
+        )
+        slot_sources.append(f"{slot} (from {source_name})")
+    return assets, ", ".join(slot_sources)
 
 
 @dataclass(frozen=True)
@@ -264,8 +341,14 @@ def _run_demo(
     save_config: bool = False,
     timeout: float = 60.0,
     max_retries: int = 3,
+    max_output_tokens: int = 2048,
+    thinking_mode: str | None = None,
+    response_format: str | None = None,
     capabilities: frozenset[str] | None = None,
     behavior_labels: tuple[str, ...] = (),
+    quick_inputs: list[Asset] | None = None,
+    quick_input_description: str | None = None,
+    raise_on_incomplete: bool = True,
 ) -> tuple[StoreProtocol, TraceStoreProtocol, Contract, _RunSessionScope]:
     """Run a bounded quick-goal task graph through the normal Worker pool."""
     if store is None:
@@ -290,6 +373,9 @@ def _run_demo(
             base_url=base_url,
             timeout=timeout,
             max_retries=max_retries,
+            max_output_tokens=max_output_tokens,
+            thinking_mode=thinking_mode,
+            response_format=response_format,
             capabilities=capabilities,
         )
     except ValueError as exc:
@@ -310,6 +396,9 @@ def _run_demo(
             timeout=timeout,
             max_retries=max_retries,
             capabilities=tuple(capabilities or ()),
+            max_output_tokens=max_output_tokens,
+            thinking_mode=thinking_mode,
+            response_format=response_format,
         )
         require_accepted(
             commit_local_effect(
@@ -319,44 +408,55 @@ def _run_demo(
             )
         )
 
-    data_file = Asset(
-        id=hash_asset_content("data_file", "Sample data for report generation"),
-        name="data_file",
-        content="Sample data for report generation",
-        definition_hash=hash_asset_definition("data_file"),
-        content_hash=hash_asset_content(
-            "data_file", "Sample data for report generation"
-        ),
-        origin="human",
-        trust_tier="human",
-    )
-    citation_db = Asset(
-        id=hash_asset_content("citation_db", "Sample citation database"),
-        name="citation_db",
-        content="Sample citation database",
-        definition_hash=hash_asset_definition("citation_db"),
-        content_hash=hash_asset_content("citation_db", "Sample citation database"),
-        origin="human",
-        trust_tier="human",
-    )
+    if quick_inputs is None:
+        data_file = Asset(
+            id=hash_asset_content("data_file", "Sample data for report generation"),
+            name="data_file",
+            content="Sample data for report generation",
+            definition_hash=hash_asset_definition("data_file"),
+            content_hash=hash_asset_content(
+                "data_file", "Sample data for report generation"
+            ),
+            origin="human",
+            trust_tier="human",
+        )
+        citation_db = Asset(
+            id=hash_asset_content("citation_db", "Sample citation database"),
+            name="citation_db",
+            content="Sample citation database",
+            definition_hash=hash_asset_definition("citation_db"),
+            content_hash=hash_asset_content("citation_db", "Sample citation database"),
+            origin="human",
+            trust_tier="human",
+        )
+        input_assets = [data_file, citation_db]
+        input_description = "Sample data and citation assets from `aig demo`."
+    else:
+        input_assets = quick_inputs
+        input_description = quick_input_description or "User-provided goal inputs."
 
     contract = contract_from_fields(
         name="build_report",
-        description=f"Build a report for goal: {goal}",
-        inputs=["data_file", "citation_db"],
+        description=(
+            f"Goal: {goal}\nInput slots: {input_description}"
+            if quick_inputs is not None
+            else f"Build a report for goal: {goal}\n{input_description}"
+        ),
+        inputs=[asset.name for asset in input_assets],
         outputs=[output_name],
-        activation="data_file AND citation_db",
+        activation=" AND ".join(asset.name for asset in input_assets),
         budget=5,
         tool_scope=[],
         labels=list(behavior_labels),
         origin="human",
     )
 
-    for suffix, effect in (
-        ("contract", contract_declaration_effect(contract)),
-        ("data-file", asset_proposal_effect(data_file)),
-        ("citation-db", asset_proposal_effect(citation_db)),
-    ):
+    publications = [("contract", contract_declaration_effect(contract))]
+    publications.extend(
+        (f"input-{index}", asset_proposal_effect(asset))
+        for index, asset in enumerate(input_assets)
+    )
+    for suffix, effect in publications:
         require_accepted(
             commit_local_effect(
                 store,
@@ -408,7 +508,7 @@ def _run_demo(
         last_submission = str(result.get("status", "unknown"))
     process_task_completions(store, registry, candidate_publishers=publishers)
     status = project_task_status(contract, store)
-    if status["status"] != "completed":
+    if status["status"] != "completed" and raise_on_incomplete:
         raise RuntimeError(
             "demo worker did not complete declared outputs: "
             f"submission={last_submission} "

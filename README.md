@@ -25,8 +25,9 @@ export AIGINEERING_API_KEY="..."
 export AIGINEERING_MODEL="your-model"
 export AIGINEERING_BASE_URL="https://provider.example/v1"
 
-# Persistent execution through the normal claim/package/submit protocol
-aig run "build a report with citations"
+# Run a generic OpenAI-compatible report task with an explicit source
+aig run "build a report with citations" --input evidence=source.md \
+  --output report.md --max-output-tokens 8192
 
 # Inspect the resulting facts and trace
 aig trace
@@ -59,6 +60,44 @@ ordinary tasks remain reusable across the local domain. With `--json`, use the
 returned `contract_id` to read the root's `outputs`; the session manifest's
 `produced_asset_ids` identifies Assets committed by that run.
 
+Quick-goal `aig run GOAL` uses the goal and only the files explicitly supplied
+with repeatable `--input NAME=PATH` options. It does not scan the workspace,
+fetch network sources, or grant tools. Input files must be non-empty UTF-8 and
+at most 1 MiB each. A successful exportable text output is saved as Markdown;
+`--output PATH` chooses the destination, and an existing path is left intact.
+`aig demo` remains the path for built-in examples and explicit mock dry-runs.
+Choose exactly one of GOAL, `--once`, or `--task`. `--input` and `--output` are
+GOAL options; quick-goal mode rejects a tool registry and mock-output
+overrides. `--behavior-label` and `--save-config` also require GOAL.
+
+For a configured DeepSeek-compatible endpoint, keep the key in an environment
+variable and map it to Aigineering's key variable:
+
+```bash
+export AIGINEERING_API_KEY="$DEEPSEEK_API_KEY"
+export AIGINEERING_MODEL="deepseek-flash"
+export AIGINEERING_BASE_URL="https://api.deepseek.com"
+aig run "基于 README 中的实现说明，生成中文能力、操作步骤和局限报告。" \
+  --input readme=README.md \
+  --output report.md \
+  --thinking-mode disabled \
+  --max-output-tokens 8192 \
+  --response-format json_object
+```
+
+`--json` controls Aigineering's CLI output. `--response-format json_object`
+selects the provider's JSON wire mode; the adapter still compiles only the
+canonical action wrapper and rejects malformed or unknown fields.
+
+For an existing Contract, `aig run --task ID` claims only that Contract and
+its immutable descendants; `--once` claims one task from the domain-wide local
+pool. Both still run domain-wide maintenance. A failed root's recovery
+successor remains explicit work and must be run separately. Target runs report
+the projected status, blockers, stop reason, and suggested next step. An
+authorized output is a committed assertion; it is not independent proof of
+semantic truth. `--wait-timeout`, `--interval`, and provider `--timeout` must
+be finite positive numbers.
+
 Existing agent harnesses can keep their own model and tool orchestration while
 using signed pull/submit Candidates. See the
 [agent harness migration reference](docs/reference/agent-harness-migration.md).
@@ -80,9 +119,14 @@ Declarative non-tool case studies are indexed in
 claim-evidence review. Their scenario evidence is collected in
 [`reports/063-runtime-native-cases-2026-09-13.md`](reports/063-runtime-native-cases-2026-09-13.md).
 
-## Current development
+## Current local preparation
 
-v0.5.11 adds declarative method packages and a local create → test → independently
+The v0.5.12 source snapshot completed deterministic, package, installed-artifact,
+chain, and nested-replanning verification. This is locally verified release
+preparation, not a published or tagged release. See the
+[CLI stabilization evidence](reports/070-usable-cli-stabilization-2026-10-03.md).
+
+v0.5.11 added declarative method packages and a local create → test → independently
 accept → reuse lifecycle. Methods run as ordinary Contracts; generated methods
 remain unverified until explicitly evaluated. See the [method guide](docs/methods.md)
 and [fixture example](examples/method-governance/README.md).
@@ -92,6 +136,14 @@ maintenance, fixes concurrent trace reconstruction and local signing-key
 publication, and preserves the v0.5.9 protocol and SQLite schema. The artifact
 adapter provides bounded attachments, extraction, exact evidence and offline
 citation export; see the [artifact guide](docs/business-artifacts.md).
+
+The current quick-goal and target-task CLI changes are documented in
+[`changes/033`](changes/033-usable-goal-cli.md),
+[`changes/034`](changes/034-target-task-cli.md), and
+[`changes/035`](changes/035-provider-output-diagnostics.md), and
+[`changes/036`](changes/036-provider-json-action-wire.md). Their integrated
+release evidence and retained failure cases are in
+[report 070](reports/070-usable-cli-stabilization-2026-10-03.md).
 
 ## Reference runtime scope
 

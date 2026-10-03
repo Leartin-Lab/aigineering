@@ -151,7 +151,10 @@ def test_quick_run_preserves_root_failure_and_publishes_recovery_successor(
             cli, ["run", "failed quick goal", "--worker", "mock", "--json"]
         )
         assert result.exit_code == 1, result.output
-        assert "did not complete declared outputs" in result.output
+        payload = json.loads(result.output)
+        assert payload["status"] == "failed"
+        assert payload["rejections"]
+        assert payload["next_step"].startswith("Inspect with: aig task audit")
         # Click renders a concise error, while runtime evidence remains durable.
         store = SQLiteStore(".aig/store.db")
         try:
@@ -178,6 +181,7 @@ def test_quick_run_preserves_root_failure_and_publishes_recovery_successor(
             ]
             assert len(recoveries) == 1
             assert recoveries[0].parent_id is None
+            assert payload["recoveries"] == [recoveries[0].id]
             claimed_ids = {
                 str(record.payload.get("contract_id", ""))
                 for _, record in store.scan_runtime_records(record_type="claim.granted")
