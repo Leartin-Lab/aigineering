@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import time
+import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -55,6 +56,23 @@ class _RunSessionScope:
     end_revision: int
 
 
+def _contract_tree_ids(contracts: list[Contract], root_contract_id: str) -> set[str]:
+    """Return the root Contract and all immutable descendants in the Store."""
+    contract_ids = (
+        {root_contract_id}
+        if any(item.id == root_contract_id for item in contracts)
+        else set()
+    )
+    changed = True
+    while changed:
+        changed = False
+        for contract in contracts:
+            if contract.parent_id in contract_ids and contract.id not in contract_ids:
+                contract_ids.add(contract.id)
+                changed = True
+    return contract_ids
+
+
 def _session_scope_for_run(
     store: StoreProtocol,
     trace_store: TraceStoreProtocol,
@@ -67,14 +85,7 @@ def _session_scope_for_run(
         after_revision=start_revision, through_revision=end_revision
     )
     contracts = {item.id: item for item in store.get_all_contracts()}
-    contract_ids = {root_contract_id} if root_contract_id in contracts else set()
-    changed = True
-    while changed:
-        changed = False
-        for contract in contracts.values():
-            if contract.parent_id in contract_ids and contract.id not in contract_ids:
-                contract_ids.add(contract.id)
-                changed = True
+    contract_ids = _contract_tree_ids(list(contracts.values()), root_contract_id)
 
     records_by_id = {record.id: record for _, record in records}
 
@@ -130,6 +141,30 @@ def _session_scope_for_run(
         start_revision=start_revision,
         end_revision=end_revision,
     )
+
+
+def _claim_next_root_tree_package(
+    store,
+    *,
+    worker_id: str,
+    root_contract_id: str,
+    candidate_publishers,
+):
+    """Claim only this quick-run root or one of its current descendants."""
+    from aigineering.runtime import claim_next_package
+
+    for contract_id in sorted(
+        _contract_tree_ids(store.get_all_contracts(), root_contract_id)
+    ):
+        claimed = claim_next_package(
+            store,
+            worker_id=worker_id,
+            contract_id=contract_id,
+            candidate_publishers=candidate_publishers,
+        )
+        if claimed is not None:
+            return claimed
+    return None
 
 
 def _get_trace_dir() -> Path:
@@ -245,7 +280,8 @@ def _run_demo(
         ensure_local_domain(store)
     except (OSError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
-    publication_id = time.time_ns()
+    publication_id = uuid.uuid4().hex
+    output_name = f"final_report_{publication_id}"
 
     try:
         worker = build_worker(
@@ -259,7 +295,7 @@ def _run_demo(
     except ValueError as exc:
         raise click.ClickException(str(exc)) from exc
     if isinstance(worker, MockWorker):
-        raw_output = f"final_report: Report content for goal '{goal}'"
+        raw_output = f"{output_name}: Report content for goal '{goal}'"
         worker.set_output("build_report", raw_output)
 
     if save_config and worker_kind == "llm" and model:
@@ -308,7 +344,7 @@ def _run_demo(
         name="build_report",
         description=f"Build a report for goal: {goal}",
         inputs=["data_file", "citation_db"],
-        outputs=["final_report"],
+        outputs=[output_name],
         activation="data_file AND citation_db",
         budget=5,
         tool_scope=[],
@@ -331,7 +367,6 @@ def _run_demo(
 
     from aigineering.runtime import (
         WorkerInvocationError,
-        claim_next_package,
         execute_claimed_package,
         process_task_completions,
         run_runtime_maintenance_step,
@@ -351,9 +386,10 @@ def _run_demo(
         status = project_task_status(contract, store)
         if status["terminal"]:
             break
-        claimed = claim_next_package(
+        claimed = _claim_next_root_tree_package(
             store,
             worker_id=host.worker_id,
+            root_contract_id=contract.id,
             candidate_publishers=publishers,
         )
         if claimed is None:

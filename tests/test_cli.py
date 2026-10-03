@@ -120,11 +120,19 @@ def test_run_persists_assets_contracts_and_session_manifest():
         assert store_path.exists(), "SQLite store DB must exist"
 
         store = SQLiteStore(str(store_path))
-        assets = store.get_assets_by_name("final_report")
-        assert len(assets) > 0, "final_report asset must exist in SQLite store"
-        contracts = [c for c in store.get_all_contracts() if c.name == "build_report"]
-        assert len(contracts) > 0, "build_report contract must exist in SQLite store"
-        assert contracts[0].description == "Build a report for goal: test"
+        contracts = [
+            c
+            for c in store.get_all_contracts()
+            if c.name == "build_report"
+            and c.description == "Build a report for goal: test"
+        ]
+        assert len(contracts) == 1, "quick run root Contract must exist"
+        root = contracts[0]
+        assert len(root.outputs) == 1
+        assert root.outputs[0].startswith("final_report_")
+        assets = store.get_assets_by_name(root.outputs[0])
+        assert assets, "quick run output Asset must exist under its root output name"
+        assert any(asset.created_by == root.id for asset in assets)
         record_types = [
             record.record_type for _, record in store.scan_runtime_records()
         ]

@@ -35,6 +35,15 @@ aig run "exercise the boundary" --worker mock --json
 
 Never present mock output as production or acceptance evidence.
 
+Quick-goal `aig run GOAL` and `aig demo GOAL` assign a distinct output name to
+each invocation and claim only work in that root task's descendant tree.
+Ordinary declared outputs may still be satisfied by an intentionally shared
+same-name Asset in the local domain. For `aig run GOAL --json`, use the returned
+`contract_id` to read the root's `outputs`, and use the session manifest's
+`produced_asset_ids` to identify Assets committed by that run. A failed root
+remains terminal; run its separate recovery successor explicitly with
+`aig run --task <contract_id>`.
+
 Use a local Fleet when independent tasks need different model or tool
 capabilities. Declare requirements on tasks and delegated scope on their
 parents, then bind operator-selected providers in TOML:

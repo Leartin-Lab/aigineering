@@ -53,6 +53,12 @@ default:
 aig demo "build a report with citations" --worker mock
 ```
 
+Each quick-goal invocation declares its own output name and runs claims within
+that root task's descendant tree. Assets intentionally shared by exact name in
+ordinary tasks remain reusable across the local domain. With `--json`, use the
+returned `contract_id` to read the root's `outputs`; the session manifest's
+`produced_asset_ids` identifies Assets committed by that run.
+
 Existing agent harnesses can keep their own model and tool orchestration while
 using signed pull/submit Candidates. See the
 [agent harness migration reference](docs/reference/agent-harness-migration.md).

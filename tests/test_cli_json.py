@@ -6,6 +6,7 @@ from click.testing import CliRunner
 
 from aigineering.cli.main import cli
 from aigineering.core.session import SessionStore
+from aigineering.core.sqlite_store import SQLiteStore
 
 
 def test_run_json_output():
@@ -52,12 +53,12 @@ def test_run_session_contains_only_root_tree_window():
         assert first_session.contract_ids == (first_data["contract_id"],)
         assert second_session.contract_ids == (second_data["contract_id"],)
         assert set(second_session.produced_asset_ids) <= set(second_session.asset_ids)
-        assert not set(first_session.produced_asset_ids) & set(
+        assert first_session.produced_asset_ids
+        assert second_session.produced_asset_ids
+        assert set(first_session.produced_asset_ids).isdisjoint(
             second_session.produced_asset_ids
         )
         assert set(first_session.contract_ids).isdisjoint(second_session.contract_ids)
-        # The second run may reuse an output satisfied before it starts. That
-        # historical asset is not attributed unless this run disclosed it.
         assert not set(first_session.produced_asset_ids) & set(second_session.asset_ids)
         assert set(first_data["trace_ids"]).isdisjoint(second_data["trace_ids"])
 
@@ -136,11 +137,18 @@ def test_audit_json_output():
     """aig audit --json produces valid JSON with asset_id, asset_name, lineage."""
     runner = CliRunner()
     with runner.isolated_filesystem():
-        runner.invoke(cli, ["run", "test", "--worker", "mock"])
+        run_result = runner.invoke(cli, ["run", "test", "--worker", "mock", "--json"])
+        assert run_result.exit_code == 0, run_result.output
+        run_payload = json.loads(run_result.output)
+        store = SQLiteStore(".aig/store.db")
+        root = store.get_contract(run_payload["contract_id"])
+        assert root is not None
+        output_name = root.outputs[0]
+        store.close()
 
         result = runner.invoke(
             cli,
-            ["audit", "--asset-name", "final_report", "--json"],
+            ["audit", "--asset-name", output_name, "--json"],
         )
         assert result.exit_code == 0
         data = json.loads(result.output)
@@ -148,7 +156,7 @@ def test_audit_json_output():
         assert isinstance(data, dict)
         assert "asset_id" in data
         assert "asset_name" in data
-        assert data["asset_name"] == "final_report"
+        assert data["asset_name"] == output_name
         assert "lineage" in data
         assert isinstance(data["lineage"], list)
         assert len(data["lineage"]) > 0

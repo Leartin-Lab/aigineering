@@ -264,6 +264,11 @@ content views for that attempt. Disclosure is restricted to declared inputs and
 promptable label-referenced Assets, then filtered by redaction and sensitive
 input policy.
 
+Disclosure and method-context assembly can use the optional Store batch Asset
+read for frozen IDs. SQLite bounds each `IN` query by its variable limit;
+readers without the optional method retain ordered per-ID lookup. The required
+Store protocol is unchanged.
+
 Behavior Assets require configured-or-higher trust before they may become
 instructions. Reserved runtime Assets and non-promptable data are not exposed
 by ordinary disclosure.
@@ -522,6 +527,18 @@ The CLI provides domain initialization, task and Asset publication, Worker
 execution, trace, audit, replay, recovery, and status views. The optional
 FastAPI adapter creates one Store connection per request and closes it
 deterministically.
+
+Quick-goal `aig run GOAL` and `aig demo GOAL` calls assign a unique declared
+output name to each invocation and claim only that root Contract or its current
+descendants. This keeps a same-name Asset from an earlier quick run from
+completing the new root. Ordinary task outputs still use domain-wide
+same-name satisfaction, so explicitly shared Assets remain reusable. Runtime
+maintenance and expired-claim processing remain domain-wide; quick-run claim
+selection does not isolate every Store side effect. A failed root remains
+terminal; its recovery successor is a separate task and must be run explicitly
+with `aig run --task <contract_id>`. For `aig run GOAL --json`, find the result
+slot through the returned Contract's `outputs` and the session's
+`produced_asset_ids`, rather than assuming a fixed output name.
 
 An operator may explicitly load a local `ToolRegistry` factory for `aig run`.
 The adapter publishes its public descriptors through Candidate commitment,
