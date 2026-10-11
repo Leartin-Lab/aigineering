@@ -1,0 +1,119 @@
+{
+  "canonical_json": {
+    "input": {
+      "": "BMP",
+      "𐀀": "supplementary",
+      "text": "中文 café",
+      "values": [
+        null,
+        true,
+        9007199254740991
+      ]
+    },
+    "expected": "{\"text\":\"中文 café\",\"values\":[null,true,9007199254740991],\"\":\"BMP\",\"𐀀\":\"supplementary\"}"
+  },
+  "ed25519_test_key": {
+    "private_key_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+    "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8"
+  },
+  "format": "aigineering-input-binding-identity-v1",
+  "effect_vectors": [],
+  "contract_identity_vectors": [
+    {
+      "value": {
+        "id": "task:v6:dae4465408b284d363684571628f814de4880113766f6c1ed26583a87d7eccad",
+        "parent_id": null,
+        "name": "输入绑定 café",
+        "description": "Retain role policy without same-name rebinding.",
+        "inputs": [
+          "source"
+        ],
+        "outputs": [
+          "report"
+        ],
+        "activation": "source",
+        "budget": 3,
+        "tool_scope": [
+          "read"
+        ],
+        "labels": [
+          "reference"
+        ],
+        "context_asset_ids": [
+          "asset:v1:3434343434343434343434343434343434343434343434343434343434343434"
+        ],
+        "worker_capabilities": [
+          "research"
+        ],
+        "worker_pools": [
+          "researchers"
+        ],
+        "delegation_capabilities": [
+          "research",
+          "review"
+        ],
+        "delegation_pools": [
+          "researchers",
+          "reviewers"
+        ],
+        "origin": "human",
+        "minting_authority": [],
+        "sensitive_input_policy": {
+          "input_asset_bindings": {}
+        },
+        "acceptance_policy": null
+      }
+    },
+    {
+      "value": {
+        "id": "task:v6:0726631e03548c81f513c2ee2773ae4120c3782aa4f6f34360cee43cbe14a522",
+        "parent_id": null,
+        "name": "输入绑定 café",
+        "description": "Retain role policy without same-name rebinding.",
+        "inputs": [
+          "source"
+        ],
+        "outputs": [
+          "report"
+        ],
+        "activation": "source",
+        "budget": 3,
+        "tool_scope": [
+          "read"
+        ],
+        "labels": [
+          "reference"
+        ],
+        "context_asset_ids": [
+          "asset:v1:3434343434343434343434343434343434343434343434343434343434343434"
+        ],
+        "worker_capabilities": [
+          "research"
+        ],
+        "worker_pools": [
+          "researchers"
+        ],
+        "delegation_capabilities": [
+          "research",
+          "review"
+        ],
+        "delegation_pools": [
+          "researchers",
+          "reviewers"
+        ],
+        "origin": "human",
+        "minting_authority": [],
+        "sensitive_input_policy": {
+          "required_signer": "worker:source",
+          "input_asset_bindings": {
+            "source": [
+              "asset:v1:1212121212121212121212121212121212121212121212121212121212121212"
+            ],
+            "unused-role": []
+          }
+        },
+        "acceptance_policy": null
+      }
+    }
+  ]
+}

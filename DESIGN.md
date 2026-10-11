@@ -1,8 +1,10 @@
 # Aigineering Design
 
-Status: implemented truth for v0.5.12
+Status: implemented truth for v0.5.13.dev0
 
-This document describes the v0.5.12 implementation in this source tree.
+This document describes the v0.5.13.dev0 implementation in this source tree.
+The configured-run entry is a development addition; v0.5.12 live release evidence
+is bound to its earlier snapshot, not to this development tree.
 Runtime release-preparation gates passed for local verification; this is not a
 published release. See the
 [stabilization report](reports/070-usable-cli-stabilization-2026-10-03.md).
@@ -45,6 +47,12 @@ classified as `empty_response`; neither case treats reasoning-only fields as
 executable output. Validated provider usage follows the durable Worker failure
 path when available.
 
+Provider retry logging uses classified status and attempt metadata. A
+non-retryable failure logs its numeric status without formatting the provider
+exception body; callers still receive the original exception. This limits that
+logger's exposure without sanitizing arbitrary application logs or changing
+failure and recovery semantics. See [change 059](changes/059-provider-log-privacy.md).
+
 The action adapter may also unwrap one syntactically valid method action that a
 provider accidentally quoted as the sole `/exec` key/value pair. Ambiguous,
 partial, or unsupported wrappers remain rejected. For a planned, retry, or
@@ -69,6 +77,23 @@ actor intent
 
 Genesis bootstrap is the only operation that precedes Candidate admission. A
 rejected Candidate never falls back to a direct write.
+
+Authentication rejection persists only its rejection audit and trace. Claimed
+actor, Candidate ID and claim binding remain untrusted metadata: they cannot
+close an attempt, submit a claim, terminate a task, extinguish allowance or
+schedule recovery. The audit path does not use a claimed Candidate ID to skip
+rejection as an already committed replay. Authenticated output rejection retains
+its receipt-backed attempt and recovery behavior. Previously committed incorrect
+facts remain immutable; audit and rebuild do not repair them. Stop older Worker
+processes before using the repaired ingress; there is no new reader-floor gate
+that constrains an already-open older writer. See
+[authentication rejection isolation](changes/057-authentication-rejection-isolation.md).
+
+Store transaction primitives are trusted implementation interfaces, not external
+publication APIs. Raw record append refuses balance-changing allowance facts;
+signed ingress checks their canonical declaration and funding provenance again
+inside commitment. This does not provide process isolation or cryptographic
+revalidation of arbitrary local Python calls or coordinated database rewrites.
 
 ## Fact domain and actors
 
@@ -109,6 +134,18 @@ delegation scope. `worker_capabilities` and `worker_pools` select who may execut
 the Contract. `delegation_capabilities` and `delegation_pools` bound what its
 descendants may require. These are capability labels, not model names or cost
 classes; operator-owned Worker registrations map them to concrete providers.
+
+Contracts with `sensitive_input_policy.input_asset_bindings` use v6. It reuses
+the complete v5 canonical field owner while marking exact input-selection support.
+Guard-bearing older identities are rejected; historical no-key identities stay
+unchanged. This reader gate began with schema18; the current floor is schema21,
+which also protects paired causal-allowance returns, task claim constraints and
+Worker assignments. It prevents older readers
+from reopening an upgraded Store,
+without changing historical facts or adding columns. Stop old Workers and use
+`domain upgrade` to back up before migration; ordinary writable opens also migrate.
+The gate cannot protect an already-open old connection. See
+[ADR-032](docs/adr/ADR-032-exact-input-binding-reader-gates.md).
 
 The public conformance vectors in `conformance/v0.5.0/` cover canonical bytes,
 Candidate identity and signature, Genesis, Contract identity, effects,
@@ -249,7 +286,18 @@ eligible Contract
 ```
 
 One active claim is allowed per Contract. Renewal and submission prove
-possession of the registered Worker key. Expired claims, invocation failures,
+possession of the registered Worker key. Claims and renewals also carry their
+original signed coordination Candidate into the SQLite writer transaction,
+which rechecks current key authorization, `worker.submit`, Worker registration,
+and claim binding before mutation. Claim selection also fences the registration
+version used for package preparation. A signed grant links to its request fact;
+a signed renewal links to both its grant and renewal request, and each request
+links to the Candidate receipt. Successful requests are single-use, while a
+no-work null-target scan records no request and can be retried. Local WorkerHost,
+Fleet, Engine, method, CLI, harness and HTTP paths share this authentication
+boundary. Recordless trusted Store compatibility calls are internal seams, not
+operational authentication evidence. Coordination itself did not change fact
+types or the reader floor; task assignments now require schema21. Expired claims, invocation failures,
 malformed Worker results, and Contract terminal facts close visibly. A terminal
 fact releases an unrelated active claim in the same transaction and records an
 immutable transition that rebuilds to the same claim view. A stale Candidate
@@ -257,9 +305,46 @@ cannot publish after terminal closure; exact replay of an already committed
 Candidate remains idempotent. Recovery is published only when its Candidate is
 accepted.
 
+Local Worker setup shares one registration service. A canonical local pull-only
+registration may advance from an unset profile to a concrete adapter profile
+through a signed, atomic promotion/register pair, preserving its Worker ID and
+key. The plugin owns only the promotion audit; current head, identity and absence
+of active claims are rechecked by the generic injected-effect validator inside
+commitment. Local hosts freeze their resolved version through claim selection
+and the writer fence. Exact committed promotion history permits repeated default
+launches without new facts. Ordinary explicit registration and external signed
+command shapes remain unchanged. Profile is descriptive metadata; stop older
+local processes before promotion. See
+[ADR-039](docs/adr/ADR-039-local-worker-profile-promotion.md).
+
 The SQLite submission transaction rechecks the claim fence and commits the
 Candidate, projection, accepted facts, trace, idempotency record, attempt
 outcome, allowance consequences, and claim transition together.
+
+Task priority is a plugin-owned signed advisory history. Its exclusive
+`task.priority.changed` facts carry an exact predecessor, actor, key and Candidate;
+the writer rechecks the chain. Zero clears the hint while retaining the head.
+One application service orders the supplied candidate IDs by descending priority,
+declaration revision and full ID. Broad pulls and scoped application enumerations
+share that service; Runtime's generic permutation hook cannot filter tasks or
+grant eligibility, and explicit task claims remain pinned. Current claims,
+assignments, readiness, holds, prerequisites and SQLite arbitration remain
+authoritative. Views expose the hint, but successors do not inherit it. Ordering
+is local to a scan snapshot, with no global fairness or mixed-version guarantee.
+The advisory hint changes no Contract identity or reader floor. See
+[ADR-041](docs/adr/ADR-041-advisory-task-priority.md).
+
+Priority validation and publication share the same target lookup guard. A
+genuinely absent Contract with no exact declaration or priority history is
+not found. Orphan typed history, ambiguous materialization and malformed
+priority history remain integrity failures; bulk collection stops on unknown
+failures rather than treating them as missing tasks. Authentication audit's
+unverified claimed IDs do not select task history. See
+[change 081](changes/081-bulk-priority-missing-target.md).
+
+See [ADR-037](docs/adr/ADR-037-transactional-worker-authentication.md) for the
+operational coordination authentication and writer-fencing decision. ADR-012
+records its original HTTP-only scope and supersession history.
 
 Pure output reduction normally runs before the write transaction. SQLite runs
 the same reducer again after acquiring its writer lock and inserting the batch
@@ -273,6 +358,13 @@ A Worker receives a frozen package containing the exact disclosed Asset IDs and
 content views for that attempt. Disclosure is restricted to declared inputs and
 promptable label-referenced Assets, then filtered by redaction and sensitive
 input policy.
+
+Mapped input roles select exact sorted unique IDs through one shared owner used
+by disclosure and verification. Active missing, wrong-role and tombstoned references
+fail closed without name fallback; empty arrays select nothing. Unmapped roles keep
+authorized name selection and unused inherited bindings are inert. Original signer,
+trust, derivation and redaction checks still apply; a binding grants no new input
+role or capability. Legacy unbound tasks are not retroactively frozen.
 
 Disclosure and method-context assembly can use the optional Store batch Asset
 read for frozen IDs. SQLite bounds each `IN` query by its variable limit;
@@ -314,7 +406,7 @@ return ordinary Candidate effects. They do not receive an Engine or mutation
 handle.
 
 All new runtime-created Contracts use one canonical construction helper so the
-materialized immutable entity and its selected v3, v4, or v5 identity cannot
+materialized immutable entity and its selected v3, v4, v5, or v6 identity cannot
 drift across planning, retry, recovery, continuation, CLI, or nested-Worker paths.
 
 Planning and replanning publish three ordinary tasks in one atomic group:
@@ -423,6 +515,11 @@ Materialized views are disposable. Rebuild:
 3. computes a semantic digest;
 4. verifies it matches the pre-rebuild digest.
 
+Worker-registration verification includes its actor and key binding alongside
+routing fields. Display timestamps remain excluded because live writes and
+fact-derived reconstruction can assign different values. This digest checks
+local consistency; it does not establish signature authenticity or log completeness.
+
 Historical SQLite schemas are migrated explicitly and tested. Missing causal
 evidence, conflicting records, or unrecorded rows fail reconstruction rather
 than being silently ignored.
@@ -499,6 +596,13 @@ scheduling state. TOML profiles bind Worker adapters to capabilities, pools,
 capacity, and secret environment-variable names; task semantics remain model
 independent.
 
+Bounded and persistent Fleet slots enrich a caught invocation failure only
+through the shared exact-claim diagnostics owner. Proven result details carry
+the task, claim, package, Worker and failure/release fact references at one
+fixed Store revision; unavailable proof carries no claimed identifiers.
+Coordinator exceptions discovered after joining bounded slots are reported as
+unbound safe errors. Neither path creates task state or exposes exception text.
+
 EngineWorker applies the same rule across nested fact domains. It receives an
 outer claim context, executes against an isolated inner Store, persists bridge
 operations, and exports only authorized output effects. A restarted
@@ -510,33 +614,502 @@ outer claim cannot submit a late result.
 CLI and optional HTTP endpoints are adapters over the same Candidate and Worker
 protocols. They do not own alternate mutation semantics.
 
-SQLite remains the authoritative query fallback. When
-`AIGINEERING_REDIS_URL` is configured, read-only Asset, Contract, capability,
-task-status, and asset-graph views may use a Redis projection:
+Named local boards are application routing configuration. `local_boards.py`
+owns a project-local registry of canonical workspace paths, exact Genesis pins,
+archive flags and saved selection. Global `--board` selects one invocation;
+explicit `-C` bypasses selection. Missing, replaced, corrupt or archived selected
+domains fail visibly. Management remains at the registry root and cwd is
+restored on exit. Archive changes metadata only; it neither cancels work nor
+stops Workers. `local_domain.py` shares explicit initialization between
+`domain init` and managed board creation, preserving the core Genesis owner.
+Atomic locked registry replacement and retry of retained post-Genesis setup
+avoid a separate task/state owner. Registry data grants no capability, scope or
+acceptance and is not OS isolation. See
+[ADR-046](docs/adr/ADR-046-named-board-workspace-routing.md).
+
+Redis is a required application collaboration component. Normal CLI operations
+and HTTP Store requests preflight it; application read queries are strict Redis
+views. The default address is local Redis, configurable through
+`AIGINEERING_REDIS_URL`. Explicit offline CLI inspection remains available for
+selected SQLite audit views. Redis is installed as a base dependency.
 
 ```text
-SQLite RuntimeRecords
-→ domain/schema-scoped Redis generation
-→ monotonic authoritative revision watermark
-→ read-only CLI/API view
+SQLite committed RuntimeRecords (replayable source)
+→ domain/schema-scoped Redis event stream and read indexes
+→ task discovery, event cursors, bounded Worker wakeups and CLI/API views
+→ ordinary SQLite pull/claim/commit boundary
 ```
 
-A complete generation is published atomically. Later immutable Asset and
-Contract records catch up idempotently, and the watermark advances
-monotonically in the same Redis transaction. A current read compares the Redis
-watermark with SQLite before using the projection. Missing, stale, partial,
-graph-incompatible, or unavailable cache state rebuilds or falls back to
-SQLite.
+An application relay publishes only record metadata and typed task references to
+the event stream. Fixed revision IDs, Lua-atomic append/watermark updates and
+conditional repair provide idempotent concurrent catch-up. Stream deletion can
+be repaired from SQLite without resetting tasks. Derived query generations retain
+revision fencing and atomic publication. Connection and corruption failures are
+visible in strict application reads; low-level compatibility fallback requires
+explicit selection.
 
-Redis is not a Store implementation. Commitment, authority, allowance,
-acceptance, claims, fencing, idempotency, and terminal decisions do not import
-or query the Redis adapter. Cache namespaces bind the Genesis domain and
-projection schema, so independent Stores cannot share a generation.
+Redis is independently rebuildable infrastructure, not a second Store authority.
+Commitment, authority, allowance, acceptance, claims, fencing, idempotency and
+terminal decisions never import or query it. SQLite commitment and Redis relay
+are separate failure domains: post-commit sync failure reports retained facts and
+pending synchronization. Default execution requires the service to be healthy.
+
+The assignment and priority application owners construct their exact durable
+operation result before post-commit relay. Their mutation CLI reports the
+retained Candidate, direct fact IDs, actual idempotency key and observed revision
+on synchronization pending. Recovery repeats the original intent and predecessor
+with that key. Pre-publication failures carry no operation result; rejected
+Candidates carry only their exact audit result. Reporting metadata grants no
+execution or output authority. See
+[change 066](changes/066-assignment-priority-durable-pending-results.md).
+
+Shared application task views serve the task CLI and execution adapters. The CLI
+adds list, board, stats, show, exact result export, cancel, retry, events and bounded
+watch. Columns are projections of facts, not editable scheduler status. Retry
+shares one signed publisher with its compatibility command; labels and scope stay
+frozen. Result export checks integrity and exact policy-qualified business Assets.
+Canonical submitted claims remain `submitted` while required qualification is
+absent. The read view exposes eligible complete assertions as exact
+`qualification_pending_outputs` references for still-unqualified slots with an independent-acceptance
+blocker; it does not classify that blocker alone as missing recovery. Terminal,
+completion and expanded-work precedence remain authoritative. Existing canonical
+output/lineage/policy validators own eligibility; the view cannot attest or
+reset a claim. Aggregate list, board and stats share one immutable revision-bearing
+fact snapshot per read; the view context is bound to its source Store and cannot
+be reused across snapshots. This avoids repeated persisted fact scans while
+retaining full-history validation. See [change 061](changes/061-submitted-task-view.md)
+and [change 076](changes/076-task-view-query-reuse.md).
+Fleet slots claim only the selected immutable task tree, use Redis notifications
+with bounded waits, and return to SQLite for every claim and submission decision.
+See [ADR-027](docs/adr/ADR-027-required-redis-collaboration.md) and the
+[task operations reference](docs/reference/task-board.md).
+
+Task conversations use a dedicated `task.comment` capability. The collaboration
+plugin projects an exact Contract, bounded text and optional same-task reply to
+an immutable `task.commented` record with authenticated actor/key attribution.
+The CLI provisions that actor through signed root authorization and explicitly
+injects the frozen plugin registry into the generic Candidate publisher.
+Additional handlers cannot override built-ins, and the core has no plugin
+imports. Commitment uses the ordinary Candidate boundary. Comments remain allowed after terminal
+outcomes and do not alter claims, allowance, Contracts, Assets, output obligations,
+or acceptance. Identical keyed Candidates return the original durable record;
+changed input remains a new Candidate. See
+[ADR-028](docs/adr/ADR-028-signed-task-comments.md).
+
+Task attachment association has one application owner in `task_attachments.py`
+and an explicitly injected plugin. A sole signed `task.attachment.link` effect
+requires `task.attach`, pins the canonical task declaration and supported
+original attachment publication witnesses, and emits the selectively exclusive
+`task.attachment.linked` relation. Existing generic commitment rechecks current
+actor/key and pure projection under the SQLite writer lock. Historical accepted
+receipt/head/member evidence is distinct from re-verifying original signatures
+when full original payloads are unavailable.
+
+Relations are append-only operator metadata, including on terminal tasks. They
+preserve inputs, context, claims, allowance and output qualification. Safe
+paginated history and exact-byte export use a shared Store resolver/read snapshot;
+export compares the currently available original Asset with its pinned committed
+member, reuses the artifact byte validator, and exclusively creates a private
+file. Failure can leave its partial output, never overwrite a prior destination.
+Redis remains required; post-commit relay failure reports retained accepted IDs,
+and exact add replay after recovery synchronizes the same facts. See
+[ADR-045](docs/adr/ADR-045-signed-task-attachment-links.md) and
+[task attachments](docs/reference/task-attachments.md).
+
+Operator holds use separately authorized `task.block` and `task.unblock`
+single-effect Candidates. The collaboration plugin produces generic immutable
+`claim.hold.placed` and `claim.hold.released` facts. Each placement record ID
+identifies one hold; any open hold prevents claim acquisition. The core reducer
+uses the same revision cutoff as other task facts. SQLite rechecks holds in the
+claim transaction and claim history in the hold transaction, so a stale view
+cannot allow both placement and claim to win. Competing releases are arbitrated
+under the same writer lock. No mutable hold table owns task state.
+
+Placement refuses terminal tasks and tasks with any claim history. Exact replay
+returns the original fact after later release, claim or terminal changes.
+Authorized domain operators may release another actor's exact hold. Releasing
+an old hold after terminal closure does not reopen work. Active Worker handoff
+requires a successor workflow; these controls only stop unclaimed work from
+starting. The CLI provides readable collaboration output by default and optional
+JSON envelopes. See [ADR-029](docs/adr/ADR-029-signed-claim-holds.md).
+
+Operator promotion is a separate sole signed `task.promote` effect requiring
+`task.unblock`. It binds the complete sorted observed hold set and exact Contract
+declaration, emits ordinary releases plus an exclusively owned `task.promoted`
+audit, and rechecks the set and eligibility under the writer lock. Generic hold
+validation admits up to 64 homogeneous same-Contract transitions with distinct
+records and release targets; mixed and cross-task batches reject. Fresh promotion
+refuses terminal, previously claimed and canonically output-satisfied tasks.
+Dependencies, activation, assignment, capacity, allowance and acceptance retain
+their owners. Results expose original releases and observed remaining blockers.
+Exact explicit replay uses the original hold IDs, reason and returned key;
+later holds remain effective. Multi-task CLI calls are independently atomic and
+report partial failures. Redis remains required. No schema or reader-floor change
+is introduced. See [ADR-042](docs/adr/ADR-042-exact-hold-set-promotion.md).
+
+CLI block, cancel and exact unblock also accept multiple targets through shared
+application publication owners. A common collector validates the invocation,
+derives per-target keys and reports ordered partial results; it does not sign
+effects, interpret eligibility or introduce a batch state owner. Every target
+remains an independent Candidate transaction. Exact hold mappings allow
+multi-task promotion to replay original complete sets after later holds appear.
+Cancellation uses the shared task publication owner and preserves its original
+single-task reason, default key and causal parent. Post-commit Redis failure
+carries the actual decision and exact durable result to the CLI; receipt/head
+membership and all record identity fields are checked, excluding only the
+non-identity timestamp. No history scan substitutes an unrelated result.
+When a signed cancellation is rejected and its durable audit proof verifies, the
+single and batch CLIs return that exact rejection result and observed revision.
+Only the typed verified rejection is an expected business refusal; an untyped
+error or unavailable proof remains an internal/unknown outcome. Authentication
+rejection IDs remain claimed metadata, not authenticated Candidate identity.
+Human rejection output includes the durable audit record reference. A single
+post-commit pending response keeps the operation's prepared revision if later
+Store activity advances the current revision. A Redis preflight failure has no
+operation result and does not claim retained facts.
+See [bulk lifecycle operations](changes/056-bulk-task-lifecycle.md).
+
+Initial assignment uses the same collector and per-task assignment publication
+owner through `task assign CONTRACTS... WORKER_ID --reason TEXT`. One target
+retains its original direct key and result; multiple targets derive stable keys
+from the batch base and exact Contract ID. Each uses the original empty
+predecessor and fresh-assignment requirement. Assignment's deliberate application
+errors retain `ValueError` compatibility but have a narrow type for collection;
+unclassified failures stop instead of becoming ordinary refusals. Accepted-pending
+responses without exact result data also stop subsequent calls. No batch ledger,
+effect, claim reset or cross-task transaction is introduced. See
+[change 067](changes/067-bulk-initial-task-assignment.md).
+
+Explicit bulk replacement and clear use `task reassign CONTRACTS...` with one explicit
+nonempty predecessor mapping per target. One replacement Worker or one clear
+action applies to the invocation. The adapter validates all maps before Store,
+identity or Redis access, then delegates each exact head to the same assignment
+validator and publisher with `require_assigned=True`. Keys bind action, batch
+base, exact Contract and predecessor. Every result echoes the requested head
+as input context; this echo is neither fact proof nor authority. Exact-data
+accepted pending continues through ordinary per-target pre-sync, whereas
+accepted pending without result and unknown errors stop collection. Historical
+single-target syntax and direct keys remain supported. See
+[change 068](changes/068-bulk-task-reassignment.md).
+
+Routine `--current` operation preparation lives in the shared application module
+`task_assignment_requests.py`. It reads all selected original heads from one
+immutable snapshot and saves canonical input bytes under a digest-named private
+file before target publication. `--resume REQUEST_ID` loads the original ordered
+targets, heads, mode, Worker, reason and base; it never refreshes heads or accepts
+intent overrides. Both routes reuse the explicit batch target executor and signed
+assignment publisher. New modes return a batch envelope even for one target;
+expert single-target output and keys remain unchanged.
+
+Saved requests bind schema, resolved Store path, Genesis and observed revision.
+The reader checks canonical bytes/digest/shape, bounded regular private files and
+workspace/domain identity, and re-establishes file/directory durability before
+recovery. Saved inputs hold no authorization, progress or acceptance state.
+Hash addressing detects changes at the original request ID; it is not a
+signature or a defense against coordinated local replacement. Path binding
+refuses automatic resume after relocation or into a copy at another path. Exact
+committed members replay original facts under current authority; stale unattempted
+members refuse through the normal owner. See
+[change 069](changes/069-reassignment-request-recovery.md).
+
+Read-only task attempt inspection has one application owner in
+`task_diagnostics.py` and a thin CLI adapter. `task runs` reconstructs allocations
+and their proven outcomes; `task diagnostics` selects an exact claim's safe causal
+facts. The owner fixes a SQLite revision and UTC observation time in each cursor,
+validates receipt/head/member and owner-specific transition ancestry, and reports
+selected-scope integrity errors regardless of the displayed page. Standalone
+authentication audit IDs cannot join a valid attempt. Inspection neither resets
+claims nor repairs historical facts. The current immutable task has zero or one
+grant; successor work is inspected under its new Contract ID.
+
+Grant provenance accepts the existing signed command's explicit null selector
+for domain-wide selection as well as an exact pinned Contract. The request,
+receipt, Worker/key and revision order remain bound to the actual grant.
+Malformed proof containers and enums return integrity issues before iteration
+or membership checks. This is historical inspection, not fresh authentication
+or a change to the claim writer. See
+[change 060](changes/060-domainwide-claim-diagnostics.md).
+
+Output uses typed identifiers and numeric usage, suppressing arbitrary bodies,
+unknown categories and unsafe legacy metadata. A noncanonical package display is
+null while internal proof compares its original value. Redis synchronization is
+required; SQLite remains the history authority. Cursor pagination bounds output,
+while the current implementation scans runtime history. These summaries do not
+capture Worker I/O. See [change 058](changes/058-task-attempt-diagnostics.md).
+
+Task lineage inspection uses one immutable task-view snapshot to navigate the
+selected task's connected component through published containment, Worker
+invocation-failure recovery publications and canonical signed retry
+publications, and accepted leaf, expanded and edit-through-handoff successor
+publications, plus accepted review-linked task revisions. Both containment
+endpoints must match their exact published declarations. Retry edges require
+the accepted target Candidate's exact source
+receipt parent, a sole declaration effect, both exact publication proofs and
+the complete canonical retry successor shape; source declarations may be
+compound publications. Receipt, committed-head and member proofs use the
+generic indexed history owner. Handoff edges bind the typed link, cancellation
+terminal and successor declaration to exact accepted publications for both
+materialized endpoints; source publications may be compound. The relation view
+does not re-audit historical handoff budget, tree, hold, assignment or allowance
+decisions. Recovery edges prove the source Contract's
+accepted publication relation, while exact invocation failure and scheduling
+facts remain separate source diagnostics. Recovery diagnostics do not establish
+a one-to-one failure-to-publication mapping. Each member retains its canonical
+task status and blockers; unverified evidence cannot expand the component.
+Read-only lineage, retry, recovery and attachment readers use one pure
+effect-type sequence reader; malformed containers such as mappings cannot
+qualify retry, recovery, handoff or revision edges.
+Handoff and revision share one pure successor-publication proof while their
+feature wrappers retain fixed sole-effect checks and issue types. A revision
+edge proves the exact source cancellation, successor declaration and accepted
+`task.revised` link; it does not re-audit the historical review decision, report,
+allowance, assignment or present-day eligibility. This guards read
+interpretation and does not change Candidate commitment.
+Redis is required. This view adds no group status, claim authority, recovery
+scheduling or output qualification. Tool request/observation/continuation and
+other recovery sources are not yet covered. See [change 080](changes/080-verified-task-lineage.md),
+[change 082](changes/082-retry-publication-lineage.md),
+[change 083](changes/083-handoff-publication-lineage.md), and
+[change 085](changes/085-task-revision-lineage.md).
+
+Current task context inspection has one application owner in `task_context.py`.
+It uses canonical disclosure and shares the extracted method-context reader
+with Worker package construction. Default output contains metadata only; exact
+Asset selection plus explicit content opt-in returns its disclosed representation.
+Redaction remains intact, and nonpromptable or tombstoned bodies are refused.
+Legacy selection behavior is preserved, including metadata for such Assets when
+selected. The immutable SQLite snapshot and required Redis synchronization do
+not write facts or claims. A current preview is neither historical claim-package
+evidence nor readiness, authority or qualification. See
+[change 062](changes/062-task-context-view.md).
+
+Local Worker operational capture has one application owner in `task_logs.py`.
+Outer quick, pool, target and configured/Fleet execution delegates to the
+canonical runtime with an invocation-scoped observer; nested Engine execution
+masks inherited observers. Built-in LLM retry branches emit typed metadata at
+its actual source. There is no root logger or arbitrary stdout interception.
+
+The Store-adjacent spool has exclusive private files, per-claim/workspace caps
+and nonblocking quota locks. Files are auxiliary observations, never facts,
+Assets, task state or qualification. Write failures produce separate safe run
+warnings. Synchronous filesystem operations can add latency; no hard deadline
+is claimed. Captures are not overwritten on restart or pruned automatically.
+
+Read/follow reuses the diagnostics exact claim-proof owner on a closed-per-poll
+SQLite snapshot and requires Redis. Headers bind domain/task/claim/epoch/package/
+Worker; cursors bind physical root, capture and verified prefix. Strict event
+schemas omit bodies and arbitrary error text. A hash chain detects accidental
+mutation, not authentication. Invocation finish precedes envelope/sign/submit,
+and EOF is not task completion. See
+[change 063](changes/063-local-worker-operational-logs.md) and
+[ADR-044](docs/adr/ADR-044-local-worker-operational-logs.md).
+
+Task dependencies use one signed `task.dependency.link` or
+`task.dependency.unlink` effect with explicit `task.dependency.manage` authority.
+The plugin projects generic `claim.constraint.placed/released` facts; the
+placement ID is the exact link ID. One pure core owner validates schema, open
+edges, cycles, exact release pairs and typed prerequisite terminals. Commitment
+binds receipt/head/actor/key and rechecks current lifecycle/claims/graph under
+the writer lock; SQLite claim acquisition reads that same predicate in its
+transaction. Scans and Redis views are advisory. Task projections use their
+selected historical fact set; no-edge views retain prior hash behavior.
+
+Placement requires known unequal endpoints and a live, never-claimed target
+without satisfied nonempty outputs. Typed prerequisite `complete` satisfies an
+open edge; other terminal states, missing or conflicting history remain blockers.
+Unlink releases one exact open placement on a live, never-claimed target. Manual
+holds allow safe hold→unlink→link→unblock replacement. Exact signed replay precedes
+current mutable checks; changed inputs yield a new Candidate and fresh validation.
+These facts affect only new claims, never Contract inputs, scope, output
+satisfaction or qualification. Canonical output completion remains possible.
+
+Successor publication refuses cancelled targets with unfinished prerequisites
+outside the cancelled set, preserving internal old edges as history and all
+protected branches. Same-batch authorized completion repairs satisfy prerequisites;
+repair-only targets are exempt. Outside downstream targets keep exact cancelled
+prerequisite IDs and need explicit replacement; no automatic successor following
+or dependency-recursive cancellation occurs. Schema20 refuses normal old-reader
+reopen and unsupported pre-20 constraint imports. MemoryStore does not gain an
+operational claim API. See [ADR-036](docs/adr/ADR-036-task-prerequisite-claim-constraints.md).
+
+Task assignment publishes one signed `task.assign` effect with
+`task.assignment.manage`. Initial set, replace and clear emit the reserved
+`claim.assignment.changed` fact. One pure core owner selects the exact head,
+including a cleared head, and validates its seven-field payload and causal
+provenance. Live targets must have no claim history and no satisfied nonempty
+output obligation. Enabled static compatibility permits placement even when
+the Worker is busy; claim capacity and current identity remain writer checks.
+SQLite enforces the selected Worker inside claim acquisition, including trusted
+direct Store calls. Assignment does not grant capabilities or control output
+qualification. Views read the selected facts and expose registration/capacity
+blockers; Redis schema-v2 events carry typed Worker references without authority.
+
+Handoff and revision inherit assignment atomically through the same owning
+effect's cancellation/declaration/link witness. Explicit set/clear signs an
+exact source head and Worker override, with additional assignment authority.
+Frozen handler admission and core-generated per-effect owners/intents/witnesses
+participate in the locked projection identity check. Ordinary children inherit
+no assignment. No-history default successors retain existing wire identities.
+Exact committed replay verifies original receipt/head/membership and historical
+registration parents before skipping mutable eligibility checks. Schema21 gates
+normal readers and refuses pre-21 assignment imports. See
+[ADR-038](docs/adr/ADR-038-transactional-task-assignments.md).
+
+Active business-task handoff uses a dedicated `task.handoff` plugin effect, also
+requiring `contract.cancel` and `contract.publish`. SQLite atomically cancels
+the predecessor, releases its claim, reserves bounded remaining allowance and
+declares a successor. Late submission under the old claim is fenced. Only
+unfinished output slots are declared; completed slot names and exact Asset IDs
+remain link metadata. Ordinary tasks retain global same-name business-output
+matching; independent-policy tasks require exact Contract qualification.
+The successor inherits frozen execution/disclosure scope and acceptance policy.
+For ordinary handoff the operator's explicit reason is appended to its description and is Worker
+context; retained Asset contents are not automatically added to that context.
+An optional successor hold additionally requires `task.block`. Expanded handoff
+closes selected live descendants and transfers the original unfinished root
+obligation to one ordinary successor, which can plan afresh. It does not clone
+the old execution tree. The shared completion predicate preserves whole branches
+serving a live independent ancestor outside the cancelled root. Holds on transferred
+or completion-repair nodes block with exact IDs; terminal intermediaries and
+preserved external branches retain their own history.
+
+The generic allowance owner credits the source and debits each selected live
+donor's unused residual through exact committed funding paths. It validates
+returns before the ordinary successor reservation and independently under the
+SQLite writer lock; replay cannot create more credit. Previously terminal funds
+are not recovered. Source balance zero is supported when eligible descendants
+hold remaining allowance. Schema19 refuses older readers and migration refuses
+preexisting return rows because schema18 has no supported return producer.
+Expanded successors freeze current legal source disclosure with v6 input bindings;
+child results, observations and authorities are not copied. Historical leaf
+handoff identities, payloads and operator key remain unchanged.
+
+For a nonempty output-satisfied descendant lacking a typed terminal, signed handoff
+explicitly publishes a canonical `complete` terminal bound to exact output evidence,
+fences its claim and extinguishes its own residual. It continues through live
+grandchildren. Untyped old failure/cancellation/unreachable traces are visible
+history-conflict blockers. Audit and rebuild remain read-only. Source eligibility
+still excludes terminal, system/recovery, plugin-controlled or protected-minting
+tasks. Cancellation does not stop an OS process or reverse external effects.
+Polling late rejection for already non-failed terminal work records unavailable
+recovery with `terminal_preserved`, without new recovery tasks or a conflicting
+failed trace. Failed-task recovery remains available. The separate precheck to
+recovery-publication cancellation race is not yet transactionally qualified.
+
+The request signs a nullable budget. Exact replay returns the first committed
+successor and budget before checking the predecessor's later state. For accepted
+Candidates handled by a trusted injected registry, commitment reruns the pure
+decision with current facts and effective keys inside the writer transaction.
+Changed projection identities cause a durable rejection before writes. The
+kernel owns this generic check; it does not import feature semantics. Current
+and historical views read terminal facts directly, including cancellation
+without a terminal trace. See
+[ADR-030](docs/adr/ADR-030-transactional-task-handoff.md),
+[ADR-034](docs/adr/ADR-034-paired-causal-allowance-returns.md) and
+[ADR-035](docs/adr/ADR-035-expanded-root-handoff.md).
+
+Task text editing is an optional strict `edit` object on the same sole handoff
+effect, requiring explicit `task.edit` authority. It replaces name/description
+exactly, preserving omitted text without a handoff suffix or appended reason.
+Titles are nonblank and bodies may be empty; valid UTF-8 text is bounded to
+65536 bytes per field, with canonical Unicode NFC no-ops rejected. The request
+binds canonical source declaration, exact assignment head and complete sorted
+source hold set. The edit inventory allows source holds only, atomically copying
+up to 64 reasons and placements to the successor; old placements remain unchanged
+and descendant holds still block. Copied placements additionally require
+`task.block` and bind the receipt, old placement and successor declaration.
+The shared transfer link carries declaration references, supplied field names
+and the exact old/new map; full text stays in Contract declarations. Assignment
+inherits and priority does not. Fresh writer revalidation rejects changed
+snapshots. Exact replay verifies signed receipt/full-head membership and copied
+provenance before mutable source checks, retaining current-key authorization.
+The application returns the durable successor and exact replay snapshot and
+reports accepted Redis synchronization pending with retained facts/result.
+There is no edit-specific kernel state, schema or scheduler. See
+[ADR-043](docs/adr/ADR-043-text-edit-through-shared-handoff.md).
+
+Injected `EffectHandler` descriptors separately declare complete direct fact
+types and optional exclusive reserved types. All in-tree operational registries
+use strict declarations. The old assignment metadata is unchanged; external
+typed and tuple handlers with `direct_output_fact_types=None` retain trusted
+compatibility. Frozen mappings reject duplicate exclusive owners, and each
+projector record is checked before generic co-effects are added. Projectors
+must return a tuple of canonical RuntimeRecords; invalid containers,
+members or identities cause observable rejection. Sole-effect
+exact full-head replay verifies the authenticated receipt, committed head,
+ordered members and record equality; only generic allowance grant/reservation
+and asset materialization may fall outside the strict set. Reserved ownership
+still applies to every member. Multi-effect replay has no full-head exception.
+The existing owner fingerprint and writer re-projection carry this decision,
+without a Store ledger or schema change. See
+[ADR-040](docs/adr/ADR-040-injected-direct-fact-ownership.md).
+
+Independent task review is plugin-owned. A sole-effect signed request creates a
+bounded ordinary reviewer child and an exact target/policy link. Only original,
+promptable target/rubric/evidence Asset IDs enter its context; name rebinding is
+not used. The child has no tools, delegation or acceptance policy and runs through
+ordinary Worker claims. `run --worker-id` selects a durable execution identity
+without attestation authority; configured fleets retain their configured IDs.
+
+A sole-effect decision checks exact committed report ancestry and a report
+producer distinct from the target producer, then invokes canonical attestation
+with the original frozen policy evidence. Its actor also needs the policy's
+verifier capabilities and must differ from the target producer. The new report
+is linked separately rather than added to frozen evidence. Accept can qualify
+and complete the source; changes records rejected attestation, without publishing
+revision work. Exact replay restores committed projection before mutable state
+or duplicate-verifier checks; the writer snapshot fence arbitrates decisions.
+
+The current review slice accepts live independent-policy business sources, not
+retrospective gates for ordinary work. Default decision authority is fixed to
+`verify.human`; custom keys must already be authorized. Report-task completion
+keeps ordinary global same-name matching, so it is not report lineage or source
+qualification proof. An exact foreign report is rejected independently, even if
+it completed the reviewer task. Source allowance may be insufficient for later
+revision, and distinct actors do not prove distinct people. See
+[ADR-031](docs/adr/ADR-031-policy-bound-task-review.md).
+A separate sole-effect `task.revise` plugin Candidate references a committed
+changes decision and its canonical rejected attestation. Its shared pure reference
+validator serves application preflight and projection, checking exact request,
+policy, target, report, causal provenance and distinct report producer. Cancellation,
+claim fencing, bounded source allowance reservation, successor declaration and
+`task.revised` link commit atomically. All still-unqualified output slots transfer;
+qualified slots and exact IDs remain history metadata. The source stays cancelled,
+and its rejected output cannot qualify the successor.
+
+The child retains original execution and acceptance scope and input roles. Exact
+input bindings and frozen legacy label references preserve the original disclosure;
+only the old exact target/report are added as context, never as new policy evidence.
+Canonical disclosure IDs and views must match. The reason becomes explicit Worker
+context. Null budget resolves once and exact replay restores its original successor
+before later state checks. Positive allowance, live independent business source,
+no holds and no unfinished descendants are required. Expanded-tree transfer remains
+outside this path. Continue the returned ID through ordinary `run --task`; publishing
+revision does not invoke a provider. See
+[ADR-033](docs/adr/ADR-033-review-linked-task-revisions.md).
+
+Authentication lost through concurrent key revocation is recorded without
+reusing an invalid receipt. Handoff and revision event metadata reference both predecessor
+and successor; operator text is not parsed for task references.
 
 The CLI provides domain initialization, task and Asset publication, Worker
 execution, trace, audit, replay, recovery, and status views. The optional
 FastAPI adapter creates one Store connection per request and closes it
 deterministically.
+
+`aig asset show NAME` retains its existing name-based selection. Alternatively,
+`aig asset show --id ASSET_ID` selects the exact stored Asset through the same
+query projection, without name fallback. Both are local operator inspection;
+they do not filter task disclosure or establish output qualification. Inspection
+redacts bodies whose `disclosure_view` is not `original`, and reports that view;
+`promptable=false` alone does not hide an original body from operator inspection.
+The HTTP Asset response uses the same projection for reads and publication
+responses. Slicing retains the source Asset's `disclosure_view` and
+`promptable` classification, so derived bodies cannot silently become original
+or Worker-disclosable. Use `task context` for disclosed task inputs and
+`task result` for qualified output export. See
+[change 070](changes/070-exact-asset-inspection.md) and
+[change 075](changes/075-asset-read-redaction.md).
 
 Quick-goal `aig run GOAL` assigns a unique declared output name to each
 invocation. It uses the goal and only the UTF-8 files explicitly supplied with
@@ -567,6 +1140,24 @@ malformed or unknown fields. It cannot be combined with `--tool-registry`.
 These controls affect provider execution only; they do not change output
 authority or independently validate meaning. `--json` remains a CLI output
 selection and is unrelated to provider wire mode.
+
+Configured `aig run --config PATH` prepares explicit input files, Skill Assets,
+one root Contract and existing Fleet profiles outside the kernel. Shared
+application services own signed local publication and Fleet assembly; the old
+`fleet run` command delegates to those services. `aig -C DIRECTORY` selects the
+workspace. Resource paths are preset-relative while the Fleet database remains
+workspace-relative. Invalid resources and Contracts fail before runtime
+provisioning. Setup and execution are separate signed transactions.
+
+`--resume CONTRACT_ID` (or existing `--task`) selects committed work. Configured
+resume reads only Worker profiles (directly or through a preset Fleet reference)
+and the existing Contract; it never reloads
+setup, rebinds labels or resets claims. New preset starts reject existing roots
+and output slots present at the startup check; this is an application guard,
+not a transactional namespace reservation. Exact acceptance evidence can be bound from
+explicit input names to accepted Asset IDs. These are application conventions,
+not new authority or namespace isolation rules. See
+[configured runs](docs/reference/configured-runs.md) and ADR-026.
 
 An operator may explicitly load a local `ToolRegistry` factory for `aig run`.
 The adapter publishes its public descriptors through Candidate commitment,
@@ -700,7 +1291,8 @@ terminal, or replay owner.
 
 ## Release limits
 
-v0.5.12 extends the local reference runtime. It does not provide:
+The v0.5.13.dev0 development tree extends the local reference runtime. It does
+not provide:
 
 - a cross-machine distributed Store;
 - a consensus implementation;
@@ -715,5 +1307,12 @@ and real-LLM scenarios recorded in `reports/`.
 Planning compile stages retain the original parent's full acceptance policy.
 Independent qualification and ordinary output completion share unfinished-child
 cancellation, including the intermediate compile task, within commitment.
+Cancellation traverses all descendant levels through output-satisfied or already
+terminal intermediate Contracts, preserving their existing outcomes. A live
+branch serving an outer independent policy remains protected until that
+obligation closes. Newly cancelled descendants release claims atomically and
+reject late submissions. This corrects deeper work remaining claimable after
+parent completion; historical already-completed trees require separately
+authorized repair and are not rewritten by rebuilding views.
 See [ADR-025](docs/adr/ADR-025-guarded-review-closure.md) and
 [guarded review evidence](reports/065-guarded-claim-review-2026-09-13.md).

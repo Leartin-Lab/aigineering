@@ -108,9 +108,9 @@ def registration_is_replay(
     return False
 
 
-def is_eligible(contract: Contract, worker: WorkerRegistration) -> bool:
-    """Return whether *worker* satisfies all hard routing constraints."""
-    if not worker.enabled or worker.active_claims >= worker.capacity:
+def is_compatible(contract: Contract, worker: WorkerRegistration) -> bool:
+    """Return whether enabled *worker* meets static Contract routing."""
+    if not worker.enabled:
         return False
     exclusive = set(worker.capabilities) & EXCLUSIVE_EXECUTION_CAPABILITIES
     if exclusive and not exclusive.intersection(contract.worker_capabilities):
@@ -120,6 +120,11 @@ def is_eligible(contract: Contract, worker: WorkerRegistration) -> bool:
     return not contract.worker_pools or bool(
         set(contract.worker_pools) & set(worker.pools)
     )
+
+
+def is_eligible(contract: Contract, worker: WorkerRegistration) -> bool:
+    """Return whether *worker* is compatible and has transient capacity."""
+    return is_compatible(contract, worker) and worker.active_claims < worker.capacity
 
 
 def eligible_workers(

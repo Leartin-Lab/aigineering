@@ -8,8 +8,13 @@
     "--samples",
     "3",
     "--output",
-    "/private/tmp/aigineering-058-benchmark.json"
+    "<private-evidence-dir>/058-runtime-benchmark.json"
   ],
+  "publication_redactions": {
+    "date": "2026-10-07",
+    "argv_path_indices": [8],
+    "note": "Private output path replaced by a placeholder; original metadata retained privately. Measurements unchanged."
+  },
   "benchmark": "aigineering-runtime",
   "git": {
     "dirty": true,

@@ -34,13 +34,24 @@ The Worker registration drives eligibility. Capabilities describe what the
 harness can execute—such as `vision`, `repository.write`, or
 `compliance.review`—rather than price, persona, or prompt style.
 
+`aig worker registrations WORKER_ID --json` displays the current registration,
+full immutable history and promotion records. For canonical local identities,
+an initial pull-only registration may advance once to a concrete adapter profile
+under the same Worker ID and key; active claims or other metadata changes block
+this automatic path. Explicit external registrations keep their existing
+semantics. Local hosts bind the selected version through the claim writer fence.
+Profile describes compatibility and does not prove which code executed. Stop
+older local Worker processes before promotion. See
+[ADR-039](../adr/ADR-039-local-worker-profile-promotion.md).
+
 ## Pull and submit loop
 
 Use `aigineering.agent.harness.HarnessCandidateAdapter` to avoid reimplementing
 canonical JSON, package binding, graph output, recursive task compilation, or
 Ed25519 signatures.
 
-1. Create a unique signed `worker.claim` Candidate.
+1. Create a unique signed `worker.claim` Candidate. This is the request itself,
+   not a Worker ID assertion; keep the Candidate intact through the request.
 2. POST it to `/worker/claims` and retain the returned WorkerPackage unchanged.
 3. Give the harness only `contract`, `disclosed_assets`,
    `method_context_assets`, `tool_scope`, and the visible remaining allowance.
@@ -49,10 +60,31 @@ Ed25519 signatures.
 6. POST the signed Candidate to `/worker/submissions`.
 7. Read task status and audit; never infer commitment from an HTTP send alone.
 
+All operational entry points use the same signed coordination boundary. SQLite
+rechecks the current enabled Worker registration, actor/key authorization,
+`worker.submit` capability and requested claim target while committing the
+claim. A successful claim Candidate is single-use. A null-target request that
+finds no eligible work commits no request fact, so it may be retried later; once
+it returns a package, create a new Candidate for another claim. Claim grant
+facts link to the request record, which links to the Candidate receipt.
+
 For work longer than the lease, sign a fresh renewal Candidate with
 `renewal_candidate(package, request_id=...)` and POST it to
-`/worker/claims/{claim_id}/renew`. A request ID is single-use. Result
+`/worker/claims/{claim_id}/renew`. The renewal carries the original claim ID and
+epoch and rechecks the current enabled registration and actor/key binding inside
+the writer transaction. A successful request ID is single-use; replay does not
+extend the lease again. Each renewal fact links to both its original grant and
+renewal request, and the request links to its Candidate receipt. Result
 idempotency is deterministic for the exact package so transport replay is safe.
+
+For a locally invoked `aig worker next`, an already registered Worker must use
+its matching local signer or pass an inline signed Candidate with
+`--candidate JSON`. The option takes JSON text, not a file path. The CLI will not
+create or rebind a private key for an external registration. Omitted target and
+lease options use the signed Candidate's values; explicit options must match.
+For example, a harness that already compiled and signed each command can use
+the same Candidate JSON with `aig worker next --candidate "$CLAIM_JSON" --json`
+and submit its signed result using `aig worker submit --json "$RESULT_JSON"`.
 
 ## Preserve existing orchestration
 
@@ -98,4 +130,10 @@ uncommitted answer.
 - Never log undisclosed package content or raw private reasoning.
 - Treat package IDs, claim epochs, and idempotency keys as protocol values, not
   mutable harness metadata.
+- Treat direct recordless Store claim calls as trusted internal compatibility
+  seams, not as authenticated operational requests or deployment evidence.
 - Do not let a producer issue its own independent acceptance attestation.
+
+See [ADR-037](../adr/ADR-037-transactional-worker-authentication.md) for the
+transactional authentication boundary and [ADR-012](../adr/ADR-012-authenticated-worker-coordination.md)
+for its original HTTP scope.

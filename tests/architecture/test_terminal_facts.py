@@ -312,3 +312,40 @@ def test_method_result_event_requires_declaring_contract_provenance():
     assert [(event.contract_id, event.asset_name) for event in detected] == [
         (plan_task.id, result_name)
     ]
+
+
+@pytest.mark.parametrize("completion_entry", ["output", "qualification"])
+def test_completion_descendant_projection_is_shared_and_read_only(
+    completion_entry, monkeypatch
+):
+    store = MemoryStore()
+    root = Contract(id="root", name="root", outputs=("root-result",))
+    intermediate = Contract(id="intermediate", name="intermediate", parent_id=root.id)
+    leaf = Contract(
+        id="leaf", name="leaf", parent_id=intermediate.id, outputs=("leaf-result",)
+    )
+    for contract in (root, intermediate, leaf):
+        store.add_contract(contract)
+    terminal = create_terminal_record(intermediate.id, "cancelled")
+    store.append_runtime_record(terminal)
+    original_records = store.scan_runtime_records()
+
+    def no_mutation(*args, **kwargs):
+        raise AssertionError("completion projection attempted a durable mutation")
+
+    monkeypatch.setattr(store, "append_runtime_record", no_mutation)
+    monkeypatch.setattr(store, "add_asset", no_mutation)
+    monkeypatch.setattr(store, "add_contract", no_mutation)
+    reducer = FactReducer(store)
+    if completion_entry == "output":
+        events = reducer.on_asset_created(
+            Asset(id="result", name="root-result", content="done", created_by=root.id)
+        )
+    else:
+        events = reducer.on_contract_completed(
+            root, terminal_contract_ids={root.id, intermediate.id}
+        )
+    cancelled = [event for event in events if event.type == "child_cancelled"]
+    assert [event.contract_id for event in cancelled] == [leaf.id]
+    assert cancelled[0].details["parent_id"] == intermediate.id
+    assert store.scan_runtime_records() == original_records

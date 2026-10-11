@@ -453,17 +453,70 @@ def test_retry_json_output():
         result = runner.invoke(cli, ["retry", "--contract", original_id, "--json"])
         assert result.exit_code == 0
         data = json.loads(result.output)
+        assert data["ok"] is True
         assert data["original_contract_id"] == original_id
         assert data["retry_contract_id"] == expected_id
 
 
-def test_retry_contract_not_found():
+def test_retry_contract_not_found(monkeypatch):
     """aig retry --contract <nonexistent> reports error."""
+    import aigineering.cli.infrastructure as infrastructure
+
+    # A nonexistent target is resolved before publication; keep this error
+    # contract test independent of the required operational Redis service.
+    monkeypatch.setattr(infrastructure, "require_redis", lambda: None)
     runner = CliRunner()
     with runner.isolated_filesystem():
         result = runner.invoke(cli, ["retry", "--contract", "nonexistent"])
-        assert result.exit_code == 0
+        assert result.exit_code == 1
         assert "not found" in result.output
+
+        json_result = runner.invoke(
+            cli, ["retry", "--contract", "nonexistent", "--json"]
+        )
+        assert json_result.exit_code == 1
+        assert json.loads(json_result.output) == {
+            "ok": False,
+            "not_found": True,
+            "error": {
+                "code": "not_found",
+                "message": "Contract was not found.",
+            },
+            "revision": None,
+        }
+
+
+def test_retry_closes_store_after_signed_publication(monkeypatch):
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        initialized = runner.invoke(cli, ["domain", "init"])
+        assert initialized.exit_code == 0, initialized.output
+        created = runner.invoke(
+            cli,
+            ["task", "create", "--name", "original", "--output", "answer", "--json"],
+        )
+        assert created.exit_code == 0, created.output
+        original_id = json.loads(created.output)["contract_id"]
+
+        import importlib
+
+        retry_cli = importlib.import_module("aigineering.cli.retry")
+        store = retry_cli._persistent_store()
+        close = store.close
+        store.closed_by_cli = False
+
+        def close_spy():
+            store.closed_by_cli = True
+            close()
+
+        monkeypatch.setattr(store, "close", close_spy)
+        monkeypatch.setattr(retry_cli, "_persistent_store", lambda: store)
+
+        result = runner.invoke(cli, ["retry", "--contract", original_id, "--json"])
+
+        assert result.exit_code == 0, result.output
+        assert json.loads(result.output)["ok"] is True
+        assert store.closed_by_cli
 
 
 def test_trace_tree_view():

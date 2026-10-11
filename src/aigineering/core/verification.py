@@ -9,6 +9,7 @@ from aigineering.core.asset_versions import (
     SLICE_DERIVATION_VERSION,
     content_slice,
 )
+from aigineering.core.input_bindings import read_contract_input_assets
 from aigineering.core.ids import hash_asset_content, hash_asset_definition
 from aigineering.core.asset_graph_facts import asset_from_graph_values
 from aigineering.core.store_capabilities import AssetReader
@@ -341,8 +342,5 @@ def check_sensitive_input_policy(
 
 
 def _collect_input_assets(contract: Contract, store: Any) -> list[Any]:
-    """Collect all assets that are contract inputs (not all store assets)."""
-    result: list[Any] = []
-    for input_name in contract.inputs:
-        result.extend(store.get_assets_by_name(input_name))
-    return result
+    """Collect input Assets through the shared exact-selection owner."""
+    return read_contract_input_assets(contract, store)

@@ -21,6 +21,11 @@ from aigineering.core.authority import (
     matched_reserved_prefix,
 )
 from aigineering.core.activation import activation_names
+from aigineering.core.claim_holds import (
+    ClaimHoldConflict,
+    open_claim_holds,
+    validate_claim_hold_batch,
+)
 from aigineering.core.crash import check_crash_point
 from aigineering.core.ids import (
     compute_content_hash,
@@ -188,6 +193,22 @@ class SQLiteStore:
     # ── Immutable runtime-record envelope ────────────────────────────────
 
     def append_runtime_record(self, record: RuntimeRecord) -> int:
+        if record.record_type in {
+            "allowance.granted",
+            "allowance.reserved",
+            "allowance.returned",
+            "allowance.extinguished",
+        }:
+            raise ValueError("allowance facts require Candidate ingress commitment")
+        if record.record_type in {
+            "claim.constraint.placed",
+            "claim.constraint.released",
+        }:
+            raise ValueError(
+                "claim constraint facts require Candidate ingress commitment"
+            )
+        if record.record_type == "claim.assignment.changed":
+            raise ValueError("assignment facts require Candidate ingress commitment")
         with self._conn:
             revision = self._insert_runtime_record(record)
             if record.record_type == "lifecycle.terminal":
@@ -243,8 +264,47 @@ class SQLiteStore:
                 )
             )
 
-    def _insert_runtime_record(self, record: RuntimeRecord) -> int:
+    def _insert_runtime_record(
+        self,
+        record: RuntimeRecord,
+        *,
+        allow_claim_hold_fact: bool = False,
+        allow_claim_constraint_fact: bool = False,
+        allow_claim_assignment_fact: bool = False,
+    ) -> int:
         """Insert within the caller's transaction without committing it."""
+        if record.record_type.startswith("claim.hold."):
+            if record.record_type not in {
+                "claim.hold.placed",
+                "claim.hold.released",
+            }:
+                raise ClaimHoldConflict("unsupported generic claim-hold fact")
+            if not allow_claim_hold_fact:
+                raise ClaimHoldConflict(
+                    "claim-hold facts must enter through authenticated Candidate commitment"
+                )
+        if (
+            record.record_type
+            in {
+                "claim.constraint.placed",
+                "claim.constraint.released",
+            }
+            and not allow_claim_constraint_fact
+        ):
+            from aigineering.core.claim_constraints import ClaimConstraintConflict
+
+            raise ClaimConstraintConflict(
+                "claim constraint facts must enter through authenticated Candidate commitment"
+            )
+        if (
+            record.record_type == "claim.assignment.changed"
+            and not allow_claim_assignment_fact
+        ):
+            from aigineering.core.claim_assignments import AssignmentConflict
+
+            raise AssignmentConflict(
+                "assignment facts must enter through authenticated Candidate commitment"
+            )
         row = self._conn.execute(
             "SELECT * FROM runtime_records WHERE record_id = ?", (record.id,)
         ).fetchone()
@@ -851,6 +911,15 @@ class SQLiteStore:
         ).fetchall()
         return [self._row_to_worker_registration(row) for row in rows]
 
+    def get_claim_history_contract_ids(self) -> frozenset[str]:
+        """Return all contract IDs with any durable worker-claim row."""
+        return frozenset(
+            str(row[0])
+            for row in self._conn.execute(
+                "SELECT DISTINCT contract_id FROM worker_claims"
+            ).fetchall()
+        )
+
     def _row_to_worker_registration(self, row: sqlite3.Row) -> WorkerRegistration:
         active_claims = self._conn.execute(
             "SELECT COUNT(*) FROM worker_claims WHERE worker_id = ? AND status = 'active'",
@@ -968,6 +1037,8 @@ class SQLiteStore:
         registrations = [
             {
                 "worker_id": registration.worker_id,
+                "actor_id": registration.actor_id,
+                "key_id": registration.key_id,
                 "capabilities": registration.capabilities,
                 "pools": registration.pools,
                 "profile_id": registration.profile_id,
@@ -1434,6 +1505,8 @@ class SQLiteStore:
         package_id: str = "",
         expected_registration_version: str = "",
         runtime_records: tuple[RuntimeRecord, ...] = (),
+        *,
+        claim_candidate=None,
     ) -> dict | None:
         """Atomically arbitrate contract exclusivity and registered capacity."""
         from datetime import datetime, timedelta, timezone
@@ -1452,6 +1525,20 @@ class SQLiteStore:
             if terminal is not None:
                 self._conn.rollback()
                 return None
+            if open_claim_holds(
+                (record for _, record in self.scan_runtime_records()),
+                contract_id=contract_id,
+            ):
+                self._conn.rollback()
+                return None
+            from aigineering.core.claim_constraints import claim_constraint_blockers
+
+            if claim_constraint_blockers(
+                (record for _, record in self.scan_runtime_records()),
+                contract_id=contract_id,
+            ):
+                self._conn.rollback()
+                return None
             existing = self._conn.execute(
                 "SELECT claim_id, status FROM worker_claims "
                 "WHERE contract_id = ? "
@@ -1467,6 +1554,75 @@ class SQLiteStore:
                 "WHERE worker_id = ?",
                 (worker_id,),
             ).fetchone()
+            from aigineering.core.claim_assignments import (
+                assignment_context_from_projection,
+                effective_assignment,
+            )
+            from aigineering.core.projection_context import (
+                EffectProjectionContext,
+            )
+
+            assignment_context = assignment_context_from_projection(
+                EffectProjectionContext(
+                    runtime_records=tuple(
+                        record for _, record in self.scan_runtime_records()
+                    )
+                )
+            )
+            assignment = effective_assignment(
+                assignment_context, contract_id=contract_id
+            )
+            if assignment is not None:
+                current_registration = self.get_worker_registration(worker_id)
+                contract = self.get_contract(contract_id)
+                from aigineering.core.worker_routing import is_compatible
+
+                if (
+                    assignment.payload.get("worker_id") != worker_id
+                    or current_registration is None
+                    or not current_registration.enabled
+                    or contract is None
+                    or not is_compatible(contract, current_registration)
+                ):
+                    self._conn.rollback()
+                    return None
+            candidate_records = ()
+            if claim_candidate is not None:
+                if registration is None:
+                    self._conn.rollback()
+                    return None
+                from aigineering.core.worker_coordination import (
+                    same_worker_command_records,
+                    validate_worker_claim_candidate,
+                )
+                from aigineering.core.actor_facts import load_effective_actor_keys
+                from aigineering.core.domain import load_genesis
+
+                current_registration = self.get_worker_registration(worker_id)
+                genesis = load_genesis(self)
+                actor_keys = load_effective_actor_keys(self, genesis)
+                candidate_records = validate_worker_claim_candidate(
+                    claim_candidate,
+                    genesis=genesis,
+                    actor_keys=actor_keys,
+                    registration=current_registration,
+                    worker_id=worker_id,
+                    requested_contract_id=contract_id,
+                    lease_seconds=lease_seconds,
+                    expected_registration_version=expected_registration_version,
+                )
+                if runtime_records and not same_worker_command_records(
+                    tuple(runtime_records), candidate_records
+                ):
+                    self._conn.rollback()
+                    return None
+            elif runtime_records:
+                self._conn.rollback()
+                raise ValueError(
+                    "claim runtime_records require their signed claim_candidate"
+                )
+            else:
+                candidate_records = ()
             if registration is not None:
                 active_claims = self._conn.execute(
                     "SELECT COUNT(*) FROM worker_claims "
@@ -1494,12 +1650,20 @@ class SQLiteStore:
             timestamp = now_iso()
             if any(
                 self.get_runtime_record(record.id) is not None
-                for record in runtime_records
+                for record in candidate_records
             ):
                 self._conn.rollback()
                 return None
-            for record in runtime_records:
+            for record in candidate_records:
                 self._insert_runtime_record(record)
+            claim_request = next(
+                (
+                    record
+                    for record in candidate_records
+                    if record.record_type == "worker.claim.requested"
+                ),
+                None,
+            )
             self._conn.execute(
                 """INSERT INTO worker_claims (
                     claim_id, contract_id, worker_id, lease_until, status,
@@ -1527,6 +1691,7 @@ class SQLiteStore:
                         "package_id": package_id,
                         "worker_id": worker_id,
                     },
+                    causal_parents=(claim_request.id,) if claim_request else (),
                 )
             )
             self._conn.commit()
@@ -1538,6 +1703,9 @@ class SQLiteStore:
             if _is_sqlite_contention(exc):
                 return None
             raise
+        except Exception:
+            self._conn.rollback()
+            raise
         return self.get_claim(contract_id)
 
     def renew_claim(
@@ -1548,6 +1716,7 @@ class SQLiteStore:
         *,
         lease_seconds: int = 60,
         runtime_records: tuple[RuntimeRecord, ...] = (),
+        claim_candidate=None,
     ) -> dict | None:
         """Renew an active claim only when all fencing identities still match."""
         from datetime import datetime, timedelta, timezone
@@ -1556,11 +1725,59 @@ class SQLiteStore:
             return None
         now = datetime.now(timezone.utc)
         deadline = (now + timedelta(seconds=lease_seconds)).isoformat()
-        with self._conn:
+        try:
+            self._conn.execute("BEGIN IMMEDIATE")
+            row = self._conn.execute(
+                "SELECT contract_id, worker_id, epoch, package_id, lease_until "
+                "FROM worker_claims WHERE claim_id = ? AND epoch = ? "
+                "AND worker_id = ? AND status = 'active' AND lease_until >= ?",
+                (claim_id, epoch, worker_id, now.isoformat()),
+            ).fetchone()
+            if row is None:
+                self._conn.rollback()
+                return None
+
+            candidate_records = ()
+            if claim_candidate is not None:
+                registration = self.get_worker_registration(worker_id)
+                if registration is None:
+                    self._conn.rollback()
+                    return None
+                from aigineering.core.actor_facts import load_effective_actor_keys
+                from aigineering.core.domain import load_genesis
+                from aigineering.core.worker_coordination import (
+                    same_worker_command_records,
+                    validate_worker_renewal_candidate,
+                )
+
+                genesis = load_genesis(self)
+                actor_keys = load_effective_actor_keys(self, genesis)
+                candidate_records = validate_worker_renewal_candidate(
+                    claim_candidate,
+                    genesis=genesis,
+                    actor_keys=actor_keys,
+                    registration=registration,
+                    claim_id=claim_id,
+                    claim_epoch=epoch,
+                    worker_id=worker_id,
+                    lease_seconds=lease_seconds,
+                )
+                if runtime_records and not same_worker_command_records(
+                    tuple(runtime_records), candidate_records
+                ):
+                    self._conn.rollback()
+                    return None
+            elif runtime_records:
+                self._conn.rollback()
+                raise ValueError(
+                    "renewal runtime_records require their signed claim_candidate"
+                )
+
             if any(
                 self.get_runtime_record(record.id) is not None
-                for record in runtime_records
+                for record in candidate_records
             ):
+                self._conn.rollback()
                 return None
             cursor = self._conn.execute(
                 "UPDATE worker_claims SET lease_until = ?, updated_at = ? "
@@ -1569,14 +1786,21 @@ class SQLiteStore:
                 (deadline, now_iso(), claim_id, epoch, worker_id, now.isoformat()),
             )
             if cursor.rowcount != 1:
+                self._conn.rollback()
                 return None
-            for record in runtime_records:
+            for record in candidate_records:
                 self._insert_runtime_record(record)
-            row = self._conn.execute(
-                "SELECT contract_id, worker_id, epoch, package_id, lease_until "
-                "FROM worker_claims WHERE claim_id = ?",
-                (claim_id,),
-            ).fetchone()
+            renewal_request = next(
+                (
+                    record
+                    for record in candidate_records
+                    if record.record_type == "worker.claim.renew.requested"
+                ),
+                None,
+            )
+            causal_parents = [self._claim_granted_record_id(claim_id)]
+            if renewal_request is not None:
+                causal_parents.append(renewal_request.id)
             self._insert_runtime_record(
                 create_runtime_record(
                     "claim.renewed",
@@ -1586,10 +1810,22 @@ class SQLiteStore:
                         "lease_until": deadline,
                         "worker_id": worker_id,
                     },
-                    causal_parents=[self._claim_granted_record_id(claim_id)],
+                    causal_parents=causal_parents,
                 )
             )
-        return self.get_claim(row["contract_id"]) if row is not None else None
+            self._conn.commit()
+        except sqlite3.IntegrityError:
+            self._conn.rollback()
+            return None
+        except sqlite3.OperationalError as exc:
+            self._conn.rollback()
+            if _is_sqlite_contention(exc):
+                return None
+            raise
+        except Exception:
+            self._conn.rollback()
+            raise
+        return self.get_claim(row["contract_id"])
 
     def mark_claim_submitted(self, claim_id: str) -> None:
         with self._conn:
@@ -1855,6 +2091,11 @@ class SQLiteStore:
         candidate_actor_id: str = "",
         candidate_key_id: str = "",
         candidate_id: str = "",
+        candidate_proposal=None,
+        effect_fact_owners=(),
+        assignment_intents=(),
+        successor_assignment_witnesses=(),
+        validate_snapshot: Callable[[], None] | None = None,
     ) -> tuple[tuple[TraceEntry, ...], tuple[RuntimeRecord, ...]]:
         with self._conn:
             # Conditional allowance/key/claim checks must observe the same
@@ -1870,13 +2111,171 @@ class SQLiteStore:
                 candidate_id,
             ):
                 return (), ()
+            if validate_snapshot is not None:
+                validate_snapshot()
+            has_assignment_fact = any(
+                record.record_type == "claim.assignment.changed"
+                for record in runtime_records
+            )
+            if has_assignment_fact and validate_snapshot is None:
+                from aigineering.core.claim_assignments import AssignmentConflict
+
+                raise AssignmentConflict(
+                    "assignment facts require the registered Candidate projection validator"
+                )
+            if (
+                has_assignment_fact
+                or assignment_intents
+                or successor_assignment_witnesses
+            ):
+                from aigineering.core.claim_assignments import (
+                    AssignmentConflict,
+                    assignment_context_from_projection,
+                    validate_assignment_batch,
+                )
+                from aigineering.core.projection_context import (
+                    load_effect_projection_context,
+                )
+                from aigineering.core.actor_facts import load_effective_actor_keys
+                from aigineering.core.domain import load_genesis
+
+                if validate_snapshot is None or candidate_proposal is None:
+                    raise AssignmentConflict(
+                        "assignment facts require their signed Candidate projection"
+                    )
+                genesis = load_genesis(self)
+                actor_keys = load_effective_actor_keys(self, genesis)
+                assignment_context = assignment_context_from_projection(
+                    load_effect_projection_context(self, actor_keys=actor_keys)
+                )
+                receipt = next(
+                    (
+                        record
+                        for record in runtime_records
+                        if record.record_type == "candidate.received"
+                        and record.payload.get("candidate_id") == candidate_id
+                    ),
+                    None,
+                )
+                if receipt is None:
+                    raise AssignmentConflict("assignment Candidate receipt is missing")
+                validate_assignment_batch(
+                    assignment_context,
+                    runtime_records,
+                    contracts,
+                    candidate=candidate_proposal,
+                    receipt_id=receipt.id,
+                    effect_fact_owners=tuple(effect_fact_owners),
+                    assignment_intents=tuple(assignment_intents),
+                    successor_assignment_witnesses=tuple(
+                        successor_assignment_witnesses
+                    ),
+                )
+            has_hold_transition = any(
+                record.record_type in {"claim.hold.placed", "claim.hold.released"}
+                for record in runtime_records
+            )
+            has_constraint_transition = any(
+                record.record_type
+                in {"claim.constraint.placed", "claim.constraint.released"}
+                for record in runtime_records
+            )
+            existing_records = (
+                tuple(record for _, record in self.scan_runtime_records())
+                if has_hold_transition or has_constraint_transition
+                else ()
+            )
+            new_placements = (
+                validate_claim_hold_batch(
+                    existing_records,
+                    runtime_records,
+                    candidate_id=candidate_id,
+                    actor_id=candidate_actor_id,
+                    key_id=candidate_key_id,
+                )
+                if has_hold_transition
+                else ()
+            )
+            for placement in new_placements:
+                target = str(placement.payload["contract_id"])
+                declarations_for_holds = (
+                    (contract,) if contract is not None else ()
+                ) + tuple(contracts)
+                declared_ids = {item.id for item in declarations_for_holds}
+                if target not in declared_ids and self.get_contract(target) is None:
+                    raise ClaimHoldConflict("claim hold references an unknown Contract")
+                has_terminal_fact = any(
+                    record.record_type == "lifecycle.terminal"
+                    and record.payload.get("contract_id") == target
+                    for record in existing_records + runtime_records
+                )
+                if has_terminal_fact:
+                    raise ClaimHoldConflict(
+                        "cannot place a hold on a terminal Contract"
+                    )
+                claim_row = self._conn.execute(
+                    "SELECT 1 FROM worker_claims WHERE contract_id = ? LIMIT 1",
+                    (target,),
+                ).fetchone()
+                has_claim_fact = any(
+                    record.record_type == "claim.granted"
+                    and record.payload.get("contract_id") == target
+                    for record in existing_records
+                )
+                if claim_row is not None or has_claim_fact:
+                    raise ClaimHoldConflict(
+                        "cannot place a hold on a Contract with claim history"
+                    )
+            if has_constraint_transition:
+                from aigineering.core.claim_constraints import (
+                    validate_claim_constraint_batch,
+                )
+                from aigineering.core.output_satisfaction import all_outputs_satisfied
+
+                declared_contracts = (
+                    (contract,) if contract is not None else ()
+                ) + tuple(contracts)
+                all_contracts = tuple(self.get_all_contracts()) + declared_contracts
+                known_contract_ids = frozenset(item.id for item in all_contracts)
+                claimed_ids = {
+                    str(record.payload.get("contract_id", ""))
+                    for record in existing_records
+                    if record.record_type == "claim.granted"
+                }
+                claimed_ids.update(
+                    str(row[0])
+                    for row in self._conn.execute(
+                        "SELECT DISTINCT contract_id FROM worker_claims"
+                    )
+                )
+                terminal_ids = frozenset(
+                    str(record.payload.get("contract_id", ""))
+                    for record in existing_records
+                    if record.record_type == "lifecycle.terminal"
+                )
+                output_satisfied_ids = frozenset(
+                    item.id
+                    for item in all_contracts
+                    if all_outputs_satisfied(item, self, require_outputs=True)
+                )
+                validate_claim_constraint_batch(
+                    existing_records,
+                    runtime_records,
+                    candidate_id=candidate_id,
+                    actor_id=candidate_actor_id,
+                    key_id=candidate_key_id,
+                    known_contract_ids=known_contract_ids,
+                    claimed_contract_ids=frozenset(claimed_ids),
+                    terminal_contract_ids=terminal_ids,
+                    output_satisfied_contract_ids=output_satisfied_ids,
+                )
             declarations = ((contract,) if contract is not None else ()) + tuple(
                 contracts
             )
             self._validate_output_qualification_records(runtime_records)
             for declaration in declarations:
                 self._insert_contract(declaration)
-            self._validate_allowance_records(runtime_records)
+            self._validate_allowance_records(runtime_records, candidate_id=candidate_id)
             self._insert_ingress_assets(accepted_assets)
             check_crash_point("after_asset_before_trace")
             derived_traces, derived_records = self._commit_time_asset_consequences(
@@ -1887,7 +2286,7 @@ class SQLiteStore:
             )
             trace_entries = list(trace_entries) + list(derived_traces)
             runtime_records = runtime_records + derived_records
-            self._validate_allowance_records(derived_records)
+            self._validate_allowance_records(derived_records, candidate_id=candidate_id)
             if reducer_callback is not None:
                 reducer_traces: list[TraceEntry] = reducer_callback()
                 trace_entries = list(trace_entries) + reducer_traces
@@ -1895,7 +2294,24 @@ class SQLiteStore:
                 self._insert_trace_entry(entry)
             check_crash_point("after_trace_before_runtime_records")
             for record in runtime_records:
-                self._insert_runtime_record(record)
+                if record.record_type in {
+                    "claim.hold.placed",
+                    "claim.hold.released",
+                }:
+                    self._insert_runtime_record(record, allow_claim_hold_fact=True)
+                elif record.record_type in {
+                    "claim.constraint.placed",
+                    "claim.constraint.released",
+                }:
+                    self._insert_runtime_record(
+                        record, allow_claim_constraint_fact=True
+                    )
+                elif record.record_type == "claim.assignment.changed":
+                    self._insert_runtime_record(
+                        record, allow_claim_assignment_fact=True
+                    )
+                else:
+                    self._insert_runtime_record(record)
             if any(
                 record.record_type == "lifecycle.terminal" for record in runtime_records
             ):
@@ -2034,23 +2450,30 @@ class SQLiteStore:
         )
 
     def _validate_allowance_records(
-        self, runtime_records: tuple[RuntimeRecord, ...]
+        self,
+        runtime_records: tuple[RuntimeRecord, ...],
+        *,
+        candidate_id: str | None = None,
     ) -> None:
         if not any(
-            record.record_type in {"allowance.reserved", "allowance.extinguished"}
+            record.record_type
+            in {
+                "allowance.granted",
+                "allowance.reserved",
+                "allowance.returned",
+                "allowance.extinguished",
+            }
             for record in runtime_records
         ):
             return
         from aigineering.core.causal_allowance import validate_allowance_commit
 
-        pending_ids = {record.id for record in runtime_records}
-        existing_records = tuple(
-            record
-            for _, record in self.scan_runtime_records()
-            if record.id not in pending_ids
-        )
+        existing_records = tuple(record for _, record in self.scan_runtime_records())
         validate_allowance_commit(
-            tuple(self.get_all_contracts()), existing_records, runtime_records
+            tuple(self.get_all_contracts()),
+            existing_records,
+            runtime_records,
+            candidate_id=candidate_id,
         )
 
     def _insert_ingress_assets(self, accepted_assets: list[Asset]) -> None:

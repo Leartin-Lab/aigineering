@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from threading import Barrier
+from threading import Barrier, Event
 
 import pytest
 
@@ -25,6 +25,7 @@ from aigineering.fleet_config import (
     load_fleet_config,
 )
 from aigineering.local_fleet import FleetHost, run_local_fleet
+import aigineering.local_fleet as local_fleet_module
 from aigineering.local_identity import ensure_local_domain, ensure_local_worker_host
 from aigineering.protocol.effect_builders import (
     asset_proposal_effect,
@@ -32,6 +33,384 @@ from aigineering.protocol.effect_builders import (
 )
 from aigineering.protocol.types import Candidate, Contract, ToolSpec
 from aigineering.agent.tool_worker import ToolWorker
+
+
+def test_fleet_result_includes_capture_warning_completed_during_executor_join(
+    monkeypatch,
+):
+    class FakeFuture:
+        def cancelled(self):
+            return False
+
+        def done(self):
+            return False
+
+        def exception(self):
+            return None
+
+    class DelayedExecutor:
+        def __init__(self, max_workers):
+            self.pending = []
+
+        def __enter__(self):
+            return self
+
+        def submit(self, function, *args):
+            self.pending.append((function, args))
+            return FakeFuture()
+
+        def __exit__(self, *_exc):
+            # Model a slot that finishes while the real executor joins after stop.
+            for function, args in self.pending:
+                function(*args)
+
+    class FakeStore:
+        def __init__(self, _path):
+            pass
+
+        def get_contract(self, contract_id):
+            return type("Contract", (), {"id": contract_id})()
+
+        def close(self):
+            pass
+
+        def get_runtime_revision(self):
+            return 1
+
+    class FakeProjection:
+        def __init__(self, *_args):
+            pass
+
+        def contract_view(self, _contract):
+            return type("View", (), {"terminal": "complete"})()
+
+    monkeypatch.setattr(local_fleet_module, "ThreadPoolExecutor", DelayedExecutor)
+    monkeypatch.setattr(local_fleet_module, "SQLiteStore", FakeStore)
+    monkeypatch.setattr(local_fleet_module, "RuntimeProjection", FakeProjection)
+    monkeypatch.setattr(local_fleet_module, "require_redis", lambda: None)
+    monkeypatch.setattr(
+        local_fleet_module, "ensure_local_runtime_publishers", lambda _s: {}
+    )
+    monkeypatch.setattr(local_fleet_module, "default_completion_registry", lambda: {})
+    monkeypatch.setattr(
+        local_fleet_module, "run_runtime_maintenance_step", lambda *_a, **_k: None
+    )
+    monkeypatch.setattr(local_fleet_module, "sync_runtime", lambda _s: None)
+    monkeypatch.setattr(
+        local_fleet_module,
+        "collaboration_service",
+        lambda _s: type("Collaboration", (), {"wait": lambda *_a, **_k: None})(),
+    )
+
+    def finish_slot(
+        _db, _host, _stop, _errors, _interval, _target, warnings, _failure_details
+    ):
+        warnings.append("capture_unavailable")
+
+    monkeypatch.setattr(local_fleet_module, "_run_slot", finish_slot)
+    result = run_local_fleet(
+        "unused.sqlite",
+        (FleetHost(object()),),
+        target_contract_id="task:fleet-test",
+    )
+    assert result.completed is True
+    assert result.capture_warnings == ("capture_unavailable",)
+
+
+@pytest.mark.parametrize(
+    ("mode", "terminal", "timeout", "expected_status"),
+    [
+        ("terminal", "complete", 2, "complete"),
+        ("timeout", None, 0, "timed_out"),
+        ("first_error", None, 2, "worker_error"),
+    ],
+)
+def test_late_unexpected_future_is_reported_safely_after_executor_join(
+    monkeypatch, mode, terminal, timeout, expected_status
+):
+    late_secret = "PRIVATE_LATE_EXCEPTION_SENTINEL"
+    first_secret = "PRIVATE_FIRST_EXCEPTION_SENTINEL"
+
+    class Future:
+        def __init__(self, *, done=False, error=None):
+            self._done = done
+            self._error = error
+
+        def done(self):
+            return self._done
+
+        def cancelled(self):
+            return False
+
+        def exception(self):
+            return self._error
+
+        def finish(self, error=None):
+            self._done = True
+            self._error = error
+
+    class JoiningExecutor:
+        def __init__(self, max_workers):
+            self.pending = []
+
+        def __enter__(self):
+            return self
+
+        def submit(self, function, *args):
+            host = args[1]
+            if mode == "first_error" and host.kind == "first":
+                return Future(done=True, error=RuntimeError(first_secret))
+            future = Future()
+            self.pending.append((function, args, future))
+            return future
+
+        def __exit__(self, *_exc):
+            for function, args, future in self.pending:
+                try:
+                    function(*args)
+                except BaseException as error:
+                    future.finish(error)
+                else:
+                    future.finish()
+
+    class FakeStore:
+        def __init__(self, _path):
+            pass
+
+        def get_contract(self, contract_id):
+            return type("Contract", (), {"id": contract_id})()
+
+        def get_runtime_revision(self):
+            return 1
+
+        def close(self):
+            pass
+
+    class FakeProjection:
+        def __init__(self, *_args):
+            pass
+
+        def contract_view(self, _contract):
+            return type("View", (), {"terminal": terminal})()
+
+    class Waiter:
+        def wait(self, *_args, **_kwargs):
+            return None
+
+    monkeypatch.setattr(local_fleet_module, "ThreadPoolExecutor", JoiningExecutor)
+    monkeypatch.setattr(local_fleet_module, "SQLiteStore", FakeStore)
+    monkeypatch.setattr(local_fleet_module, "RuntimeProjection", FakeProjection)
+    monkeypatch.setattr(local_fleet_module, "require_redis", lambda: None)
+    monkeypatch.setattr(
+        local_fleet_module, "ensure_local_runtime_publishers", lambda _store: {}
+    )
+    monkeypatch.setattr(local_fleet_module, "default_completion_registry", lambda: {})
+    monkeypatch.setattr(
+        local_fleet_module, "run_runtime_maintenance_step", lambda *_a, **_k: None
+    )
+    monkeypatch.setattr(local_fleet_module, "sync_runtime", lambda _store: None)
+    monkeypatch.setattr(
+        local_fleet_module, "collaboration_service", lambda _store: Waiter()
+    )
+
+    def late_slot(*_args):
+        raise RuntimeError(late_secret)
+
+    monkeypatch.setattr(local_fleet_module, "_run_slot", late_slot)
+    hosts = tuple(
+        FleetHost(type("Host", (), {"kind": kind})())
+        for kind in (("first", "late") if mode == "first_error" else ("late",))
+    )
+    result = run_local_fleet(
+        "unused.sqlite",
+        hosts,
+        target_contract_id="task:late-future",
+        timeout=timeout,
+        poll_interval=0.001,
+    )
+
+    assert result.status == expected_status
+    assert hasattr(result, "worker_failure_details")
+    assert any(
+        detail.get("kind") == "slot_error"
+        and detail.get("category") == "unexpected_exception"
+        for detail in result.worker_failure_details
+    )
+    assert sum(
+        detail.get("kind") == "slot_error" for detail in result.worker_failure_details
+    ) == (2 if mode == "first_error" else 1)
+    assert late_secret not in repr(result)
+    assert first_secret not in repr(result)
+
+
+def test_invocation_diagnostic_failure_does_not_echo_unproven_claim_ids(monkeypatch):
+    class Package:
+        claim_id = "lease:" + "a" * 64
+        package_id = "pkg:" + "b" * 64
+        claim_epoch = 1
+
+    claimed = type(
+        "Claimed",
+        (),
+        {
+            "contract": type("Contract", (), {"id": "task:unavailable"})(),
+            "package": Package(),
+            "worker_id": "worker:unavailable",
+        },
+    )()
+
+    def unavailable(*_args):
+        raise ValueError("PRIVATE_DIAGNOSTIC_EXCEPTION")
+
+    monkeypatch.setattr(
+        "aigineering.run_failure_diagnostics.task_invocation_failure_binding",
+        unavailable,
+    )
+    detail = local_fleet_module._invocation_failure_detail(object(), claimed)
+    assert detail == {
+        "kind": "invocation_failure",
+        "status": "diagnostic_unavailable",
+        "category": "diagnostic_unavailable",
+    }
+    assert "task:unavailable" not in repr(detail)
+    assert "lease:" not in repr(detail)
+    assert "PRIVATE_DIAGNOSTIC_EXCEPTION" not in repr(detail)
+
+
+def test_persistent_fleet_keeps_tuple_and_uses_shared_safe_failure_formatter(
+    monkeypatch,
+):
+    failed = Event()
+    stop_event = Event()
+    claim_id = "lease:" + "c" * 64
+    contract_id = "task:persistent-failure"
+    details = {
+        "kind": "invocation_failure",
+        "status": "invocation_failed",
+        "contract_id": contract_id,
+        "claim_id": claim_id,
+        "package_id": "pkg:" + "d" * 64,
+        "worker_id": "worker:persistent",
+        "category": "provider_error",
+        "status_code": 503,
+    }
+    claimed = type(
+        "Claimed",
+        (),
+        {
+            "contract": type("Contract", (), {"id": contract_id})(),
+            "package": object(),
+            "worker_id": "worker:persistent",
+        },
+    )()
+
+    class FakeStore:
+        def __init__(self, _path):
+            pass
+
+        def get_runtime_revision(self):
+            return 0
+
+        def close(self):
+            pass
+
+    class Permit:
+        def release(self):
+            pass
+
+    class Gate:
+        closed = False
+
+        def admit(self):
+            return None if self.closed else Permit()
+
+        def close(self):
+            self.closed = True
+
+    class Waiter:
+        def wait(self, *_args, **_kwargs):
+            return None
+
+    attempts = 0
+
+    def claim_one(*_args, **_kwargs):
+        nonlocal attempts
+        attempts += 1
+        return claimed if attempts == 1 else None
+
+    def fail_invocation(*_args, **_kwargs):
+        failed.set()
+        raise local_fleet_module.WorkerInvocationError("PRIVATE_EXCEPTION_BODY")
+
+    monkeypatch.setattr(local_fleet_module, "SQLiteStore", FakeStore)
+    monkeypatch.setattr(
+        local_fleet_module, "ensure_local_runtime_publishers", lambda _store: {}
+    )
+    monkeypatch.setattr(local_fleet_module, "require_redis", lambda: None)
+    monkeypatch.setattr(local_fleet_module, "_claim_one", claim_one)
+    monkeypatch.setattr(local_fleet_module, "execute_captured_package", fail_invocation)
+    monkeypatch.setattr(
+        local_fleet_module,
+        "_invocation_failure_detail",
+        lambda _store, _claimed: details,
+    )
+    monkeypatch.setattr(local_fleet_module, "sync_runtime", lambda _store: None)
+    monkeypatch.setattr(
+        local_fleet_module, "collaboration_service", lambda _store: Waiter()
+    )
+    errors = local_fleet_module.run_persistent_local_fleet(
+        "unused.sqlite",
+        (FleetHost(object()),),
+        gate=Gate(),
+        stop_event=stop_event,
+        stop_requested=failed.is_set,
+        poll_interval=0.001,
+    )
+    assert isinstance(errors, tuple)
+    assert len(errors) == 1
+    assert contract_id in errors[0] and claim_id in errors[0]
+    assert "provider_error" in errors[0]
+    assert "PRIVATE_EXCEPTION_BODY" not in errors[0]
+
+
+def test_persistent_fleet_surfaces_failure_when_future_is_done_before_loop(
+    monkeypatch,
+):
+    failure = RuntimeError("PRIVATE_PERSISTENT_SLOT_SENTINEL")
+
+    class AlreadyFailedFuture:
+        def done(self):
+            return True
+
+        def cancelled(self):
+            return False
+
+        def exception(self):
+            return failure
+
+    class AlreadyDoneExecutor:
+        def __init__(self, max_workers):
+            assert max_workers == 1
+
+        def __enter__(self):
+            return self
+
+        def submit(self, *_args):
+            return AlreadyFailedFuture()
+
+        def __exit__(self, *_args):
+            return False
+
+    monkeypatch.setattr(local_fleet_module, "ThreadPoolExecutor", AlreadyDoneExecutor)
+    with pytest.raises(RuntimeError) as raised:
+        local_fleet_module.run_persistent_local_fleet(
+            "unused.sqlite",
+            (FleetHost(object()),),
+            gate=local_fleet_module.PullAdmissionGate(),
+            stop_event=Event(),
+            stop_requested=lambda: False,
+        )
+    assert raised.value is failure
 
 
 class _ConcurrentWorker:
@@ -204,6 +583,19 @@ def test_local_fleet_executes_specialized_tasks_concurrently(tmp_path, monkeypat
     db_path = str(tmp_path / "fleet.db")
     store = SQLiteStore(db_path)
     ensure_local_domain(store)
+    unrelated = build_control_plane_contract(
+        name="unrelated-workspace-root",
+        description="Must not be claimed by a fleet assigned to another root.",
+        outputs=("unrelated_result",),
+        worker_capabilities=("text.extract",),
+    )
+    require_accepted(
+        commit_local_effects(
+            store,
+            (contract_declaration_effect(unrelated),),
+            idempotency_key="fleet-unrelated-root",
+        )
+    )
     root = build_control_plane_contract(
         name="root",
         outputs=("cheap_result", "deep_result"),
@@ -263,6 +655,11 @@ def test_local_fleet_executes_specialized_tasks_concurrently(tmp_path, monkeypat
     try:
         assert reopened.get_assets_by_name("cheap_result")
         assert reopened.get_assets_by_name("deep_result")
+        assert not reopened.get_assets_by_name("unrelated_result")
+        assert not any(
+            record.payload.get("contract_id") == unrelated.id
+            for _, record in reopened.scan_runtime_records(record_type="claim.granted")
+        )
     finally:
         reopened.close()
 
@@ -479,3 +876,14 @@ def test_parallel_tool_method_runs_calls_concurrently_then_joins(tmp_path, monke
         len([name for name in names if name.startswith("tool_observation_")]) == 2
         for names in orchestrator.disclosures
     )
+
+
+def test_fleet_json_action_mode_rejects_tool_registry_before_loading():
+    with pytest.raises(ValueError, match="cannot be combined with tool_registry"):
+        FleetWorkerSpec(
+            worker_id="json-with-tools",
+            kind="llm",
+            model="unused",
+            response_format="json_object",
+            tool_registry="unimportable:factory",
+        )

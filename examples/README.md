@@ -5,6 +5,16 @@ child Contracts, claimable Worker packages, and independent attestation. Their
 oracle files are human review aids and are deliberately excluded from runtime
 inputs. The linked report records their actual manual outcomes.
 
+## Shared execution entry
+
+The complete AI4S, report consistency, claim-evidence and guarded claim-review
+recipes each provide `run.toml`. Start with
+`aig -C WORKSPACE run --config /absolute/path/to/run.toml`, then continue the
+returned task with the same configuration and `--resume TASK_ID`. Method examples
+keep import/test/assessment preparation, followed by the same configured run
+entry for their existing task IDs. Skill-only packages remain reusable resources.
+See [configured runs](../docs/reference/configured-runs.md).
+
 ## New diagnostic case studies
 
 - [`report-consistency`](report-consistency/README.md) checks a corrected sales

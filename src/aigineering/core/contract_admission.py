@@ -5,6 +5,10 @@ from __future__ import annotations
 from aigineering.core.activation import validate_execution_activation
 from aigineering.core.authority import matched_reserved_prefix
 from aigineering.core.ids import validate_contract_identity
+from aigineering.core.input_bindings import (
+    input_asset_bindings,
+    validate_input_asset_binding_targets,
+)
 from aigineering.protocol.types import Contract
 
 
@@ -45,16 +49,22 @@ def validate_acceptance_policy(contract: Contract) -> None:
 
 
 def validate_contract_commitment(
-    contract: Contract, *, require_canonical_v3: bool = True
+    contract: Contract,
+    *,
+    require_canonical_v3: bool = True,
+    assets: tuple | list | None = None,
 ) -> None:
     if require_canonical_v3 and not contract.id.startswith(
-        ("task:v3:", "task:v4:", "task:v5:")
+        ("task:v3:", "task:v4:", "task:v5:", "task:v6:")
     ):
         raise ValueError(
             "Candidate contracts require a canonical task:v3 identity "
             "or newer canonical identity"
         )
     validate_contract_identity(contract)
+    input_asset_bindings(contract.sensitive_input_policy)
+    if assets is not None:
+        validate_input_asset_binding_targets(contract, assets)
     validate_acceptance_policy(contract)
     validate_execution_activation(contract.activation)
     for output_name in contract.outputs:

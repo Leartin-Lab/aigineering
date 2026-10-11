@@ -22,6 +22,7 @@ from aigineering.core.output_satisfaction import (
     all_outputs_satisfied,
     is_business_output,
 )
+from aigineering.core.task_lifecycle import serves_pending_independent_acceptance
 from aigineering.protocol.immutability import deep_freeze
 
 if TYPE_CHECKING:
@@ -160,7 +161,15 @@ class FactReducer:
                 )
             )
 
-        return events
+        deduplicated: list[FactReducerEvent] = []
+        cancelled: set[str] = set()
+        for event in events:
+            if event.type == "child_cancelled":
+                if event.contract_id in cancelled:
+                    continue
+                cancelled.add(event.contract_id)
+            deduplicated.append(event)
+        return deduplicated
 
     def on_contract_completed(
         self, contract: Contract, *, terminal_contract_ids: set[str]
@@ -310,33 +319,54 @@ class FactReducer:
         terminal_contract_ids: set[str],
         contracts: tuple[Contract, ...],
     ) -> list[FactReducerEvent]:
-        """Find child contracts that should be cancelled after *completed_contract*
-        finishes."""
+        """Find unfinished descendants to cancel after *completed_contract* ends.
+
+        A terminal or already-satisfied intermediate Contract does not shield
+        unfinished descendants from an ancestor that has now closed their
+        obligation. A live independent verifier remains an explicit exception.
+        """
         events: list[FactReducerEvent] = []
         contracts_by_id = {contract.id: contract for contract in contracts}
-
+        children_by_parent: dict[str, list[Contract]] = {}
         for contract in contracts:
-            if contract.parent_id != completed_contract.id:
-                continue
-            if contract.id in terminal_contract_ids:
-                continue
-            if self._serves_pending_independent_acceptance(
-                contract,
-                completed_contract,
-                contracts_by_id,
-                terminal_contract_ids,
-            ):
-                continue
-            # If the child still has outstanding outputs, it's unfinished.
-            if not self._all_outputs_satisfied(contract, pending_names):
+            if contract.parent_id:
+                children_by_parent.setdefault(contract.parent_id, []).append(contract)
+        for children in children_by_parent.values():
+            children.sort(key=lambda item: item.id)
+
+        queue = [completed_contract]
+        visited = {completed_contract.id}
+        known_terminals = set(terminal_contract_ids)
+        while queue:
+            parent = queue.pop(0)
+            for child in children_by_parent.get(parent.id, ()):
+                if child.id in visited:
+                    continue
+                visited.add(child.id)
+                already_terminal = child.id in known_terminals
+                if not already_terminal and self._serves_pending_independent_acceptance(
+                    child, parent, contracts_by_id, known_terminals
+                ):
+                    continue
+
+                # Keep existing terminal facts immutable, but continue through
+                # their branch so any still-live descendants can be fenced.
+                if already_terminal or self._all_outputs_satisfied(
+                    child, pending_names
+                ):
+                    queue.append(child)
+                    continue
+
                 events.append(
                     FactReducerEvent(
                         type="child_cancelled",
-                        contract_id=contract.id,
+                        contract_id=child.id,
                         asset_name=completed_contract.id,
-                        details=MappingProxyType({"parent_id": completed_contract.id}),
+                        details=MappingProxyType({"parent_id": parent.id}),
                     )
                 )
+                known_terminals.add(child.id)
+                queue.append(child)
         return events
 
     @staticmethod
@@ -354,28 +384,12 @@ class FactReducer:
         serves an independently accepted ancestor.  Capability and input
         containment make that relationship explicit in immutable Contracts.
         """
-        ancestor_id = completed_parent.parent_id
-        visited: set[str] = set()
-        while ancestor_id and ancestor_id not in visited:
-            visited.add(ancestor_id)
-            ancestor = contracts_by_id.get(ancestor_id)
-            if ancestor is None:
-                return False
-            policy = ancestor.acceptance_policy
-            verifier_capabilities = (
-                set(policy.get("verifier_capabilities", ()))
-                if policy is not None and policy.get("mode") == "independent"
-                else set()
-            )
-            if (
-                ancestor.id not in terminal_contract_ids
-                and verifier_capabilities
-                and verifier_capabilities.issubset(child.worker_capabilities)
-                and set(ancestor.outputs).issubset(child.inputs)
-            ):
-                return True
-            ancestor_id = ancestor.parent_id
-        return False
+        return serves_pending_independent_acceptance(
+            child,
+            completed_parent,
+            contracts_by_id,
+            terminal_contract_ids,
+        )
 
     def _contracts_with(
         self, pending_contracts: tuple[Contract, ...]

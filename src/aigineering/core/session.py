@@ -41,6 +41,65 @@ def runtime_record_contract_references(
     return _runtime_record_contract_references(record, records_by_id or {}, set())
 
 
+def runtime_record_worker_references(
+    record: RuntimeRecord,
+    records_by_id: Mapping[str, RuntimeRecord] | None = None,
+) -> frozenset[str]:
+    """Return Worker IDs explicitly named by known typed runtime facts.
+
+    This is a scoped read-model helper. It never searches descriptions, trace
+    prose, or arbitrary nested candidate content for strings that resemble IDs.
+    """
+    return _runtime_record_worker_references(record, records_by_id or {}, set())
+
+
+def _runtime_record_worker_references(
+    record: RuntimeRecord,
+    index: Mapping[str, RuntimeRecord],
+    visited: set[str],
+) -> frozenset[str]:
+    if record.id in visited:
+        return frozenset()
+    visited.add(record.id)
+    typed_worker_records = {
+        "worker.registered",
+        "worker.claim.requested",
+        "worker.claim.renew.requested",
+        "claim.granted",
+        "claim.renewed",
+        "claim.expired",
+        "claim.released",
+        "claim.submitted",
+        "claim.assignment.changed",
+    }
+    references: set[str] = set()
+    if record.record_type in typed_worker_records:
+        value = record.payload.get("worker_id")
+        if isinstance(value, str) and value:
+            references.add(value)
+    if record.record_type == "candidate.committed":
+        for committed_id in record.payload.get("committed_record_ids", ()):
+            committed = index.get(committed_id)
+            if committed is not None:
+                references.update(
+                    _runtime_record_worker_references(committed, index, visited)
+                )
+    elif record.record_type in {"claim.renewed", "worker.claim.renew.requested"}:
+        for parent_id in record.causal_parents:
+            parent = index.get(parent_id)
+            if parent is not None and parent.record_type == "claim.granted":
+                references.update(
+                    _runtime_record_worker_references(parent, index, visited)
+                )
+    # Derive successor Worker references from typed causal facts instead of
+    # teaching this core reader about plugin-owned handoff/revision records.
+    for parent_id in record.causal_parents:
+        parent = index.get(parent_id)
+        if parent is not None:
+            references.update(_runtime_record_worker_references(parent, index, visited))
+    return frozenset(references)
+
+
 def _runtime_record_contract_references(
     record: RuntimeRecord,
     index: Mapping[str, RuntimeRecord],
@@ -51,7 +110,20 @@ def _runtime_record_contract_references(
     visited.add(record.id)
     payload = record.payload
     references: set[str] = set()
-    for key in ("contract_id", "source_contract_id", "parent_contract_id"):
+    reference_fields = (
+        "contract_id",
+        "source_contract_id",
+        "from_contract_id",
+        "parent_contract_id",
+        "child_contract_id",
+        "successor_id",
+    )
+    if record.record_type in {
+        "claim.constraint.placed",
+        "claim.constraint.released",
+    }:
+        reference_fields += ("prerequisite_contract_id",)
+    for key in reference_fields:
         value = payload.get(key)
         if isinstance(value, str):
             references.add(value)
@@ -110,6 +182,13 @@ def _runtime_record_contract_references(
                 references.update(
                     _runtime_record_contract_references(committed, index, visited)
                 )
+    elif record.record_type in {"claim.renewed", "worker.claim.renew.requested"}:
+        for parent_id in record.causal_parents:
+            parent = index.get(parent_id)
+            if parent is not None and parent.record_type == "claim.granted":
+                references.update(
+                    _runtime_record_contract_references(parent, index, visited)
+                )
 
     return frozenset(references)
 
@@ -140,8 +219,6 @@ class SessionStore:
 
     def __init__(self, sessions_dir: str = ".aig/sessions") -> None:
         self._dir = Path(sessions_dir)
-        if not self._dir.exists():
-            self._dir.mkdir(parents=True, exist_ok=True)
 
     def _file_path(self, session_id: str) -> Path:
         session_id = validate_session_id(session_id)
@@ -172,7 +249,9 @@ class SessionStore:
                 unassigned_trace_ids=session.unassigned_trace_ids,
             )
         payload = session_to_dict(session)
-        with open(self._file_path(session.id), "w", encoding="utf-8") as f:
+        destination = self._file_path(session.id)
+        self._dir.mkdir(parents=True, exist_ok=True)
+        with open(destination, "w", encoding="utf-8") as f:
             json.dump(payload, f, ensure_ascii=False, indent=2)
             f.write("\n")
 

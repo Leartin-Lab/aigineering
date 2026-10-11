@@ -5,6 +5,10 @@ Baseline: `4431c85` (v0.5.7).
 Candidate: v0.5.8 local source tree on `dev`; no publication is claimed.
 Environment: Darwin arm64, Python 3.11.15, SQLite 3.53.0, Twine 7.0.0.
 
+Public-path redaction, 2026-10-07: command paths below are placeholders for
+private wheel/evidence locations. Original report and benchmark metadata are
+retained privately; measured values and original validation outcomes are unchanged.
+
 ## Scope
 
 Backup-first reconstruction diagnosis, signed-publication scaling measurements,
@@ -36,9 +40,9 @@ main database contents are not rebuilt or repaired.
 - `python -m build` passed in isolated environments; Twine accepted wheel
   and sdist. A final no-isolation packaging pass includes the closing evidence.
 - `python scripts/installed_smoke.py --wheel
-  /private/tmp/aigineering-058-release/aigineering-0.5.8-py3-none-any.whl
+  <private-wheel-dir>/aigineering-0.5.8-py3-none-any.whl
   --expected-version 0.5.8 --source-root <repository-root>
-  --evidence-dir /private/tmp/aigineering-058-reconstruction` passed.
+  --evidence-dir <private-evidence-dir>` passed.
   The script created a fresh dependency environment and verified imports outside
   the repository, signed publication, explicit mock execution, separate-process
   status/audit, backup-first reconstruction, and source reopen.
@@ -52,24 +56,25 @@ main database contents are not rebuilt or repaired.
   `67308162af4502c7c6639989fca00712aed040459a3ff37aa2e1c43abc581819`.
   Its runtime files match the isolated-build wheel; build-tool-generated
   distribution metadata differs, so the final wheel also passed its own
-  fresh installed smoke check using `--wheel /private/tmp/aigineering-058-final/aigineering-0.5.8-py3-none-any.whl`
-  and `--evidence-dir /private/tmp/aigineering-058-final-reconstruction`. The sdist includes both scripts, ADR-021, this
-  report, and the raw benchmark JSON.
+  fresh installed smoke check using `--wheel <private-final-wheel-dir>/aigineering-0.5.8-py3-none-any.whl`
+  and `--evidence-dir <private-final-evidence-dir>`. The sdist includes both scripts, ADR-021, this
+  report, and the benchmark JSON with path-redacted invocation metadata.
 - Both workflow files parsed successfully and `git diff --check` passed.
   No GitHub Actions run, Python 3.12/3.13 local execution, or PyPI publication
   is claimed by these observations.
 
 ## Reproducible scaling baseline
 
-Command:
+Original command shape (private output path redacted):
 
 ```bash
 python scripts/benchmark_runtime.py --sizes 10 100 300 --samples 3 \
-  --output /private/tmp/aigineering-058-benchmark.json
+  --output <private-evidence-dir>/058-runtime-benchmark.json
 ```
 
-The [raw measurements](data/058-runtime-benchmark.json) retain per-sample
-values, environment, actual counts, and the dirty candidate tree based on
+The [measurements](data/058-runtime-benchmark.json), with path-redacted
+invocation metadata, retain per-sample values, environment, actual counts,
+and the dirty candidate tree based on
 `4431c85d61a9443beb342c58370bb29f0e5d0d03`. Each sample builds history through
 signed asset/Contract publication in a fresh SQLite domain, measures one more
 publication, audits one selected task, and verifies reconstruction against the

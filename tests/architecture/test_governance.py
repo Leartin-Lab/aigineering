@@ -167,13 +167,15 @@ def test_released_changes_are_ordered_and_design_matches_package_version():
     assert roadmap.index("v0.5.4") < roadmap.index("Future candidate directions")
     assert "Status: Implemented and verified" in redis_change
     assert "Change 003 is closed" in identity_change
-    assert "Status: Accepted" in redis_adr
+    assert "Status: Partially superseded by ADR-027" in redis_adr
+    assert (ROOT / "docs/adr/ADR-027-required-redis-collaboration.md").is_file()
     assert "Status: Implemented and verified" in identity_change
     assert "Status: Accepted" in identity_adr
     from aigineering import __version__
 
     assert f"Status: implemented truth for v{__version__}" in design
-    assert "Redis projection" in design
+    assert "Redis is a required application collaboration component" in design
+    assert "Redis is independently rebuildable infrastructure" in design
     assert "## Asset identity graph" in design
 
 
@@ -217,8 +219,10 @@ def test_legacy_runtime_files_stay_out_of_release_artifacts():
 def test_contract_cli_uses_candidate_commitment_not_legacy_ingress():
     source = (ROOT / "src/aigineering/cli/contract.py").read_text(encoding="utf-8")
 
-    assert "commit_local_effect" in source
-    assert "contract_declaration_effect" in source
+    owner = (ROOT / "src/aigineering/task_publication.py").read_text(encoding="utf-8")
+    assert "publish_task_contract" in source
+    assert "commit_local_effect" in owner
+    assert "contract_declaration_effect" in owner
     assert "RuntimeIngress" not in source
     assert "inject_contract" not in source
 
@@ -271,8 +275,10 @@ def test_task_create_uses_candidate_commitment_not_legacy_ingress():
     source = (ROOT / "src/aigineering/cli/task.py").read_text(encoding="utf-8")
     create_body = source.split('@task_group.command("status")', 1)[0]
 
-    assert "commit_local_effect" in create_body
-    assert "contract_declaration_effect" in create_body
+    owner = (ROOT / "src/aigineering/task_publication.py").read_text(encoding="utf-8")
+    assert "publish_task_contract" in create_body
+    assert "commit_local_effect" in owner
+    assert "contract_declaration_effect" in owner
     assert "inject_contract" not in create_body
     assert "RuntimeIngress(" not in create_body
 
@@ -341,9 +347,11 @@ def test_recovery_cancel_uses_candidate_and_trace_is_not_task_state():
 def test_retry_cli_publishes_an_ordinary_contract_candidate():
     source = (ROOT / "src/aigineering/cli/retry.py").read_text(encoding="utf-8")
 
-    assert "contract_declaration_effect" in source
-    assert "commit_local_effect" in source
-    assert "causal_parents=(original.id,)" in source
+    owner = (ROOT / "src/aigineering/task_publication.py").read_text(encoding="utf-8")
+    assert "retry_local_task" in source
+    assert "contract_declaration_effect" in owner
+    assert "commit_local_effect" in owner
+    assert "causal_parents=(original.id,)" in owner
     assert "MethodRuntime" not in source
     assert "RetryMethodHandler" not in source
 
@@ -579,9 +587,7 @@ def test_runtime_task_state_is_a_pure_boolean_projection():
     projection = (ROOT / "src/aigineering/core/runtime_projection.py").read_text(
         encoding="utf-8"
     )
-    task_state = (ROOT / "src/aigineering/cli/task_state.py").read_text(
-        encoding="utf-8"
-    )
+    task_state = (ROOT / "src/aigineering/task_views.py").read_text(encoding="utf-8")
 
     assert 'blockers.append("delegation_pending")' in projection
     assert "method_pending" not in projection

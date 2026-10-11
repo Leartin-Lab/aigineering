@@ -49,7 +49,26 @@ class QueryProjectionUnavailable(RuntimeError):
 def _client_from_url(redis_url: str):
     import redis
 
-    return redis.Redis.from_url(redis_url, decode_responses=True)
+    return redis.Redis.from_url(
+        redis_url,
+        decode_responses=True,
+        socket_connect_timeout=1.0,
+        socket_timeout=2.0,
+    )
+
+
+def redis_client(redis_url: str):
+    """Return the bounded-timeout Redis client used by application adapters."""
+    return _client_from_url(redis_url)
+
+
+def redis_errors() -> tuple[type[BaseException], ...]:
+    """Return redis-py's stable exception family without importing it at module load."""
+    try:
+        import redis
+    except ImportError as exc:
+        raise RuntimeError("Redis support requires the redis package") from exc
+    return (redis.RedisError,)
 
 
 class RedisQueryProjection:
@@ -63,6 +82,7 @@ class RedisQueryProjection:
         domain_id: str,
         redis_errors: tuple[type[BaseException], ...] = (ConnectionError,),
         on_degraded: Callable[[BaseException], None] | None = None,
+        strict: bool = False,
     ) -> None:
         self._store = store
         self._fallback = StoreQueryProjection(store)
@@ -70,11 +90,12 @@ class RedisQueryProjection:
         self._domain_id = domain_id
         self._redis_errors = redis_errors
         self._on_degraded = on_degraded or self._log_degraded
+        self._strict = strict
         domain_key = compute_content_hash(domain_id)
         self._root = f"aig:q:{QUERY_PROJECTION_SCHEMA}:{domain_key}"
 
     @classmethod
-    def from_url(cls, store, *, domain_id: str, redis_url: str):
+    def from_url(cls, store, *, domain_id: str, redis_url: str, strict: bool = False):
         """Create the adapter without making redis-py a base dependency."""
         try:
             import redis
@@ -88,6 +109,7 @@ class RedisQueryProjection:
             client,
             domain_id=domain_id,
             redis_errors=(redis.RedisError,),
+            strict=strict,
         )
 
     @property
@@ -109,7 +131,9 @@ class RedisQueryProjection:
         try:
             return self._rebuild()
         except self._redis_errors as exc:
-            raise QueryProjectionUnavailable(str(exc)) from exc
+            raise QueryProjectionUnavailable(
+                "Redis query projection unavailable"
+            ) from exc
 
     def _rebuild(self) -> QuerySnapshot:
         """Atomically publish a complete generation derived from SQLite."""
@@ -343,16 +367,42 @@ class RedisQueryProjection:
         try:
             return operation(self._current_generation())
         except self._redis_errors as exc:
+            if self._strict:
+                raise QueryProjectionUnavailable(
+                    "Redis query projection unavailable"
+                ) from exc
             self._on_degraded(exc)
+            return fallback()
+        except QueryProjectionUnavailable:
+            if self._strict:
+                raise QueryProjectionUnavailable(
+                    "Redis query projection unavailable"
+                ) from None
+            self._on_degraded(ConnectionError("Redis query projection unavailable"))
             return fallback()
         except CorruptQueryProjection:
             try:
                 generation = self._generation_root(self._rebuild().digest)
                 return operation(generation)
             except self._redis_errors as exc:
+                if self._strict:
+                    raise QueryProjectionUnavailable(
+                        "Redis query projection unavailable"
+                    ) from exc
                 self._on_degraded(exc)
                 return fallback()
+            except QueryProjectionUnavailable:
+                if self._strict:
+                    raise QueryProjectionUnavailable(
+                        "Redis query projection unavailable"
+                    ) from None
+                self._on_degraded(ConnectionError("Redis query projection unavailable"))
+                return fallback()
             except CorruptQueryProjection:
+                if self._strict:
+                    raise CorruptQueryProjection(
+                        "Redis query projection is corrupt"
+                    ) from None
                 return fallback()
 
     def get_asset(self, asset_id: str):
@@ -544,14 +594,14 @@ class RedisQueryProjection:
         authoritative_revision = self._store.get_runtime_revision()
         try:
             active = self._active_metadata()
-        except self._redis_errors as exc:
+        except self._redis_errors:
             return {
                 "authoritative_revision": authoritative_revision,
                 "available": False,
                 "backend": "redis",
                 "configured": True,
                 "current": False,
-                "reason": str(exc),
+                "reason": "redis_unavailable" if self._strict else "unavailable",
             }
         if active is None:
             return {

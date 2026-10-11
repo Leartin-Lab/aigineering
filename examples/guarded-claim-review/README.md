@@ -3,7 +3,7 @@
 This is a declarative root-task example for a single bounded revision followed
 by deterministic gating and a separate semantic review. The operator submits
 three base Assets plus the frozen `review_instructions` document first: `research_result`, `draft_report`, and
-`review_policy`. The root task freezes all three in context and passes them to
+`review_policy`. The root task freezes all four in context and passes them to
 every child. Planner-created handoffs are `draft_checks`, `review_report`,
 `structural_receipt`, `semantic_review`, and `acceptance_receipt`.
 
@@ -14,40 +14,24 @@ local factory, using
 `AIG_REVIEW_BASE_URL` (default `https://api.deepseek.com/v1`). The acceptor has
 the only `asset.attest` capability. Worker roles and policy actors are distinct.
 
-Prepare the three input Assets, then create the root with ordinary CLI commands:
+The preset publishes the four explicit input Assets and the signed root, then
+starts the configured Workers through the shared application service:
 
 ```bash
 export DEEPSEEK_API_KEY=replace-me
 export AIG_REVIEW_MODEL=deepseek-flash
 export AIG_REVIEW_BASE_URL=https://api.deepseek.com/v1
-
-aig domain init
-aig asset add --name research_result --content-file research-result.json --json
-aig asset add --name draft_report --content-file draft-report.json --json
-aig asset add --name review_policy --content-file review-policy.json --json
-aig asset add --name review_instructions --content-file review-instructions.txt --json
-aig task create --name guarded_claim_review \
-  --description-file /path/to/aigineering/examples/guarded-claim-review/task-description.txt \
-  --input research_result --input draft_report --input review_policy --input review_instructions \
-  --activation 'research_result AND draft_report AND review_policy' \
-  --label research_result --label draft_report --label review_policy --label review_instructions \
-  --output review_report --budget 30 \
-  --requires-capability planning --worker-pool planning \
-  --delegate-capability claim.review.assess \
-  --delegate-capability claim.review.revise \
-  --delegate-capability claim.review.gate \
-  --delegate-capability claim.review.semantic \
-  --delegate-capability claim.review.accept \
-  --delegate-pool validation --delegate-pool reasoning --delegate-pool verification \
-  --acceptance-policy '{"mode":"independent","policy_version":"claim-review-closure-v1","required_attestations":1,"verifier_capabilities":["claim.review.accept"],"evidence_asset_ids":["SOURCE_ASSET_ID","DRAFT_ASSET_ID","POLICY_ASSET_ID"]}' \
-  --json
-aig fleet run --config /path/to/aigineering/examples/guarded-claim-review/workers.toml \
-  --task ROOT_CONTRACT_ID --wait-timeout 300 --json
+mkdir -p workspaces/guarded-claim-review
+aig -C workspaces/guarded-claim-review run --config /path/to/aigineering/examples/guarded-claim-review/run.toml \
+  --wait-timeout 300 --json
+# Use the returned contract_id for continuation or audit:
+aig -C workspaces/guarded-claim-review run --config /path/to/aigineering/examples/guarded-claim-review/run.toml \
+  --resume TASK_ID --wait-timeout 300 --json
+aig -C workspaces/guarded-claim-review task audit TASK_ID --json
 ```
 
-Sort the three actual evidence IDs lexicographically in the policy JSON.
-Replace the three evidence placeholders with the exact committed Asset IDs
-returned by the preceding `aig asset add` commands. The planner compiles the
+The preset binds the three declared evidence input names to the actual committed
+Asset IDs in the acceptance policy before publishing the root. The planner compiles the
 stage dependencies from the description; this example contains no business
 driver script and uses only the configured model Worker for model-backed
 stages. Runtime retries remain ordinary protocol attempts.
@@ -71,3 +55,10 @@ the immediate parent is not necessarily the original root. The runtime still
 checks target policy, evidence, producer independence and actor authority.
 
 See [live development evidence](../../reports/065-guarded-claim-review-2026-09-13.md), including failed attempts and the qualified report.
+
+The preset paths are relative to `run.toml`; its database is relative to the
+selected workspace. Use a fresh workspace for an independent run; a new start
+refuses historical outputs. Resume does not reload inputs or reset a failed root.
+See [configured runs](../../docs/reference/configured-runs.md). The entrypoint
+migration has deterministic verification; the earlier linked live reports do not
+constitute new provider execution of this preset.

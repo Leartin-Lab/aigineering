@@ -7,13 +7,17 @@ from __future__ import annotations
 
 import json
 from dataclasses import replace
+from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 from aigineering.core.acceptance import (
     OutputQualificationConflict,
     materialize_qualification_facts,
 )
-from aigineering.core.actor_facts import load_effective_actor_keys
+from aigineering.core.actor_facts import (
+    candidate_actor_capabilities,
+    load_effective_actor_keys,
+)
 from aigineering.core.attempt_projection import close_claim_attempt
 from aigineering.core.candidate_decision import (
     CommitmentDecision,
@@ -26,7 +30,26 @@ from aigineering.core.causal_allowance import (
     CausalAllowanceConflict,
     materialize_terminal_allowance,
 )
-from aigineering.core.effect_projection import project_effect_batch
+from aigineering.core.candidate_rejection import (
+    record_authenticated_candidate_rejection,
+    record_candidate_rejection as record_candidate_rejection,
+    record_unreceipted_authentication_rejection,
+)
+from aigineering.core.claim_holds import ClaimHoldConflict
+from aigineering.core.claim_assignments import AssignmentConflict
+from aigineering.core.claim_constraints import ClaimConstraintConflict
+from aigineering.core.commit_snapshot import (
+    ProjectionSnapshotConflict,
+    build_candidate_projection_snapshot_validator,
+    commit_ingress_arguments,
+    record_projection_snapshot_rejection,
+)
+from aigineering.core.effect_projection import (
+    freeze_additional_effects,
+    project_effect_batch,
+)
+from aigineering.core.effect_projectors import EffectProjector
+from aigineering.core.effect_projection import EffectHandler
 from aigineering.core.projection_context import (
     EffectProjectionContext,
     load_effect_projection_context,
@@ -50,22 +73,11 @@ from aigineering.protocol.candidate import (
     validate_genesis_manifest,
     validate_candidate_usage_metadata,
 )
-from aigineering.protocol.runtime_record import RuntimeRecord, create_runtime_record
+from aigineering.protocol.runtime_record import create_runtime_record
 
 if TYPE_CHECKING:
     from aigineering.core.store import StoreProtocol
     from aigineering.core.trace import PostCommitTraceExporter, TraceStoreProtocol
-
-
-def _actor_capabilities(
-    candidate: CandidateProposal, actor_keys: tuple[ActorKey, ...]
-) -> tuple[str, ...]:
-    key = next(
-        item
-        for item in actor_keys
-        if item.actor_id == candidate.actor_id and item.key_id == candidate.key_id
-    )
-    return key.capabilities
 
 
 def reduce_candidate(
@@ -75,6 +87,8 @@ def reduce_candidate(
     verifier_factory: VerifierFactory,
     actor_keys: tuple[ActorKey, ...] | None = None,
     projection_context: EffectProjectionContext | None = None,
+    additional_effects: Mapping[str, tuple[str, EffectProjector] | EffectHandler]
+    | None = None,
 ) -> CommitmentDecision:
     """Authenticate and purely decide one Candidate's complete effect batch."""
     validate_genesis_manifest(genesis)
@@ -99,8 +113,9 @@ def reduce_candidate(
         projection = project_effect_batch(
             candidate,
             receipt.id,
-            _actor_capabilities(candidate, effective_actor_keys),
+            candidate_actor_capabilities(candidate, effective_actor_keys),
             effective_context,
+            additional_effects=additional_effects,
         )
     except (TypeError, ValueError) as exc:
         return candidate_rejection_decision(candidate, receipt, str(exc))
@@ -144,6 +159,9 @@ def reduce_candidate(
         trace_entries=(trace,),
         contracts=projection.contracts,
         assets=projection.assets,
+        effect_fact_owners=projection.effect_fact_owners,
+        assignment_intents=projection.assignment_intents,
+        successor_assignment_witnesses=projection.successor_assignment_witnesses,
     )
 
 
@@ -158,12 +176,20 @@ class CandidateCommitRejected(ValueError):
 class CandidateCommitter:
     """Store-independent transactional adapter for the pure reducer."""
 
-    def __init__(self, store: StoreProtocol, trace: TraceStoreProtocol) -> None:
+    def __init__(
+        self,
+        store: StoreProtocol,
+        trace: TraceStoreProtocol,
+        *,
+        additional_effects: Mapping[str, tuple[str, EffectProjector] | EffectHandler]
+        | None = None,
+    ) -> None:
         from aigineering.core.store import require_runtime_store
         from aigineering.core.trace import TraceStoreExportAdapter
 
         self._store = require_runtime_store(store)
         self._trace = store
+        self._additional_effects = freeze_additional_effects(additional_effects)
         self._trace_exporter: PostCommitTraceExporter | None = (
             None if trace is store else TraceStoreExportAdapter(trace)
         )
@@ -188,6 +214,22 @@ class CandidateCommitter:
             projection_context=load_effect_projection_context(
                 self._store, actor_keys=actor_keys
             ),
+            additional_effects=self._additional_effects,
+        )
+        rejected = record_unreceipted_authentication_rejection(
+            candidate, decision, self._store
+        )
+        if rejected is not None:
+            if self._trace_exporter is not None:
+                self._trace_exporter.export(rejected.trace_entries)
+            return rejected
+        validate_snapshot = build_candidate_projection_snapshot_validator(
+            candidate,
+            genesis,
+            decision,
+            self._store,
+            verifier_factory,
+            self._additional_effects,
         )
         decision = close_claim_attempt(candidate, decision)
         if decision.assets:
@@ -222,14 +264,7 @@ class CandidateCommitter:
         )
         try:
             derived_traces, derived_records = self._store.commit_ingress_batch(
-                accepted_assets=list(decision.assets),
-                trace_entries=list(decision.trace_entries),
-                contracts=decision.contracts,
-                runtime_records=decision.runtime_records,
-                claim_binding=candidate.claim_binding,
-                candidate_actor_id=candidate.actor_id,
-                candidate_key_id=candidate.key_id,
-                candidate_id=candidate.id,
+                **commit_ingress_arguments(decision, candidate, validate_snapshot),
             )
             if derived_traces or derived_records:
                 decision = replace(
@@ -237,58 +272,28 @@ class CandidateCommitter:
                     trace_entries=decision.trace_entries + tuple(derived_traces),
                     runtime_records=decision.runtime_records + tuple(derived_records),
                 )
-        except ClaimBindingConflict as exc:
-            receipt = next(
-                record
-                for record in decision.runtime_records
-                if record.record_type == "candidate.received"
-            )
-            rejection = record_candidate_rejection(
-                candidate, str(exc), self._store, self._trace, receipt=receipt
+        except (
+            ClaimBindingConflict,
+            ClaimHoldConflict,
+            ClaimConstraintConflict,
+            AssignmentConflict,
+        ) as exc:
+            rejection = record_authenticated_candidate_rejection(
+                candidate, decision, str(exc), self._store, self._trace
             )
             raise CandidateCommitRejected(str(exc), rejection) from exc
+        except ProjectionSnapshotConflict as exc:
+            return record_projection_snapshot_rejection(
+                candidate, decision, exc, self._store, self._trace
+            )
         except (
             CausalAllowanceConflict,
             ImmutableRecordConflict,
             OutputQualificationConflict,
         ) as exc:
-            receipt = next(
-                record
-                for record in decision.runtime_records
-                if record.record_type == "candidate.received"
-            )
-            return record_candidate_rejection(
-                candidate, str(exc), self._store, self._trace, receipt=receipt
+            return record_authenticated_candidate_rejection(
+                candidate, decision, str(exc), self._store, self._trace
             )
         if self._trace_exporter is not None:
             self._trace_exporter.export(decision.trace_entries)
         return decision
-
-
-def record_candidate_rejection(
-    candidate: CandidateProposal,
-    reason: str,
-    store: StoreProtocol,
-    trace: TraceStoreProtocol,
-    *,
-    receipt: RuntimeRecord | None = None,
-) -> CommitmentDecision:
-    """Durably record a failed Candidate without interpreting its effects."""
-    from aigineering.core.store import require_runtime_store
-
-    decision = (
-        candidate_rejection_decision(candidate, receipt, reason)
-        if receipt is not None
-        else authentication_rejection_decision(candidate, reason)
-    )
-    runtime_store = require_runtime_store(store)
-    runtime_store.commit_ingress_batch(
-        accepted_assets=[],
-        trace_entries=list(decision.trace_entries),
-        runtime_records=decision.runtime_records,
-    )
-    if trace is not store:
-        from aigineering.core.trace import TraceStoreExportAdapter
-
-        TraceStoreExportAdapter(trace).export(decision.trace_entries)
-    return decision

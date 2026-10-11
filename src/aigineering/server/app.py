@@ -7,6 +7,7 @@ from collections.abc import Iterator
 from typing import Optional
 
 from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from aigineering import __version__
@@ -15,14 +16,22 @@ from aigineering.application import (
     latest_session_file as _latest_session_file,
     persistent_store as _persistent_store,
     query_projection,
+    require_redis,
+    collaboration_service,
+)
+from aigineering.adapters.redis_query import QueryProjectionUnavailable
+from aigineering.runtime_services import (
+    RedisSyncPending,
+    claim_next_application_package,
+    sync_runtime,
 )
 from aigineering.runtime import (
     WorkerSubmissionCommitError,
-    claim_next_package,
     submit_worker_proposal,
 )
 
 from aigineering.core.commitment import CandidateCommitter
+from aigineering.core.disclosure import redact_for_disclosure
 from aigineering.core.worker_coordination import authenticate_worker_command
 from aigineering.protocol.candidate import (
     candidate_proposal_from_dict,
@@ -34,6 +43,47 @@ from aigineering.protocol.effect_builders import (
 from aigineering.protocol.immutability import deep_thaw
 
 app = FastAPI(title="Aigineering API", version=__version__)
+
+
+@app.exception_handler(QueryProjectionUnavailable)
+async def redis_failure(_request, error: QueryProjectionUnavailable):
+    pending = isinstance(error, RedisSyncPending)
+    return JSONResponse(
+        status_code=503,
+        content={
+            "ok": False,
+            "error": "redis_sync_pending" if pending else "redis_unavailable",
+            "facts_retained": pending,
+            "candidate_accepted": error.accepted if pending else None,
+        },
+    )
+
+
+@app.get("/health/redis")
+def redis_health():
+    """Probe required infrastructure without creating a workspace Store."""
+    require_redis()
+    return {"ok": True, "backend": "redis", "required": True}
+
+
+@app.get("/readiness/redis")
+def redis_readiness():
+    """Check relay freshness without mutating or silently repairing the workspace."""
+    from aigineering.core.sqlite_store import SQLiteStore
+
+    require_redis()
+    try:
+        store = SQLiteStore.snapshot_from_path(".aig/store.db")
+    except (OSError, RuntimeError, ValueError):
+        return JSONResponse(
+            status_code=503, content={"ok": False, "reason": "store_unavailable"}
+        )
+    try:
+        status = collaboration_service(store).status()
+        status["ok"] = bool(status.get("available") and status.get("current"))
+        return JSONResponse(status_code=200 if status["ok"] else 503, content=status)
+    finally:
+        store.close()
 
 
 # ── Request / response models ────────────────────────────────────────────────
@@ -79,6 +129,7 @@ class AssetResponse(BaseModel):
     origin: str
     trust_tier: str
     promptable: bool
+    disclosure_view: str
     definition_hash: str
     content_hash: str
 
@@ -138,6 +189,7 @@ class ReplacementClaimResponse(BaseModel):
 
 
 def _asset_response(asset) -> AssetResponse:
+    asset = redact_for_disclosure(asset)
     return AssetResponse(
         id=asset.id,
         name=asset.name,
@@ -146,6 +198,7 @@ def _asset_response(asset) -> AssetResponse:
         origin=asset.origin,
         trust_tier=asset.trust_tier,
         promptable=asset.promptable,
+        disclosure_view=asset.disclosure_view,
         definition_hash=asset.definition_hash,
         content_hash=asset.content_hash,
     )
@@ -209,6 +262,7 @@ def _replacement_claim_response(claim) -> ReplacementClaimResponse:
 
 def _request_store() -> Iterator:
     """Own exactly one operational Store connection for one HTTP request."""
+    require_redis()
     store = _persistent_store()
     try:
         yield store
@@ -219,7 +273,9 @@ def _request_store() -> Iterator:
 def _commit_candidate_request(body: CandidateProposalRequest, store):
     try:
         candidate = candidate_proposal_from_dict(body.model_dump())
-        return CandidateCommitter(store, store).commit(candidate)
+        decision = CandidateCommitter(store, store).commit(candidate)
+        sync_runtime(store, accepted=decision.accepted)
+        return decision
     except LookupError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
@@ -501,24 +557,22 @@ def claim_worker_package(body: CandidateProposalRequest, store=Depends(_request_
             candidate_proposal_from_dict(body.model_dump()), "worker.claim", store
         )
         payload = command.payload
-        worker_id = str(payload.get("worker_id", ""))
-        contract_id = payload.get("contract_id")
-        if contract_id is not None and not isinstance(contract_id, str):
-            raise ValueError("worker.claim contract_id must be a string or null")
-        lease_seconds = int(payload.get("lease_seconds", 60))
-        if lease_seconds < 1:
-            raise ValueError("lease_seconds must be positive")
-        claimed = claim_next_package(
+        worker_id = payload["worker_id"]
+        contract_id = payload["contract_id"]
+        lease_seconds = payload["lease_seconds"]
+        claimed = claim_next_application_package(
             store,
             worker_id=worker_id,
             contract_id=contract_id,
             lease_seconds=lease_seconds,
             claim_runtime_records=command.runtime_records,
+            claim_candidate=command.candidate,
         )
     except (LookupError, TypeError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     if claimed is None:
         raise HTTPException(status_code=409, detail="No eligible contract available")
+    sync_runtime(store, accepted=True)
     return json.loads(claimed.package.to_json())
 
 
@@ -536,23 +590,23 @@ def renew_worker_claim(
             store,
         )
         payload = command.payload
-        if str(payload.get("claim_id", "")) != claim_id:
+        if payload["claim_id"] != claim_id:
             raise ValueError("renewal Candidate claim_id does not match request path")
-        claim_epoch = int(payload.get("claim_epoch", 0))
-        lease_seconds = int(payload.get("lease_seconds", 60))
-        if lease_seconds < 1 or claim_epoch < 1:
-            raise ValueError("lease_seconds and claim_epoch must be positive")
+        claim_epoch = payload["claim_epoch"]
+        lease_seconds = payload["lease_seconds"]
         renewed = store.renew_claim(
             claim_id,
             claim_epoch,
-            str(payload.get("worker_id", "")),
+            payload["worker_id"],
             lease_seconds=lease_seconds,
             runtime_records=command.runtime_records,
+            claim_candidate=command.candidate,
         )
     except (LookupError, TypeError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     if renewed is None:
         raise HTTPException(status_code=409, detail="Claim renewal was rejected")
+    sync_runtime(store, accepted=True)
     return renewed
 
 
@@ -563,10 +617,12 @@ def submit_worker_candidate(
     """Commit a signed and claim-fenced worker Candidate on any replica."""
     try:
         proposal = candidate_proposal_from_dict(body.model_dump())
-        return submit_worker_proposal(
+        result = submit_worker_proposal(
             proposal,
             store,
         )
+        sync_runtime(store)
+        return result
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 

@@ -9,7 +9,6 @@ from pathlib import Path
 from click.testing import CliRunner
 
 from aigineering.agent.tool_worker import ToolWorker
-from aigineering.agent.tool_registry_loader import load_tool_registry
 from aigineering.cli.main import cli
 from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.core.worker_routing import WorkerRegistration
@@ -324,9 +323,7 @@ def test_runtime_ai4s_tool_continuation_attest_reopen_via_fleet_cli(
     assert created.exit_code == 0, created.output
     root_id = json.loads(created.output)["contract_id"]
 
-    registry = load_tool_registry(f"{TOOLS}:build_registry")
-
-    def build_worker(spec):
+    def build_worker(spec, *, registry=None):
         if spec.worker_id == "runtime:reasoner":
             return _RuntimeReasoner()
         if spec.worker_id == "runtime:verifier":
@@ -334,7 +331,7 @@ def test_runtime_ai4s_tool_continuation_attest_reopen_via_fleet_cli(
         assert spec.worker_id == "runtime:tools"
         return ToolWorker(registry, worker_id=spec.worker_id)
 
-    monkeypatch.setattr("aigineering.cli.fleet.build_fleet_worker", build_worker)
+    monkeypatch.setattr("aigineering.fleet_config.build_fleet_worker", build_worker)
     config = tmp_path / "workers.toml"
     _write_fleet_config(config, f"{TOOLS}:build_registry")
     result = runner.invoke(

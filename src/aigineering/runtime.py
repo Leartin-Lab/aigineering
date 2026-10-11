@@ -4,19 +4,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 import sqlite3
+import time
 from threading import Event, Thread
+from uuid import uuid4
 
 from aigineering.agent.llm import LLMWorker, ProviderError
 from aigineering.agent.mock import MockWorker
 from aigineering.agent.worker import WorkerExecutionError, WorkerHost
 from aigineering.core.activation import check_activation
-from aigineering.core.asset_reads import read_assets_by_ids
 from aigineering.core.disclosure import (
     DisclosurePolicyError,
     compute_disclosure,
-    redact_for_disclosure,
 )
 from aigineering.core.store import require_operational_store
 from aigineering.plugins.completion_projection import (
@@ -26,6 +26,7 @@ from aigineering.plugins.completion_projection import (
 from aigineering.plugins.recovery import schedule_projection_recovery
 from aigineering.plugins.task_semantics import method_payload
 from aigineering.core.runtime_projection import RuntimeProjection
+from aigineering.core.projection_context import EffectProjectionContext
 from aigineering.core.lifecycle_facts import create_terminal_record
 from aigineering.core.commitment import (
     CandidateCommitRejected,
@@ -34,6 +35,10 @@ from aigineering.core.commitment import (
 )
 from aigineering.core.candidate_decision import trace_record
 from aigineering.core.worker_routing import is_eligible
+from aigineering.core.worker_coordination import (
+    authenticate_worker_command,
+    same_worker_command_records,
+)
 from aigineering.core.trace_manager import TraceManager
 from aigineering.core.trace import create_entry
 from aigineering.protocol.candidate import CandidateClaimBinding
@@ -46,6 +51,18 @@ from aigineering.protocol.wire import (
     asset_to_dict,
     contract_to_dict,
 )
+from aigineering.task_context import method_context_assets_for
+
+
+def _capture_emit(observer, event: str, **fields) -> None:
+    """Keep local diagnostic capture outside normal Worker semantics."""
+    if observer is None:
+        return
+    try:
+        observer.emit(event, **fields)
+    except Exception:
+        # A capture callback is strictly best-effort and cannot affect execution.
+        return
 
 
 @dataclass(frozen=True)
@@ -99,9 +116,10 @@ class WorkerSubmissionCommitError(RuntimeError):
 class _ClaimLeaseKeeper:
     """Renew one claim while its synchronous provider invocation is running."""
 
-    def __init__(self, claimed: ClaimedPackage, store) -> None:
+    def __init__(self, claimed: ClaimedPackage, store, worker_host=None) -> None:
         self._claimed = claimed
         self._store = store
+        self._worker_host = worker_host
         self._stop = Event()
         self._failed = Event()
         self._thread: Thread | None = None
@@ -118,15 +136,17 @@ class _ClaimLeaseKeeper:
         self._interval = max(0.1, min(10.0, lease_seconds / 3))
 
     def start(self) -> None:
-        if not self._claimed.package.claim_id:
+        if not self._claimed.package.claim_id or self._worker_host is None:
             return
         self._thread = Thread(target=self._run, daemon=True)
         self._thread.start()
 
-    def stop(self) -> None:
+    def stop(self) -> bool:
         self._stop.set()
         if self._thread is not None:
             self._thread.join(timeout=max(1.0, self._interval * 2))
+            return not self._thread.is_alive()
+        return True
 
     @property
     def failed(self) -> bool:
@@ -135,13 +155,22 @@ class _ClaimLeaseKeeper:
     def _run(self) -> None:
         while not self._stop.wait(self._interval):
             try:
+                if self._worker_host is None:
+                    self._failed.set()
+                    return
+                renewal = self._worker_host.renewal_candidate(
+                    self._claimed.package,
+                    request_id=f"renew:{self._claimed.package.claim_id}:{uuid4().hex}",
+                    lease_seconds=self._lease_seconds,
+                )
                 renewed = self._store.renew_claim(
                     self._claimed.package.claim_id,
                     self._claimed.package.claim_epoch,
                     self._claimed.worker_id,
                     lease_seconds=self._lease_seconds,
+                    claim_candidate=renewal,
                 )
-            except (RuntimeError, sqlite3.Error):
+            except (RuntimeError, sqlite3.Error, TypeError, ValueError, LookupError):
                 self._failed.set()
                 return
             if renewed is None:
@@ -155,19 +184,59 @@ def claim_next_package(
     worker_id: str,
     lease_seconds: int = 60,
     contract_id: str | None = None,
+    expected_registration_version: str | None = None,
     candidate_publishers=None,
     claim_runtime_records=(),
+    claim_candidate=None,
+    order_contract_ids: Callable[[tuple[str, ...]], tuple[str, ...]] | None = None,
 ) -> ClaimedPackage | None:
     """Claim the next ready contract and return its worker package."""
     store = require_operational_store(store)
-    process_expired_claims(store, candidate_publishers=candidate_publishers)
+    if claim_candidate is not None:
+        command = authenticate_worker_command(claim_candidate, "worker.claim", store)
+        payload = command.payload
+        if (
+            payload["worker_id"] != worker_id
+            or payload["lease_seconds"] != lease_seconds
+            or (
+                payload["contract_id"] is not None
+                and payload["contract_id"] != contract_id
+            )
+        ):
+            raise ValueError("signed worker.claim does not match the package scan")
+        if claim_runtime_records and not same_worker_command_records(
+            tuple(claim_runtime_records), command.runtime_records
+        ):
+            raise ValueError("claim runtime records do not match the signed Candidate")
+        claim_runtime_records = command.runtime_records
     registered_worker = store.get_worker_registration(worker_id)
-    policy_blockers: list[DisclosurePolicyError] = []
-    if contract_id is None:
-        contracts = store.get_all_contracts()
-    else:
+    selected_registration_version = (
+        registered_worker.version if registered_worker is not None else ""
+    )
+    if (
+        expected_registration_version not in (None, "")
+        and expected_registration_version != selected_registration_version
+    ):
+        raise ValueError(
+            f"WorkerHost registration version {expected_registration_version!r} is "
+            f"stale for {worker_id!r}; current version is "
+            f"{selected_registration_version or 'unregistered'}"
+        )
+    registration_version = (
+        selected_registration_version
+        if expected_registration_version in (None, "")
+        else expected_registration_version
+    )
+    process_expired_claims(store, candidate_publishers=candidate_publishers)
+    # Maintenance can expire claims and therefore change the capacity snapshot.
+    registered_worker = store.get_worker_registration(worker_id)
+    if contract_id is not None:
         selected = store.get_contract(contract_id)
-        contracts = [] if selected is None else [selected]
+        if selected is None or not _worker_can_claim(selected, registered_worker):
+            return None
+        contracts = [selected]
+    else:
+        contracts = store.get_all_contracts()
     routed_contracts = [
         contract
         for contract in contracts
@@ -175,6 +244,38 @@ def claim_next_package(
     ]
     if not routed_contracts:
         return None
+    from aigineering.core.claim_assignments import (
+        assignment_context_from_projection,
+        effective_assignment,
+    )
+
+    assignment_context = assignment_context_from_projection(
+        EffectProjectionContext(
+            runtime_records=tuple(record for _, record in store.scan_runtime_records())
+        )
+    )
+    policy_blockers: list[DisclosurePolicyError] = []
+    routed_contracts = [
+        contract
+        for contract in routed_contracts
+        if (
+            (
+                assigned := effective_assignment(
+                    assignment_context, contract_id=contract.id
+                )
+            )
+            is None
+            or assigned.payload.get("worker_id") == worker_id
+        )
+    ]
+    if not routed_contracts:
+        return None
+    if contract_id is None and order_contract_ids is not None:
+        if not callable(order_contract_ids):
+            raise ValueError("claim order hook must be callable")
+        routed_contracts = _reorder_routed_contracts(
+            routed_contracts, order_contract_ids
+        )
     available_names = {a.name for a in store.get_all_assets()}
     projection = RuntimeProjection(
         store,
@@ -217,12 +318,21 @@ def claim_next_package(
             worker_id,
             lease_seconds=lease_seconds,
             package_id=package.package_id,
-            expected_registration_version=(
-                registered_worker.version if registered_worker else ""
-            ),
+            expected_registration_version=(registration_version),
             runtime_records=tuple(claim_runtime_records),
+            claim_candidate=claim_candidate,
         )
         if claim is None:
+            current_registration = store.get_worker_registration(worker_id)
+            current_version = (
+                current_registration.version if current_registration is not None else ""
+            )
+            if current_version != registration_version:
+                raise ValueError(
+                    f"WorkerHost registration changed during claim preparation for "
+                    f"{worker_id!r}; expected {registration_version or 'unregistered'}, "
+                    f"current is {current_version or 'unregistered'}"
+                )
             continue
         package = _record_worker_route(
             store,
@@ -240,6 +350,35 @@ def claim_next_package(
         reasons = [reason for exc in policy_blockers for reason in exc.reasons]
         raise DisclosurePolicyError(policy_blockers[0].contract_id, reasons)
     return None
+
+
+def _reorder_routed_contracts(
+    contracts: list[Contract],
+    order_contract_ids: Callable[[tuple[str, ...]], tuple[str, ...]],
+) -> list[Contract]:
+    """Apply a complete ordering to already-routed contracts only."""
+    contract_ids = tuple(contract.id for contract in contracts)
+    if any(
+        not isinstance(contract_id, str) or not contract_id
+        for contract_id in contract_ids
+    ):
+        raise ValueError("claim scan contains an invalid Contract ID")
+    if len(set(contract_ids)) != len(contract_ids):
+        raise ValueError("claim scan contains duplicate Contract IDs")
+    ordered_ids = order_contract_ids(contract_ids)
+    if not isinstance(ordered_ids, tuple) or any(
+        not isinstance(contract_id, str) or not contract_id
+        for contract_id in ordered_ids
+    ):
+        raise ValueError("claim order hook must return a tuple of Contract IDs")
+    if (
+        len(ordered_ids) != len(contract_ids)
+        or len(set(ordered_ids)) != len(ordered_ids)
+        or set(ordered_ids) != set(contract_ids)
+    ):
+        raise ValueError("claim order hook must return a complete Contract permutation")
+    by_id = {contract.id: contract for contract in contracts}
+    return [by_id[item] for item in ordered_ids]
 
 
 def _worker_can_claim(contract: Contract, registration) -> bool:
@@ -307,10 +446,15 @@ def execute_claimed_package(
     store,
     trace_store=None,
     candidate_publishers=None,
+    event_observer=None,
 ) -> dict:
     """Invoke an authenticated WorkerHost and submit its ordinary effects."""
     trace = trace_store if trace_store is not None else store
-    keeper = _ClaimLeaseKeeper(claimed, store)
+    keeper = _ClaimLeaseKeeper(
+        claimed,
+        store,
+        worker if isinstance(worker, WorkerHost) else None,
+    )
     keeper.start()
     candidate = None
     try:
@@ -323,15 +467,57 @@ def execute_claimed_package(
                 package_id=claimed.package.package_id,
             )
             disclosed = list(claimed.disclosed_assets + claimed.method_context_assets)
-            candidate = (
-                worker.invoke(
-                    claimed.contract,
-                    disclosed,
-                    claim_binding=invocation_binding,
+            from aigineering.task_logs import observer_scope
+
+            invocation_started = time.monotonic()
+            _capture_emit(event_observer, "invocation.started")
+            try:
+                with observer_scope(event_observer):
+                    candidate = (
+                        worker.invoke(
+                            claimed.contract,
+                            disclosed,
+                            claim_binding=invocation_binding,
+                        )
+                        if isinstance(worker, WorkerHost)
+                        else worker.invoke(claimed.contract, disclosed)
+                    )
+                _capture_emit(event_observer, "candidate.returned")
+            except (ProviderError, WorkerExecutionError) as exc:
+                _capture_emit(
+                    event_observer,
+                    "invocation.failed",
+                    category=(
+                        "provider_error"
+                        if isinstance(exc, ProviderError)
+                        else "worker_execution_error"
+                    ),
+                    status_code=(
+                        exc.status_code if isinstance(exc, ProviderError) else 0
+                    ),
+                    retryable=(
+                        exc.is_retryable if isinstance(exc, ProviderError) else False
+                    ),
                 )
-                if isinstance(worker, WorkerHost)
-                else worker.invoke(claimed.contract, disclosed)
-            )
+                raise
+            except Exception:
+                _capture_emit(
+                    event_observer,
+                    "invocation.failed",
+                    category="other",
+                    status_code=0,
+                    retryable=False,
+                )
+                raise
+            finally:
+                _capture_emit(
+                    event_observer,
+                    "invocation.finished",
+                    outcome="returned" if candidate is not None else "failed",
+                    duration_ms=max(
+                        0, int((time.monotonic() - invocation_started) * 1000)
+                    ),
+                )
             phase = "envelope"
             envelope = CandidateEnvelope(
                 contract_id=claimed.contract.id,
@@ -361,6 +547,10 @@ def execute_claimed_package(
                 else None
             )
         except (ProviderError, WorkerExecutionError) as exc:
+            if keeper.stop() is False:
+                raise WorkerSubmissionCommitError(
+                    "claim renewal thread did not stop; refusing concurrent failure write"
+                ) from exc
             status_code = exc.status_code if isinstance(exc, ProviderError) else 0
             retryable = exc.is_retryable if isinstance(exc, ProviderError) else False
             category = (
@@ -400,6 +590,10 @@ def execute_claimed_package(
                 "claim was released and recovery was evaluated"
             ) from None
         except (RuntimeError, TypeError, ValueError) as exc:
+            if keeper.stop() is False:
+                raise WorkerSubmissionCommitError(
+                    "claim renewal thread did not stop; refusing concurrent failure write"
+                ) from exc
             candidate_processing_failure = (
                 phase in {"envelope", "candidate_encoding"} and candidate is not None
             )
@@ -425,7 +619,11 @@ def execute_claimed_package(
                 f"worker {phase} failed; claim was released and recovery was evaluated"
             ) from None
     finally:
-        keeper.stop()
+        keeper_stopped = keeper.stop()
+    if keeper_stopped is False:
+        raise WorkerSubmissionCommitError(
+            "claim renewal thread did not stop; refusing to reuse its Store connection"
+        )
     if keeper.failed:
         try:
             _record_worker_invocation_failure(
@@ -604,6 +802,34 @@ def _commit_recovery_outcome(
     )
 
 
+def _commit_terminal_preserved_outcome(
+    store,
+    *,
+    contract_id: str,
+    terminal: str,
+    source_record,
+    record_prefix: str,
+    source_field: str,
+) -> None:
+    """Record that terminal work cannot be recovered without changing it."""
+    store.commit_ingress_batch(
+        accepted_assets=[],
+        trace_entries=[],
+        runtime_records=(
+            create_runtime_record(
+                f"{record_prefix}.recovery_unavailable",
+                {
+                    "contract_id": contract_id,
+                    source_field: source_record.id,
+                    "reason": "terminal_preserved",
+                    "terminal": terminal,
+                },
+                causal_parents=(source_record.id,),
+            ),
+        ),
+    )
+
+
 def process_rejected_submissions(store, *, candidate_publishers=None) -> list[str]:
     """Replay recovery from every durable claim-bound Candidate rejection."""
     processed: list[str] = []
@@ -615,7 +841,7 @@ def process_rejected_submissions(store, *, candidate_publishers=None) -> list[st
         and "raw_output" in record.payload
     }
     terminal_contracts = {
-        record.payload["contract_id"]
+        str(record.payload["contract_id"]): str(record.payload["terminal"])
         for record in records
         if record.record_type == "lifecycle.terminal"
     }
@@ -661,6 +887,25 @@ def process_rejected_submissions(store, *, candidate_publishers=None) -> list[st
                 f"rejected projection {record.id!r} has no replayable raw "
                 f"Candidate evidence for {candidate_id!r}"
             )
+        terminal = terminal_contracts.get(contract_id)
+        if terminal is not None and terminal != "failed":
+            _commit_terminal_preserved_outcome(
+                store,
+                contract_id=contract_id,
+                terminal=terminal,
+                source_record=record,
+                record_prefix=(
+                    "projection_rejection"
+                    if is_projection_rejection
+                    else "candidate_rejection"
+                ),
+                source_field=(
+                    "projection_id" if is_projection_rejection else "rejection_id"
+                ),
+            )
+            recovered_source_ids.add(record.id)
+            processed.append(contract_id)
+            continue
         rejections = (
             [dict(rejection) for rejection in payload["rejections"]]
             if is_projection_rejection
@@ -691,10 +936,10 @@ def process_rejected_submissions(store, *, candidate_publishers=None) -> list[st
                 else "candidate_rejection"
             ),
             source_field="projection_id" if is_projection_rejection else "rejection_id",
-            record_terminal=contract_id not in terminal_contracts,
+            record_terminal=terminal is None,
         )
         recovered_source_ids.add(record.id)
-        terminal_contracts.add(contract_id)
+        terminal_contracts[contract_id] = "failed"
         processed.append(contract_id)
     return processed
 
@@ -1009,20 +1254,4 @@ def process_task_completions(
 
 
 def _method_context_assets_for(contract: Contract, store) -> tuple[Asset, ...]:
-    store = require_operational_store(store)
-    assets: list[Asset] = []
-    seen: set[str] = set()
-    asset_ids: list[str] = []
-    for entry in store.get_by_relation_target(contract.id):
-        if entry.event_type not in {
-            "method_continuation_context_prepared",
-            "method_continuation_scheduled",
-        }:
-            continue
-        asset_ids.extend(entry.disclosed_assets)
-    for asset in read_assets_by_ids(store, asset_ids):
-        if asset is None or asset.id in seen:
-            continue
-        assets.append(redact_for_disclosure(asset))
-        seen.add(asset.id)
-    return tuple(assets)
+    return method_context_assets_for(contract, store)

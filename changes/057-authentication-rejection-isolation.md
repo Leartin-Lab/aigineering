@@ -1,0 +1,7 @@
+# Authentication rejection isolation
+
+Candidates that fail authentication are now persisted through the existing rejection audit owner before any claim-attempt, replay, lifecycle, allowance, or writer-binding path can interpret their headers. An unauthenticated claim binding or candidate ID can no longer submit a live claim or create an unparented terminal outcome; the rejection remains observable in durable facts and trace. Repeated identical authentication failures are audit-idempotent.
+
+Authenticated but inadmissible output keeps its receipt-backed rejection and normal failed-attempt/recovery behavior. The shared rejection owner requires exactly one `candidate.received` record whose `candidate_id` matches the submitted Candidate before recording a post-authentication rejection. The commitment coordinator delegates both rejection paths to that owner and remains below the existing 300-line governance limit. This change adds no schema or new fact type. It does not repair historical facts written before the isolation boundary; those remain visible and require an explicit signed retry or new work.
+
+Verification: focused authentication, claimless/revoked-key, CLI submission, HTTP adapter, and architecture regressions passed. The CLI and HTTP tests use fixture-local Redis preflight/relay seams and SQLite stores; they are not Redis deployment or installed-artifact verification. The integrated full suite, package and installed-artifact gates are reported by the independent integrator.

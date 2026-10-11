@@ -7,11 +7,15 @@ import hmac
 import json
 from collections.abc import Callable
 from typing import TYPE_CHECKING
+from uuid import uuid4
 
 from aigineering.plugins import default_completion_registry
+from aigineering.runtime_services import (
+    claim_next_application_package,
+    order_application_contract_ids,
+)
 from aigineering.runtime import (
     WorkerInvocationError,
-    claim_next_package,
     execute_claimed_package,
     process_task_completions,
     run_runtime_maintenance_step,
@@ -386,14 +390,24 @@ def _claim_inner_work(
     worker_hosts: dict[str, tuple[ActorKey, Ed25519Signer]],
     candidate_publishers: CandidatePublisherRegistry,
 ):
-    for contract in store.get_all_contracts():
+    contracts = store.get_all_contracts()
+    by_id = {contract.id: contract for contract in contracts}
+    for contract_id in order_application_contract_ids(
+        store, tuple(contract.id for contract in contracts)
+    ):
+        contract = by_id[contract_id]
         worker = selector(contract) if selector is not None else delegate
         host = _inner_worker_host(worker, publisher, genesis, root_signer, worker_hosts)
-        claimed = claim_next_package(
+        claimed = claim_next_application_package(
             store,
             worker_id=host.worker_id,
             contract_id=contract.id,
+            expected_registration_version=host.registration_version,
             candidate_publishers=candidate_publishers,
+            claim_candidate=host.claim_candidate(
+                request_id=f"engine-worker-claim:{uuid4().hex}",
+                contract_id=contract.id,
+            ),
         )
         if claimed is not None:
             return claimed, host

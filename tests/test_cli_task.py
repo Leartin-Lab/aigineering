@@ -140,7 +140,7 @@ def test_timed_out_task_wait_states_integrity_was_not_checked():
             ["task", "wait", contract_id, "--timeout", "0", "--json"],
         )
 
-        assert result.exit_code == 0, result.output
+        assert result.exit_code == 1, result.output
         payload = json.loads(result.output)
         assert payload["timed_out"] is True
         assert payload["integrity"]["status"] == "not_checked"

@@ -1,0 +1,19 @@
+[run]
+fleet = "workers.toml"
+
+[[inputs]]
+name = "research_result"
+path = "research-result.json"
+
+[task]
+name = "claim_evidence_review"
+description_file = "task-description.txt"
+inputs = ["research_result"]
+activation = "research_result"
+outputs = ["review_report"]
+budget = 18
+worker_capabilities = ["planning"]
+worker_pools = ["reasoning"]
+delegation_capabilities = ["claim.review.extract", "claim.review.check", "claim.review.revise", "claim.review.verify"]
+delegation_pools = ["economy", "reasoning", "verification"]
+acceptance_policy_file = "acceptance-policy.json"

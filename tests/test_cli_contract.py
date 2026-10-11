@@ -3,6 +3,7 @@
 import json
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 
 from aigineering.cli.main import cli
@@ -99,6 +100,86 @@ class TestContractAdd:
             assert result.exit_code == 0, result.output
             assert "Contract injected: scoped_ct" in result.output
 
+    @pytest.mark.parametrize(
+        ("option", "value"),
+        [("--acceptance-policy", "[]"), ("--sensitive-input-policy", "null")],
+    )
+    def test_add_rejects_non_object_policy_before_opening_store(
+        self, monkeypatch, option, value
+    ):
+        def fail_if_opened():
+            pytest.fail("invalid policy must fail before opening Store")
+
+        monkeypatch.setattr(
+            "aigineering.cli.contract._persistent_store", fail_if_opened
+        )
+        result = CliRunner().invoke(
+            cli,
+            ["contract", "add", "--name", "invalid", option, value, "--json"],
+        )
+        assert result.exit_code == 2, result.output
+        assert "JSON object" in result.output
+
+    def test_add_rejects_nonpositive_budget_before_opening_store(self, monkeypatch):
+        def fail_if_opened():
+            pytest.fail("invalid Contract must fail before opening Store")
+
+        monkeypatch.setattr(
+            "aigineering.cli.contract._persistent_store", fail_if_opened
+        )
+        result = CliRunner().invoke(
+            cli,
+            ["contract", "add", "--name", "invalid", "--budget", "0"],
+        )
+        assert result.exit_code == 1, result.output
+        assert "positive integer" in result.output
+
+    def test_duplicate_add_replays_one_signed_publication(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            first = _add_contract(runner, "same", outputs=("answer",))
+            second = _add_contract(runner, "same", outputs=("answer",))
+            assert first.exit_code == 0, first.output
+            assert second.exit_code == 0, second.output
+
+            from aigineering.cli._common import _persistent_store
+
+            store = _persistent_store()
+            try:
+                assert [contract.name for contract in store.get_all_contracts()] == [
+                    "same"
+                ]
+                received = store.scan_runtime_records(record_type="candidate.received")
+                assert len(received) == 1
+            finally:
+                store.close()
+
+    def test_add_closes_store_after_signed_publication(self, monkeypatch):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            initialized = runner.invoke(cli, ["domain", "init"])
+            assert initialized.exit_code == 0, initialized.output
+
+            from aigineering.cli import contract as contract_cli
+
+            store = contract_cli._persistent_store()
+            close = store.close
+            store.closed_by_cli = False
+
+            def close_spy():
+                store.closed_by_cli = True
+                close()
+
+            monkeypatch.setattr(store, "close", close_spy)
+            monkeypatch.setattr(contract_cli, "_persistent_store", lambda: store)
+            result = runner.invoke(
+                cli,
+                ["contract", "add", "--name", "close-check", "--output", "answer"],
+            )
+
+            assert result.exit_code == 0, result.output
+            assert store.closed_by_cli
+
 
 class TestContractList:
     """Tests for aig contract ls."""
@@ -107,9 +188,19 @@ class TestContractList:
         """aig contract ls on empty store shows no contracts."""
         runner = CliRunner()
         with runner.isolated_filesystem():
+            initialized = runner.invoke(cli, ["domain", "init"])
+            assert initialized.exit_code == 0, initialized.output
             result = runner.invoke(cli, ["contract", "ls"])
             assert result.exit_code == 0
             assert "No contracts found" in result.output
+
+    def test_ls_uninitialized_domain_does_not_create_store(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            result = runner.invoke(cli, ["contract", "ls"])
+            assert result.exit_code != 0
+            assert "domain is not initialized" in result.output
+            assert not Path(".aig/store.db").exists()
 
     def test_ls_after_add(self):
         """aig contract ls shows injected contracts."""
@@ -165,12 +256,22 @@ class TestContractShow:
         """aig contract show <missing> fails with an error."""
         runner = CliRunner()
         with runner.isolated_filesystem():
+            initialized = runner.invoke(cli, ["domain", "init"])
+            assert initialized.exit_code == 0, initialized.output
             result = runner.invoke(
                 cli,
                 ["contract", "show", "nonexistent123"],
             )
             assert result.exit_code != 0
             assert "No contract with id" in result.output
+
+    def test_show_uninitialized_domain_does_not_create_store(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            result = runner.invoke(cli, ["contract", "show", "missing"])
+            assert result.exit_code != 0
+            assert "domain is not initialized" in result.output
+            assert not Path(".aig/store.db").exists()
 
     def test_show_json_output(self):
         """aig contract show <id> --json returns valid JSON."""

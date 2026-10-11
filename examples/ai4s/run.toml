@@ -1,0 +1,32 @@
+[run]
+fleet = "workers.toml"
+skills = ["../literature-evidence"]
+
+[[inputs]]
+name = "literature_query"
+path = "literature-query.json"
+
+[task]
+name = "ai4s_literature_report"
+description_file = "task-description.txt"
+inputs = ["literature_query"]
+activation = "literature_query"
+outputs = ["literature_report"]
+budget = 24
+tool_scope = ["openalex_search"]
+labels = ["_skill_content_literature_evidence"]
+worker_capabilities = ["planning"]
+worker_pools = ["reasoning"]
+delegation_capabilities = ["literature.retrieve", "literature.screen", "literature.extract", "literature.synthesize", "literature.replan", "literature.verify"]
+delegation_pools = ["economy", "reasoning", "verification"]
+
+[task.acceptance_policy]
+mode = "independent"
+policy_version = "ai4s-literature-v1"
+required_attestations = 1
+verifier_capabilities = ["literature.verify"]
+
+[task.acceptance_policy.output_shapes.literature_report]
+answer = "nonempty_string"
+citations = ["nonempty_string"]
+limitations = ["nonempty_string"]

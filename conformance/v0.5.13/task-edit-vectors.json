@@ -1,0 +1,247 @@
+{
+  "format": "aigineering-task-edit-v1",
+  "genesis": {
+    "id": "genesis:4b5f5ce4ec03c299f3bb17d03fbce4e6f99fc7404e6760f0a37948fecf79f163",
+    "domain": "task-edit-vector",
+    "policy_hash": "policy:task-edit-vector",
+    "root_keys": [
+      {
+        "actor_id": "human:task-edit-vector",
+        "capabilities": [
+          "contract.cancel",
+          "contract.publish",
+          "task.edit",
+          "task.handoff"
+        ],
+        "key_id": "task-edit-vector-key",
+        "kind": "ed25519",
+        "public_key": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+        "revoked": false
+      }
+    ],
+    "schema_version": 1
+  },
+  "source_contract": {
+    "id": "task:v3:f0b47c302eb98be49623115981ebf16f7115512dfe60c34871ccb8f9b88ac233",
+    "parent_id": null,
+    "name": "Draft title",
+    "description": "Draft body",
+    "inputs": [],
+    "outputs": [
+      "report"
+    ],
+    "activation": "",
+    "budget": 3,
+    "tool_scope": [],
+    "labels": [],
+    "context_asset_ids": [],
+    "worker_capabilities": [],
+    "worker_pools": [],
+    "delegation_capabilities": [],
+    "delegation_pools": [],
+    "origin": "human",
+    "minting_authority": [],
+    "sensitive_input_policy": null,
+    "acceptance_policy": null
+  },
+  "source_declaration": {
+    "id": "record:828f52b4174fd5a871f6d54691db3bee2432786fafcbc6252fdbc5a355a40a30",
+    "record_type": "contract.declared",
+    "schema_version": 1,
+    "payload": {
+      "contract": {
+        "id": "task:v3:f0b47c302eb98be49623115981ebf16f7115512dfe60c34871ccb8f9b88ac233",
+        "parent_id": null,
+        "name": "Draft title",
+        "description": "Draft body",
+        "inputs": [],
+        "outputs": [
+          "report"
+        ],
+        "activation": "",
+        "budget": 3,
+        "tool_scope": [],
+        "labels": [],
+        "context_asset_ids": [],
+        "worker_capabilities": [],
+        "worker_pools": [],
+        "delegation_capabilities": [],
+        "delegation_pools": [],
+        "origin": "human",
+        "minting_authority": [],
+        "sensitive_input_policy": null,
+        "acceptance_policy": null
+      }
+    },
+    "causal_parents": []
+  },
+  "candidate": {
+    "value": {
+      "id": "candidate:v1:602dab8beca6f7026a1b84188f39c848c9776ceacb7e5f2c151f4b9098f1451e",
+      "signature": "ed25519:vOxJxECZjbl1p9lHeC3Jtn7oiyehDf9bi06P5DlF0+LMgyAD+hZuOCoeOFOruZXREhZ2ETVeMxP+rvbA/N5NDw==",
+      "actor_id": "human:task-edit-vector",
+      "causal_parents": [
+        "task:v3:f0b47c302eb98be49623115981ebf16f7115512dfe60c34871ccb8f9b88ac233",
+        "record:828f52b4174fd5a871f6d54691db3bee2432786fafcbc6252fdbc5a355a40a30"
+      ],
+      "domain_id": "genesis:4b5f5ce4ec03c299f3bb17d03fbce4e6f99fc7404e6760f0a37948fecf79f163",
+      "effects": [
+        {
+          "atomic_group": "",
+          "effect_type": "task.handoff",
+          "payload": {
+            "budget": 2,
+            "contract_id": "task:v3:f0b47c302eb98be49623115981ebf16f7115512dfe60c34871ccb8f9b88ac233",
+            "hold_reason": "",
+            "reason": "Correct the title and clear the body",
+            "edit": {
+              "source_assignment_id": "",
+              "source_hold_ids": [],
+              "title": "Approved title",
+              "body": ""
+            }
+          }
+        }
+      ],
+      "idempotency_key": "task-edit-vector-v1",
+      "key_id": "task-edit-vector-key",
+      "protocol_version": 1,
+      "signature_kind": "ed25519"
+    },
+    "expected_signing_utf8": "{\"actor_id\":\"human:task-edit-vector\",\"causal_parents\":[\"task:v3:f0b47c302eb98be49623115981ebf16f7115512dfe60c34871ccb8f9b88ac233\",\"record:828f52b4174fd5a871f6d54691db3bee2432786fafcbc6252fdbc5a355a40a30\"],\"domain_id\":\"genesis:4b5f5ce4ec03c299f3bb17d03fbce4e6f99fc7404e6760f0a37948fecf79f163\",\"effects\":[{\"atomic_group\":\"\",\"effect_type\":\"task.handoff\",\"payload\":{\"budget\":2,\"contract_id\":\"task:v3:f0b47c302eb98be49623115981ebf16f7115512dfe60c34871ccb8f9b88ac233\",\"edit\":{\"body\":\"\",\"source_assignment_id\":\"\",\"source_hold_ids\":[],\"title\":\"Approved title\"},\"hold_reason\":\"\",\"reason\":\"Correct the title and clear the body\"}}],\"idempotency_key\":\"task-edit-vector-v1\",\"key_id\":\"task-edit-vector-key\",\"protocol_version\":1,\"signature_kind\":\"ed25519\"}"
+  },
+  "edit": {
+    "source_assignment_id": "",
+    "source_hold_ids": [],
+    "title": "Approved title",
+    "body": ""
+  },
+  "receipt": {
+    "id": "record:e9b4112286803569fdf78cfbda96827402ac81bd726d8be9318c28f821549e04",
+    "record_type": "candidate.received",
+    "schema_version": 1,
+    "payload": {
+      "actor_id": "human:task-edit-vector",
+      "candidate_id": "candidate:v1:602dab8beca6f7026a1b84188f39c848c9776ceacb7e5f2c151f4b9098f1451e",
+      "domain_id": "genesis:4b5f5ce4ec03c299f3bb17d03fbce4e6f99fc7404e6760f0a37948fecf79f163",
+      "effect_types": [
+        "task.handoff"
+      ],
+      "key_id": "task-edit-vector-key",
+      "metadata": {},
+      "signature": "ed25519:vOxJxECZjbl1p9lHeC3Jtn7oiyehDf9bi06P5DlF0+LMgyAD+hZuOCoeOFOruZXREhZ2ETVeMxP+rvbA/N5NDw==",
+      "signature_kind": "ed25519"
+    },
+    "causal_parents": [
+      "task:v3:f0b47c302eb98be49623115981ebf16f7115512dfe60c34871ccb8f9b88ac233",
+      "record:828f52b4174fd5a871f6d54691db3bee2432786fafcbc6252fdbc5a355a40a30"
+    ]
+  },
+  "successor": {
+    "id": "task:v3:8420a8faf109c016ce80b1fc46b4d9cb135ff58d3d225d2ec768485df24563d8",
+    "parent_id": "task:v3:f0b47c302eb98be49623115981ebf16f7115512dfe60c34871ccb8f9b88ac233",
+    "name": "Approved title",
+    "description": "",
+    "inputs": [],
+    "outputs": [
+      "report"
+    ],
+    "activation": "",
+    "budget": 2,
+    "tool_scope": [],
+    "labels": [],
+    "context_asset_ids": [],
+    "worker_capabilities": [],
+    "worker_pools": [],
+    "delegation_capabilities": [],
+    "delegation_pools": [],
+    "origin": "human",
+    "minting_authority": [],
+    "sensitive_input_policy": null,
+    "acceptance_policy": null
+  },
+  "records": [
+    {
+      "id": "record:cfa5d9ba8fac990a81fba9f9d7703743597ff5fa9ce7cba6434539206a9c149a",
+      "record_type": "lifecycle.terminal",
+      "schema_version": 1,
+      "payload": {
+        "contract_id": "task:v3:f0b47c302eb98be49623115981ebf16f7115512dfe60c34871ccb8f9b88ac233",
+        "terminal": "cancelled",
+        "reason": "Correct the title and clear the body",
+        "actor_id": "human:task-edit-vector"
+      },
+      "causal_parents": [
+        "record:e9b4112286803569fdf78cfbda96827402ac81bd726d8be9318c28f821549e04"
+      ]
+    },
+    {
+      "id": "record:86bfac7b52bf085a29864374d462e5f199b92c7070fb4cd1b33f40e0a4f725ea",
+      "record_type": "contract.declared",
+      "schema_version": 1,
+      "payload": {
+        "candidate_id": "candidate:v1:602dab8beca6f7026a1b84188f39c848c9776ceacb7e5f2c151f4b9098f1451e",
+        "contract": {
+          "id": "task:v3:8420a8faf109c016ce80b1fc46b4d9cb135ff58d3d225d2ec768485df24563d8",
+          "parent_id": "task:v3:f0b47c302eb98be49623115981ebf16f7115512dfe60c34871ccb8f9b88ac233",
+          "name": "Approved title",
+          "description": "",
+          "inputs": [],
+          "outputs": [
+            "report"
+          ],
+          "activation": "",
+          "budget": 2,
+          "tool_scope": [],
+          "labels": [],
+          "context_asset_ids": [],
+          "worker_capabilities": [],
+          "worker_pools": [],
+          "delegation_capabilities": [],
+          "delegation_pools": [],
+          "origin": "human",
+          "minting_authority": [],
+          "sensitive_input_policy": null,
+          "acceptance_policy": null
+        }
+      },
+      "causal_parents": [
+        "record:e9b4112286803569fdf78cfbda96827402ac81bd726d8be9318c28f821549e04"
+      ]
+    },
+    {
+      "id": "record:a09eadcf867afa12922ec922d72f0d556757aec9b861241d8f157b4f449aabd4",
+      "record_type": "task.handed_off",
+      "schema_version": 1,
+      "payload": {
+        "actor_id": "human:task-edit-vector",
+        "budget": 2,
+        "candidate_id": "candidate:v1:602dab8beca6f7026a1b84188f39c848c9776ceacb7e5f2c151f4b9098f1451e",
+        "completed_outputs": [],
+        "contract_id": "task:v3:f0b47c302eb98be49623115981ebf16f7115512dfe60c34871ccb8f9b88ac233",
+        "hold_id": "",
+        "key_id": "task-edit-vector-key",
+        "reason": "Correct the title and clear the body",
+        "retained_asset_ids": [],
+        "successor_id": "task:v3:8420a8faf109c016ce80b1fc46b4d9cb135ff58d3d225d2ec768485df24563d8",
+        "edit": {
+          "changed_fields": [
+            "title",
+            "body"
+          ],
+          "source_declaration_id": "record:828f52b4174fd5a871f6d54691db3bee2432786fafcbc6252fdbc5a355a40a30",
+          "successor_declaration_id": "record:86bfac7b52bf085a29864374d462e5f199b92c7070fb4cd1b33f40e0a4f725ea",
+          "source_assignment_id": "",
+          "source_hold_ids": [],
+          "hold_mapping": []
+        }
+      },
+      "causal_parents": [
+        "record:e9b4112286803569fdf78cfbda96827402ac81bd726d8be9318c28f821549e04",
+        "record:cfa5d9ba8fac990a81fba9f9d7703743597ff5fa9ce7cba6434539206a9c149a",
+        "record:86bfac7b52bf085a29864374d462e5f199b92c7070fb4cd1b33f40e0a4f725ea",
+        "record:828f52b4174fd5a871f6d54691db3bee2432786fafcbc6252fdbc5a355a40a30"
+      ]
+    }
+  ]
+}

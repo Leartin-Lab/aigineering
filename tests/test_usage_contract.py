@@ -226,14 +226,15 @@ def test_claim_renewal_failure_keeps_returned_candidate_usage(monkeypatch):
         store.add_contract(contract)
 
         class FailedKeeper:
-            def __init__(self, claimed, _store):
+            def __init__(self, claimed, _store, worker_host=None):
                 self.claimed = claimed
+                self.worker_host = worker_host
 
             def start(self):
                 pass
 
             def stop(self):
-                pass
+                return True
 
             @property
             def failed(self):

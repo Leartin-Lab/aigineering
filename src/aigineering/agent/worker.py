@@ -28,6 +28,7 @@ from aigineering.protocol.effect_builders import (
     claim_bound_graph_output_effects,
 )
 from aigineering.protocol.envelope import CandidateEnvelope
+from aigineering.protocol.package import WorkerPackage
 from aigineering.protocol.types import Asset, Candidate, Contract
 
 
@@ -69,8 +70,11 @@ class WorkerHost:
     genesis: GenesisManifest
     actor_key: ActorKey
     signer: Signer
+    registration_version: str = ""
 
     def __post_init__(self) -> None:
+        if not isinstance(self.registration_version, str):
+            raise ValueError("WorkerHost registration_version must be a string")
         if self.actor_key.actor_id != self.worker.worker_id:
             raise ValueError("WorkerHost actor_id must equal worker.worker_id")
         if (
@@ -104,6 +108,59 @@ class WorkerHost:
                 "worker output identity does not match its WorkerHost actor",
             )
         return candidate
+
+    def coordination_candidate(
+        self, effect: CandidateEffect, *, idempotency_key: str
+    ) -> CandidateProposal:
+        """Sign one claim/renew command with this host's registered identity."""
+        from aigineering.core.worker_coordination import compile_worker_command
+
+        return compile_worker_command(
+            self.genesis.id,
+            self.actor_key,
+            self.signer,
+            effect,
+            idempotency_key=idempotency_key,
+        )
+
+    def claim_candidate(
+        self,
+        *,
+        request_id: str,
+        contract_id: str | None = None,
+        lease_seconds: int = 60,
+    ) -> CandidateProposal:
+        from aigineering.protocol.effect_builders import worker_claim_effect
+
+        return self.coordination_candidate(
+            worker_claim_effect(
+                self.worker_id,
+                contract_id=contract_id,
+                lease_seconds=lease_seconds,
+            ),
+            idempotency_key=request_id,
+        )
+
+    def renewal_candidate(
+        self,
+        package: WorkerPackage,
+        *,
+        request_id: str,
+        lease_seconds: int = 60,
+    ) -> CandidateProposal:
+        from aigineering.protocol.effect_builders import worker_claim_renewal_effect
+
+        if not package.claim_id or package.claim_epoch < 1:
+            raise ValueError("renewal requires a claimed WorkerPackage")
+        return self.coordination_candidate(
+            worker_claim_renewal_effect(
+                self.worker_id,
+                package.claim_id,
+                package.claim_epoch,
+                lease_seconds=lease_seconds,
+            ),
+            idempotency_key=request_id,
+        )
 
     def sign_envelope(
         self,

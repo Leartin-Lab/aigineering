@@ -27,10 +27,10 @@ aig method test ORIGINAL_METHOD_ASSET_ID --cases ORIGINAL_SUITE_ASSET_ID \
   --name original-text-evaluation --budget 1 --json
 aig method test EVIDENCE_METHOD_ASSET_ID --cases EVIDENCE_SUITE_ASSET_ID \
   --name evidence-bindings-evaluation --budget 1 --json
-aig fleet run --config /path/to/aigineering/examples/claim-validation/workers.toml \
-  --task ORIGINAL_TEST_ROOT_ID --wait-timeout 300 --json
-aig fleet run --config /path/to/aigineering/examples/claim-validation/workers.toml \
-  --task EVIDENCE_TEST_ROOT_ID --wait-timeout 300 --json
+aig run --config /path/to/aigineering/examples/claim-validation/workers.toml \
+  --resume ORIGINAL_TEST_ROOT_ID --wait-timeout 300 --json
+aig run --config /path/to/aigineering/examples/claim-validation/workers.toml \
+  --resume EVIDENCE_TEST_ROOT_ID --wait-timeout 300 --json
 aig method assess ORIGINAL_RUN_ASSET_ID --json
 aig method assess EVIDENCE_RUN_ASSET_ID --json
 ```
@@ -69,8 +69,8 @@ aig task create --name structural-gate \
   --activation 'research_result AND review_report' \
   --output structural_receipt --budget 1 \
   --requires-capability claim.check.gate --worker-pool validation --json
-aig fleet run --config /path/to/aigineering/examples/claim-validation/workers.toml \
-  --task GATE_TASK_ID --wait-timeout 30 --json
+aig run --config /path/to/aigineering/examples/claim-validation/workers.toml \
+  --resume GATE_TASK_ID --wait-timeout 30 --json
 aig task audit GATE_TASK_ID --json
 ```
 
@@ -90,8 +90,8 @@ aig method instantiate METHOD_ASSET_ID \
   --input source=SOURCE_ASSET_ID --input report=REPORT_ASSET_ID \
   --output assessment=reused_assessment --name reuse-check --budget 1 \
   --evaluation EVALUATION_ASSET_ID --json
-aig fleet run --config /path/to/aigineering/examples/claim-validation/workers.toml \
-  --task REUSE_TASK_ID --wait-timeout 30 --json
+aig run --config /path/to/aigineering/examples/claim-validation/workers.toml \
+  --resume REUSE_TASK_ID --wait-timeout 30 --json
 ```
 
 Review authorizes the exact tested method, not arbitrary reports. Different keys

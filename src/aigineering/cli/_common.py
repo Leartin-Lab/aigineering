@@ -131,23 +131,14 @@ class _RunSessionScope:
     unassigned_trace_ids: tuple[str, ...]
     start_revision: int
     end_revision: int
+    capture_warnings: tuple[str, ...] = ()
 
 
 def _contract_tree_ids(contracts: list[Contract], root_contract_id: str) -> set[str]:
-    """Return the root Contract and all immutable descendants in the Store."""
-    contract_ids = (
-        {root_contract_id}
-        if any(item.id == root_contract_id for item in contracts)
-        else set()
-    )
-    changed = True
-    while changed:
-        changed = False
-        for contract in contracts:
-            if contract.parent_id in contract_ids and contract.id not in contract_ids:
-                contract_ids.add(contract.id)
-                changed = True
-    return contract_ids
+    """Compatibility delegate for the shared application tree selection."""
+    from aigineering.task_views import contract_tree_ids
+
+    return contract_tree_ids(contracts, root_contract_id)
 
 
 def _session_scope_for_run(
@@ -223,21 +214,30 @@ def _session_scope_for_run(
 def _claim_next_root_tree_package(
     store,
     *,
-    worker_id: str,
+    worker_host,
     root_contract_id: str,
     candidate_publishers,
 ):
     """Claim only this quick-run root or one of its current descendants."""
-    from aigineering.runtime import claim_next_package
+    from aigineering.runtime_services import (
+        claim_next_application_package,
+        order_application_contract_ids,
+    )
 
-    for contract_id in sorted(
-        _contract_tree_ids(store.get_all_contracts(), root_contract_id)
-    ):
-        claimed = claim_next_package(
+    contract_ids = tuple(
+        sorted(_contract_tree_ids(store.get_all_contracts(), root_contract_id))
+    )
+    for contract_id in order_application_contract_ids(store, contract_ids):
+        claimed = claim_next_application_package(
             store,
-            worker_id=worker_id,
+            worker_id=worker_host.worker_id,
             contract_id=contract_id,
             candidate_publishers=candidate_publishers,
+            claim_candidate=worker_host.claim_candidate(
+                request_id=f"quick-run-claim:{uuid.uuid4().hex}",
+                contract_id=contract_id,
+            ),
+            expected_registration_version=worker_host.registration_version,
         )
         if claimed is not None:
             return claimed
@@ -349,6 +349,8 @@ def _run_demo(
     quick_inputs: list[Asset] | None = None,
     quick_input_description: str | None = None,
     raise_on_incomplete: bool = True,
+    worker_id: str | None = None,
+    capture_db_path: str | None = None,
 ) -> tuple[StoreProtocol, TraceStoreProtocol, Contract, _RunSessionScope]:
     """Run a bounded quick-goal task graph through the normal Worker pool."""
     if store is None:
@@ -367,6 +369,7 @@ def _run_demo(
     output_name = f"final_report_{publication_id}"
 
     try:
+        identity_options = {"worker_id": worker_id} if worker_id is not None else {}
         worker = build_worker(
             worker_kind,
             model=model,
@@ -377,6 +380,7 @@ def _run_demo(
             thinking_mode=thinking_mode,
             response_format=response_format,
             capabilities=capabilities,
+            **identity_options,
         )
     except ValueError as exc:
         raise click.ClickException(str(exc)) from exc
@@ -475,38 +479,51 @@ def _run_demo(
         ensure_local_runtime_publishers,
         ensure_local_worker_host,
     )
-    from aigineering.cli.task_state import project_task_status
+    from aigineering.task_views import project_task_status
+    from aigineering.runtime_services import sync_runtime
 
     host = ensure_local_worker_host(store, worker)
     publishers = ensure_local_runtime_publishers(store)
     registry = default_completion_registry()
     last_submission = "none"
+    capture_warnings: list[str] = []
     for _ in range(64):
         run_runtime_maintenance_step(store, registry, candidate_publishers=publishers)
+        sync_runtime(store)
         status = project_task_status(contract, store)
         if status["terminal"]:
             break
         claimed = _claim_next_root_tree_package(
             store,
-            worker_id=host.worker_id,
+            worker_host=host,
             root_contract_id=contract.id,
             candidate_publishers=publishers,
         )
         if claimed is None:
             break
         try:
-            result = execute_claimed_package(
-                claimed,
-                host,
-                store,
-                trace_store,
-                candidate_publishers=publishers,
-            )
+            if capture_db_path is None:
+                result = execute_claimed_package(
+                    claimed, host, store, trace_store, candidate_publishers=publishers
+                )
+            else:
+                from aigineering.task_logs import execute_captured_package
+
+                result = execute_captured_package(
+                    claimed,
+                    host,
+                    store,
+                    db_path=capture_db_path,
+                    trace_store=trace_store,
+                    candidate_publishers=publishers,
+                    warnings=capture_warnings,
+                )
         except WorkerInvocationError:
             last_submission = "worker_failed"
             continue
         last_submission = str(result.get("status", "unknown"))
     process_task_completions(store, registry, candidate_publishers=publishers)
+    sync_runtime(store)
     status = project_task_status(contract, store)
     if status["status"] != "completed" and raise_on_incomplete:
         raise RuntimeError(
@@ -528,6 +545,10 @@ def _run_demo(
     finally:
         if scope_store is not store:
             scope_store.close()
+    if capture_warnings:
+        from dataclasses import replace
+
+        scope = replace(scope, capture_warnings=tuple(capture_warnings))
     return store, trace_store, contract, scope
 
 

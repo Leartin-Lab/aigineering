@@ -8,12 +8,12 @@ from dataclasses import dataclass
 from typing import Any
 
 from aigineering.agent.worker import compile_worker_envelope
+from aigineering.core.worker_coordination import compile_worker_command
 from aigineering.core.signing import Ed25519Signer, Signer
 from aigineering.protocol.candidate import (
     ActorKey,
     CandidateProposal,
     candidate_proposal_to_dict,
-    create_candidate_proposal,
 )
 from aigineering.protocol.effect_builders import (
     worker_claim_effect,
@@ -149,12 +149,11 @@ class HarnessCandidateAdapter:
     def _command_candidate(self, effect, *, request_id: str) -> CandidateProposal:
         if not request_id.strip():
             raise ValueError("request_id must not be empty")
-        return create_candidate_proposal(
-            domain_id=self.domain_id,
-            actor_id=self.actor_key.actor_id,
-            key_id=self.actor_key.key_id,
-            effects=(effect,),
-            signer=self.signer,
+        return compile_worker_command(
+            self.domain_id,
+            self.actor_key,
+            self.signer,
+            effect,
             idempotency_key=request_id,
         )
 

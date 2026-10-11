@@ -6,7 +6,7 @@ import sqlite3
 import pytest
 from conftest import candidate_runtime
 
-from aigineering.core.sqlite_store import SQLiteStore
+from aigineering.core.sqlite_store import CURRENT_SCHEMA_VERSION, SQLiteStore
 from aigineering.core.store import MemoryStore
 from aigineering.core.trace import MemoryTraceStore
 from aigineering.core.verification import batch_verify_definition
@@ -444,7 +444,7 @@ def test_v13_legacy_assets_migrate_without_changing_asset_identity(tmp_path) -> 
 
     reopened = SQLiteStore(str(db_path))
     try:
-        assert reopened.schema_version == 17
+        assert reopened.schema_version == CURRENT_SCHEMA_VERSION
         assert reopened.get_asset(legacy.id) == legacy
         contents = reopened.get_content_objects()
         definitions = reopened.get_asset_definitions()

@@ -42,7 +42,8 @@ from aigineering.protocol.identity import (
 )
 from aigineering.protocol.immutability import deep_thaw
 from aigineering.protocol.types import Candidate
-from aigineering.runtime import claim_next_package, execute_claimed_package
+from aigineering.runtime import execute_claimed_package
+from aigineering.runtime_services import claim_next_application_package
 
 
 class _AssessmentWorker:
@@ -282,8 +283,15 @@ class MethodService:
             return existing[0], contract
         worker = _AssessmentWorker(report, contract.id)
         host = ensure_local_worker_host(self.store, worker)
-        claimed = claim_next_package(
-            self.store, worker_id=host.worker_id, contract_id=contract.id
+        claimed = claim_next_application_package(
+            self.store,
+            worker_id=host.worker_id,
+            contract_id=contract.id,
+            expected_registration_version=host.registration_version,
+            claim_candidate=host.claim_candidate(
+                request_id=f"method-assessment-claim:{run_id}:{contract.id}",
+                contract_id=contract.id,
+            ),
         )
         if claimed is None:
             raise ValueError("method assessment is not claimable")

@@ -93,8 +93,8 @@ class TestSessionSealedConfig:
 class TestCLIRetryBypass:
     """G1: CLI must not directly mutate runtime state."""
 
-    def test_cli_retry_does_not_directly_mutate_store(self):
-        """aig retry must go through method ingress, not direct store.add_contract().
+    def test_cli_retry_does_not_directly_mutate_store(self, tmp_path):
+        """aig retry must publish a signed Candidate, not directly add a Contract.
 
         Gate: G1 (Single Runtime Ingress)
         """
@@ -120,8 +120,7 @@ class TestCLIRetryBypass:
 
         assert len(add_contract_calls) == 0, (
             f"G1/D-P0.1: cli/retry.py calls add_contract() directly at line(s): "
-            f"{add_contract_calls}. Must go through method ingress "
-            f"(MethodRuntime → RetryMethodHandler)."
+            f"{add_contract_calls}. Must go through signed Candidate commitment."
         )
 
         # ── Functional test: CLI retry still creates the retry contract ──
@@ -134,7 +133,8 @@ class TestCLIRetryBypass:
         from aigineering.core.sqlite_store import SQLiteStore
         from aigineering.cli.identity import ensure_local_domain
 
-        store = SQLiteStore(":memory:")
+        retry_database = str(tmp_path / "retry.db")
+        store = SQLiteStore(retry_database)
         original = Contract(
             id="c-original",
             parent_id=None,
@@ -159,6 +159,7 @@ class TestCLIRetryBypass:
 
         assert result.exit_code == 0, f"G1/D-P0.1: CLI retry failed: {result.output}"
 
+        store = SQLiteStore(retry_database)
         retry_contract = store.get_contract(expected_id)
         assert retry_contract is not None, (
             f"G1/D-P0.1: Retry contract '{expected_id}' not found in store. "

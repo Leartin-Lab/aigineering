@@ -16,6 +16,9 @@ navigation, not another architecture specification.
 | How do contributors change the project? | [`CONTRIBUTING.md`](../CONTRIBUTING.md) |
 | How does an AI coding worker use this repository? | [`SKILL.md`](../SKILL.md) |
 | How do procedures become reusable, evaluated methods? | [`methods.md`](methods.md) |
+| How are examples launched and continued through one entry? | [`reference/configured-runs.md`](reference/configured-runs.md) |
+| How do I discover, assign, prioritize, edit, comment on, hold, promote, order by prerequisites, hand off, review, revise, observe, retry and export tasks, or upgrade and repair Redis? | [`reference/task-board.md`](reference/task-board.md) |
+| How do I import, associate, list and copy task attachments? | [`reference/task-attachments.md`](reference/task-attachments.md) |
 | How does an existing agent harness become a Worker? | [`reference/agent-harness-migration.md`](reference/agent-harness-migration.md) |
 | Where are the declarative runtime-native case studies? | [`examples/README.md`](../examples/README.md) |
 
@@ -44,3 +47,5 @@ does not override the implemented design, invariants, or release scope.
   independent reader and executable verification.
 - Private review notes, analogies, credentials, and speculative work never
   enter public release artifacts.
+
+- [Persistent local Fleet service](reference/local-fleet-service.md)

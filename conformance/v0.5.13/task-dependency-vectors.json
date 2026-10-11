@@ -1,0 +1,186 @@
+{
+  "format": "aigineering-task-dependency-v1",
+  "canonical_json": {
+    "input": {
+      "text": "中文 café",
+      "values": [
+        null,
+        true,
+        9007199254740991
+      ],
+      "": "BMP",
+      "𐀀": "supplementary"
+    },
+    "expected": "{\"text\":\"中文 café\",\"values\":[null,true,9007199254740991],\"\":\"BMP\",\"𐀀\":\"supplementary\"}"
+  },
+  "ed25519_test_key": {
+    "private_key_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+    "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8"
+  },
+  "genesis": {
+    "id": "genesis:59585de1b21821043647357642cf4be06a257ca158d06e8e215a582f460a4f26",
+    "domain": "dependency-conformance",
+    "policy_hash": "policy:vector",
+    "root_keys": [
+      {
+        "actor_id": "human:dependency-vector",
+        "capabilities": [
+          "task.dependency.manage"
+        ],
+        "key_id": "dependency-vector-key",
+        "kind": "ed25519",
+        "public_key": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+        "revoked": false
+      }
+    ],
+    "schema_version": 1
+  },
+  "contracts": [
+    {
+      "id": "task:v3:target",
+      "parent_id": null,
+      "name": "target",
+      "description": "",
+      "inputs": [],
+      "outputs": [
+        "report"
+      ],
+      "activation": "",
+      "budget": 2,
+      "tool_scope": [],
+      "labels": [],
+      "context_asset_ids": [],
+      "worker_capabilities": [],
+      "worker_pools": [],
+      "delegation_capabilities": [],
+      "delegation_pools": [],
+      "origin": "human",
+      "minting_authority": [],
+      "sensitive_input_policy": null,
+      "acceptance_policy": null
+    },
+    {
+      "id": "task:v3:prerequisite",
+      "parent_id": null,
+      "name": "prerequisite",
+      "description": "",
+      "inputs": [],
+      "outputs": [
+        "proof"
+      ],
+      "activation": "",
+      "budget": 2,
+      "tool_scope": [],
+      "labels": [],
+      "context_asset_ids": [],
+      "worker_capabilities": [],
+      "worker_pools": [],
+      "delegation_capabilities": [],
+      "delegation_pools": [],
+      "origin": "human",
+      "minting_authority": [],
+      "sensitive_input_policy": null,
+      "acceptance_policy": null
+    }
+  ],
+  "effect_vectors": [
+    {
+      "name": "link",
+      "candidate": {
+        "value": {
+          "id": "candidate:v1:559823d25f450c8be78db9758425ba932b1a06744b07a6467777ce77876f79ea",
+          "signature": "ed25519:8naslAYY3qn1LhibivjLemHkXr4JnX4158bQKv01U8G2PdPYx8KeKYF8KSmyc++DuQHnY0HdMxjBKJz9xmS3Dg==",
+          "actor_id": "human:dependency-vector",
+          "causal_parents": [],
+          "domain_id": "genesis:59585de1b21821043647357642cf4be06a257ca158d06e8e215a582f460a4f26",
+          "effects": [
+            {
+              "atomic_group": "",
+              "effect_type": "task.dependency.link",
+              "payload": {
+                "contract_id": "task:v3:target",
+                "prerequisite_contract_id": "task:v3:prerequisite",
+                "reason": "wait for proof"
+              }
+            }
+          ],
+          "idempotency_key": "dependency-vector-link",
+          "key_id": "dependency-vector-key",
+          "protocol_version": 1,
+          "signature_kind": "ed25519"
+        },
+        "expected_signing_utf8": "{\"actor_id\":\"human:dependency-vector\",\"causal_parents\":[],\"domain_id\":\"genesis:59585de1b21821043647357642cf4be06a257ca158d06e8e215a582f460a4f26\",\"effects\":[{\"atomic_group\":\"\",\"effect_type\":\"task.dependency.link\",\"payload\":{\"contract_id\":\"task:v3:target\",\"prerequisite_contract_id\":\"task:v3:prerequisite\",\"reason\":\"wait for proof\"}}],\"idempotency_key\":\"dependency-vector-link\",\"key_id\":\"dependency-vector-key\",\"protocol_version\":1,\"signature_kind\":\"ed25519\"}"
+      },
+      "records": [
+        {
+          "id": "record:70aba501b780881e396b0ab72a3205e03dc9f19619e4543d37da1f92c0e5513d",
+          "record_type": "claim.constraint.placed",
+          "schema_version": 1,
+          "payload": {
+            "actor_id": "human:dependency-vector",
+            "candidate_id": "candidate:v1:559823d25f450c8be78db9758425ba932b1a06744b07a6467777ce77876f79ea",
+            "contract_id": "task:v3:target",
+            "key_id": "dependency-vector-key",
+            "predicate": "prerequisite_terminal",
+            "prerequisite_contract_id": "task:v3:prerequisite",
+            "reason": "wait for proof",
+            "required_terminal": "complete"
+          },
+          "causal_parents": [
+            "record:91dfe1fab3306345450f323572471e69477211fa8f44d4e58febb9dab0aa2a8a"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "unlink",
+      "candidate": {
+        "value": {
+          "id": "candidate:v1:9d9f69e20ea1523346587187d5136f3b21b1ec002cb80f4c4017fc302fba966e",
+          "signature": "ed25519:1JT6OVvboNSvZtVKsRXMM4R3hN1esUxM3j8WxQ01t+OktiLKp+OoghsZekqTO0NRBSxKJuV5zaC/zM6wS85oCQ==",
+          "actor_id": "human:dependency-vector",
+          "causal_parents": [],
+          "domain_id": "genesis:59585de1b21821043647357642cf4be06a257ca158d06e8e215a582f460a4f26",
+          "effects": [
+            {
+              "atomic_group": "",
+              "effect_type": "task.dependency.unlink",
+              "payload": {
+                "contract_id": "task:v3:target",
+                "constraint_id": "record:70aba501b780881e396b0ab72a3205e03dc9f19619e4543d37da1f92c0e5513d",
+                "reason": "dependency no longer needed"
+              }
+            }
+          ],
+          "idempotency_key": "dependency-vector-unlink",
+          "key_id": "dependency-vector-key",
+          "protocol_version": 1,
+          "signature_kind": "ed25519"
+        },
+        "expected_signing_utf8": "{\"actor_id\":\"human:dependency-vector\",\"causal_parents\":[],\"domain_id\":\"genesis:59585de1b21821043647357642cf4be06a257ca158d06e8e215a582f460a4f26\",\"effects\":[{\"atomic_group\":\"\",\"effect_type\":\"task.dependency.unlink\",\"payload\":{\"constraint_id\":\"record:70aba501b780881e396b0ab72a3205e03dc9f19619e4543d37da1f92c0e5513d\",\"contract_id\":\"task:v3:target\",\"reason\":\"dependency no longer needed\"}}],\"idempotency_key\":\"dependency-vector-unlink\",\"key_id\":\"dependency-vector-key\",\"protocol_version\":1,\"signature_kind\":\"ed25519\"}"
+      },
+      "records": [
+        {
+          "id": "record:7afe8cd1eedcf2a19938e401eb0deb128bacb2cd35115e1d0f615f0856bb8852",
+          "record_type": "claim.constraint.released",
+          "schema_version": 1,
+          "payload": {
+            "actor_id": "human:dependency-vector",
+            "candidate_id": "candidate:v1:9d9f69e20ea1523346587187d5136f3b21b1ec002cb80f4c4017fc302fba966e",
+            "constraint_id": "record:70aba501b780881e396b0ab72a3205e03dc9f19619e4543d37da1f92c0e5513d",
+            "contract_id": "task:v3:target",
+            "key_id": "dependency-vector-key",
+            "predicate": "prerequisite_terminal",
+            "prerequisite_contract_id": "task:v3:prerequisite",
+            "reason": "dependency no longer needed",
+            "required_terminal": "complete"
+          },
+          "causal_parents": [
+            "record:1821eb34aa66f6470914578b7a1e511698a4d1900b351de8263a9c973cfaa3df",
+            "record:70aba501b780881e396b0ab72a3205e03dc9f19619e4543d37da1f92c0e5513d"
+          ]
+        }
+      ]
+    }
+  ]
+}

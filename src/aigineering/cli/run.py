@@ -5,12 +5,27 @@ from __future__ import annotations
 import json
 import math
 import time
+from uuid import uuid4
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
 import click
+
+from aigineering.application import collaboration_service
+from aigineering.adapters.redis_query import QueryProjectionUnavailable
+from aigineering.runtime_services import (
+    claim_next_application_package,
+    order_application_contract_ids,
+    sync_runtime,
+)
+
+from aigineering.configured_run import (
+    publish_tool_descriptors as _publish_tool_descriptors,
+    run_configured,
+)
+from aigineering.run_config import prepare_configured_run
 
 from aigineering.agent.tool_registry_loader import (
     load_tool_registry,
@@ -29,7 +44,7 @@ from aigineering.cli._common import (
     _run_demo,
     _session_id,
 )
-from aigineering.cli.task_state import (
+from aigineering.task_views import (
     project_task_status,
     recovery_successor_map,
 )
@@ -37,21 +52,21 @@ from aigineering.local_identity import (
     ensure_local_runtime_publishers,
     ensure_local_worker_host,
 )
-from aigineering.application import build_worker
+from aigineering.application import build_worker, validate_worker_id
 from aigineering.runtime import (
     WorkerInvocationError,
-    claim_next_package,
-    execute_claimed_package,
     process_task_completions,
     run_runtime_maintenance_step,
+)
+from aigineering.task_logs import execute_captured_package
+from aigineering.run_failure_diagnostics import (
+    format_worker_failure_detail,
+    invocation_failure_detail,
 )
 from aigineering.core.session import SessionStore
 from aigineering.core.session import runtime_record_contract_references
 from aigineering.core.trace import JsonLTraceStore
 from aigineering.protocol.types import Session
-from aigineering.core.capability_descriptors import create_tool_descriptor
-from aigineering.protocol.effect_builders import asset_proposal_effect
-from aigineering.cli._candidate import commit_local_effects, require_accepted
 
 
 def _parse_capabilities(capabilities_str: Optional[str]) -> frozenset[str] | None:
@@ -97,6 +112,7 @@ def _output_run_json(
             "rejections": task_status.get("rejections", []),
             "recoveries": task_status.get("recoveries", []),
             "failure_details": task_status.get("failure_details", []),
+            "capture_warnings": task_status.get("capture_warnings", []),
             "next_step": (
                 None
                 if task_status["ok"] and delivery_error is None
@@ -125,6 +141,13 @@ def _quick_output_exportable(asset) -> bool:
 
 
 @click.command("run")
+@click.option(
+    "--config",
+    "config_path",
+    type=click.Path(path_type=Path, exists=True, dir_okay=False),
+    default=None,
+    help="Run a packaged scenario or resume a configured Worker fleet.",
+)
 @click.argument("goal", required=False)
 @click.option(
     "--once",
@@ -138,6 +161,12 @@ def _quick_output_exportable(asset) -> bool:
     "target_task_id",
     default=None,
     help="Run worker cycles until this task reaches a terminal status.",
+)
+@click.option(
+    "--resume",
+    "resume_task_id",
+    default=None,
+    help="Resume a task; with --config, use its configured Worker fleet.",
 )
 @click.option(
     "--wait-timeout",
@@ -171,6 +200,11 @@ def _quick_output_exportable(asset) -> bool:
     default="llm",
     show_default=True,
     help="Worker implementation; mock is only for explicit tests and dry runs.",
+)
+@click.option(
+    "--worker-id",
+    default=None,
+    help="Durable execution identity; use a separate ID for an independent reviewer.",
 )
 @click.option(
     "--model",
@@ -265,15 +299,20 @@ def _quick_output_exportable(asset) -> bool:
     default=None,
     help="Markdown result path (default: .aig/outputs/<session>.md).",
 )
+@click.pass_context
 def run(
+    ctx: click.Context,
+    config_path: Path | None,
     goal: Optional[str],
     run_once: bool,
     target_task_id: Optional[str],
+    resume_task_id: str | None,
     wait_timeout: float,
     interval: float,
     mock_output: Optional[str],
     mock_presets: tuple[str, ...],
     worker_kind: str,
+    worker_id: str | None,
     model: Optional[str],
     base_url: str,
     timeout: float,
@@ -289,7 +328,12 @@ def run(
     input_specs: tuple[str, ...],
     output_path: Path | None,
 ) -> None:
-    """Run one Worker cycle, a target task, or a quick goal task graph."""
+    """Run a packaged scenario, resume a task, or run a quick goal/task cycle."""
+    if worker_id is not None:
+        try:
+            validate_worker_id(worker_id)
+        except ValueError as exc:
+            raise click.BadParameter(str(exc), param_hint="--worker-id") from exc
     if not math.isfinite(wait_timeout) or wait_timeout <= 0:
         raise click.BadParameter(
             "must be a finite positive number", param_hint="--wait-timeout"
@@ -302,6 +346,96 @@ def run(
         raise click.BadParameter(
             "must be a finite positive number", param_hint="--timeout"
         )
+    if resume_task_id is not None and target_task_id is not None:
+        raise click.UsageError("Choose only one of --task and --resume.")
+    if target_task_id is not None and not target_task_id.strip():
+        raise click.BadParameter("must not be empty or whitespace", param_hint="--task")
+    if resume_task_id is not None and not resume_task_id.strip():
+        raise click.BadParameter(
+            "must not be empty or whitespace", param_hint="--resume"
+        )
+    selected_resume = resume_task_id if resume_task_id is not None else target_task_id
+    if config_path is not None:
+        allowed_with_config = {
+            "config_path",
+            "target_task_id",
+            "resume_task_id",
+            "wait_timeout",
+            "json_output",
+        }
+        explicit = [
+            name
+            for name in ctx.params
+            if name not in allowed_with_config
+            and ctx.get_parameter_source(name) == click.core.ParameterSource.COMMANDLINE
+        ]
+        if explicit:
+            display = {
+                "goal": "GOAL",
+                "run_once": "--once",
+                "interval": "--interval",
+                "input_specs": "--input",
+                "output_path": "--output",
+                "mock_output": "--mock-output",
+                "mock_presets": "--mock-preset",
+                "worker_kind": "--worker",
+                "worker_id": "--worker-id",
+                "model": "--model",
+                "base_url": "--base-url",
+                "timeout": "--timeout",
+                "max_retries": "--max-retries",
+                "max_output_tokens": "--max-output-tokens",
+                "thinking_mode": "--thinking-mode",
+                "response_format": "--response-format",
+                "capabilities_str": "--capability",
+                "tool_registry": "--tool-registry",
+                "behavior_labels": "--behavior-label",
+                "save_config": "--save-config",
+            }
+            raise click.UsageError(
+                "--config cannot be combined with "
+                + ", ".join(
+                    display.get(name, f"--{name.replace('_', '-')}")
+                    for name in explicit
+                )
+                + "."
+            )
+        try:
+            prepared = prepare_configured_run(
+                config_path, resume_task_id=selected_resume
+            )
+            result = run_configured(prepared, timeout=wait_timeout)
+        except QueryProjectionUnavailable:
+            raise
+        except (OSError, RuntimeError, ValueError) as exc:
+            raise click.ClickException(str(exc)) from exc
+        payload = {
+            "contract_id": result.contract_id,
+            "status": result.status,
+            "completed": result.completed,
+            "timed_out": result.timed_out,
+            "worker_errors": list(result.worker_errors),
+            "worker_failure_details": list(result.worker_failure_details),
+            "capture_warnings": list(result.capture_warnings),
+        }
+        if json_output:
+            _output_json(payload)
+        else:
+            click.echo(f"run {result.status}: {result.contract_id}")
+            for error in result.worker_errors:
+                click.echo(f"worker error: {error}")
+            for detail in result.worker_failure_details:
+                click.echo(
+                    "worker failure detail: "
+                    + json.dumps(detail, ensure_ascii=True, sort_keys=True)
+                )
+            for warning in result.capture_warnings:
+                click.echo(f"capture warning: {warning}")
+        if not result.completed:
+            raise click.exceptions.Exit(1)
+        return
+    if resume_task_id is not None:
+        target_task_id = resume_task_id
     modes = int(goal is not None) + int(run_once) + int(target_task_id is not None)
     if modes != 1:
         raise click.UsageError(
@@ -331,6 +465,7 @@ def run(
         _run_task_pool(
             target_task_id=target_task_id,
             worker_kind=worker_kind,
+            worker_id=worker_id,
             model=model,
             base_url=base_url,
             timeout=timeout,
@@ -366,7 +501,9 @@ def run(
             goal,
             trace_store=jsonl_store,
             store=_persistent_store(),
+            capture_db_path=".aig/store.db",
             worker_kind=worker_kind,
+            worker_id=worker_id,
             model=model,
             base_url=base_url,
             save_config=save_config,
@@ -381,6 +518,8 @@ def run(
             quick_input_description=input_description,
             raise_on_incomplete=False,
         )
+    except QueryProjectionUnavailable:
+        raise
     except (RuntimeError, WorkerInvocationError) as exc:
         raise click.ClickException(str(exc)) from exc
     entries = trace_store.get_by_contract(contract.id)
@@ -402,6 +541,7 @@ def run(
     session_store = SessionStore()
     session_store.create_session(session)
     task_status = project_task_status(contract, store)
+    task_status["capture_warnings"] = list(scope.capture_warnings)
     outputs: list[dict] = []
     markdown_content: str | None = None
     for slot, asset_id in task_status["outputs"].items():
@@ -506,9 +646,12 @@ def _run_task_pool(
     max_output_tokens: int | None = None,
     thinking_mode: str | None = None,
     response_format: str | None = None,
+    worker_id: str | None = None,
 ) -> None:
     store = _persistent_store()
     cycles: list[dict] = []
+    capture_warnings: list[str] = []
+    worker_failure_details: list[dict] = []
     try:
         tool_registry = (
             load_tool_registry(tool_registry_reference)
@@ -520,6 +663,8 @@ def _run_task_pool(
             provider_capabilities = provider_capabilities | {"tool_calling"}
             _publish_tool_descriptors(store, tool_registry)
         worker_options = {}
+        if worker_id is not None:
+            worker_options["worker_id"] = worker_id
         if max_output_tokens is not None:
             worker_options["max_output_tokens"] = max_output_tokens
         if thinking_mode is not None:
@@ -565,6 +710,8 @@ def _run_task_pool(
                 candidate_publishers,
                 registry,
                 json_output=json_output,
+                capture_warnings=capture_warnings,
+                worker_failure_details=worker_failure_details,
             )
             return
 
@@ -578,20 +725,33 @@ def _run_task_pool(
             interval=interval,
             cycles=cycles,
             json_output=json_output,
+            capture_warnings=capture_warnings,
+            worker_failure_details=worker_failure_details,
         )
-    except WorkerInvocationError as e:
+    except WorkerInvocationError:
+        sync_runtime(store)
+        failure_message = (
+            "; ".join(
+                format_worker_failure_detail(detail)
+                for detail in worker_failure_details
+            )
+            if worker_failure_details
+            else "worker invocation failed; exact claim diagnostics are unavailable"
+        )
         failure = {
             "ok": False,
             "status": "failed",
-            "error": str(e),
+            "error": failure_message,
             "cycles": cycles,
+            "capture_warnings": capture_warnings,
+            "worker_failure_details": worker_failure_details,
         }
         if target_task_id is not None:
             target = store.get_contract(target_task_id)
             if target is not None:
                 failure.update(project_task_status(target, store))
                 failure["ok"] = False
-                failure["error"] = str(e)
+                failure["error"] = failure_message
                 tree_ids = _contract_tree_ids(store.get_all_contracts(), target_task_id)
                 failure["failure_categories"] = _worker_failure_categories(
                     store, tree_ids
@@ -666,33 +826,19 @@ def _configure_pool_worker(
         )
 
 
-def _publish_tool_descriptors(store, registry) -> None:
-    descriptors = tuple(
-        create_tool_descriptor(
-            spec.name,
-            spec.description,
-            spec.input_schema,
-            source_uri=f"python:{spec.name}",
-            output_schema=spec.output_schema,
-            version=spec.version,
-            max_output_bytes=spec.max_output_bytes,
-        )
-        for spec in registry.list_specs()
-    )
-    effects = tuple(asset_proposal_effect(descriptor) for descriptor in descriptors)
-    require_accepted(
-        commit_local_effects(
-            store,
-            effects,
-            idempotency_key="tool-registry:"
-            + ",".join(sorted(descriptor.id for descriptor in descriptors)),
-        )
-    )
-
-
 def _run_single_pool_cycle(
-    store, hosts, candidate_publishers, registry, *, json_output: bool
+    store,
+    hosts,
+    candidate_publishers,
+    registry,
+    *,
+    json_output: bool,
+    capture_warnings: list[str],
+    worker_failure_details: list[dict] | None = None,
 ) -> None:
+    worker_failure_details = (
+        worker_failure_details if worker_failure_details is not None else []
+    )
     maintenance = run_runtime_maintenance_step(
         store, registry, candidate_publishers=candidate_publishers
     )
@@ -709,14 +855,20 @@ def _run_single_pool_cycle(
         if claimed is None:
             continue
         claims.append(claimed)
-        submissions.append(
-            execute_claimed_package(
-                claimed,
-                pool_host.host,
-                store,
-                candidate_publishers=candidate_publishers,
+        try:
+            submissions.append(
+                execute_captured_package(
+                    claimed,
+                    pool_host.host,
+                    store,
+                    db_path=".aig/store.db",
+                    candidate_publishers=candidate_publishers,
+                    warnings=capture_warnings,
+                )
             )
-        )
+        except WorkerInvocationError:
+            worker_failure_details.append(invocation_failure_detail(store, claimed))
+            raise
     if not claims:
         _emit_run_result(
             {
@@ -731,6 +883,7 @@ def _run_single_pool_cycle(
     processed_after = process_task_completions(
         store, registry, candidate_publishers=candidate_publishers
     )
+    sync_runtime(store)
     status = project_task_status(claims[0].contract, store)
     status["ok"] = status["status"] == "completed"
     status["submission_status"] = submissions[0]["status"]
@@ -744,6 +897,7 @@ def _run_single_pool_cycle(
             "rejections_recovered": recovered,
         }
     ]
+    status["capture_warnings"] = list(capture_warnings)
     _emit_run_result(status, json_output)
     if not status["ok"]:
         raise click.exceptions.Exit(1)
@@ -760,7 +914,12 @@ def _run_target_pool(
     interval: float,
     cycles: list[dict],
     json_output: bool,
+    capture_warnings: list[str],
+    worker_failure_details: list[dict] | None = None,
 ) -> None:
+    worker_failure_details = (
+        worker_failure_details if worker_failure_details is not None else []
+    )
     while True:
         target = store.get_contract(target_task_id)
         if target is None:
@@ -774,10 +933,15 @@ def _run_target_pool(
                 json_output,
             )
             raise click.exceptions.Exit(1)
+        sync_runtime(store)
         status = project_task_status(target, store)
         if status["terminal"]:
             _finish_target_run(
-                status, cycles, stop_reason="terminal", json_output=json_output
+                status,
+                cycles,
+                stop_reason="terminal",
+                json_output=json_output,
+                capture_warnings=capture_warnings,
             )
             return
 
@@ -799,14 +963,20 @@ def _run_target_pool(
             if claimed is None:
                 continue
             claimed_packages.append(claimed)
-            submissions.append(
-                execute_claimed_package(
-                    claimed,
-                    pool_host.host,
-                    store,
-                    candidate_publishers=candidate_publishers,
+            try:
+                submissions.append(
+                    execute_captured_package(
+                        claimed,
+                        pool_host.host,
+                        store,
+                        db_path=".aig/store.db",
+                        candidate_publishers=candidate_publishers,
+                        warnings=capture_warnings,
+                    )
                 )
-            )
+            except WorkerInvocationError:
+                worker_failure_details.append(invocation_failure_detail(store, claimed))
+                raise
         processed_after = process_task_completions(
             store, registry, candidate_publishers=candidate_publishers
         )
@@ -836,10 +1006,15 @@ def _run_target_pool(
 
         target = store.get_contract(target_task_id)
         assert target is not None
+        sync_runtime(store)
         status = project_task_status(target, store)
         if status["terminal"]:
             _finish_target_run(
-                status, cycles, stop_reason="terminal", json_output=json_output
+                status,
+                cycles,
+                stop_reason="terminal",
+                json_output=json_output,
+                capture_warnings=capture_warnings,
             )
             return
 
@@ -854,13 +1029,17 @@ def _run_target_pool(
             if status.get("silent_failure_risks"):
                 status["status"] = "stalled"
             status["timed_out"] = timed_out
+            status["capture_warnings"] = list(capture_warnings)
             _finish_target_run(
                 status,
                 cycles,
                 stop_reason="timeout" if timed_out else "idle",
                 json_output=json_output,
+                capture_warnings=capture_warnings,
             )
-        time.sleep(max(interval, 0.05))
+        collaboration_service(store).wait(
+            store.get_runtime_revision(), timeout=min(max(interval, 0.05), 0.5)
+        )
 
 
 def _claim_for_target_pool_host(
@@ -868,32 +1047,50 @@ def _claim_for_target_pool_host(
 ):
     """Claim only the selected task tree while preserving host routing."""
     capability = pool_host.required_contract_capability
-    from aigineering.runtime import claim_next_package
-
-    contract_ids = _contract_tree_ids(store.get_all_contracts(), target_task_id)
-    for contract_id in sorted(contract_ids):
+    contracts = store.get_all_contracts()
+    contract_ids = _contract_tree_ids(contracts, target_task_id)
+    if capability is not None:
+        contract_ids = {
+            contract.id
+            for contract in contracts
+            if contract.id in contract_ids
+            and capability in contract.worker_capabilities
+        }
+    ordered_ids = order_application_contract_ids(store, tuple(sorted(contract_ids)))
+    for contract_id in ordered_ids:
         contract = store.get_contract(contract_id)
         if contract is None:
             continue
-        if capability is not None and capability not in contract.worker_capabilities:
-            continue
-        claimed = claim_next_package(
+        claimed = claim_next_application_package(
             store,
             worker_id=pool_host.host.worker_id,
             contract_id=contract_id,
             candidate_publishers=candidate_publishers,
+            claim_candidate=pool_host.host.claim_candidate(
+                request_id=f"run-target-claim:{uuid4().hex}",
+                contract_id=contract_id,
+            ),
+            expected_registration_version=pool_host.host.registration_version,
         )
         if claimed is not None:
             return claimed
     return None
 
 
-def _finish_target_run(status, cycles, *, stop_reason: str, json_output: bool) -> None:
+def _finish_target_run(
+    status,
+    cycles,
+    *,
+    stop_reason: str,
+    json_output: bool,
+    capture_warnings: list[str] | None = None,
+) -> None:
     """Emit a target's actual projection plus a concise operator next step."""
     status["ok"] = status["status"] == "completed"
     status["stop_reason"] = stop_reason
     status["next_step"] = _target_next_step(status, stop_reason)
     status["cycles"] = cycles
+    status["capture_warnings"] = list(capture_warnings or ())
     _emit_run_result(status, json_output)
     if not status["ok"]:
         raise click.exceptions.Exit(1)
@@ -927,8 +1124,44 @@ def _target_next_step(status: dict, stop_reason: str) -> str:
         )
     if task_status == "blocked_capability":
         return "Register a Worker with the required capability, then rerun this task."
+    if task_status == "blocked_assignment":
+        assignment = status.get("assignment") or {}
+        blocker = assignment.get("blocker") or {}
+        reason = blocker.get("reason", "assignment unavailable")
+        worker_id = blocker.get("worker_id") or assignment.get("worker_id")
+        if reason == "worker_at_capacity":
+            cause = f"assigned Worker {worker_id} is at capacity"
+        elif reason == "disabled_worker":
+            cause = f"assigned Worker {worker_id} is disabled"
+        elif reason == "missing_registration":
+            cause = f"assigned Worker {worker_id} has no active registration"
+        else:
+            cause = f"assigned Worker {worker_id} is unavailable ({reason})"
+        return (
+            f"Resolve the assignment blocker: {cause}. Restore that Worker’s "
+            "registration or capacity; another Worker cannot take over this "
+            "assignment. Use `aig task assignments <CONTRACT_ID>` to copy the "
+            "head. Only if this Contract has never been claimed can you use "
+            "`aig task reassign <CONTRACT_ID> --worker <WORKER_ID> --previous "
+            "<HEAD> --reason <TEXT>`."
+        )
     if task_status == "claimed":
         return "Wait for the active claim to finish, then inspect status and rerun if work remains."
+    if task_status == "submitted":
+        if "qualification:independent_acceptance" in status.get("blockers", ()):
+            return (
+                "The signed Worker claim is already submitted and the exact declared "
+                "business outputs await independent qualification. Inspect `aig task "
+                "reviews <CONTRACT_ID>` and task audit for an existing decision. If "
+                "that decision requests changes, publish its explicit successor with "
+                "`aig task request-changes <DECISION_ID> --reason <TEXT>`; request a "
+                "review only when no exact review exists. Do not rerun or reset this claim."
+            )
+        return (
+            "The Worker claim is already submitted. Inspect task audit for incomplete "
+            "or malformed outputs and any explicitly published recovery; do not reset "
+            "or reuse this claim."
+        )
     if task_status in {"stalled", "failed", "cancelled", "unreachable"}:
         return (
             "Inspect aig task audit; run a recovery successor explicitly if one "
@@ -977,19 +1210,38 @@ def _cycle_trace_scope(window_records) -> tuple[list[str], list[str], int]:
 def _claim_for_pool_host(store, pool_host, candidate_publishers):
     capability = pool_host.required_contract_capability
     if capability is None:
-        return claim_next_package(
+        return claim_next_application_package(
             store,
             worker_id=pool_host.host.worker_id,
             candidate_publishers=candidate_publishers,
+            claim_candidate=pool_host.host.claim_candidate(
+                request_id=f"run-pool-claim:{uuid4().hex}"
+            ),
+            expected_registration_version=pool_host.host.registration_version,
         )
-    for contract in store.get_all_contracts():
-        if capability not in contract.worker_capabilities:
-            continue
-        claimed = claim_next_package(
+    contracts = store.get_all_contracts()
+    if capability is not None:
+        contracts = [
+            contract
+            for contract in contracts
+            if capability in contract.worker_capabilities
+        ]
+    ordered_ids = order_application_contract_ids(
+        store, tuple(contract.id for contract in contracts)
+    )
+    contracts_by_id = {contract.id: contract for contract in contracts}
+    for contract_id in ordered_ids:
+        contract = contracts_by_id[contract_id]
+        claimed = claim_next_application_package(
             store,
             worker_id=pool_host.host.worker_id,
             contract_id=contract.id,
             candidate_publishers=candidate_publishers,
+            claim_candidate=pool_host.host.claim_candidate(
+                request_id=f"run-pool-claim:{uuid4().hex}",
+                contract_id=contract.id,
+            ),
+            expected_registration_version=pool_host.host.registration_version,
         )
         if claimed is not None:
             return claimed
@@ -1014,6 +1266,8 @@ def _emit_run_result(payload: dict, json_output: bool) -> None:
         click.echo(f"recoveries: {', '.join(payload['recoveries'])}")
     if payload.get("failure_categories"):
         click.echo(f"failure_categories: {', '.join(payload['failure_categories'])}")
+    for detail in payload.get("worker_failure_details", ()):
+        click.echo(format_worker_failure_detail(detail))
     if payload.get("next_step"):
         click.echo(f"next_step: {payload['next_step']}")
 
@@ -1099,9 +1353,14 @@ def demo(
             max_retries=max_retries,
             capabilities=capabilities,
             behavior_labels=behavior_labels,
+            capture_db_path=".aig/store.db",
         )
+    except QueryProjectionUnavailable:
+        raise
     except (RuntimeError, WorkerInvocationError) as exc:
         raise click.ClickException(str(exc)) from exc
     click.echo(f"Demo completed for goal: '{goal}'")
+    for warning in _scope.capture_warnings:
+        click.echo(f"capture warning: {warning}")
     click.echo(f"  Contract: {contract.name}")
     click.echo(f"  Assets: {[a.name for a in store.get_all_assets()]}")

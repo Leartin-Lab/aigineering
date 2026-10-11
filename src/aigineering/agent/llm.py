@@ -24,6 +24,20 @@ from aigineering.protocol.usage import (
     normalize_usage_metadata,
 )
 
+
+def _emit_capture_event(event: str, **fields: object) -> None:
+    """Emit fixed retry metadata to the current invocation-local observer."""
+    try:
+        from aigineering.task_logs import current_observer
+
+        observer = current_observer()
+        if observer is not None:
+            observer.emit(event, **fields)
+    except Exception:
+        # Capture is auxiliary and must not change provider retry behavior.
+        return
+
+
 logger = logging.getLogger(__name__)
 
 # Known LLM provider capabilities.  Providers advertise which features they
@@ -395,13 +409,18 @@ class LLMWorker:
             except ProviderError as e:
                 last_error = e
                 if not e.is_retryable:
+                    _emit_capture_event(
+                        "provider.failed", status_code=e.status_code, retryable=False
+                    )
                     logger.warning(
-                        "LLM call failed with non-retryable error %d: %s",
+                        "LLM call failed with non-retryable error status %d",
                         e.status_code,
-                        e,
                     )
                     raise
                 if attempt >= self._max_retries:
+                    _emit_capture_event(
+                        "provider.failed", status_code=e.status_code, retryable=True
+                    )
                     logger.error(
                         "LLM call exhausted %d retries on status %d",
                         self._max_retries,
@@ -409,6 +428,13 @@ class LLMWorker:
                     )
                     raise
                 wait = self._retry_backoff ** (attempt + 1)
+                _emit_capture_event(
+                    "provider.retry",
+                    status_code=e.status_code,
+                    attempt=attempt + 1,
+                    max_retries=self._max_retries,
+                    backoff_seconds=wait,
+                )
                 logger.info(
                     "LLM call retry %d/%d after %.0fs (status %d)",
                     attempt + 1,
@@ -420,6 +446,9 @@ class LLMWorker:
             except (TimeoutError, OSError) as e:
                 last_error = e
                 if attempt >= self._max_retries:
+                    _emit_capture_event(
+                        "provider.failed", status_code=0, retryable=True
+                    )
                     logger.error(
                         "LLM call exhausted %d retries after timeout/network error",
                         self._max_retries,
@@ -429,6 +458,13 @@ class LLMWorker:
                         f"Timeout/network error after {self._max_retries} retries: {e}",
                     ) from e
                 wait = self._retry_backoff ** (attempt + 1)
+                _emit_capture_event(
+                    "provider.retry",
+                    status_code=0,
+                    attempt=attempt + 1,
+                    max_retries=self._max_retries,
+                    backoff_seconds=wait,
+                )
                 logger.info(
                     "LLM call retry %d/%d after %.0fs (timeout/network)",
                     attempt + 1,

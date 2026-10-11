@@ -6,12 +6,24 @@ from collections.abc import Iterable
 from dataclasses import replace
 
 from aigineering.core.record_conflict import ImmutableRecordConflict
-from aigineering.protocol.candidate import ActorKey
+from aigineering.protocol.candidate import ActorKey, CandidateProposal
 from aigineering.protocol.runtime_record import RuntimeRecord
 
 
 ACTOR_AUTHORIZED = "actor.authorized"
 ACTOR_REVOKED = "actor.revoked"
+
+
+def candidate_actor_capabilities(
+    candidate: CandidateProposal, actor_keys: tuple[ActorKey, ...]
+) -> tuple[str, ...]:
+    """Return capabilities from the exact effective key authenticating a Candidate."""
+    key = next(
+        item
+        for item in actor_keys
+        if item.actor_id == candidate.actor_id and item.key_id == candidate.key_id
+    )
+    return key.capabilities
 
 
 def actor_key_payload(key: ActorKey) -> dict[str, object]:

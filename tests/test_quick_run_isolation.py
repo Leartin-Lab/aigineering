@@ -237,7 +237,7 @@ def test_quick_run_claim_selection_executes_expansion_and_recovery_descendants(
 
     claimed = _claim_next_root_tree_package(
         temp_sqlite_store,
-        worker_id=host.worker_id,
+        worker_host=host,
         root_contract_id=root.id,
         candidate_publishers=publishers,
     )
@@ -260,7 +260,7 @@ def test_quick_run_claim_selection_executes_expansion_and_recovery_descendants(
 
     recovered_claim = _claim_next_root_tree_package(
         temp_sqlite_store,
-        worker_id=host.worker_id,
+        worker_host=host,
         root_contract_id=root.id,
         candidate_publishers=publishers,
     )

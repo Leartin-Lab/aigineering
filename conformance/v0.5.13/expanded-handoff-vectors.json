@@ -1,0 +1,3294 @@
+{
+  "canonical_json": {
+    "input": {
+      "": "BMP",
+      "𐀀": "supplementary",
+      "text": "中文 café",
+      "values": [
+        null,
+        true,
+        9007199254740991
+      ]
+    },
+    "expected": "{\"text\":\"中文 café\",\"values\":[null,true,9007199254740991],\"\":\"BMP\",\"𐀀\":\"supplementary\"}"
+  },
+  "ed25519_test_key": {
+    "private_key_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+    "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8"
+  },
+  "format": "aigineering-expanded-handoff-v1",
+  "effect_vectors": [
+    {
+      "name": "zero-source-budget-None",
+      "candidate": {
+        "value": {
+          "id": "candidate:v1:e5002bcf647f8796e2e82734f16325f565905df0e25a6c90908664e3f40f8e62",
+          "signature": "ed25519:foGhnyA2bUBwWOLl85WEIJKnzSWQw6Nl8Pef8gvabDzySvdRBq9W1E1qlSY99cxRj2enKW7F99oKQ84IA/7uAQ==",
+          "actor_id": "human:operator",
+          "causal_parents": [],
+          "domain_id": "genesis:a281981599140dbee751fdc6473c7412881f48613b2f00c27fa060a7ced8420c",
+          "effects": [
+            {
+              "atomic_group": "",
+              "effect_type": "task.handoff",
+              "payload": {
+                "budget": null,
+                "contract_id": "task:v3:2ae5fd4c6efcf39fd8ac2d455b8d23aff64f3df700afde42a5af8614ed284067",
+                "hold_reason": "",
+                "reason": "继续同一目标 café；结束旧执行树"
+              }
+            }
+          ],
+          "idempotency_key": "vector-expanded-None",
+          "key_id": "operator-key",
+          "protocol_version": 1,
+          "signature_kind": "ed25519"
+        },
+        "expected_signing_utf8": "{\"actor_id\":\"human:operator\",\"causal_parents\":[],\"domain_id\":\"genesis:a281981599140dbee751fdc6473c7412881f48613b2f00c27fa060a7ced8420c\",\"effects\":[{\"atomic_group\":\"\",\"effect_type\":\"task.handoff\",\"payload\":{\"budget\":null,\"contract_id\":\"task:v3:2ae5fd4c6efcf39fd8ac2d455b8d23aff64f3df700afde42a5af8614ed284067\",\"hold_reason\":\"\",\"reason\":\"继续同一目标 café；结束旧执行树\"}}],\"idempotency_key\":\"vector-expanded-None\",\"key_id\":\"operator-key\",\"protocol_version\":1,\"signature_kind\":\"ed25519\"}"
+      },
+      "context": {
+        "contracts": [
+          {
+            "id": "task:v3:2ae5fd4c6efcf39fd8ac2d455b8d23aff64f3df700afde42a5af8614ed284067",
+            "parent_id": null,
+            "name": "expanded-source",
+            "description": "root obligation",
+            "inputs": [],
+            "outputs": [
+              "final"
+            ],
+            "activation": "",
+            "budget": 5,
+            "tool_scope": [],
+            "labels": [],
+            "context_asset_ids": [],
+            "worker_capabilities": [],
+            "worker_pools": [],
+            "delegation_capabilities": [],
+            "delegation_pools": [],
+            "origin": "human",
+            "minting_authority": [],
+            "sensitive_input_policy": null,
+            "acceptance_policy": null
+          },
+          {
+            "id": "task:v3:6380f51e48679fc2701703f1430745e03cfa3b7dcd185b01c6dbaa23908a3cd2",
+            "parent_id": "task:v3:2ae5fd4c6efcf39fd8ac2d455b8d23aff64f3df700afde42a5af8614ed284067",
+            "name": "expanded-child",
+            "description": "expanded-child",
+            "inputs": [],
+            "outputs": [],
+            "activation": "",
+            "budget": 5,
+            "tool_scope": [],
+            "labels": [],
+            "context_asset_ids": [],
+            "worker_capabilities": [],
+            "worker_pools": [],
+            "delegation_capabilities": [],
+            "delegation_pools": [],
+            "origin": "human",
+            "minting_authority": [],
+            "sensitive_input_policy": null,
+            "acceptance_policy": null
+          },
+          {
+            "id": "task:v3:cd184f98bca79b2994df1d9605283cf3ea24d2c83bbfac8714fce5c1ad5ed284",
+            "parent_id": "task:v3:6380f51e48679fc2701703f1430745e03cfa3b7dcd185b01c6dbaa23908a3cd2",
+            "name": "expanded-grandchild",
+            "description": "expanded-grandchild",
+            "inputs": [],
+            "outputs": [],
+            "activation": "",
+            "budget": 2,
+            "tool_scope": [],
+            "labels": [],
+            "context_asset_ids": [],
+            "worker_capabilities": [],
+            "worker_pools": [],
+            "delegation_capabilities": [],
+            "delegation_pools": [],
+            "origin": "human",
+            "minting_authority": [],
+            "sensitive_input_policy": null,
+            "acceptance_policy": null
+          },
+          {
+            "id": "task:v3:d13c7626344abe2fadc6e6948d3cc4865a8929f8891c8cdf6b043cd6a576d9d4",
+            "parent_id": "task:v3:cd184f98bca79b2994df1d9605283cf3ea24d2c83bbfac8714fce5c1ad5ed284",
+            "name": "expanded-great-grandchild",
+            "description": "expanded-great-grandchild",
+            "inputs": [],
+            "outputs": [],
+            "activation": "",
+            "budget": 1,
+            "tool_scope": [],
+            "labels": [],
+            "context_asset_ids": [],
+            "worker_capabilities": [],
+            "worker_pools": [],
+            "delegation_capabilities": [],
+            "delegation_pools": [],
+            "origin": "human",
+            "minting_authority": [],
+            "sensitive_input_policy": null,
+            "acceptance_policy": null
+          }
+        ],
+        "assets": [],
+        "runtime_records": [
+          {
+            "id": "record:ca033c9f1e4acefd621c0c8e648ac9b5318a087960fa3f55c78be408dd9eefff",
+            "causal_parents": [],
+            "payload": {
+              "manifest": {
+                "domain": "expanded-handoff",
+                "id": "genesis:a281981599140dbee751fdc6473c7412881f48613b2f00c27fa060a7ced8420c",
+                "policy_hash": "policy:test",
+                "root_keys": [
+                  {
+                    "actor_id": "human:operator",
+                    "capabilities": [
+                      "contract.cancel",
+                      "contract.publish",
+                      "task.block",
+                      "task.handoff"
+                    ],
+                    "key_id": "operator-key",
+                    "kind": "ed25519",
+                    "public_key": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+                    "revoked": false
+                  },
+                  {
+                    "actor_id": "human:revoker",
+                    "capabilities": [
+                      "actor.revoke"
+                    ],
+                    "key_id": "revoker-key",
+                    "kind": "ed25519",
+                    "public_key": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+                    "revoked": false
+                  }
+                ],
+                "schema_version": 1
+              }
+            },
+            "record_type": "domain.genesis",
+            "schema_version": 1
+          },
+          {
+            "id": "record:4dcacd7d853bfd45b6491b4ce4a7e33e9acdfe433c6facd89ba3099e8073b684",
+            "causal_parents": [],
+            "payload": {
+              "actor_id": "human:operator",
+              "candidate_id": "candidate:v1:65e71aba2366dd550c70fc24eb97db14b4222acc830ce39e4b5ad38f29454954",
+              "domain_id": "genesis:a281981599140dbee751fdc6473c7412881f48613b2f00c27fa060a7ced8420c",
+              "effect_types": [
+                "contract.declare"
+              ],
+              "key_id": "operator-key",
+              "metadata": {},
+              "signature": "ed25519:yRfD2rHZT7CacyfsdDYmMSJlLZGhs0TIvoReEkOLF2hhersQwJboE60JBecGEC3hZUMGVqKxrfEcsijgULolBQ==",
+              "signature_kind": "ed25519"
+            },
+            "record_type": "candidate.received",
+            "schema_version": 1
+          },
+          {
+            "id": "record:6b1882a9a52db4ead6114ec23676254f3b998872f6d2b8aa0d360fd69fceba9b",
+            "causal_parents": [
+              "record:4dcacd7d853bfd45b6491b4ce4a7e33e9acdfe433c6facd89ba3099e8073b684"
+            ],
+            "payload": {
+              "candidate_id": "candidate:v1:65e71aba2366dd550c70fc24eb97db14b4222acc830ce39e4b5ad38f29454954",
+              "contract": {
+                "acceptance_policy": null,
+                "activation": "",
+                "budget": 5,
+                "context_asset_ids": [],
+                "delegation_capabilities": [],
+                "delegation_pools": [],
+                "description": "root obligation",
+                "id": "task:v3:2ae5fd4c6efcf39fd8ac2d455b8d23aff64f3df700afde42a5af8614ed284067",
+                "inputs": [],
+                "labels": [],
+                "minting_authority": [],
+                "name": "expanded-source",
+                "origin": "human",
+                "outputs": [
+                  "final"
+                ],
+                "parent_id": null,
+                "sensitive_input_policy": null,
+                "tool_scope": [],
+                "worker_capabilities": [],
+                "worker_pools": []
+              }
+            },
+            "record_type": "contract.declared",
+            "schema_version": 1
+          },
+          {
+            "id": "record:450f551248625ff5a6e725b1895bdf7704f223025032eb2c0e228c497105be8a",
+            "causal_parents": [
+              "record:4dcacd7d853bfd45b6491b4ce4a7e33e9acdfe433c6facd89ba3099e8073b684"
+            ],
+            "payload": {
+              "amount": 5,
+              "contract_id": "task:v3:2ae5fd4c6efcf39fd8ac2d455b8d23aff64f3df700afde42a5af8614ed284067",
+              "grant_id": "grant:task:v3:2ae5fd4c6efcf39fd8ac2d455b8d23aff64f3df700afde42a5af8614ed284067",
+              "purpose": "root",
+              "source_contract_id": ""
+            },
+            "record_type": "allowance.granted",
+            "schema_version": 1
+          },
+          {
+            "id": "record:c007d7c6cb214c36daa3069c8748d99a7b1e2fac51278879a791b9258dd49894",
+            "causal_parents": [
+              "record:4dcacd7d853bfd45b6491b4ce4a7e33e9acdfe433c6facd89ba3099e8073b684",
+              "record:6b1882a9a52db4ead6114ec23676254f3b998872f6d2b8aa0d360fd69fceba9b",
+              "record:450f551248625ff5a6e725b1895bdf7704f223025032eb2c0e228c497105be8a"
+            ],
+            "payload": {
+              "candidate_id": "candidate:v1:65e71aba2366dd550c70fc24eb97db14b4222acc830ce39e4b5ad38f29454954",
+              "committed_record_ids": [
+                "record:6b1882a9a52db4ead6114ec23676254f3b998872f6d2b8aa0d360fd69fceba9b",
+                "record:450f551248625ff5a6e725b1895bdf7704f223025032eb2c0e228c497105be8a"
+              ]
+            },
+            "record_type": "candidate.committed",
+            "schema_version": 1
+          },
+          {
+            "id": "record:e38c72f7fb6902f894c41150cf13ee43122959a0f0380e4b10d2a68004e36a0d",
+            "causal_parents": [],
+            "payload": {
+              "trace": {
+                "accepted_asset_names": [],
+                "accepted_fragments": [
+                  "{\"candidate_id\": \"candidate:v1:65e71aba2366dd550c70fc24eb97db14b4222acc830ce39e4b5ad38f29454954\", \"effect_type\": \"contract.declare\", \"relation_target\": \"task:v3:2ae5fd4c6efcf39fd8ac2d455b8d23aff64f3df700afde42a5af8614ed284067\"}"
+                ],
+                "authority_policy": null,
+                "authority_result": "accepted",
+                "budget_remaining": 0,
+                "candidate_raw": null,
+                "contract_id": "commitment",
+                "disclosed_assets": [],
+                "event_type": "candidate_committed",
+                "id": "event:a68cdc14a735ea3312f9b1daacfa0f22742c2862447feb5359fa5db7a0aa0abb",
+                "parent_id": "candidate:v1:65e71aba2366dd550c70fc24eb97db14b4222acc830ce39e4b5ad38f29454954",
+                "rejected_fragments": [],
+                "relation_target": "task:v3:2ae5fd4c6efcf39fd8ac2d455b8d23aff64f3df700afde42a5af8614ed284067",
+                "relation_type": null,
+                "timestamp": "",
+                "usage_metadata": null,
+                "worker_id": "human:operator"
+              }
+            },
+            "record_type": "trace.recorded",
+            "schema_version": 1
+          },
+          {
+            "id": "record:e2065b3603b0abe8d0fa612ecc11ea9dfe7ce8bfb0552511647342cbb9111db2",
+            "causal_parents": [],
+            "payload": {
+              "actor_id": "human:operator",
+              "candidate_id": "candidate:v1:09ccabeb5c1c67cb74352d80e312f5a7730937eab521f967eed7e6be533f2c8b",
+              "domain_id": "genesis:a281981599140dbee751fdc6473c7412881f48613b2f00c27fa060a7ced8420c",
+              "effect_types": [
+                "contract.declare"
+              ],
+              "key_id": "operator-key",
+              "metadata": {},
+              "signature": "ed25519:/Kg60JcN1g7MzoGK1kmqkc4eTndYyqSx7iknkn7YEE/UDKHXxRyNFBILN4E4+Vn4TwG0dN3QvqiuY/qDnFznDg==",
+              "signature_kind": "ed25519"
+            },
+            "record_type": "candidate.received",
+            "schema_version": 1
+          },
+          {
+            "id": "record:155201e4023ecabb2e1068c5f8f9da4fe1b1cb845b9b89ede56b786c53ff811f",
+            "causal_parents": [
+              "record:e2065b3603b0abe8d0fa612ecc11ea9dfe7ce8bfb0552511647342cbb9111db2"
+            ],
+            "payload": {
+              "candidate_id": "candidate:v1:09ccabeb5c1c67cb74352d80e312f5a7730937eab521f967eed7e6be533f2c8b",
+              "contract": {
+                "acceptance_policy": null,
+                "activation": "",
+                "budget": 5,
+                "context_asset_ids": [],
+                "delegation_capabilities": [],
+                "delegation_pools": [],
+                "description": "expanded-child",
+                "id": "task:v3:6380f51e48679fc2701703f1430745e03cfa3b7dcd185b01c6dbaa23908a3cd2",
+                "inputs": [],
+                "labels": [],
+                "minting_authority": [],
+                "name": "expanded-child",
+                "origin": "human",
+                "outputs": [],
+                "parent_id": "task:v3:2ae5fd4c6efcf39fd8ac2d455b8d23aff64f3df700afde42a5af8614ed284067",
+                "sensitive_input_policy": null,
+                "tool_scope": [],
+                "worker_capabilities": [],
+                "worker_pools": []
+              }
+            },
+            "record_type": "contract.declared",
+            "schema_version": 1
+          },
+          {
+            "id": "record:3587842099e07a29e233c85237c0ed65d63263c2f009f6ad89759eabba24c2c5",
+            "causal_parents": [
+              "record:e2065b3603b0abe8d0fa612ecc11ea9dfe7ce8bfb0552511647342cbb9111db2"
+            ],
+            "payload": {
+              "amount": 5,
+              "child_contract_id": "task:v3:6380f51e48679fc2701703f1430745e03cfa3b7dcd185b01c6dbaa23908a3cd2",
+              "purpose": "execution",
+              "reservation_id": "reservation:9a6c16f7a362cca56315388f012d8782bded1fe211b84a561649da48febafd3f",
+              "source_contract_id": "task:v3:2ae5fd4c6efcf39fd8ac2d455b8d23aff64f3df700afde42a5af8614ed284067"
+            },
+            "record_type": "allowance.reserved",
+            "schema_version": 1
+          },
+          {
+            "id": "record:58a26947adde83c8adcf568ba3c6ec8ca541781a255e191a7048daa23d0b001a",
+            "causal_parents": [
+              "record:3587842099e07a29e233c85237c0ed65d63263c2f009f6ad89759eabba24c2c5"
+            ],
+            "payload": {
+              "amount": 5,
+              "contract_id": "task:v3:6380f51e48679fc2701703f1430745e03cfa3b7dcd185b01c6dbaa23908a3cd2",
+              "grant_id": "grant:task:v3:6380f51e48679fc2701703f1430745e03cfa3b7dcd185b01c6dbaa23908a3cd2",
+              "purpose": "execution",
+              "reservation_id": "reservation:9a6c16f7a362cca56315388f012d8782bded1fe211b84a561649da48febafd3f",
+              "source_contract_id": "task:v3:2ae5fd4c6efcf39fd8ac2d455b8d23aff64f3df700afde42a5af8614ed284067"
+            },
+            "record_type": "allowance.granted",
+            "schema_version": 1
+          },
+          {
+            "id": "record:2a5cfcc0165c0417f112fc2b4ccb9a8cd39413060c479f28fd224af4c95aa73b",
+            "causal_parents": [
+              "record:e2065b3603b0abe8d0fa612ecc11ea9dfe7ce8bfb0552511647342cbb9111db2",
+              "record:155201e4023ecabb2e1068c5f8f9da4fe1b1cb845b9b89ede56b786c53ff811f",
+              "record:3587842099e07a29e233c85237c0ed65d63263c2f009f6ad89759eabba24c2c5",
+              "record:58a26947adde83c8adcf568ba3c6ec8ca541781a255e191a7048daa23d0b001a"
+            ],
+            "payload": {
+              "candidate_id": "candidate:v1:09ccabeb5c1c67cb74352d80e312f5a7730937eab521f967eed7e6be533f2c8b",
+              "committed_record_ids": [
+                "record:155201e4023ecabb2e1068c5f8f9da4fe1b1cb845b9b89ede56b786c53ff811f",
+                "record:3587842099e07a29e233c85237c0ed65d63263c2f009f6ad89759eabba24c2c5",
+                "record:58a26947adde83c8adcf568ba3c6ec8ca541781a255e191a7048daa23d0b001a"
+              ]
+            },
+            "record_type": "candidate.committed",
+            "schema_version": 1
+          },
+          {
+            "id": "record:e63dd2772c0f1f28a7d7f6546b369dbbbed246106b1efe0ad3141f85691e8031",
+            "causal_parents": [],
+            "payload": {
+              "trace": {
+                "accepted_asset_names": [],
+                "accepted_fragments": [
+                  "{\"candidate_id\": \"candidate:v1:09ccabeb5c1c67cb74352d80e312f5a7730937eab521f967eed7e6be533f2c8b\", \"effect_type\": \"contract.declare\", \"relation_target\": \"task:v3:6380f51e48679fc2701703f1430745e03cfa3b7dcd185b01c6dbaa23908a3cd2\"}"
+                ],
+                "authority_policy": null,
+                "authority_result": "accepted",
+                "budget_remaining": 0,
+                "candidate_raw": null,
+                "contract_id": "commitment",
+                "disclosed_assets": [],
+                "event_type": "candidate_committed",
+                "id": "event:9352f1cc207595fea279efbeeab1af981acf0c30ca00371fba4398fbbf8d368b",
+                "parent_id": "candidate:v1:09ccabeb5c1c67cb74352d80e312f5a7730937eab521f967eed7e6be533f2c8b",
+                "rejected_fragments": [],
+                "relation_target": "task:v3:6380f51e48679fc2701703f1430745e03cfa3b7dcd185b01c6dbaa23908a3cd2",
+                "relation_type": null,
+                "timestamp": "",
+                "usage_metadata": null,
+                "worker_id": "human:operator"
+              }
+            },
+            "record_type": "trace.recorded",
+            "schema_version": 1
+          },
+          {
+            "id": "record:1f1e112f42a16a17da24ab93872067c8add14735b50fed0aaec0a2b74af0bddd",
+            "causal_parents": [],
+            "payload": {
+              "actor_id": "human:operator",
+              "candidate_id": "candidate:v1:bdbd917c0e2c88000d0854eb8b7a279b8ab04d11e46eab7608fd2e90a86d207a",
+              "domain_id": "genesis:a281981599140dbee751fdc6473c7412881f48613b2f00c27fa060a7ced8420c",
+              "effect_types": [
+                "contract.declare"
+              ],
+              "key_id": "operator-key",
+              "metadata": {},
+              "signature": "ed25519:ACKxKBfytmbrbEPJOq2tdRR6vwHzCyj1CWXXY8LwpR9tLPDbRv1c4FadxkDK74YGMgrsyTB1w86W0owED59rCg==",
+              "signature_kind": "ed25519"
+            },
+            "record_type": "candidate.received",
+            "schema_version": 1
+          },
+          {
+            "id": "record:f2935f9649119d50f666e54a67306b8930caadabef7d0eb04e5e5f40bcf87a1a",
+            "causal_parents": [
+              "record:1f1e112f42a16a17da24ab93872067c8add14735b50fed0aaec0a2b74af0bddd"
+            ],
+            "payload": {
+              "candidate_id": "candidate:v1:bdbd917c0e2c88000d0854eb8b7a279b8ab04d11e46eab7608fd2e90a86d207a",
+              "contract": {
+                "acceptance_policy": null,
+                "activation": "",
+                "budget": 2,
+                "context_asset_ids": [],
+                "delegation_capabilities": [],
+                "delegation_pools": [],
+                "description": "expanded-grandchild",
+                "id": "task:v3:cd184f98bca79b2994df1d9605283cf3ea24d2c83bbfac8714fce5c1ad5ed284",
+                "inputs": [],
+                "labels": [],
+                "minting_authority": [],
+                "name": "expanded-grandchild",
+                "origin": "human",
+                "outputs": [],
+                "parent_id": "task:v3:6380f51e48679fc2701703f1430745e03cfa3b7dcd185b01c6dbaa23908a3cd2",
+                "sensitive_input_policy": null,
+                "tool_scope": [],
+                "worker_capabilities": [],
+                "worker_pools": []
+              }
+            },
+            "record_type": "contract.declared",
+            "schema_version": 1
+          },
+          {
+            "id": "record:80352276d878dce94a9057eacb4273ab73cf0f138e9b7d6c2d6d20580898fb2f",
+            "causal_parents": [
+              "record:1f1e112f42a16a17da24ab93872067c8add14735b50fed0aaec0a2b74af0bddd"
+            ],
+            "payload": {
+              "amount": 2,
+              "child_contract_id": "task:v3:cd184f98bca79b2994df1d9605283cf3ea24d2c83bbfac8714fce5c1ad5ed284",
+              "purpose": "execution",
+              "reservation_id": "reservation:b0f955766b8dbac0483391aae605f4516c9a3a9022f73790496b889a6f373426",
+              "source_contract_id": "task:v3:6380f51e48679fc2701703f1430745e03cfa3b7dcd185b01c6dbaa23908a3cd2"
+            },
+            "record_type": "allowance.reserved",
+            "schema_version": 1
+          },
+          {
+            "id": "record:adac2ea9c3c4299dca91ccbf1827b74f17a5062038522af10376c3d1f3ac825b",
+            "causal_parents": [
+              "record:80352276d878dce94a9057eacb4273ab73cf0f138e9b7d6c2d6d20580898fb2f"
+            ],
+            "payload": {
+              "amount": 2,
+              "contract_id": "task:v3:cd184f98bca79b2994df1d9605283cf3ea24d2c83bbfac8714fce5c1ad5ed284",
+              "grant_id": "grant:task:v3:cd184f98bca79b2994df1d9605283cf3ea24d2c83bbfac8714fce5c1ad5ed284",
+              "purpose": "execution",
+              "reservation_id": "reservation:b0f955766b8dbac0483391aae605f4516c9a3a9022f73790496b889a6f373426",
+              "source_contract_id": "task:v3:6380f51e48679fc2701703f1430745e03cfa3b7dcd185b01c6dbaa23908a3cd2"
+            },
+            "record_type": "allowance.granted",
+            "schema_version": 1
+          },
+          {
+            "id": "record:303f84fce76cb50fa966f9d9dc65b934a0675f5b2575f5b83846ea31a490b4e6",
+            "causal_parents": [
+              "record:1f1e112f42a16a17da24ab93872067c8add14735b50fed0aaec0a2b74af0bddd",
+              "record:f2935f9649119d50f666e54a67306b8930caadabef7d0eb04e5e5f40bcf87a1a",
+              "record:80352276d878dce94a9057eacb4273ab73cf0f138e9b7d6c2d6d20580898fb2f",
+              "record:adac2ea9c3c4299dca91ccbf1827b74f17a5062038522af10376c3d1f3ac825b"
+            ],
+            "payload": {
+              "candidate_id": "candidate:v1:bdbd917c0e2c88000d0854eb8b7a279b8ab04d11e46eab7608fd2e90a86d207a",
+              "committed_record_ids": [
+                "record:f2935f9649119d50f666e54a67306b8930caadabef7d0eb04e5e5f40bcf87a1a",
+                "record:80352276d878dce94a9057eacb4273ab73cf0f138e9b7d6c2d6d20580898fb2f",
+                "record:adac2ea9c3c4299dca91ccbf1827b74f17a5062038522af10376c3d1f3ac825b"
+              ]
+            },
+            "record_type": "candidate.committed",
+            "schema_version": 1
+          },
+          {
+            "id": "record:69ff3bb816a9160dcd1e2c17272afa9a24327707670ed1a835efe70583246b0d",
+            "causal_parents": [],
+            "payload": {
+              "trace": {
+                "accepted_asset_names": [],
+                "accepted_fragments": [
+                  "{\"candidate_id\": \"candidate:v1:bdbd917c0e2c88000d0854eb8b7a279b8ab04d11e46eab7608fd2e90a86d207a\", \"effect_type\": \"contract.declare\", \"relation_target\": \"task:v3:cd184f98bca79b2994df1d9605283cf3ea24d2c83bbfac8714fce5c1ad5ed284\"}"
+                ],
+                "authority_policy": null,
+                "authority_result": "accepted",
+                "budget_remaining": 0,
+                "candidate_raw": null,
+                "contract_id": "commitment",
+                "disclosed_assets": [],
+                "event_type": "candidate_committed",
+                "id": "event:ab470955c5e003fcf4f986297d167bdc584dca28faf5dbefaf821b55aa439b46",
+                "parent_id": "candidate:v1:bdbd917c0e2c88000d0854eb8b7a279b8ab04d11e46eab7608fd2e90a86d207a",
+                "rejected_fragments": [],
+                "relation_target": "task:v3:cd184f98bca79b2994df1d9605283cf3ea24d2c83bbfac8714fce5c1ad5ed284",
+                "relation_type": null,
+                "timestamp": "",
+                "usage_metadata": null,
+                "worker_id": "human:operator"
+              }
+            },
+            "record_type": "trace.recorded",
+            "schema_version": 1
+          },
+          {
+            "id": "record:9866011e888a238cee89002d51a6ff57b3052ac9457545e7b23bdfd5a7edcbdb",
+            "causal_parents": [],
+            "payload": {
+              "actor_id": "human:operator",
+              "candidate_id": "candidate:v1:a755441e0a7f04345d12c5f83ed318ff274202b1185f7078f0e8c4eb06359b12",
+              "domain_id": "genesis:a281981599140dbee751fdc6473c7412881f48613b2f00c27fa060a7ced8420c",
+              "effect_types": [
+                "contract.declare"
+              ],
+              "key_id": "operator-key",
+              "metadata": {},
+              "signature": "ed25519:Xycm0LzZXKoYHvx97PHxS4ad8yyLoGBs+C7XaDFhfU+YC4ZWklzec4gEY11wQ3ntXPcki7Zu6PwQ+QyyOeNaDg==",
+              "signature_kind": "ed25519"
+            },
+            "record_type": "candidate.received",
+            "schema_version": 1
+          },
+          {
+            "id": "record:72b0641757dd960f6080d549970529f9f0063abffe7a74868edbc94f1b0e7ef7",
+            "causal_parents": [
+              "record:9866011e888a238cee89002d51a6ff57b3052ac9457545e7b23bdfd5a7edcbdb"
+            ],
+            "payload": {
+              "candidate_id": "candidate:v1:a755441e0a7f04345d12c5f83ed318ff274202b1185f7078f0e8c4eb06359b12",
+              "contract": {
+                "acceptance_policy": null,
+                "activation": "",
+                "budget": 1,
+                "context_asset_ids": [],
+                "delegation_capabilities": [],
+                "delegation_pools": [],
+                "description": "expanded-great-grandchild",
+                "id": "task:v3:d13c7626344abe2fadc6e6948d3cc4865a8929f8891c8cdf6b043cd6a576d9d4",
+                "inputs": [],
+                "labels": [],
+                "minting_authority": [],
+                "name": "expanded-great-grandchild",
+                "origin": "human",
+                "outputs": [],
+                "parent_id": "task:v3:cd184f98bca79b2994df1d9605283cf3ea24d2c83bbfac8714fce5c1ad5ed284",
+                "sensitive_input_policy": null,
+                "tool_scope": [],
+                "worker_capabilities": [],
+                "worker_pools": []
+              }
+            },
+            "record_type": "contract.declared",
+            "schema_version": 1
+          },
+          {
+            "id": "record:b62f954c59d35371522fbef485722cba04863b8daeec7e61d08ccc1f05e32dfd",
+            "causal_parents": [
+              "record:9866011e888a238cee89002d51a6ff57b3052ac9457545e7b23bdfd5a7edcbdb"
+            ],
+            "payload": {
+              "amount": 1,
+              "child_contract_id": "task:v3:d13c7626344abe2fadc6e6948d3cc4865a8929f8891c8cdf6b043cd6a576d9d4",
+              "purpose": "execution",
+              "reservation_id": "reservation:9793e67d0a860f2457360b923497bde9736ef810a9aa1ab97ac9ba17e7ea4f8f",
+              "source_contract_id": "task:v3:cd184f98bca79b2994df1d9605283cf3ea24d2c83bbfac8714fce5c1ad5ed284"
+            },
+            "record_type": "allowance.reserved",
+            "schema_version": 1
+          },
+          {
+            "id": "record:f98de48bf59cfbc57bcbfee767c129497e17ff40ab3b4437036b4d5629067004",
+            "causal_parents": [
+              "record:b62f954c59d35371522fbef485722cba04863b8daeec7e61d08ccc1f05e32dfd"
+            ],
+            "payload": {
+              "amount": 1,
+              "contract_id": "task:v3:d13c7626344abe2fadc6e6948d3cc4865a8929f8891c8cdf6b043cd6a576d9d4",
+              "grant_id": "grant:task:v3:d13c7626344abe2fadc6e6948d3cc4865a8929f8891c8cdf6b043cd6a576d9d4",
+              "purpose": "execution",
+              "reservation_id": "reservation:9793e67d0a860f2457360b923497bde9736ef810a9aa1ab97ac9ba17e7ea4f8f",
+              "source_contract_id": "task:v3:cd184f98bca79b2994df1d9605283cf3ea24d2c83bbfac8714fce5c1ad5ed284"
+            },
+            "record_type": "allowance.granted",
+            "schema_version": 1
+          },
+          {
+            "id": "record:aee3d0bd6bdee17749161efb88f981e750a650f53a58d16eeca2c3a1cbf7ccaf",
+            "causal_parents": [
+              "record:9866011e888a238cee89002d51a6ff57b3052ac9457545e7b23bdfd5a7edcbdb",
+              "record:72b0641757dd960f6080d549970529f9f0063abffe7a74868edbc94f1b0e7ef7",
+              "record:b62f954c59d35371522fbef485722cba04863b8daeec7e61d08ccc1f05e32dfd",
+              "record:f98de48bf59cfbc57bcbfee767c129497e17ff40ab3b4437036b4d5629067004"
+            ],
+            "payload": {
+              "candidate_id": "candidate:v1:a755441e0a7f04345d12c5f83ed318ff274202b1185f7078f0e8c4eb06359b12",
+              "committed_record_ids": [
+                "record:72b0641757dd960f6080d549970529f9f0063abffe7a74868edbc94f1b0e7ef7",
+                "record:b62f954c59d35371522fbef485722cba04863b8daeec7e61d08ccc1f05e32dfd",
+                "record:f98de48bf59cfbc57bcbfee767c129497e17ff40ab3b4437036b4d5629067004"
+              ]
+            },
+            "record_type": "candidate.committed",
+            "schema_version": 1
+          },
+          {
+            "id": "record:67ba524720c30f44971cca9fe466c982b23f45c1a3f1dd811b5c83cb318295a2",
+            "causal_parents": [],
+            "payload": {
+              "trace": {
+                "accepted_asset_names": [],
+                "accepted_fragments": [
+                  "{\"candidate_id\": \"candidate:v1:a755441e0a7f04345d12c5f83ed318ff274202b1185f7078f0e8c4eb06359b12\", \"effect_type\": \"contract.declare\", \"relation_target\": \"task:v3:d13c7626344abe2fadc6e6948d3cc4865a8929f8891c8cdf6b043cd6a576d9d4\"}"
+                ],
+                "authority_policy": null,
+                "authority_result": "accepted",
+                "budget_remaining": 0,
+                "candidate_raw": null,
+                "contract_id": "commitment",
+                "disclosed_assets": [],
+                "event_type": "candidate_committed",
+                "id": "event:7ea245c818fee31188e5ee5dabb5ac5816b5ee41bfa2b429807478de92627cf4",
+                "parent_id": "candidate:v1:a755441e0a7f04345d12c5f83ed318ff274202b1185f7078f0e8c4eb06359b12",
+                "rejected_fragments": [],
+                "relation_target": "task:v3:d13c7626344abe2fadc6e6948d3cc4865a8929f8891c8cdf6b043cd6a576d9d4",
+                "relation_type": null,
+                "timestamp": "",
+                "usage_metadata": null,
+                "worker_id": "human:operator"
+              }
+            },
+            "record_type": "trace.recorded",
+            "schema_version": 1
+          }
+        ]
+      },
+      "records": [
+        {
+          "id": "record:41ea785d4261c837fddebb0f178da7208af476e4857eb70602e909d57d13f2fd",
+          "causal_parents": [
+            "record:afce4a0756a4361f3c842e19abe4494c178fc9e7752e515d43c12ff16a4299af"
+          ],
+          "payload": {
+            "contract_id": "task:v3:2ae5fd4c6efcf39fd8ac2d455b8d23aff64f3df700afde42a5af8614ed284067",
+            "terminal": "cancelled",
+            "reason": "继续同一目标 café；结束旧执行树",
+            "actor_id": "human:operator"
+          },
+          "record_type": "lifecycle.terminal",
+          "schema_version": 1
+        },
+        {
+          "id": "record:29ca18fa275f69f3e7955f1f7a1b4f5e21711d8dd9e39f3bfe1f477d4ea452ab",
+          "causal_parents": [
+            "record:afce4a0756a4361f3c842e19abe4494c178fc9e7752e515d43c12ff16a4299af"
+          ],
+          "payload": {
+            "contract_id": "task:v3:6380f51e48679fc2701703f1430745e03cfa3b7dcd185b01c6dbaa23908a3cd2",
+            "terminal": "cancelled",
+            "reason": "继续同一目标 café；结束旧执行树",
+            "actor_id": "human:operator"
+          },
+          "record_type": "lifecycle.terminal",
+          "schema_version": 1
+        },
+        {
+          "id": "record:3d43459ca184d155a7f727d971ed697bb3825ebcdcd8bf733abd20ea3150d862",
+          "causal_parents": [
+            "record:afce4a0756a4361f3c842e19abe4494c178fc9e7752e515d43c12ff16a4299af"
+          ],
+          "payload": {
+            "contract_id": "task:v3:cd184f98bca79b2994df1d9605283cf3ea24d2c83bbfac8714fce5c1ad5ed284",
+            "terminal": "cancelled",
+            "reason": "继续同一目标 café；结束旧执行树",
+            "actor_id": "human:operator"
+          },
+          "record_type": "lifecycle.terminal",
+          "schema_version": 1
+        },
+        {
+          "id": "record:3b9dd07ab33e3cea39b88ce569a07c0d0056d084de2f3d86b1dc0c4e2630d0c4",
+          "causal_parents": [
+            "record:afce4a0756a4361f3c842e19abe4494c178fc9e7752e515d43c12ff16a4299af"
+          ],
+          "payload": {
+            "contract_id": "task:v3:d13c7626344abe2fadc6e6948d3cc4865a8929f8891c8cdf6b043cd6a576d9d4",
+            "terminal": "cancelled",
+            "reason": "继续同一目标 café；结束旧执行树",
+            "actor_id": "human:operator"
+          },
+          "record_type": "lifecycle.terminal",
+          "schema_version": 1
+        },
+        {
+          "id": "record:b9b4f6b64ce9d274dca25a7ad76ae1938d426a63cd58cf3d8a733483cf226461",
+          "causal_parents": [
+            "record:afce4a0756a4361f3c842e19abe4494c178fc9e7752e515d43c12ff16a4299af",
+            "record:29ca18fa275f69f3e7955f1f7a1b4f5e21711d8dd9e39f3bfe1f477d4ea452ab",
+            "record:450f551248625ff5a6e725b1895bdf7704f223025032eb2c0e228c497105be8a",
+            "record:3587842099e07a29e233c85237c0ed65d63263c2f009f6ad89759eabba24c2c5",
+            "record:58a26947adde83c8adcf568ba3c6ec8ca541781a255e191a7048daa23d0b001a"
+          ],
+          "payload": {
+            "amount": 3,
+            "candidate_id": "candidate:v1:e5002bcf647f8796e2e82734f16325f565905df0e25a6c90908664e3f40f8e62",
+            "cancellation_record_id": "record:29ca18fa275f69f3e7955f1f7a1b4f5e21711d8dd9e39f3bfe1f477d4ea452ab",
+            "from_contract_id": "task:v3:6380f51e48679fc2701703f1430745e03cfa3b7dcd185b01c6dbaa23908a3cd2",
+            "funding_path_record_ids": [
+              "record:450f551248625ff5a6e725b1895bdf7704f223025032eb2c0e228c497105be8a",
+              "record:3587842099e07a29e233c85237c0ed65d63263c2f009f6ad89759eabba24c2c5",
+              "record:58a26947adde83c8adcf568ba3c6ec8ca541781a255e191a7048daa23d0b001a"
+            ],
+            "receipt_id": "record:afce4a0756a4361f3c842e19abe4494c178fc9e7752e515d43c12ff16a4299af",
+            "return_id": "return:14727097c4e429addd2ee6140f1945c11cf0197f6894debf021e3b0f6cf31824",
+            "source_contract_id": "task:v3:2ae5fd4c6efcf39fd8ac2d455b8d23aff64f3df700afde42a5af8614ed284067"
+          },
+          "record_type": "allowance.returned",
+          "schema_version": 1
+        },
+        {
+          "id": "record:afee68bbee339627332e997bde7f2b96c29a63a9439c1be0927800dbde2382b8",
+          "causal_parents": [
+            "record:afce4a0756a4361f3c842e19abe4494c178fc9e7752e515d43c12ff16a4299af",
+            "record:3d43459ca184d155a7f727d971ed697bb3825ebcdcd8bf733abd20ea3150d862",
+            "record:450f551248625ff5a6e725b1895bdf7704f223025032eb2c0e228c497105be8a",
+            "record:80352276d878dce94a9057eacb4273ab73cf0f138e9b7d6c2d6d20580898fb2f",
+            "record:adac2ea9c3c4299dca91ccbf1827b74f17a5062038522af10376c3d1f3ac825b",
+            "record:3587842099e07a29e233c85237c0ed65d63263c2f009f6ad89759eabba24c2c5",
+            "record:58a26947adde83c8adcf568ba3c6ec8ca541781a255e191a7048daa23d0b001a"
+          ],
+          "payload": {
+            "amount": 1,
+            "candidate_id": "candidate:v1:e5002bcf647f8796e2e82734f16325f565905df0e25a6c90908664e3f40f8e62",
+            "cancellation_record_id": "record:3d43459ca184d155a7f727d971ed697bb3825ebcdcd8bf733abd20ea3150d862",
+            "from_contract_id": "task:v3:cd184f98bca79b2994df1d9605283cf3ea24d2c83bbfac8714fce5c1ad5ed284",
+            "funding_path_record_ids": [
+              "record:450f551248625ff5a6e725b1895bdf7704f223025032eb2c0e228c497105be8a",
+              "record:80352276d878dce94a9057eacb4273ab73cf0f138e9b7d6c2d6d20580898fb2f",
+              "record:adac2ea9c3c4299dca91ccbf1827b74f17a5062038522af10376c3d1f3ac825b",
+              "record:3587842099e07a29e233c85237c0ed65d63263c2f009f6ad89759eabba24c2c5",
+              "record:58a26947adde83c8adcf568ba3c6ec8ca541781a255e191a7048daa23d0b001a"
+            ],
+            "receipt_id": "record:afce4a0756a4361f3c842e19abe4494c178fc9e7752e515d43c12ff16a4299af",
+            "return_id": "return:6e5b178f44ce29d7b00e63d63a3d90c67f0fa248bcf2ad41881b75a5b2001dd2",
+            "source_contract_id": "task:v3:2ae5fd4c6efcf39fd8ac2d455b8d23aff64f3df700afde42a5af8614ed284067"
+          },
+          "record_type": "allowance.returned",
+          "schema_version": 1
+        },
+        {
+          "id": "record:18a6bb4b96398732bced102a24735347cce3f8622ee103c116def42259312760",
+          "causal_parents": [
+            "record:afce4a0756a4361f3c842e19abe4494c178fc9e7752e515d43c12ff16a4299af",
+            "record:3b9dd07ab33e3cea39b88ce569a07c0d0056d084de2f3d86b1dc0c4e2630d0c4",
+            "record:450f551248625ff5a6e725b1895bdf7704f223025032eb2c0e228c497105be8a",
+            "record:b62f954c59d35371522fbef485722cba04863b8daeec7e61d08ccc1f05e32dfd",
+            "record:f98de48bf59cfbc57bcbfee767c129497e17ff40ab3b4437036b4d5629067004",
+            "record:80352276d878dce94a9057eacb4273ab73cf0f138e9b7d6c2d6d20580898fb2f",
+            "record:adac2ea9c3c4299dca91ccbf1827b74f17a5062038522af10376c3d1f3ac825b",
+            "record:3587842099e07a29e233c85237c0ed65d63263c2f009f6ad89759eabba24c2c5",
+            "record:58a26947adde83c8adcf568ba3c6ec8ca541781a255e191a7048daa23d0b001a"
+          ],
+          "payload": {
+            "amount": 1,
+            "candidate_id": "candidate:v1:e5002bcf647f8796e2e82734f16325f565905df0e25a6c90908664e3f40f8e62",
+            "cancellation_record_id": "record:3b9dd07ab33e3cea39b88ce569a07c0d0056d084de2f3d86b1dc0c4e2630d0c4",
+            "from_contract_id": "task:v3:d13c7626344abe2fadc6e6948d3cc4865a8929f8891c8cdf6b043cd6a576d9d4",
+            "funding_path_record_ids": [
+              "record:450f551248625ff5a6e725b1895bdf7704f223025032eb2c0e228c497105be8a",
+              "record:b62f954c59d35371522fbef485722cba04863b8daeec7e61d08ccc1f05e32dfd",
+              "record:f98de48bf59cfbc57bcbfee767c129497e17ff40ab3b4437036b4d5629067004",
+              "record:80352276d878dce94a9057eacb4273ab73cf0f138e9b7d6c2d6d20580898fb2f",
+              "record:adac2ea9c3c4299dca91ccbf1827b74f17a5062038522af10376c3d1f3ac825b",
+              "record:3587842099e07a29e233c85237c0ed65d63263c2f009f6ad89759eabba24c2c5",
+              "record:58a26947adde83c8adcf568ba3c6ec8ca541781a255e191a7048daa23d0b001a"
+            ],
+            "receipt_id": "record:afce4a0756a4361f3c842e19abe4494c178fc9e7752e515d43c12ff16a4299af",
+            "return_id": "return:a9fbb93501ae4e0245438427f639c33cec8a549b453580d43d16f3c36490314a",
+            "source_contract_id": "task:v3:2ae5fd4c6efcf39fd8ac2d455b8d23aff64f3df700afde42a5af8614ed284067"
+          },
+          "record_type": "allowance.returned",
+          "schema_version": 1
+        },
+        {
+          "id": "record:2cb2af992b76a0c9bc97031ce4ea3de40a037b36ec4d30bc142926472f48d24a",
+          "causal_parents": [
+            "record:afce4a0756a4361f3c842e19abe4494c178fc9e7752e515d43c12ff16a4299af"
+          ],
+          "payload": {
+            "candidate_id": "candidate:v1:e5002bcf647f8796e2e82734f16325f565905df0e25a6c90908664e3f40f8e62",
+            "contract": {
+              "id": "task:v6:a7609d805861254525583c55640eb73c100294cd76e7b59901dfd1e2c59e82e1",
+              "parent_id": "task:v3:2ae5fd4c6efcf39fd8ac2d455b8d23aff64f3df700afde42a5af8614ed284067",
+              "name": "expanded-source.handoff.expanded.e5002bcf647f8796e2e82734f16325f565905df0e25a6c90908664e3f40f8e62",
+              "description": "root obligation\n\nTask handoff reason: 继续同一目标 café；结束旧执行树",
+              "inputs": [],
+              "outputs": [
+                "final"
+              ],
+              "activation": "",
+              "budget": 5,
+              "tool_scope": [],
+              "labels": [],
+              "context_asset_ids": [],
+              "worker_capabilities": [],
+              "worker_pools": [],
+              "delegation_capabilities": [],
+              "delegation_pools": [],
+              "origin": "human",
+              "minting_authority": [],
+              "sensitive_input_policy": {
+                "input_asset_bindings": {}
+              },
+              "acceptance_policy": null
+            }
+          },
+          "record_type": "contract.declared",
+          "schema_version": 1
+        },
+        {
+          "id": "record:0600ff81eca81b4e96224a9e2636906d9a5e4ffec5a4460e8e9431ec5e947b72",
+          "causal_parents": [
+            "record:afce4a0756a4361f3c842e19abe4494c178fc9e7752e515d43c12ff16a4299af",
+            "record:41ea785d4261c837fddebb0f178da7208af476e4857eb70602e909d57d13f2fd",
+            "record:2cb2af992b76a0c9bc97031ce4ea3de40a037b36ec4d30bc142926472f48d24a",
+            "record:29ca18fa275f69f3e7955f1f7a1b4f5e21711d8dd9e39f3bfe1f477d4ea452ab",
+            "record:3d43459ca184d155a7f727d971ed697bb3825ebcdcd8bf733abd20ea3150d862",
+            "record:3b9dd07ab33e3cea39b88ce569a07c0d0056d084de2f3d86b1dc0c4e2630d0c4",
+            "record:b9b4f6b64ce9d274dca25a7ad76ae1938d426a63cd58cf3d8a733483cf226461",
+            "record:afee68bbee339627332e997bde7f2b96c29a63a9439c1be0927800dbde2382b8",
+            "record:18a6bb4b96398732bced102a24735347cce3f8622ee103c116def42259312760"
+          ],
+          "payload": {
+            "actor_id": "human:operator",
+            "allowance_returns": [
+              {
+                "donor_contract_id": "task:v3:6380f51e48679fc2701703f1430745e03cfa3b7dcd185b01c6dbaa23908a3cd2",
+                "amount": 3,
+                "record_id": "record:b9b4f6b64ce9d274dca25a7ad76ae1938d426a63cd58cf3d8a733483cf226461"
+              },
+              {
+                "donor_contract_id": "task:v3:cd184f98bca79b2994df1d9605283cf3ea24d2c83bbfac8714fce5c1ad5ed284",
+                "amount": 1,
+                "record_id": "record:afee68bbee339627332e997bde7f2b96c29a63a9439c1be0927800dbde2382b8"
+              },
+              {
+                "donor_contract_id": "task:v3:d13c7626344abe2fadc6e6948d3cc4865a8929f8891c8cdf6b043cd6a576d9d4",
+                "amount": 1,
+                "record_id": "record:18a6bb4b96398732bced102a24735347cce3f8622ee103c116def42259312760"
+              }
+            ],
+            "budget": 5,
+            "candidate_id": "candidate:v1:e5002bcf647f8796e2e82734f16325f565905df0e25a6c90908664e3f40f8e62",
+            "cancel_record_ids": [
+              "record:29ca18fa275f69f3e7955f1f7a1b4f5e21711d8dd9e39f3bfe1f477d4ea452ab",
+              "record:3d43459ca184d155a7f727d971ed697bb3825ebcdcd8bf733abd20ea3150d862",
+              "record:3b9dd07ab33e3cea39b88ce569a07c0d0056d084de2f3d86b1dc0c4e2630d0c4"
+            ],
+            "cancelled_contract_ids": [
+              "task:v3:6380f51e48679fc2701703f1430745e03cfa3b7dcd185b01c6dbaa23908a3cd2",
+              "task:v3:cd184f98bca79b2994df1d9605283cf3ea24d2c83bbfac8714fce5c1ad5ed284",
+              "task:v3:d13c7626344abe2fadc6e6948d3cc4865a8929f8891c8cdf6b043cd6a576d9d4"
+            ],
+            "completed_outputs": [],
+            "contract_id": "task:v3:2ae5fd4c6efcf39fd8ac2d455b8d23aff64f3df700afde42a5af8614ed284067",
+            "hold_id": "",
+            "key_id": "operator-key",
+            "preserved_contract_ids": [],
+            "reason": "继续同一目标 café；结束旧执行树",
+            "retained_output_proofs": {},
+            "repair_output_proofs": {},
+            "repair_record_ids": [],
+            "repair_contract_ids": [],
+            "retained_asset_ids": [],
+            "return_record_ids": [
+              "record:b9b4f6b64ce9d274dca25a7ad76ae1938d426a63cd58cf3d8a733483cf226461",
+              "record:afee68bbee339627332e997bde7f2b96c29a63a9439c1be0927800dbde2382b8",
+              "record:18a6bb4b96398732bced102a24735347cce3f8622ee103c116def42259312760"
+            ],
+            "returned_allowance": 5,
+            "source_original_balance": 0,
+            "successor_id": "task:v6:a7609d805861254525583c55640eb73c100294cd76e7b59901dfd1e2c59e82e1"
+          },
+          "record_type": "task.handed_off",
+          "schema_version": 1
+        }
+      ],
+      "contract": {
+        "id": "task:v6:a7609d805861254525583c55640eb73c100294cd76e7b59901dfd1e2c59e82e1",
+        "parent_id": "task:v3:2ae5fd4c6efcf39fd8ac2d455b8d23aff64f3df700afde42a5af8614ed284067",
+        "name": "expanded-source.handoff.expanded.e5002bcf647f8796e2e82734f16325f565905df0e25a6c90908664e3f40f8e62",
+        "description": "root obligation\n\nTask handoff reason: 继续同一目标 café；结束旧执行树",
+        "inputs": [],
+        "outputs": [
+          "final"
+        ],
+        "activation": "",
+        "budget": 5,
+        "tool_scope": [],
+        "labels": [],
+        "context_asset_ids": [],
+        "worker_capabilities": [],
+        "worker_pools": [],
+        "delegation_capabilities": [],
+        "delegation_pools": [],
+        "origin": "human",
+        "minting_authority": [],
+        "sensitive_input_policy": {
+          "input_asset_bindings": {}
+        },
+        "acceptance_policy": null
+      },
+      "additional_capabilities": [
+        "contract.cancel",
+        "contract.publish"
+      ]
+    },
+    {
+      "name": "exact-replay-after-tree-cancellation",
+      "candidate": {
+        "value": {
+          "id": "candidate:v1:e5002bcf647f8796e2e82734f16325f565905df0e25a6c90908664e3f40f8e62",
+          "signature": "ed25519:foGhnyA2bUBwWOLl85WEIJKnzSWQw6Nl8Pef8gvabDzySvdRBq9W1E1qlSY99cxRj2enKW7F99oKQ84IA/7uAQ==",
+          "actor_id": "human:operator",
+          "causal_parents": [],
+          "domain_id": "genesis:a281981599140dbee751fdc6473c7412881f48613b2f00c27fa060a7ced8420c",
+          "effects": [
+            {
+              "atomic_group": "",
+              "effect_type": "task.handoff",
+              "payload": {
+                "budget": null,
+                "contract_id": "task:v3:2ae5fd4c6efcf39fd8ac2d455b8d23aff64f3df700afde42a5af8614ed284067",
+                "hold_reason": "",
+                "reason": "继续同一目标 café；结束旧执行树"
+              }
+            }
+          ],
+          "idempotency_key": "vector-expanded-None",
+          "key_id": "operator-key",
+          "protocol_version": 1,
+          "signature_kind": "ed25519"
+        },
+        "expected_signing_utf8": "{\"actor_id\":\"human:operator\",\"causal_parents\":[],\"domain_id\":\"genesis:a281981599140dbee751fdc6473c7412881f48613b2f00c27fa060a7ced8420c\",\"effects\":[{\"atomic_group\":\"\",\"effect_type\":\"task.handoff\",\"payload\":{\"budget\":null,\"contract_id\":\"task:v3:2ae5fd4c6efcf39fd8ac2d455b8d23aff64f3df700afde42a5af8614ed284067\",\"hold_reason\":\"\",\"reason\":\"继续同一目标 café；结束旧执行树\"}}],\"idempotency_key\":\"vector-expanded-None\",\"key_id\":\"operator-key\",\"protocol_version\":1,\"signature_kind\":\"ed25519\"}"
+      },
+      "context": {
+        "contracts": [
+          {
+            "id": "task:v3:2ae5fd4c6efcf39fd8ac2d455b8d23aff64f3df700afde42a5af8614ed284067",
+            "parent_id": null,
+            "name": "expanded-source",
+            "description": "root obligation",
+            "inputs": [],
+            "outputs": [
+              "final"
+            ],
+            "activation": "",
+            "budget": 5,
+            "tool_scope": [],
+            "labels": [],
+            "context_asset_ids": [],
+            "worker_capabilities": [],
+            "worker_pools": [],
+            "delegation_capabilities": [],
+            "delegation_pools": [],
+            "origin": "human",
+            "minting_authority": [],
+            "sensitive_input_policy": null,
+            "acceptance_policy": null
+          },
+          {
+            "id": "task:v3:6380f51e48679fc2701703f1430745e03cfa3b7dcd185b01c6dbaa23908a3cd2",
+            "parent_id": "task:v3:2ae5fd4c6efcf39fd8ac2d455b8d23aff64f3df700afde42a5af8614ed284067",
+            "name": "expanded-child",
+            "description": "expanded-child",
+            "inputs": [],
+            "outputs": [],
+            "activation": "",
+            "budget": 5,
+            "tool_scope": [],
+            "labels": [],
+            "context_asset_ids": [],
+            "worker_capabilities": [],
+            "worker_pools": [],
+            "delegation_capabilities": [],
+            "delegation_pools": [],
+            "origin": "human",
+            "minting_authority": [],
+            "sensitive_input_policy": null,
+            "acceptance_policy": null
+          },
+          {
+            "id": "task:v3:cd184f98bca79b2994df1d9605283cf3ea24d2c83bbfac8714fce5c1ad5ed284",
+            "parent_id": "task:v3:6380f51e48679fc2701703f1430745e03cfa3b7dcd185b01c6dbaa23908a3cd2",
+            "name": "expanded-grandchild",
+            "description": "expanded-grandchild",
+            "inputs": [],
+            "outputs": [],
+            "activation": "",
+            "budget": 2,
+            "tool_scope": [],
+            "labels": [],
+            "context_asset_ids": [],
+            "worker_capabilities": [],
+            "worker_pools": [],
+            "delegation_capabilities": [],
+            "delegation_pools": [],
+            "origin": "human",
+            "minting_authority": [],
+            "sensitive_input_policy": null,
+            "acceptance_policy": null
+          },
+          {
+            "id": "task:v3:d13c7626344abe2fadc6e6948d3cc4865a8929f8891c8cdf6b043cd6a576d9d4",
+            "parent_id": "task:v3:cd184f98bca79b2994df1d9605283cf3ea24d2c83bbfac8714fce5c1ad5ed284",
+            "name": "expanded-great-grandchild",
+            "description": "expanded-great-grandchild",
+            "inputs": [],
+            "outputs": [],
+            "activation": "",
+            "budget": 1,
+            "tool_scope": [],
+            "labels": [],
+            "context_asset_ids": [],
+            "worker_capabilities": [],
+            "worker_pools": [],
+            "delegation_capabilities": [],
+            "delegation_pools": [],
+            "origin": "human",
+            "minting_authority": [],
+            "sensitive_input_policy": null,
+            "acceptance_policy": null
+          },
+          {
+            "id": "task:v6:a7609d805861254525583c55640eb73c100294cd76e7b59901dfd1e2c59e82e1",
+            "parent_id": "task:v3:2ae5fd4c6efcf39fd8ac2d455b8d23aff64f3df700afde42a5af8614ed284067",
+            "name": "expanded-source.handoff.expanded.e5002bcf647f8796e2e82734f16325f565905df0e25a6c90908664e3f40f8e62",
+            "description": "root obligation\n\nTask handoff reason: 继续同一目标 café；结束旧执行树",
+            "inputs": [],
+            "outputs": [
+              "final"
+            ],
+            "activation": "",
+            "budget": 5,
+            "tool_scope": [],
+            "labels": [],
+            "context_asset_ids": [],
+            "worker_capabilities": [],
+            "worker_pools": [],
+            "delegation_capabilities": [],
+            "delegation_pools": [],
+            "origin": "human",
+            "minting_authority": [],
+            "sensitive_input_policy": {
+              "input_asset_bindings": {}
+            },
+            "acceptance_policy": null
+          }
+        ],
+        "assets": [],
+        "runtime_records": [
+          {
+            "id": "record:ca033c9f1e4acefd621c0c8e648ac9b5318a087960fa3f55c78be408dd9eefff",
+            "causal_parents": [],
+            "payload": {
+              "manifest": {
+                "domain": "expanded-handoff",
+                "id": "genesis:a281981599140dbee751fdc6473c7412881f48613b2f00c27fa060a7ced8420c",
+                "policy_hash": "policy:test",
+                "root_keys": [
+                  {
+                    "actor_id": "human:operator",
+                    "capabilities": [
+                      "contract.cancel",
+                      "contract.publish",
+                      "task.block",
+                      "task.handoff"
+                    ],
+                    "key_id": "operator-key",
+                    "kind": "ed25519",
+                    "public_key": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+                    "revoked": false
+                  },
+                  {
+                    "actor_id": "human:revoker",
+                    "capabilities": [
+                      "actor.revoke"
+                    ],
+                    "key_id": "revoker-key",
+                    "kind": "ed25519",
+                    "public_key": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+                    "revoked": false
+                  }
+                ],
+                "schema_version": 1
+              }
+            },
+            "record_type": "domain.genesis",
+            "schema_version": 1
+          },
+          {
+            "id": "record:4dcacd7d853bfd45b6491b4ce4a7e33e9acdfe433c6facd89ba3099e8073b684",
+            "causal_parents": [],
+            "payload": {
+              "actor_id": "human:operator",
+              "candidate_id": "candidate:v1:65e71aba2366dd550c70fc24eb97db14b4222acc830ce39e4b5ad38f29454954",
+              "domain_id": "genesis:a281981599140dbee751fdc6473c7412881f48613b2f00c27fa060a7ced8420c",
+              "effect_types": [
+                "contract.declare"
+              ],
+              "key_id": "operator-key",
+              "metadata": {},
+              "signature": "ed25519:yRfD2rHZT7CacyfsdDYmMSJlLZGhs0TIvoReEkOLF2hhersQwJboE60JBecGEC3hZUMGVqKxrfEcsijgULolBQ==",
+              "signature_kind": "ed25519"
+            },
+            "record_type": "candidate.received",
+            "schema_version": 1
+          },
+          {
+            "id": "record:6b1882a9a52db4ead6114ec23676254f3b998872f6d2b8aa0d360fd69fceba9b",
+            "causal_parents": [
+              "record:4dcacd7d853bfd45b6491b4ce4a7e33e9acdfe433c6facd89ba3099e8073b684"
+            ],
+            "payload": {
+              "candidate_id": "candidate:v1:65e71aba2366dd550c70fc24eb97db14b4222acc830ce39e4b5ad38f29454954",
+              "contract": {
+                "acceptance_policy": null,
+                "activation": "",
+                "budget": 5,
+                "context_asset_ids": [],
+                "delegation_capabilities": [],
+                "delegation_pools": [],
+                "description": "root obligation",
+                "id": "task:v3:2ae5fd4c6efcf39fd8ac2d455b8d23aff64f3df700afde42a5af8614ed284067",
+                "inputs": [],
+                "labels": [],
+                "minting_authority": [],
+                "name": "expanded-source",
+                "origin": "human",
+                "outputs": [
+                  "final"
+                ],
+                "parent_id": null,
+                "sensitive_input_policy": null,
+                "tool_scope": [],
+                "worker_capabilities": [],
+                "worker_pools": []
+              }
+            },
+            "record_type": "contract.declared",
+            "schema_version": 1
+          },
+          {
+            "id": "record:450f551248625ff5a6e725b1895bdf7704f223025032eb2c0e228c497105be8a",
+            "causal_parents": [
+              "record:4dcacd7d853bfd45b6491b4ce4a7e33e9acdfe433c6facd89ba3099e8073b684"
+            ],
+            "payload": {
+              "amount": 5,
+              "contract_id": "task:v3:2ae5fd4c6efcf39fd8ac2d455b8d23aff64f3df700afde42a5af8614ed284067",
+              "grant_id": "grant:task:v3:2ae5fd4c6efcf39fd8ac2d455b8d23aff64f3df700afde42a5af8614ed284067",
+              "purpose": "root",
+              "source_contract_id": ""
+            },
+            "record_type": "allowance.granted",
+            "schema_version": 1
+          },
+          {
+            "id": "record:c007d7c6cb214c36daa3069c8748d99a7b1e2fac51278879a791b9258dd49894",
+            "causal_parents": [
+              "record:4dcacd7d853bfd45b6491b4ce4a7e33e9acdfe433c6facd89ba3099e8073b684",
+              "record:6b1882a9a52db4ead6114ec23676254f3b998872f6d2b8aa0d360fd69fceba9b",
+              "record:450f551248625ff5a6e725b1895bdf7704f223025032eb2c0e228c497105be8a"
+            ],
+            "payload": {
+              "candidate_id": "candidate:v1:65e71aba2366dd550c70fc24eb97db14b4222acc830ce39e4b5ad38f29454954",
+              "committed_record_ids": [
+                "record:6b1882a9a52db4ead6114ec23676254f3b998872f6d2b8aa0d360fd69fceba9b",
+                "record:450f551248625ff5a6e725b1895bdf7704f223025032eb2c0e228c497105be8a"
+              ]
+            },
+            "record_type": "candidate.committed",
+            "schema_version": 1
+          },
+          {
+            "id": "record:e38c72f7fb6902f894c41150cf13ee43122959a0f0380e4b10d2a68004e36a0d",
+            "causal_parents": [],
+            "payload": {
+              "trace": {
+                "accepted_asset_names": [],
+                "accepted_fragments": [
+                  "{\"candidate_id\": \"candidate:v1:65e71aba2366dd550c70fc24eb97db14b4222acc830ce39e4b5ad38f29454954\", \"effect_type\": \"contract.declare\", \"relation_target\": \"task:v3:2ae5fd4c6efcf39fd8ac2d455b8d23aff64f3df700afde42a5af8614ed284067\"}"
+                ],
+                "authority_policy": null,
+                "authority_result": "accepted",
+                "budget_remaining": 0,
+                "candidate_raw": null,
+                "contract_id": "commitment",
+                "disclosed_assets": [],
+                "event_type": "candidate_committed",
+                "id": "event:a68cdc14a735ea3312f9b1daacfa0f22742c2862447feb5359fa5db7a0aa0abb",
+                "parent_id": "candidate:v1:65e71aba2366dd550c70fc24eb97db14b4222acc830ce39e4b5ad38f29454954",
+                "rejected_fragments": [],
+                "relation_target": "task:v3:2ae5fd4c6efcf39fd8ac2d455b8d23aff64f3df700afde42a5af8614ed284067",
+                "relation_type": null,
+                "timestamp": "",
+                "usage_metadata": null,
+                "worker_id": "human:operator"
+              }
+            },
+            "record_type": "trace.recorded",
+            "schema_version": 1
+          },
+          {
+            "id": "record:e2065b3603b0abe8d0fa612ecc11ea9dfe7ce8bfb0552511647342cbb9111db2",
+            "causal_parents": [],
+            "payload": {
+              "actor_id": "human:operator",
+              "candidate_id": "candidate:v1:09ccabeb5c1c67cb74352d80e312f5a7730937eab521f967eed7e6be533f2c8b",
+              "domain_id": "genesis:a281981599140dbee751fdc6473c7412881f48613b2f00c27fa060a7ced8420c",
+              "effect_types": [
+                "contract.declare"
+              ],
+              "key_id": "operator-key",
+              "metadata": {},
+              "signature": "ed25519:/Kg60JcN1g7MzoGK1kmqkc4eTndYyqSx7iknkn7YEE/UDKHXxRyNFBILN4E4+Vn4TwG0dN3QvqiuY/qDnFznDg==",
+              "signature_kind": "ed25519"
+            },
+            "record_type": "candidate.received",
+            "schema_version": 1
+          },
+          {
+            "id": "record:155201e4023ecabb2e1068c5f8f9da4fe1b1cb845b9b89ede56b786c53ff811f",
+            "causal_parents": [
+              "record:e2065b3603b0abe8d0fa612ecc11ea9dfe7ce8bfb0552511647342cbb9111db2"
+            ],
+            "payload": {
+              "candidate_id": "candidate:v1:09ccabeb5c1c67cb74352d80e312f5a7730937eab521f967eed7e6be533f2c8b",
+              "contract": {
+                "acceptance_policy": null,
+                "activation": "",
+                "budget": 5,
+                "context_asset_ids": [],
+                "delegation_capabilities": [],
+                "delegation_pools": [],
+                "description": "expanded-child",
+                "id": "task:v3:6380f51e48679fc2701703f1430745e03cfa3b7dcd185b01c6dbaa23908a3cd2",
+                "inputs": [],
+                "labels": [],
+                "minting_authority": [],
+                "name": "expanded-child",
+                "origin": "human",
+                "outputs": [],
+                "parent_id": "task:v3:2ae5fd4c6efcf39fd8ac2d455b8d23aff64f3df700afde42a5af8614ed284067",
+                "sensitive_input_policy": null,
+                "tool_scope": [],
+                "worker_capabilities": [],
+                "worker_pools": []
+              }
+            },
+            "record_type": "contract.declared",
+            "schema_version": 1
+          },
+          {
+            "id": "record:3587842099e07a29e233c85237c0ed65d63263c2f009f6ad89759eabba24c2c5",
+            "causal_parents": [
+              "record:e2065b3603b0abe8d0fa612ecc11ea9dfe7ce8bfb0552511647342cbb9111db2"
+            ],
+            "payload": {
+              "amount": 5,
+              "child_contract_id": "task:v3:6380f51e48679fc2701703f1430745e03cfa3b7dcd185b01c6dbaa23908a3cd2",
+              "purpose": "execution",
+              "reservation_id": "reservation:9a6c16f7a362cca56315388f012d8782bded1fe211b84a561649da48febafd3f",
+              "source_contract_id": "task:v3:2ae5fd4c6efcf39fd8ac2d455b8d23aff64f3df700afde42a5af8614ed284067"
+            },
+            "record_type": "allowance.reserved",
+            "schema_version": 1
+          },
+          {
+            "id": "record:58a26947adde83c8adcf568ba3c6ec8ca541781a255e191a7048daa23d0b001a",
+            "causal_parents": [
+              "record:3587842099e07a29e233c85237c0ed65d63263c2f009f6ad89759eabba24c2c5"
+            ],
+            "payload": {
+              "amount": 5,
+              "contract_id": "task:v3:6380f51e48679fc2701703f1430745e03cfa3b7dcd185b01c6dbaa23908a3cd2",
+              "grant_id": "grant:task:v3:6380f51e48679fc2701703f1430745e03cfa3b7dcd185b01c6dbaa23908a3cd2",
+              "purpose": "execution",
+              "reservation_id": "reservation:9a6c16f7a362cca56315388f012d8782bded1fe211b84a561649da48febafd3f",
+              "source_contract_id": "task:v3:2ae5fd4c6efcf39fd8ac2d455b8d23aff64f3df700afde42a5af8614ed284067"
+            },
+            "record_type": "allowance.granted",
+            "schema_version": 1
+          },
+          {
+            "id": "record:2a5cfcc0165c0417f112fc2b4ccb9a8cd39413060c479f28fd224af4c95aa73b",
+            "causal_parents": [
+              "record:e2065b3603b0abe8d0fa612ecc11ea9dfe7ce8bfb0552511647342cbb9111db2",
+              "record:155201e4023ecabb2e1068c5f8f9da4fe1b1cb845b9b89ede56b786c53ff811f",
+              "record:3587842099e07a29e233c85237c0ed65d63263c2f009f6ad89759eabba24c2c5",
+              "record:58a26947adde83c8adcf568ba3c6ec8ca541781a255e191a7048daa23d0b001a"
+            ],
+            "payload": {
+              "candidate_id": "candidate:v1:09ccabeb5c1c67cb74352d80e312f5a7730937eab521f967eed7e6be533f2c8b",
+              "committed_record_ids": [
+                "record:155201e4023ecabb2e1068c5f8f9da4fe1b1cb845b9b89ede56b786c53ff811f",
+                "record:3587842099e07a29e233c85237c0ed65d63263c2f009f6ad89759eabba24c2c5",
+                "record:58a26947adde83c8adcf568ba3c6ec8ca541781a255e191a7048daa23d0b001a"
+              ]
+            },
+            "record_type": "candidate.committed",
+            "schema_version": 1
+          },
+          {
+            "id": "record:e63dd2772c0f1f28a7d7f6546b369dbbbed246106b1efe0ad3141f85691e8031",
+            "causal_parents": [],
+            "payload": {
+              "trace": {
+                "accepted_asset_names": [],
+                "accepted_fragments": [
+                  "{\"candidate_id\": \"candidate:v1:09ccabeb5c1c67cb74352d80e312f5a7730937eab521f967eed7e6be533f2c8b\", \"effect_type\": \"contract.declare\", \"relation_target\": \"task:v3:6380f51e48679fc2701703f1430745e03cfa3b7dcd185b01c6dbaa23908a3cd2\"}"
+                ],
+                "authority_policy": null,
+                "authority_result": "accepted",
+                "budget_remaining": 0,
+                "candidate_raw": null,
+                "contract_id": "commitment",
+                "disclosed_assets": [],
+                "event_type": "candidate_committed",
+                "id": "event:9352f1cc207595fea279efbeeab1af981acf0c30ca00371fba4398fbbf8d368b",
+                "parent_id": "candidate:v1:09ccabeb5c1c67cb74352d80e312f5a7730937eab521f967eed7e6be533f2c8b",
+                "rejected_fragments": [],
+                "relation_target": "task:v3:6380f51e48679fc2701703f1430745e03cfa3b7dcd185b01c6dbaa23908a3cd2",
+                "relation_type": null,
+                "timestamp": "",
+                "usage_metadata": null,
+                "worker_id": "human:operator"
+              }
+            },
+            "record_type": "trace.recorded",
+            "schema_version": 1
+          },
+          {
+            "id": "record:1f1e112f42a16a17da24ab93872067c8add14735b50fed0aaec0a2b74af0bddd",
+            "causal_parents": [],
+            "payload": {
+              "actor_id": "human:operator",
+              "candidate_id": "candidate:v1:bdbd917c0e2c88000d0854eb8b7a279b8ab04d11e46eab7608fd2e90a86d207a",
+              "domain_id": "genesis:a281981599140dbee751fdc6473c7412881f48613b2f00c27fa060a7ced8420c",
+              "effect_types": [
+                "contract.declare"
+              ],
+              "key_id": "operator-key",
+              "metadata": {},
+              "signature": "ed25519:ACKxKBfytmbrbEPJOq2tdRR6vwHzCyj1CWXXY8LwpR9tLPDbRv1c4FadxkDK74YGMgrsyTB1w86W0owED59rCg==",
+              "signature_kind": "ed25519"
+            },
+            "record_type": "candidate.received",
+            "schema_version": 1
+          },
+          {
+            "id": "record:f2935f9649119d50f666e54a67306b8930caadabef7d0eb04e5e5f40bcf87a1a",
+            "causal_parents": [
+              "record:1f1e112f42a16a17da24ab93872067c8add14735b50fed0aaec0a2b74af0bddd"
+            ],
+            "payload": {
+              "candidate_id": "candidate:v1:bdbd917c0e2c88000d0854eb8b7a279b8ab04d11e46eab7608fd2e90a86d207a",
+              "contract": {
+                "acceptance_policy": null,
+                "activation": "",
+                "budget": 2,
+                "context_asset_ids": [],
+                "delegation_capabilities": [],
+                "delegation_pools": [],
+                "description": "expanded-grandchild",
+                "id": "task:v3:cd184f98bca79b2994df1d9605283cf3ea24d2c83bbfac8714fce5c1ad5ed284",
+                "inputs": [],
+                "labels": [],
+                "minting_authority": [],
+                "name": "expanded-grandchild",
+                "origin": "human",
+                "outputs": [],
+                "parent_id": "task:v3:6380f51e48679fc2701703f1430745e03cfa3b7dcd185b01c6dbaa23908a3cd2",
+                "sensitive_input_policy": null,
+                "tool_scope": [],
+                "worker_capabilities": [],
+                "worker_pools": []
+              }
+            },
+            "record_type": "contract.declared",
+            "schema_version": 1
+          },
+          {
+            "id": "record:80352276d878dce94a9057eacb4273ab73cf0f138e9b7d6c2d6d20580898fb2f",
+            "causal_parents": [
+              "record:1f1e112f42a16a17da24ab93872067c8add14735b50fed0aaec0a2b74af0bddd"
+            ],
+            "payload": {
+              "amount": 2,
+              "child_contract_id": "task:v3:cd184f98bca79b2994df1d9605283cf3ea24d2c83bbfac8714fce5c1ad5ed284",
+              "purpose": "execution",
+              "reservation_id": "reservation:b0f955766b8dbac0483391aae605f4516c9a3a9022f73790496b889a6f373426",
+              "source_contract_id": "task:v3:6380f51e48679fc2701703f1430745e03cfa3b7dcd185b01c6dbaa23908a3cd2"
+            },
+            "record_type": "allowance.reserved",
+            "schema_version": 1
+          },
+          {
+            "id": "record:adac2ea9c3c4299dca91ccbf1827b74f17a5062038522af10376c3d1f3ac825b",
+            "causal_parents": [
+              "record:80352276d878dce94a9057eacb4273ab73cf0f138e9b7d6c2d6d20580898fb2f"
+            ],
+            "payload": {
+              "amount": 2,
+              "contract_id": "task:v3:cd184f98bca79b2994df1d9605283cf3ea24d2c83bbfac8714fce5c1ad5ed284",
+              "grant_id": "grant:task:v3:cd184f98bca79b2994df1d9605283cf3ea24d2c83bbfac8714fce5c1ad5ed284",
+              "purpose": "execution",
+              "reservation_id": "reservation:b0f955766b8dbac0483391aae605f4516c9a3a9022f73790496b889a6f373426",
+              "source_contract_id": "task:v3:6380f51e48679fc2701703f1430745e03cfa3b7dcd185b01c6dbaa23908a3cd2"
+            },
+            "record_type": "allowance.granted",
+            "schema_version": 1
+          },
+          {
+            "id": "record:303f84fce76cb50fa966f9d9dc65b934a0675f5b2575f5b83846ea31a490b4e6",
+            "causal_parents": [
+              "record:1f1e112f42a16a17da24ab93872067c8add14735b50fed0aaec0a2b74af0bddd",
+              "record:f2935f9649119d50f666e54a67306b8930caadabef7d0eb04e5e5f40bcf87a1a",
+              "record:80352276d878dce94a9057eacb4273ab73cf0f138e9b7d6c2d6d20580898fb2f",
+              "record:adac2ea9c3c4299dca91ccbf1827b74f17a5062038522af10376c3d1f3ac825b"
+            ],
+            "payload": {
+              "candidate_id": "candidate:v1:bdbd917c0e2c88000d0854eb8b7a279b8ab04d11e46eab7608fd2e90a86d207a",
+              "committed_record_ids": [
+                "record:f2935f9649119d50f666e54a67306b8930caadabef7d0eb04e5e5f40bcf87a1a",
+                "record:80352276d878dce94a9057eacb4273ab73cf0f138e9b7d6c2d6d20580898fb2f",
+                "record:adac2ea9c3c4299dca91ccbf1827b74f17a5062038522af10376c3d1f3ac825b"
+              ]
+            },
+            "record_type": "candidate.committed",
+            "schema_version": 1
+          },
+          {
+            "id": "record:69ff3bb816a9160dcd1e2c17272afa9a24327707670ed1a835efe70583246b0d",
+            "causal_parents": [],
+            "payload": {
+              "trace": {
+                "accepted_asset_names": [],
+                "accepted_fragments": [
+                  "{\"candidate_id\": \"candidate:v1:bdbd917c0e2c88000d0854eb8b7a279b8ab04d11e46eab7608fd2e90a86d207a\", \"effect_type\": \"contract.declare\", \"relation_target\": \"task:v3:cd184f98bca79b2994df1d9605283cf3ea24d2c83bbfac8714fce5c1ad5ed284\"}"
+                ],
+                "authority_policy": null,
+                "authority_result": "accepted",
+                "budget_remaining": 0,
+                "candidate_raw": null,
+                "contract_id": "commitment",
+                "disclosed_assets": [],
+                "event_type": "candidate_committed",
+                "id": "event:ab470955c5e003fcf4f986297d167bdc584dca28faf5dbefaf821b55aa439b46",
+                "parent_id": "candidate:v1:bdbd917c0e2c88000d0854eb8b7a279b8ab04d11e46eab7608fd2e90a86d207a",
+                "rejected_fragments": [],
+                "relation_target": "task:v3:cd184f98bca79b2994df1d9605283cf3ea24d2c83bbfac8714fce5c1ad5ed284",
+                "relation_type": null,
+                "timestamp": "",
+                "usage_metadata": null,
+                "worker_id": "human:operator"
+              }
+            },
+            "record_type": "trace.recorded",
+            "schema_version": 1
+          },
+          {
+            "id": "record:9866011e888a238cee89002d51a6ff57b3052ac9457545e7b23bdfd5a7edcbdb",
+            "causal_parents": [],
+            "payload": {
+              "actor_id": "human:operator",
+              "candidate_id": "candidate:v1:a755441e0a7f04345d12c5f83ed318ff274202b1185f7078f0e8c4eb06359b12",
+              "domain_id": "genesis:a281981599140dbee751fdc6473c7412881f48613b2f00c27fa060a7ced8420c",
+              "effect_types": [
+                "contract.declare"
+              ],
+              "key_id": "operator-key",
+              "metadata": {},
+              "signature": "ed25519:Xycm0LzZXKoYHvx97PHxS4ad8yyLoGBs+C7XaDFhfU+YC4ZWklzec4gEY11wQ3ntXPcki7Zu6PwQ+QyyOeNaDg==",
+              "signature_kind": "ed25519"
+            },
+            "record_type": "candidate.received",
+            "schema_version": 1
+          },
+          {
+            "id": "record:72b0641757dd960f6080d549970529f9f0063abffe7a74868edbc94f1b0e7ef7",
+            "causal_parents": [
+              "record:9866011e888a238cee89002d51a6ff57b3052ac9457545e7b23bdfd5a7edcbdb"
+            ],
+            "payload": {
+              "candidate_id": "candidate:v1:a755441e0a7f04345d12c5f83ed318ff274202b1185f7078f0e8c4eb06359b12",
+              "contract": {
+                "acceptance_policy": null,
+                "activation": "",
+                "budget": 1,
+                "context_asset_ids": [],
+                "delegation_capabilities": [],
+                "delegation_pools": [],
+                "description": "expanded-great-grandchild",
+                "id": "task:v3:d13c7626344abe2fadc6e6948d3cc4865a8929f8891c8cdf6b043cd6a576d9d4",
+                "inputs": [],
+                "labels": [],
+                "minting_authority": [],
+                "name": "expanded-great-grandchild",
+                "origin": "human",
+                "outputs": [],
+                "parent_id": "task:v3:cd184f98bca79b2994df1d9605283cf3ea24d2c83bbfac8714fce5c1ad5ed284",
+                "sensitive_input_policy": null,
+                "tool_scope": [],
+                "worker_capabilities": [],
+                "worker_pools": []
+              }
+            },
+            "record_type": "contract.declared",
+            "schema_version": 1
+          },
+          {
+            "id": "record:b62f954c59d35371522fbef485722cba04863b8daeec7e61d08ccc1f05e32dfd",
+            "causal_parents": [
+              "record:9866011e888a238cee89002d51a6ff57b3052ac9457545e7b23bdfd5a7edcbdb"
+            ],
+            "payload": {
+              "amount": 1,
+              "child_contract_id": "task:v3:d13c7626344abe2fadc6e6948d3cc4865a8929f8891c8cdf6b043cd6a576d9d4",
+              "purpose": "execution",
+              "reservation_id": "reservation:9793e67d0a860f2457360b923497bde9736ef810a9aa1ab97ac9ba17e7ea4f8f",
+              "source_contract_id": "task:v3:cd184f98bca79b2994df1d9605283cf3ea24d2c83bbfac8714fce5c1ad5ed284"
+            },
+            "record_type": "allowance.reserved",
+            "schema_version": 1
+          },
+          {
+            "id": "record:f98de48bf59cfbc57bcbfee767c129497e17ff40ab3b4437036b4d5629067004",
+            "causal_parents": [
+              "record:b62f954c59d35371522fbef485722cba04863b8daeec7e61d08ccc1f05e32dfd"
+            ],
+            "payload": {
+              "amount": 1,
+              "contract_id": "task:v3:d13c7626344abe2fadc6e6948d3cc4865a8929f8891c8cdf6b043cd6a576d9d4",
+              "grant_id": "grant:task:v3:d13c7626344abe2fadc6e6948d3cc4865a8929f8891c8cdf6b043cd6a576d9d4",
+              "purpose": "execution",
+              "reservation_id": "reservation:9793e67d0a860f2457360b923497bde9736ef810a9aa1ab97ac9ba17e7ea4f8f",
+              "source_contract_id": "task:v3:cd184f98bca79b2994df1d9605283cf3ea24d2c83bbfac8714fce5c1ad5ed284"
+            },
+            "record_type": "allowance.granted",
+            "schema_version": 1
+          },
+          {
+            "id": "record:aee3d0bd6bdee17749161efb88f981e750a650f53a58d16eeca2c3a1cbf7ccaf",
+            "causal_parents": [
+              "record:9866011e888a238cee89002d51a6ff57b3052ac9457545e7b23bdfd5a7edcbdb",
+              "record:72b0641757dd960f6080d549970529f9f0063abffe7a74868edbc94f1b0e7ef7",
+              "record:b62f954c59d35371522fbef485722cba04863b8daeec7e61d08ccc1f05e32dfd",
+              "record:f98de48bf59cfbc57bcbfee767c129497e17ff40ab3b4437036b4d5629067004"
+            ],
+            "payload": {
+              "candidate_id": "candidate:v1:a755441e0a7f04345d12c5f83ed318ff274202b1185f7078f0e8c4eb06359b12",
+              "committed_record_ids": [
+                "record:72b0641757dd960f6080d549970529f9f0063abffe7a74868edbc94f1b0e7ef7",
+                "record:b62f954c59d35371522fbef485722cba04863b8daeec7e61d08ccc1f05e32dfd",
+                "record:f98de48bf59cfbc57bcbfee767c129497e17ff40ab3b4437036b4d5629067004"
+              ]
+            },
+            "record_type": "candidate.committed",
+            "schema_version": 1
+          },
+          {
+            "id": "record:67ba524720c30f44971cca9fe466c982b23f45c1a3f1dd811b5c83cb318295a2",
+            "causal_parents": [],
+            "payload": {
+              "trace": {
+                "accepted_asset_names": [],
+                "accepted_fragments": [
+                  "{\"candidate_id\": \"candidate:v1:a755441e0a7f04345d12c5f83ed318ff274202b1185f7078f0e8c4eb06359b12\", \"effect_type\": \"contract.declare\", \"relation_target\": \"task:v3:d13c7626344abe2fadc6e6948d3cc4865a8929f8891c8cdf6b043cd6a576d9d4\"}"
+                ],
+                "authority_policy": null,
+                "authority_result": "accepted",
+                "budget_remaining": 0,
+                "candidate_raw": null,
+                "contract_id": "commitment",
+                "disclosed_assets": [],
+                "event_type": "candidate_committed",
+                "id": "event:7ea245c818fee31188e5ee5dabb5ac5816b5ee41bfa2b429807478de92627cf4",
+                "parent_id": "candidate:v1:a755441e0a7f04345d12c5f83ed318ff274202b1185f7078f0e8c4eb06359b12",
+                "rejected_fragments": [],
+                "relation_target": "task:v3:d13c7626344abe2fadc6e6948d3cc4865a8929f8891c8cdf6b043cd6a576d9d4",
+                "relation_type": null,
+                "timestamp": "",
+                "usage_metadata": null,
+                "worker_id": "human:operator"
+              }
+            },
+            "record_type": "trace.recorded",
+            "schema_version": 1
+          },
+          {
+            "id": "record:afce4a0756a4361f3c842e19abe4494c178fc9e7752e515d43c12ff16a4299af",
+            "causal_parents": [],
+            "payload": {
+              "actor_id": "human:operator",
+              "candidate_id": "candidate:v1:e5002bcf647f8796e2e82734f16325f565905df0e25a6c90908664e3f40f8e62",
+              "domain_id": "genesis:a281981599140dbee751fdc6473c7412881f48613b2f00c27fa060a7ced8420c",
+              "effect_types": [
+                "task.handoff"
+              ],
+              "key_id": "operator-key",
+              "metadata": {},
+              "signature": "ed25519:foGhnyA2bUBwWOLl85WEIJKnzSWQw6Nl8Pef8gvabDzySvdRBq9W1E1qlSY99cxRj2enKW7F99oKQ84IA/7uAQ==",
+              "signature_kind": "ed25519"
+            },
+            "record_type": "candidate.received",
+            "schema_version": 1
+          },
+          {
+            "id": "record:41ea785d4261c837fddebb0f178da7208af476e4857eb70602e909d57d13f2fd",
+            "causal_parents": [
+              "record:afce4a0756a4361f3c842e19abe4494c178fc9e7752e515d43c12ff16a4299af"
+            ],
+            "payload": {
+              "actor_id": "human:operator",
+              "contract_id": "task:v3:2ae5fd4c6efcf39fd8ac2d455b8d23aff64f3df700afde42a5af8614ed284067",
+              "reason": "继续同一目标 café；结束旧执行树",
+              "terminal": "cancelled"
+            },
+            "record_type": "lifecycle.terminal",
+            "schema_version": 1
+          },
+          {
+            "id": "record:29ca18fa275f69f3e7955f1f7a1b4f5e21711d8dd9e39f3bfe1f477d4ea452ab",
+            "causal_parents": [
+              "record:afce4a0756a4361f3c842e19abe4494c178fc9e7752e515d43c12ff16a4299af"
+            ],
+            "payload": {
+              "actor_id": "human:operator",
+              "contract_id": "task:v3:6380f51e48679fc2701703f1430745e03cfa3b7dcd185b01c6dbaa23908a3cd2",
+              "reason": "继续同一目标 café；结束旧执行树",
+              "terminal": "cancelled"
+            },
+            "record_type": "lifecycle.terminal",
+            "schema_version": 1
+          },
+          {
+            "id": "record:3d43459ca184d155a7f727d971ed697bb3825ebcdcd8bf733abd20ea3150d862",
+            "causal_parents": [
+              "record:afce4a0756a4361f3c842e19abe4494c178fc9e7752e515d43c12ff16a4299af"
+            ],
+            "payload": {
+              "actor_id": "human:operator",
+              "contract_id": "task:v3:cd184f98bca79b2994df1d9605283cf3ea24d2c83bbfac8714fce5c1ad5ed284",
+              "reason": "继续同一目标 café；结束旧执行树",
+              "terminal": "cancelled"
+            },
+            "record_type": "lifecycle.terminal",
+            "schema_version": 1
+          },
+          {
+            "id": "record:3b9dd07ab33e3cea39b88ce569a07c0d0056d084de2f3d86b1dc0c4e2630d0c4",
+            "causal_parents": [
+              "record:afce4a0756a4361f3c842e19abe4494c178fc9e7752e515d43c12ff16a4299af"
+            ],
+            "payload": {
+              "actor_id": "human:operator",
+              "contract_id": "task:v3:d13c7626344abe2fadc6e6948d3cc4865a8929f8891c8cdf6b043cd6a576d9d4",
+              "reason": "继续同一目标 café；结束旧执行树",
+              "terminal": "cancelled"
+            },
+            "record_type": "lifecycle.terminal",
+            "schema_version": 1
+          },
+          {
+            "id": "record:b9b4f6b64ce9d274dca25a7ad76ae1938d426a63cd58cf3d8a733483cf226461",
+            "causal_parents": [
+              "record:afce4a0756a4361f3c842e19abe4494c178fc9e7752e515d43c12ff16a4299af",
+              "record:29ca18fa275f69f3e7955f1f7a1b4f5e21711d8dd9e39f3bfe1f477d4ea452ab",
+              "record:450f551248625ff5a6e725b1895bdf7704f223025032eb2c0e228c497105be8a",
+              "record:3587842099e07a29e233c85237c0ed65d63263c2f009f6ad89759eabba24c2c5",
+              "record:58a26947adde83c8adcf568ba3c6ec8ca541781a255e191a7048daa23d0b001a"
+            ],
+            "payload": {
+              "amount": 3,
+              "cancellation_record_id": "record:29ca18fa275f69f3e7955f1f7a1b4f5e21711d8dd9e39f3bfe1f477d4ea452ab",
+              "candidate_id": "candidate:v1:e5002bcf647f8796e2e82734f16325f565905df0e25a6c90908664e3f40f8e62",
+              "from_contract_id": "task:v3:6380f51e48679fc2701703f1430745e03cfa3b7dcd185b01c6dbaa23908a3cd2",
+              "funding_path_record_ids": [
+                "record:450f551248625ff5a6e725b1895bdf7704f223025032eb2c0e228c497105be8a",
+                "record:3587842099e07a29e233c85237c0ed65d63263c2f009f6ad89759eabba24c2c5",
+                "record:58a26947adde83c8adcf568ba3c6ec8ca541781a255e191a7048daa23d0b001a"
+              ],
+              "receipt_id": "record:afce4a0756a4361f3c842e19abe4494c178fc9e7752e515d43c12ff16a4299af",
+              "return_id": "return:14727097c4e429addd2ee6140f1945c11cf0197f6894debf021e3b0f6cf31824",
+              "source_contract_id": "task:v3:2ae5fd4c6efcf39fd8ac2d455b8d23aff64f3df700afde42a5af8614ed284067"
+            },
+            "record_type": "allowance.returned",
+            "schema_version": 1
+          },
+          {
+            "id": "record:afee68bbee339627332e997bde7f2b96c29a63a9439c1be0927800dbde2382b8",
+            "causal_parents": [
+              "record:afce4a0756a4361f3c842e19abe4494c178fc9e7752e515d43c12ff16a4299af",
+              "record:3d43459ca184d155a7f727d971ed697bb3825ebcdcd8bf733abd20ea3150d862",
+              "record:450f551248625ff5a6e725b1895bdf7704f223025032eb2c0e228c497105be8a",
+              "record:80352276d878dce94a9057eacb4273ab73cf0f138e9b7d6c2d6d20580898fb2f",
+              "record:adac2ea9c3c4299dca91ccbf1827b74f17a5062038522af10376c3d1f3ac825b",
+              "record:3587842099e07a29e233c85237c0ed65d63263c2f009f6ad89759eabba24c2c5",
+              "record:58a26947adde83c8adcf568ba3c6ec8ca541781a255e191a7048daa23d0b001a"
+            ],
+            "payload": {
+              "amount": 1,
+              "cancellation_record_id": "record:3d43459ca184d155a7f727d971ed697bb3825ebcdcd8bf733abd20ea3150d862",
+              "candidate_id": "candidate:v1:e5002bcf647f8796e2e82734f16325f565905df0e25a6c90908664e3f40f8e62",
+              "from_contract_id": "task:v3:cd184f98bca79b2994df1d9605283cf3ea24d2c83bbfac8714fce5c1ad5ed284",
+              "funding_path_record_ids": [
+                "record:450f551248625ff5a6e725b1895bdf7704f223025032eb2c0e228c497105be8a",
+                "record:80352276d878dce94a9057eacb4273ab73cf0f138e9b7d6c2d6d20580898fb2f",
+                "record:adac2ea9c3c4299dca91ccbf1827b74f17a5062038522af10376c3d1f3ac825b",
+                "record:3587842099e07a29e233c85237c0ed65d63263c2f009f6ad89759eabba24c2c5",
+                "record:58a26947adde83c8adcf568ba3c6ec8ca541781a255e191a7048daa23d0b001a"
+              ],
+              "receipt_id": "record:afce4a0756a4361f3c842e19abe4494c178fc9e7752e515d43c12ff16a4299af",
+              "return_id": "return:6e5b178f44ce29d7b00e63d63a3d90c67f0fa248bcf2ad41881b75a5b2001dd2",
+              "source_contract_id": "task:v3:2ae5fd4c6efcf39fd8ac2d455b8d23aff64f3df700afde42a5af8614ed284067"
+            },
+            "record_type": "allowance.returned",
+            "schema_version": 1
+          },
+          {
+            "id": "record:18a6bb4b96398732bced102a24735347cce3f8622ee103c116def42259312760",
+            "causal_parents": [
+              "record:afce4a0756a4361f3c842e19abe4494c178fc9e7752e515d43c12ff16a4299af",
+              "record:3b9dd07ab33e3cea39b88ce569a07c0d0056d084de2f3d86b1dc0c4e2630d0c4",
+              "record:450f551248625ff5a6e725b1895bdf7704f223025032eb2c0e228c497105be8a",
+              "record:b62f954c59d35371522fbef485722cba04863b8daeec7e61d08ccc1f05e32dfd",
+              "record:f98de48bf59cfbc57bcbfee767c129497e17ff40ab3b4437036b4d5629067004",
+              "record:80352276d878dce94a9057eacb4273ab73cf0f138e9b7d6c2d6d20580898fb2f",
+              "record:adac2ea9c3c4299dca91ccbf1827b74f17a5062038522af10376c3d1f3ac825b",
+              "record:3587842099e07a29e233c85237c0ed65d63263c2f009f6ad89759eabba24c2c5",
+              "record:58a26947adde83c8adcf568ba3c6ec8ca541781a255e191a7048daa23d0b001a"
+            ],
+            "payload": {
+              "amount": 1,
+              "cancellation_record_id": "record:3b9dd07ab33e3cea39b88ce569a07c0d0056d084de2f3d86b1dc0c4e2630d0c4",
+              "candidate_id": "candidate:v1:e5002bcf647f8796e2e82734f16325f565905df0e25a6c90908664e3f40f8e62",
+              "from_contract_id": "task:v3:d13c7626344abe2fadc6e6948d3cc4865a8929f8891c8cdf6b043cd6a576d9d4",
+              "funding_path_record_ids": [
+                "record:450f551248625ff5a6e725b1895bdf7704f223025032eb2c0e228c497105be8a",
+                "record:b62f954c59d35371522fbef485722cba04863b8daeec7e61d08ccc1f05e32dfd",
+                "record:f98de48bf59cfbc57bcbfee767c129497e17ff40ab3b4437036b4d5629067004",
+                "record:80352276d878dce94a9057eacb4273ab73cf0f138e9b7d6c2d6d20580898fb2f",
+                "record:adac2ea9c3c4299dca91ccbf1827b74f17a5062038522af10376c3d1f3ac825b",
+                "record:3587842099e07a29e233c85237c0ed65d63263c2f009f6ad89759eabba24c2c5",
+                "record:58a26947adde83c8adcf568ba3c6ec8ca541781a255e191a7048daa23d0b001a"
+              ],
+              "receipt_id": "record:afce4a0756a4361f3c842e19abe4494c178fc9e7752e515d43c12ff16a4299af",
+              "return_id": "return:a9fbb93501ae4e0245438427f639c33cec8a549b453580d43d16f3c36490314a",
+              "source_contract_id": "task:v3:2ae5fd4c6efcf39fd8ac2d455b8d23aff64f3df700afde42a5af8614ed284067"
+            },
+            "record_type": "allowance.returned",
+            "schema_version": 1
+          },
+          {
+            "id": "record:2cb2af992b76a0c9bc97031ce4ea3de40a037b36ec4d30bc142926472f48d24a",
+            "causal_parents": [
+              "record:afce4a0756a4361f3c842e19abe4494c178fc9e7752e515d43c12ff16a4299af"
+            ],
+            "payload": {
+              "candidate_id": "candidate:v1:e5002bcf647f8796e2e82734f16325f565905df0e25a6c90908664e3f40f8e62",
+              "contract": {
+                "acceptance_policy": null,
+                "activation": "",
+                "budget": 5,
+                "context_asset_ids": [],
+                "delegation_capabilities": [],
+                "delegation_pools": [],
+                "description": "root obligation\n\nTask handoff reason: 继续同一目标 café；结束旧执行树",
+                "id": "task:v6:a7609d805861254525583c55640eb73c100294cd76e7b59901dfd1e2c59e82e1",
+                "inputs": [],
+                "labels": [],
+                "minting_authority": [],
+                "name": "expanded-source.handoff.expanded.e5002bcf647f8796e2e82734f16325f565905df0e25a6c90908664e3f40f8e62",
+                "origin": "human",
+                "outputs": [
+                  "final"
+                ],
+                "parent_id": "task:v3:2ae5fd4c6efcf39fd8ac2d455b8d23aff64f3df700afde42a5af8614ed284067",
+                "sensitive_input_policy": {
+                  "input_asset_bindings": {}
+                },
+                "tool_scope": [],
+                "worker_capabilities": [],
+                "worker_pools": []
+              }
+            },
+            "record_type": "contract.declared",
+            "schema_version": 1
+          },
+          {
+            "id": "record:0600ff81eca81b4e96224a9e2636906d9a5e4ffec5a4460e8e9431ec5e947b72",
+            "causal_parents": [
+              "record:afce4a0756a4361f3c842e19abe4494c178fc9e7752e515d43c12ff16a4299af",
+              "record:41ea785d4261c837fddebb0f178da7208af476e4857eb70602e909d57d13f2fd",
+              "record:2cb2af992b76a0c9bc97031ce4ea3de40a037b36ec4d30bc142926472f48d24a",
+              "record:29ca18fa275f69f3e7955f1f7a1b4f5e21711d8dd9e39f3bfe1f477d4ea452ab",
+              "record:3d43459ca184d155a7f727d971ed697bb3825ebcdcd8bf733abd20ea3150d862",
+              "record:3b9dd07ab33e3cea39b88ce569a07c0d0056d084de2f3d86b1dc0c4e2630d0c4",
+              "record:b9b4f6b64ce9d274dca25a7ad76ae1938d426a63cd58cf3d8a733483cf226461",
+              "record:afee68bbee339627332e997bde7f2b96c29a63a9439c1be0927800dbde2382b8",
+              "record:18a6bb4b96398732bced102a24735347cce3f8622ee103c116def42259312760"
+            ],
+            "payload": {
+              "actor_id": "human:operator",
+              "allowance_returns": [
+                {
+                  "amount": 3,
+                  "donor_contract_id": "task:v3:6380f51e48679fc2701703f1430745e03cfa3b7dcd185b01c6dbaa23908a3cd2",
+                  "record_id": "record:b9b4f6b64ce9d274dca25a7ad76ae1938d426a63cd58cf3d8a733483cf226461"
+                },
+                {
+                  "amount": 1,
+                  "donor_contract_id": "task:v3:cd184f98bca79b2994df1d9605283cf3ea24d2c83bbfac8714fce5c1ad5ed284",
+                  "record_id": "record:afee68bbee339627332e997bde7f2b96c29a63a9439c1be0927800dbde2382b8"
+                },
+                {
+                  "amount": 1,
+                  "donor_contract_id": "task:v3:d13c7626344abe2fadc6e6948d3cc4865a8929f8891c8cdf6b043cd6a576d9d4",
+                  "record_id": "record:18a6bb4b96398732bced102a24735347cce3f8622ee103c116def42259312760"
+                }
+              ],
+              "budget": 5,
+              "cancel_record_ids": [
+                "record:29ca18fa275f69f3e7955f1f7a1b4f5e21711d8dd9e39f3bfe1f477d4ea452ab",
+                "record:3d43459ca184d155a7f727d971ed697bb3825ebcdcd8bf733abd20ea3150d862",
+                "record:3b9dd07ab33e3cea39b88ce569a07c0d0056d084de2f3d86b1dc0c4e2630d0c4"
+              ],
+              "cancelled_contract_ids": [
+                "task:v3:6380f51e48679fc2701703f1430745e03cfa3b7dcd185b01c6dbaa23908a3cd2",
+                "task:v3:cd184f98bca79b2994df1d9605283cf3ea24d2c83bbfac8714fce5c1ad5ed284",
+                "task:v3:d13c7626344abe2fadc6e6948d3cc4865a8929f8891c8cdf6b043cd6a576d9d4"
+              ],
+              "candidate_id": "candidate:v1:e5002bcf647f8796e2e82734f16325f565905df0e25a6c90908664e3f40f8e62",
+              "completed_outputs": [],
+              "contract_id": "task:v3:2ae5fd4c6efcf39fd8ac2d455b8d23aff64f3df700afde42a5af8614ed284067",
+              "hold_id": "",
+              "key_id": "operator-key",
+              "preserved_contract_ids": [],
+              "reason": "继续同一目标 café；结束旧执行树",
+              "repair_contract_ids": [],
+              "repair_output_proofs": {},
+              "repair_record_ids": [],
+              "retained_asset_ids": [],
+              "retained_output_proofs": {},
+              "return_record_ids": [
+                "record:b9b4f6b64ce9d274dca25a7ad76ae1938d426a63cd58cf3d8a733483cf226461",
+                "record:afee68bbee339627332e997bde7f2b96c29a63a9439c1be0927800dbde2382b8",
+                "record:18a6bb4b96398732bced102a24735347cce3f8622ee103c116def42259312760"
+              ],
+              "returned_allowance": 5,
+              "source_original_balance": 0,
+              "successor_id": "task:v6:a7609d805861254525583c55640eb73c100294cd76e7b59901dfd1e2c59e82e1"
+            },
+            "record_type": "task.handed_off",
+            "schema_version": 1
+          },
+          {
+            "id": "record:24bf76f8aeabfbbc151b50476e562f3f1d1b2144d663483f63e086bec7864291",
+            "causal_parents": [
+              "record:afce4a0756a4361f3c842e19abe4494c178fc9e7752e515d43c12ff16a4299af"
+            ],
+            "payload": {
+              "amount": 5,
+              "child_contract_id": "task:v6:a7609d805861254525583c55640eb73c100294cd76e7b59901dfd1e2c59e82e1",
+              "purpose": "execution",
+              "reservation_id": "reservation:6afad0f4e0c072353c4a1c080c78d0d93976914ceddc77accc854f6f13b197bd",
+              "source_contract_id": "task:v3:2ae5fd4c6efcf39fd8ac2d455b8d23aff64f3df700afde42a5af8614ed284067"
+            },
+            "record_type": "allowance.reserved",
+            "schema_version": 1
+          },
+          {
+            "id": "record:5050e544852202b71b0b9298209f48badd9303ada17fe99bcec15cdfae22b64b",
+            "causal_parents": [
+              "record:24bf76f8aeabfbbc151b50476e562f3f1d1b2144d663483f63e086bec7864291"
+            ],
+            "payload": {
+              "amount": 5,
+              "contract_id": "task:v6:a7609d805861254525583c55640eb73c100294cd76e7b59901dfd1e2c59e82e1",
+              "grant_id": "grant:task:v6:a7609d805861254525583c55640eb73c100294cd76e7b59901dfd1e2c59e82e1",
+              "purpose": "execution",
+              "reservation_id": "reservation:6afad0f4e0c072353c4a1c080c78d0d93976914ceddc77accc854f6f13b197bd",
+              "source_contract_id": "task:v3:2ae5fd4c6efcf39fd8ac2d455b8d23aff64f3df700afde42a5af8614ed284067"
+            },
+            "record_type": "allowance.granted",
+            "schema_version": 1
+          },
+          {
+            "id": "record:7f6b0f1e9496392c8767d7050ede86eaaac1e3f50333b39c8f26e7890e629630",
+            "causal_parents": [
+              "record:afce4a0756a4361f3c842e19abe4494c178fc9e7752e515d43c12ff16a4299af",
+              "record:41ea785d4261c837fddebb0f178da7208af476e4857eb70602e909d57d13f2fd",
+              "record:29ca18fa275f69f3e7955f1f7a1b4f5e21711d8dd9e39f3bfe1f477d4ea452ab",
+              "record:3d43459ca184d155a7f727d971ed697bb3825ebcdcd8bf733abd20ea3150d862",
+              "record:3b9dd07ab33e3cea39b88ce569a07c0d0056d084de2f3d86b1dc0c4e2630d0c4",
+              "record:b9b4f6b64ce9d274dca25a7ad76ae1938d426a63cd58cf3d8a733483cf226461",
+              "record:afee68bbee339627332e997bde7f2b96c29a63a9439c1be0927800dbde2382b8",
+              "record:18a6bb4b96398732bced102a24735347cce3f8622ee103c116def42259312760",
+              "record:2cb2af992b76a0c9bc97031ce4ea3de40a037b36ec4d30bc142926472f48d24a",
+              "record:0600ff81eca81b4e96224a9e2636906d9a5e4ffec5a4460e8e9431ec5e947b72",
+              "record:24bf76f8aeabfbbc151b50476e562f3f1d1b2144d663483f63e086bec7864291",
+              "record:5050e544852202b71b0b9298209f48badd9303ada17fe99bcec15cdfae22b64b"
+            ],
+            "payload": {
+              "candidate_id": "candidate:v1:e5002bcf647f8796e2e82734f16325f565905df0e25a6c90908664e3f40f8e62",
+              "committed_record_ids": [
+                "record:41ea785d4261c837fddebb0f178da7208af476e4857eb70602e909d57d13f2fd",
+                "record:29ca18fa275f69f3e7955f1f7a1b4f5e21711d8dd9e39f3bfe1f477d4ea452ab",
+                "record:3d43459ca184d155a7f727d971ed697bb3825ebcdcd8bf733abd20ea3150d862",
+                "record:3b9dd07ab33e3cea39b88ce569a07c0d0056d084de2f3d86b1dc0c4e2630d0c4",
+                "record:b9b4f6b64ce9d274dca25a7ad76ae1938d426a63cd58cf3d8a733483cf226461",
+                "record:afee68bbee339627332e997bde7f2b96c29a63a9439c1be0927800dbde2382b8",
+                "record:18a6bb4b96398732bced102a24735347cce3f8622ee103c116def42259312760",
+                "record:2cb2af992b76a0c9bc97031ce4ea3de40a037b36ec4d30bc142926472f48d24a",
+                "record:0600ff81eca81b4e96224a9e2636906d9a5e4ffec5a4460e8e9431ec5e947b72",
+                "record:24bf76f8aeabfbbc151b50476e562f3f1d1b2144d663483f63e086bec7864291",
+                "record:5050e544852202b71b0b9298209f48badd9303ada17fe99bcec15cdfae22b64b"
+              ]
+            },
+            "record_type": "candidate.committed",
+            "schema_version": 1
+          },
+          {
+            "id": "record:569663dfe1d9d694b0ae240991eb2ceba8d0175dcdf81e9145923dd7e69a084d",
+            "causal_parents": [],
+            "payload": {
+              "trace": {
+                "accepted_asset_names": [],
+                "accepted_fragments": [
+                  "{\"candidate_id\": \"candidate:v1:e5002bcf647f8796e2e82734f16325f565905df0e25a6c90908664e3f40f8e62\", \"effect_type\": \"task.handoff\", \"relation_target\": \"task:v3:2ae5fd4c6efcf39fd8ac2d455b8d23aff64f3df700afde42a5af8614ed284067\"}"
+                ],
+                "authority_policy": null,
+                "authority_result": "accepted",
+                "budget_remaining": 0,
+                "candidate_raw": null,
+                "contract_id": "commitment",
+                "disclosed_assets": [],
+                "event_type": "candidate_committed",
+                "id": "event:6a316cff00f3df8039ed1da2992e676682898416d9fd3e66238bb6b432b8824b",
+                "parent_id": "candidate:v1:e5002bcf647f8796e2e82734f16325f565905df0e25a6c90908664e3f40f8e62",
+                "rejected_fragments": [],
+                "relation_target": "task:v3:2ae5fd4c6efcf39fd8ac2d455b8d23aff64f3df700afde42a5af8614ed284067",
+                "relation_type": null,
+                "timestamp": "",
+                "usage_metadata": null,
+                "worker_id": "human:operator"
+              }
+            },
+            "record_type": "trace.recorded",
+            "schema_version": 1
+          }
+        ]
+      },
+      "records": [
+        {
+          "id": "record:41ea785d4261c837fddebb0f178da7208af476e4857eb70602e909d57d13f2fd",
+          "causal_parents": [
+            "record:afce4a0756a4361f3c842e19abe4494c178fc9e7752e515d43c12ff16a4299af"
+          ],
+          "payload": {
+            "actor_id": "human:operator",
+            "contract_id": "task:v3:2ae5fd4c6efcf39fd8ac2d455b8d23aff64f3df700afde42a5af8614ed284067",
+            "reason": "继续同一目标 café；结束旧执行树",
+            "terminal": "cancelled"
+          },
+          "record_type": "lifecycle.terminal",
+          "schema_version": 1
+        },
+        {
+          "id": "record:29ca18fa275f69f3e7955f1f7a1b4f5e21711d8dd9e39f3bfe1f477d4ea452ab",
+          "causal_parents": [
+            "record:afce4a0756a4361f3c842e19abe4494c178fc9e7752e515d43c12ff16a4299af"
+          ],
+          "payload": {
+            "actor_id": "human:operator",
+            "contract_id": "task:v3:6380f51e48679fc2701703f1430745e03cfa3b7dcd185b01c6dbaa23908a3cd2",
+            "reason": "继续同一目标 café；结束旧执行树",
+            "terminal": "cancelled"
+          },
+          "record_type": "lifecycle.terminal",
+          "schema_version": 1
+        },
+        {
+          "id": "record:3d43459ca184d155a7f727d971ed697bb3825ebcdcd8bf733abd20ea3150d862",
+          "causal_parents": [
+            "record:afce4a0756a4361f3c842e19abe4494c178fc9e7752e515d43c12ff16a4299af"
+          ],
+          "payload": {
+            "actor_id": "human:operator",
+            "contract_id": "task:v3:cd184f98bca79b2994df1d9605283cf3ea24d2c83bbfac8714fce5c1ad5ed284",
+            "reason": "继续同一目标 café；结束旧执行树",
+            "terminal": "cancelled"
+          },
+          "record_type": "lifecycle.terminal",
+          "schema_version": 1
+        },
+        {
+          "id": "record:3b9dd07ab33e3cea39b88ce569a07c0d0056d084de2f3d86b1dc0c4e2630d0c4",
+          "causal_parents": [
+            "record:afce4a0756a4361f3c842e19abe4494c178fc9e7752e515d43c12ff16a4299af"
+          ],
+          "payload": {
+            "actor_id": "human:operator",
+            "contract_id": "task:v3:d13c7626344abe2fadc6e6948d3cc4865a8929f8891c8cdf6b043cd6a576d9d4",
+            "reason": "继续同一目标 café；结束旧执行树",
+            "terminal": "cancelled"
+          },
+          "record_type": "lifecycle.terminal",
+          "schema_version": 1
+        },
+        {
+          "id": "record:b9b4f6b64ce9d274dca25a7ad76ae1938d426a63cd58cf3d8a733483cf226461",
+          "causal_parents": [
+            "record:afce4a0756a4361f3c842e19abe4494c178fc9e7752e515d43c12ff16a4299af",
+            "record:29ca18fa275f69f3e7955f1f7a1b4f5e21711d8dd9e39f3bfe1f477d4ea452ab",
+            "record:450f551248625ff5a6e725b1895bdf7704f223025032eb2c0e228c497105be8a",
+            "record:3587842099e07a29e233c85237c0ed65d63263c2f009f6ad89759eabba24c2c5",
+            "record:58a26947adde83c8adcf568ba3c6ec8ca541781a255e191a7048daa23d0b001a"
+          ],
+          "payload": {
+            "amount": 3,
+            "cancellation_record_id": "record:29ca18fa275f69f3e7955f1f7a1b4f5e21711d8dd9e39f3bfe1f477d4ea452ab",
+            "candidate_id": "candidate:v1:e5002bcf647f8796e2e82734f16325f565905df0e25a6c90908664e3f40f8e62",
+            "from_contract_id": "task:v3:6380f51e48679fc2701703f1430745e03cfa3b7dcd185b01c6dbaa23908a3cd2",
+            "funding_path_record_ids": [
+              "record:450f551248625ff5a6e725b1895bdf7704f223025032eb2c0e228c497105be8a",
+              "record:3587842099e07a29e233c85237c0ed65d63263c2f009f6ad89759eabba24c2c5",
+              "record:58a26947adde83c8adcf568ba3c6ec8ca541781a255e191a7048daa23d0b001a"
+            ],
+            "receipt_id": "record:afce4a0756a4361f3c842e19abe4494c178fc9e7752e515d43c12ff16a4299af",
+            "return_id": "return:14727097c4e429addd2ee6140f1945c11cf0197f6894debf021e3b0f6cf31824",
+            "source_contract_id": "task:v3:2ae5fd4c6efcf39fd8ac2d455b8d23aff64f3df700afde42a5af8614ed284067"
+          },
+          "record_type": "allowance.returned",
+          "schema_version": 1
+        },
+        {
+          "id": "record:afee68bbee339627332e997bde7f2b96c29a63a9439c1be0927800dbde2382b8",
+          "causal_parents": [
+            "record:afce4a0756a4361f3c842e19abe4494c178fc9e7752e515d43c12ff16a4299af",
+            "record:3d43459ca184d155a7f727d971ed697bb3825ebcdcd8bf733abd20ea3150d862",
+            "record:450f551248625ff5a6e725b1895bdf7704f223025032eb2c0e228c497105be8a",
+            "record:80352276d878dce94a9057eacb4273ab73cf0f138e9b7d6c2d6d20580898fb2f",
+            "record:adac2ea9c3c4299dca91ccbf1827b74f17a5062038522af10376c3d1f3ac825b",
+            "record:3587842099e07a29e233c85237c0ed65d63263c2f009f6ad89759eabba24c2c5",
+            "record:58a26947adde83c8adcf568ba3c6ec8ca541781a255e191a7048daa23d0b001a"
+          ],
+          "payload": {
+            "amount": 1,
+            "cancellation_record_id": "record:3d43459ca184d155a7f727d971ed697bb3825ebcdcd8bf733abd20ea3150d862",
+            "candidate_id": "candidate:v1:e5002bcf647f8796e2e82734f16325f565905df0e25a6c90908664e3f40f8e62",
+            "from_contract_id": "task:v3:cd184f98bca79b2994df1d9605283cf3ea24d2c83bbfac8714fce5c1ad5ed284",
+            "funding_path_record_ids": [
+              "record:450f551248625ff5a6e725b1895bdf7704f223025032eb2c0e228c497105be8a",
+              "record:80352276d878dce94a9057eacb4273ab73cf0f138e9b7d6c2d6d20580898fb2f",
+              "record:adac2ea9c3c4299dca91ccbf1827b74f17a5062038522af10376c3d1f3ac825b",
+              "record:3587842099e07a29e233c85237c0ed65d63263c2f009f6ad89759eabba24c2c5",
+              "record:58a26947adde83c8adcf568ba3c6ec8ca541781a255e191a7048daa23d0b001a"
+            ],
+            "receipt_id": "record:afce4a0756a4361f3c842e19abe4494c178fc9e7752e515d43c12ff16a4299af",
+            "return_id": "return:6e5b178f44ce29d7b00e63d63a3d90c67f0fa248bcf2ad41881b75a5b2001dd2",
+            "source_contract_id": "task:v3:2ae5fd4c6efcf39fd8ac2d455b8d23aff64f3df700afde42a5af8614ed284067"
+          },
+          "record_type": "allowance.returned",
+          "schema_version": 1
+        },
+        {
+          "id": "record:18a6bb4b96398732bced102a24735347cce3f8622ee103c116def42259312760",
+          "causal_parents": [
+            "record:afce4a0756a4361f3c842e19abe4494c178fc9e7752e515d43c12ff16a4299af",
+            "record:3b9dd07ab33e3cea39b88ce569a07c0d0056d084de2f3d86b1dc0c4e2630d0c4",
+            "record:450f551248625ff5a6e725b1895bdf7704f223025032eb2c0e228c497105be8a",
+            "record:b62f954c59d35371522fbef485722cba04863b8daeec7e61d08ccc1f05e32dfd",
+            "record:f98de48bf59cfbc57bcbfee767c129497e17ff40ab3b4437036b4d5629067004",
+            "record:80352276d878dce94a9057eacb4273ab73cf0f138e9b7d6c2d6d20580898fb2f",
+            "record:adac2ea9c3c4299dca91ccbf1827b74f17a5062038522af10376c3d1f3ac825b",
+            "record:3587842099e07a29e233c85237c0ed65d63263c2f009f6ad89759eabba24c2c5",
+            "record:58a26947adde83c8adcf568ba3c6ec8ca541781a255e191a7048daa23d0b001a"
+          ],
+          "payload": {
+            "amount": 1,
+            "cancellation_record_id": "record:3b9dd07ab33e3cea39b88ce569a07c0d0056d084de2f3d86b1dc0c4e2630d0c4",
+            "candidate_id": "candidate:v1:e5002bcf647f8796e2e82734f16325f565905df0e25a6c90908664e3f40f8e62",
+            "from_contract_id": "task:v3:d13c7626344abe2fadc6e6948d3cc4865a8929f8891c8cdf6b043cd6a576d9d4",
+            "funding_path_record_ids": [
+              "record:450f551248625ff5a6e725b1895bdf7704f223025032eb2c0e228c497105be8a",
+              "record:b62f954c59d35371522fbef485722cba04863b8daeec7e61d08ccc1f05e32dfd",
+              "record:f98de48bf59cfbc57bcbfee767c129497e17ff40ab3b4437036b4d5629067004",
+              "record:80352276d878dce94a9057eacb4273ab73cf0f138e9b7d6c2d6d20580898fb2f",
+              "record:adac2ea9c3c4299dca91ccbf1827b74f17a5062038522af10376c3d1f3ac825b",
+              "record:3587842099e07a29e233c85237c0ed65d63263c2f009f6ad89759eabba24c2c5",
+              "record:58a26947adde83c8adcf568ba3c6ec8ca541781a255e191a7048daa23d0b001a"
+            ],
+            "receipt_id": "record:afce4a0756a4361f3c842e19abe4494c178fc9e7752e515d43c12ff16a4299af",
+            "return_id": "return:a9fbb93501ae4e0245438427f639c33cec8a549b453580d43d16f3c36490314a",
+            "source_contract_id": "task:v3:2ae5fd4c6efcf39fd8ac2d455b8d23aff64f3df700afde42a5af8614ed284067"
+          },
+          "record_type": "allowance.returned",
+          "schema_version": 1
+        },
+        {
+          "id": "record:2cb2af992b76a0c9bc97031ce4ea3de40a037b36ec4d30bc142926472f48d24a",
+          "causal_parents": [
+            "record:afce4a0756a4361f3c842e19abe4494c178fc9e7752e515d43c12ff16a4299af"
+          ],
+          "payload": {
+            "candidate_id": "candidate:v1:e5002bcf647f8796e2e82734f16325f565905df0e25a6c90908664e3f40f8e62",
+            "contract": {
+              "acceptance_policy": null,
+              "activation": "",
+              "budget": 5,
+              "context_asset_ids": [],
+              "delegation_capabilities": [],
+              "delegation_pools": [],
+              "description": "root obligation\n\nTask handoff reason: 继续同一目标 café；结束旧执行树",
+              "id": "task:v6:a7609d805861254525583c55640eb73c100294cd76e7b59901dfd1e2c59e82e1",
+              "inputs": [],
+              "labels": [],
+              "minting_authority": [],
+              "name": "expanded-source.handoff.expanded.e5002bcf647f8796e2e82734f16325f565905df0e25a6c90908664e3f40f8e62",
+              "origin": "human",
+              "outputs": [
+                "final"
+              ],
+              "parent_id": "task:v3:2ae5fd4c6efcf39fd8ac2d455b8d23aff64f3df700afde42a5af8614ed284067",
+              "sensitive_input_policy": {
+                "input_asset_bindings": {}
+              },
+              "tool_scope": [],
+              "worker_capabilities": [],
+              "worker_pools": []
+            }
+          },
+          "record_type": "contract.declared",
+          "schema_version": 1
+        },
+        {
+          "id": "record:0600ff81eca81b4e96224a9e2636906d9a5e4ffec5a4460e8e9431ec5e947b72",
+          "causal_parents": [
+            "record:afce4a0756a4361f3c842e19abe4494c178fc9e7752e515d43c12ff16a4299af",
+            "record:41ea785d4261c837fddebb0f178da7208af476e4857eb70602e909d57d13f2fd",
+            "record:2cb2af992b76a0c9bc97031ce4ea3de40a037b36ec4d30bc142926472f48d24a",
+            "record:29ca18fa275f69f3e7955f1f7a1b4f5e21711d8dd9e39f3bfe1f477d4ea452ab",
+            "record:3d43459ca184d155a7f727d971ed697bb3825ebcdcd8bf733abd20ea3150d862",
+            "record:3b9dd07ab33e3cea39b88ce569a07c0d0056d084de2f3d86b1dc0c4e2630d0c4",
+            "record:b9b4f6b64ce9d274dca25a7ad76ae1938d426a63cd58cf3d8a733483cf226461",
+            "record:afee68bbee339627332e997bde7f2b96c29a63a9439c1be0927800dbde2382b8",
+            "record:18a6bb4b96398732bced102a24735347cce3f8622ee103c116def42259312760"
+          ],
+          "payload": {
+            "actor_id": "human:operator",
+            "allowance_returns": [
+              {
+                "amount": 3,
+                "donor_contract_id": "task:v3:6380f51e48679fc2701703f1430745e03cfa3b7dcd185b01c6dbaa23908a3cd2",
+                "record_id": "record:b9b4f6b64ce9d274dca25a7ad76ae1938d426a63cd58cf3d8a733483cf226461"
+              },
+              {
+                "amount": 1,
+                "donor_contract_id": "task:v3:cd184f98bca79b2994df1d9605283cf3ea24d2c83bbfac8714fce5c1ad5ed284",
+                "record_id": "record:afee68bbee339627332e997bde7f2b96c29a63a9439c1be0927800dbde2382b8"
+              },
+              {
+                "amount": 1,
+                "donor_contract_id": "task:v3:d13c7626344abe2fadc6e6948d3cc4865a8929f8891c8cdf6b043cd6a576d9d4",
+                "record_id": "record:18a6bb4b96398732bced102a24735347cce3f8622ee103c116def42259312760"
+              }
+            ],
+            "budget": 5,
+            "cancel_record_ids": [
+              "record:29ca18fa275f69f3e7955f1f7a1b4f5e21711d8dd9e39f3bfe1f477d4ea452ab",
+              "record:3d43459ca184d155a7f727d971ed697bb3825ebcdcd8bf733abd20ea3150d862",
+              "record:3b9dd07ab33e3cea39b88ce569a07c0d0056d084de2f3d86b1dc0c4e2630d0c4"
+            ],
+            "cancelled_contract_ids": [
+              "task:v3:6380f51e48679fc2701703f1430745e03cfa3b7dcd185b01c6dbaa23908a3cd2",
+              "task:v3:cd184f98bca79b2994df1d9605283cf3ea24d2c83bbfac8714fce5c1ad5ed284",
+              "task:v3:d13c7626344abe2fadc6e6948d3cc4865a8929f8891c8cdf6b043cd6a576d9d4"
+            ],
+            "candidate_id": "candidate:v1:e5002bcf647f8796e2e82734f16325f565905df0e25a6c90908664e3f40f8e62",
+            "completed_outputs": [],
+            "contract_id": "task:v3:2ae5fd4c6efcf39fd8ac2d455b8d23aff64f3df700afde42a5af8614ed284067",
+            "hold_id": "",
+            "key_id": "operator-key",
+            "preserved_contract_ids": [],
+            "reason": "继续同一目标 café；结束旧执行树",
+            "repair_contract_ids": [],
+            "repair_output_proofs": {},
+            "repair_record_ids": [],
+            "retained_asset_ids": [],
+            "retained_output_proofs": {},
+            "return_record_ids": [
+              "record:b9b4f6b64ce9d274dca25a7ad76ae1938d426a63cd58cf3d8a733483cf226461",
+              "record:afee68bbee339627332e997bde7f2b96c29a63a9439c1be0927800dbde2382b8",
+              "record:18a6bb4b96398732bced102a24735347cce3f8622ee103c116def42259312760"
+            ],
+            "returned_allowance": 5,
+            "source_original_balance": 0,
+            "successor_id": "task:v6:a7609d805861254525583c55640eb73c100294cd76e7b59901dfd1e2c59e82e1"
+          },
+          "record_type": "task.handed_off",
+          "schema_version": 1
+        },
+        {
+          "id": "record:24bf76f8aeabfbbc151b50476e562f3f1d1b2144d663483f63e086bec7864291",
+          "causal_parents": [
+            "record:afce4a0756a4361f3c842e19abe4494c178fc9e7752e515d43c12ff16a4299af"
+          ],
+          "payload": {
+            "amount": 5,
+            "child_contract_id": "task:v6:a7609d805861254525583c55640eb73c100294cd76e7b59901dfd1e2c59e82e1",
+            "purpose": "execution",
+            "reservation_id": "reservation:6afad0f4e0c072353c4a1c080c78d0d93976914ceddc77accc854f6f13b197bd",
+            "source_contract_id": "task:v3:2ae5fd4c6efcf39fd8ac2d455b8d23aff64f3df700afde42a5af8614ed284067"
+          },
+          "record_type": "allowance.reserved",
+          "schema_version": 1
+        },
+        {
+          "id": "record:5050e544852202b71b0b9298209f48badd9303ada17fe99bcec15cdfae22b64b",
+          "causal_parents": [
+            "record:24bf76f8aeabfbbc151b50476e562f3f1d1b2144d663483f63e086bec7864291"
+          ],
+          "payload": {
+            "amount": 5,
+            "contract_id": "task:v6:a7609d805861254525583c55640eb73c100294cd76e7b59901dfd1e2c59e82e1",
+            "grant_id": "grant:task:v6:a7609d805861254525583c55640eb73c100294cd76e7b59901dfd1e2c59e82e1",
+            "purpose": "execution",
+            "reservation_id": "reservation:6afad0f4e0c072353c4a1c080c78d0d93976914ceddc77accc854f6f13b197bd",
+            "source_contract_id": "task:v3:2ae5fd4c6efcf39fd8ac2d455b8d23aff64f3df700afde42a5af8614ed284067"
+          },
+          "record_type": "allowance.granted",
+          "schema_version": 1
+        }
+      ],
+      "contract": {
+        "id": "task:v6:a7609d805861254525583c55640eb73c100294cd76e7b59901dfd1e2c59e82e1",
+        "parent_id": "task:v3:2ae5fd4c6efcf39fd8ac2d455b8d23aff64f3df700afde42a5af8614ed284067",
+        "name": "expanded-source.handoff.expanded.e5002bcf647f8796e2e82734f16325f565905df0e25a6c90908664e3f40f8e62",
+        "description": "root obligation\n\nTask handoff reason: 继续同一目标 café；结束旧执行树",
+        "inputs": [],
+        "outputs": [
+          "final"
+        ],
+        "activation": "",
+        "budget": 5,
+        "tool_scope": [],
+        "labels": [],
+        "context_asset_ids": [],
+        "worker_capabilities": [],
+        "worker_pools": [],
+        "delegation_capabilities": [],
+        "delegation_pools": [],
+        "origin": "human",
+        "minting_authority": [],
+        "sensitive_input_policy": {
+          "input_asset_bindings": {}
+        },
+        "acceptance_policy": null
+      },
+      "additional_capabilities": [
+        "contract.cancel",
+        "contract.publish"
+      ]
+    },
+    {
+      "name": "zero-source-budget-3",
+      "candidate": {
+        "value": {
+          "id": "candidate:v1:8e973e0941e3f122b8cff46539df86503c6645aff88ab45449898bf3c0d988da",
+          "signature": "ed25519:9Iov7rd0FMHOwJ9DD3edCRNHrQCn/Ucf9D6NCZJj5604r5rIZu9rnHyQpFBo3zk880xc4kFcm4W+FbLv1R2/AA==",
+          "actor_id": "human:operator",
+          "causal_parents": [],
+          "domain_id": "genesis:a281981599140dbee751fdc6473c7412881f48613b2f00c27fa060a7ced8420c",
+          "effects": [
+            {
+              "atomic_group": "",
+              "effect_type": "task.handoff",
+              "payload": {
+                "budget": 3,
+                "contract_id": "task:v3:2ae5fd4c6efcf39fd8ac2d455b8d23aff64f3df700afde42a5af8614ed284067",
+                "hold_reason": "",
+                "reason": "继续同一目标 café；结束旧执行树"
+              }
+            }
+          ],
+          "idempotency_key": "vector-expanded-3",
+          "key_id": "operator-key",
+          "protocol_version": 1,
+          "signature_kind": "ed25519"
+        },
+        "expected_signing_utf8": "{\"actor_id\":\"human:operator\",\"causal_parents\":[],\"domain_id\":\"genesis:a281981599140dbee751fdc6473c7412881f48613b2f00c27fa060a7ced8420c\",\"effects\":[{\"atomic_group\":\"\",\"effect_type\":\"task.handoff\",\"payload\":{\"budget\":3,\"contract_id\":\"task:v3:2ae5fd4c6efcf39fd8ac2d455b8d23aff64f3df700afde42a5af8614ed284067\",\"hold_reason\":\"\",\"reason\":\"继续同一目标 café；结束旧执行树\"}}],\"idempotency_key\":\"vector-expanded-3\",\"key_id\":\"operator-key\",\"protocol_version\":1,\"signature_kind\":\"ed25519\"}"
+      },
+      "context": {
+        "contracts": [
+          {
+            "id": "task:v3:2ae5fd4c6efcf39fd8ac2d455b8d23aff64f3df700afde42a5af8614ed284067",
+            "parent_id": null,
+            "name": "expanded-source",
+            "description": "root obligation",
+            "inputs": [],
+            "outputs": [
+              "final"
+            ],
+            "activation": "",
+            "budget": 5,
+            "tool_scope": [],
+            "labels": [],
+            "context_asset_ids": [],
+            "worker_capabilities": [],
+            "worker_pools": [],
+            "delegation_capabilities": [],
+            "delegation_pools": [],
+            "origin": "human",
+            "minting_authority": [],
+            "sensitive_input_policy": null,
+            "acceptance_policy": null
+          },
+          {
+            "id": "task:v3:6380f51e48679fc2701703f1430745e03cfa3b7dcd185b01c6dbaa23908a3cd2",
+            "parent_id": "task:v3:2ae5fd4c6efcf39fd8ac2d455b8d23aff64f3df700afde42a5af8614ed284067",
+            "name": "expanded-child",
+            "description": "expanded-child",
+            "inputs": [],
+            "outputs": [],
+            "activation": "",
+            "budget": 5,
+            "tool_scope": [],
+            "labels": [],
+            "context_asset_ids": [],
+            "worker_capabilities": [],
+            "worker_pools": [],
+            "delegation_capabilities": [],
+            "delegation_pools": [],
+            "origin": "human",
+            "minting_authority": [],
+            "sensitive_input_policy": null,
+            "acceptance_policy": null
+          },
+          {
+            "id": "task:v3:cd184f98bca79b2994df1d9605283cf3ea24d2c83bbfac8714fce5c1ad5ed284",
+            "parent_id": "task:v3:6380f51e48679fc2701703f1430745e03cfa3b7dcd185b01c6dbaa23908a3cd2",
+            "name": "expanded-grandchild",
+            "description": "expanded-grandchild",
+            "inputs": [],
+            "outputs": [],
+            "activation": "",
+            "budget": 2,
+            "tool_scope": [],
+            "labels": [],
+            "context_asset_ids": [],
+            "worker_capabilities": [],
+            "worker_pools": [],
+            "delegation_capabilities": [],
+            "delegation_pools": [],
+            "origin": "human",
+            "minting_authority": [],
+            "sensitive_input_policy": null,
+            "acceptance_policy": null
+          },
+          {
+            "id": "task:v3:d13c7626344abe2fadc6e6948d3cc4865a8929f8891c8cdf6b043cd6a576d9d4",
+            "parent_id": "task:v3:cd184f98bca79b2994df1d9605283cf3ea24d2c83bbfac8714fce5c1ad5ed284",
+            "name": "expanded-great-grandchild",
+            "description": "expanded-great-grandchild",
+            "inputs": [],
+            "outputs": [],
+            "activation": "",
+            "budget": 1,
+            "tool_scope": [],
+            "labels": [],
+            "context_asset_ids": [],
+            "worker_capabilities": [],
+            "worker_pools": [],
+            "delegation_capabilities": [],
+            "delegation_pools": [],
+            "origin": "human",
+            "minting_authority": [],
+            "sensitive_input_policy": null,
+            "acceptance_policy": null
+          }
+        ],
+        "assets": [],
+        "runtime_records": [
+          {
+            "id": "record:ca033c9f1e4acefd621c0c8e648ac9b5318a087960fa3f55c78be408dd9eefff",
+            "causal_parents": [],
+            "payload": {
+              "manifest": {
+                "domain": "expanded-handoff",
+                "id": "genesis:a281981599140dbee751fdc6473c7412881f48613b2f00c27fa060a7ced8420c",
+                "policy_hash": "policy:test",
+                "root_keys": [
+                  {
+                    "actor_id": "human:operator",
+                    "capabilities": [
+                      "contract.cancel",
+                      "contract.publish",
+                      "task.block",
+                      "task.handoff"
+                    ],
+                    "key_id": "operator-key",
+                    "kind": "ed25519",
+                    "public_key": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+                    "revoked": false
+                  },
+                  {
+                    "actor_id": "human:revoker",
+                    "capabilities": [
+                      "actor.revoke"
+                    ],
+                    "key_id": "revoker-key",
+                    "kind": "ed25519",
+                    "public_key": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+                    "revoked": false
+                  }
+                ],
+                "schema_version": 1
+              }
+            },
+            "record_type": "domain.genesis",
+            "schema_version": 1
+          },
+          {
+            "id": "record:4dcacd7d853bfd45b6491b4ce4a7e33e9acdfe433c6facd89ba3099e8073b684",
+            "causal_parents": [],
+            "payload": {
+              "actor_id": "human:operator",
+              "candidate_id": "candidate:v1:65e71aba2366dd550c70fc24eb97db14b4222acc830ce39e4b5ad38f29454954",
+              "domain_id": "genesis:a281981599140dbee751fdc6473c7412881f48613b2f00c27fa060a7ced8420c",
+              "effect_types": [
+                "contract.declare"
+              ],
+              "key_id": "operator-key",
+              "metadata": {},
+              "signature": "ed25519:yRfD2rHZT7CacyfsdDYmMSJlLZGhs0TIvoReEkOLF2hhersQwJboE60JBecGEC3hZUMGVqKxrfEcsijgULolBQ==",
+              "signature_kind": "ed25519"
+            },
+            "record_type": "candidate.received",
+            "schema_version": 1
+          },
+          {
+            "id": "record:6b1882a9a52db4ead6114ec23676254f3b998872f6d2b8aa0d360fd69fceba9b",
+            "causal_parents": [
+              "record:4dcacd7d853bfd45b6491b4ce4a7e33e9acdfe433c6facd89ba3099e8073b684"
+            ],
+            "payload": {
+              "candidate_id": "candidate:v1:65e71aba2366dd550c70fc24eb97db14b4222acc830ce39e4b5ad38f29454954",
+              "contract": {
+                "acceptance_policy": null,
+                "activation": "",
+                "budget": 5,
+                "context_asset_ids": [],
+                "delegation_capabilities": [],
+                "delegation_pools": [],
+                "description": "root obligation",
+                "id": "task:v3:2ae5fd4c6efcf39fd8ac2d455b8d23aff64f3df700afde42a5af8614ed284067",
+                "inputs": [],
+                "labels": [],
+                "minting_authority": [],
+                "name": "expanded-source",
+                "origin": "human",
+                "outputs": [
+                  "final"
+                ],
+                "parent_id": null,
+                "sensitive_input_policy": null,
+                "tool_scope": [],
+                "worker_capabilities": [],
+                "worker_pools": []
+              }
+            },
+            "record_type": "contract.declared",
+            "schema_version": 1
+          },
+          {
+            "id": "record:450f551248625ff5a6e725b1895bdf7704f223025032eb2c0e228c497105be8a",
+            "causal_parents": [
+              "record:4dcacd7d853bfd45b6491b4ce4a7e33e9acdfe433c6facd89ba3099e8073b684"
+            ],
+            "payload": {
+              "amount": 5,
+              "contract_id": "task:v3:2ae5fd4c6efcf39fd8ac2d455b8d23aff64f3df700afde42a5af8614ed284067",
+              "grant_id": "grant:task:v3:2ae5fd4c6efcf39fd8ac2d455b8d23aff64f3df700afde42a5af8614ed284067",
+              "purpose": "root",
+              "source_contract_id": ""
+            },
+            "record_type": "allowance.granted",
+            "schema_version": 1
+          },
+          {
+            "id": "record:c007d7c6cb214c36daa3069c8748d99a7b1e2fac51278879a791b9258dd49894",
+            "causal_parents": [
+              "record:4dcacd7d853bfd45b6491b4ce4a7e33e9acdfe433c6facd89ba3099e8073b684",
+              "record:6b1882a9a52db4ead6114ec23676254f3b998872f6d2b8aa0d360fd69fceba9b",
+              "record:450f551248625ff5a6e725b1895bdf7704f223025032eb2c0e228c497105be8a"
+            ],
+            "payload": {
+              "candidate_id": "candidate:v1:65e71aba2366dd550c70fc24eb97db14b4222acc830ce39e4b5ad38f29454954",
+              "committed_record_ids": [
+                "record:6b1882a9a52db4ead6114ec23676254f3b998872f6d2b8aa0d360fd69fceba9b",
+                "record:450f551248625ff5a6e725b1895bdf7704f223025032eb2c0e228c497105be8a"
+              ]
+            },
+            "record_type": "candidate.committed",
+            "schema_version": 1
+          },
+          {
+            "id": "record:e38c72f7fb6902f894c41150cf13ee43122959a0f0380e4b10d2a68004e36a0d",
+            "causal_parents": [],
+            "payload": {
+              "trace": {
+                "accepted_asset_names": [],
+                "accepted_fragments": [
+                  "{\"candidate_id\": \"candidate:v1:65e71aba2366dd550c70fc24eb97db14b4222acc830ce39e4b5ad38f29454954\", \"effect_type\": \"contract.declare\", \"relation_target\": \"task:v3:2ae5fd4c6efcf39fd8ac2d455b8d23aff64f3df700afde42a5af8614ed284067\"}"
+                ],
+                "authority_policy": null,
+                "authority_result": "accepted",
+                "budget_remaining": 0,
+                "candidate_raw": null,
+                "contract_id": "commitment",
+                "disclosed_assets": [],
+                "event_type": "candidate_committed",
+                "id": "event:a68cdc14a735ea3312f9b1daacfa0f22742c2862447feb5359fa5db7a0aa0abb",
+                "parent_id": "candidate:v1:65e71aba2366dd550c70fc24eb97db14b4222acc830ce39e4b5ad38f29454954",
+                "rejected_fragments": [],
+                "relation_target": "task:v3:2ae5fd4c6efcf39fd8ac2d455b8d23aff64f3df700afde42a5af8614ed284067",
+                "relation_type": null,
+                "timestamp": "",
+                "usage_metadata": null,
+                "worker_id": "human:operator"
+              }
+            },
+            "record_type": "trace.recorded",
+            "schema_version": 1
+          },
+          {
+            "id": "record:e2065b3603b0abe8d0fa612ecc11ea9dfe7ce8bfb0552511647342cbb9111db2",
+            "causal_parents": [],
+            "payload": {
+              "actor_id": "human:operator",
+              "candidate_id": "candidate:v1:09ccabeb5c1c67cb74352d80e312f5a7730937eab521f967eed7e6be533f2c8b",
+              "domain_id": "genesis:a281981599140dbee751fdc6473c7412881f48613b2f00c27fa060a7ced8420c",
+              "effect_types": [
+                "contract.declare"
+              ],
+              "key_id": "operator-key",
+              "metadata": {},
+              "signature": "ed25519:/Kg60JcN1g7MzoGK1kmqkc4eTndYyqSx7iknkn7YEE/UDKHXxRyNFBILN4E4+Vn4TwG0dN3QvqiuY/qDnFznDg==",
+              "signature_kind": "ed25519"
+            },
+            "record_type": "candidate.received",
+            "schema_version": 1
+          },
+          {
+            "id": "record:155201e4023ecabb2e1068c5f8f9da4fe1b1cb845b9b89ede56b786c53ff811f",
+            "causal_parents": [
+              "record:e2065b3603b0abe8d0fa612ecc11ea9dfe7ce8bfb0552511647342cbb9111db2"
+            ],
+            "payload": {
+              "candidate_id": "candidate:v1:09ccabeb5c1c67cb74352d80e312f5a7730937eab521f967eed7e6be533f2c8b",
+              "contract": {
+                "acceptance_policy": null,
+                "activation": "",
+                "budget": 5,
+                "context_asset_ids": [],
+                "delegation_capabilities": [],
+                "delegation_pools": [],
+                "description": "expanded-child",
+                "id": "task:v3:6380f51e48679fc2701703f1430745e03cfa3b7dcd185b01c6dbaa23908a3cd2",
+                "inputs": [],
+                "labels": [],
+                "minting_authority": [],
+                "name": "expanded-child",
+                "origin": "human",
+                "outputs": [],
+                "parent_id": "task:v3:2ae5fd4c6efcf39fd8ac2d455b8d23aff64f3df700afde42a5af8614ed284067",
+                "sensitive_input_policy": null,
+                "tool_scope": [],
+                "worker_capabilities": [],
+                "worker_pools": []
+              }
+            },
+            "record_type": "contract.declared",
+            "schema_version": 1
+          },
+          {
+            "id": "record:3587842099e07a29e233c85237c0ed65d63263c2f009f6ad89759eabba24c2c5",
+            "causal_parents": [
+              "record:e2065b3603b0abe8d0fa612ecc11ea9dfe7ce8bfb0552511647342cbb9111db2"
+            ],
+            "payload": {
+              "amount": 5,
+              "child_contract_id": "task:v3:6380f51e48679fc2701703f1430745e03cfa3b7dcd185b01c6dbaa23908a3cd2",
+              "purpose": "execution",
+              "reservation_id": "reservation:9a6c16f7a362cca56315388f012d8782bded1fe211b84a561649da48febafd3f",
+              "source_contract_id": "task:v3:2ae5fd4c6efcf39fd8ac2d455b8d23aff64f3df700afde42a5af8614ed284067"
+            },
+            "record_type": "allowance.reserved",
+            "schema_version": 1
+          },
+          {
+            "id": "record:58a26947adde83c8adcf568ba3c6ec8ca541781a255e191a7048daa23d0b001a",
+            "causal_parents": [
+              "record:3587842099e07a29e233c85237c0ed65d63263c2f009f6ad89759eabba24c2c5"
+            ],
+            "payload": {
+              "amount": 5,
+              "contract_id": "task:v3:6380f51e48679fc2701703f1430745e03cfa3b7dcd185b01c6dbaa23908a3cd2",
+              "grant_id": "grant:task:v3:6380f51e48679fc2701703f1430745e03cfa3b7dcd185b01c6dbaa23908a3cd2",
+              "purpose": "execution",
+              "reservation_id": "reservation:9a6c16f7a362cca56315388f012d8782bded1fe211b84a561649da48febafd3f",
+              "source_contract_id": "task:v3:2ae5fd4c6efcf39fd8ac2d455b8d23aff64f3df700afde42a5af8614ed284067"
+            },
+            "record_type": "allowance.granted",
+            "schema_version": 1
+          },
+          {
+            "id": "record:2a5cfcc0165c0417f112fc2b4ccb9a8cd39413060c479f28fd224af4c95aa73b",
+            "causal_parents": [
+              "record:e2065b3603b0abe8d0fa612ecc11ea9dfe7ce8bfb0552511647342cbb9111db2",
+              "record:155201e4023ecabb2e1068c5f8f9da4fe1b1cb845b9b89ede56b786c53ff811f",
+              "record:3587842099e07a29e233c85237c0ed65d63263c2f009f6ad89759eabba24c2c5",
+              "record:58a26947adde83c8adcf568ba3c6ec8ca541781a255e191a7048daa23d0b001a"
+            ],
+            "payload": {
+              "candidate_id": "candidate:v1:09ccabeb5c1c67cb74352d80e312f5a7730937eab521f967eed7e6be533f2c8b",
+              "committed_record_ids": [
+                "record:155201e4023ecabb2e1068c5f8f9da4fe1b1cb845b9b89ede56b786c53ff811f",
+                "record:3587842099e07a29e233c85237c0ed65d63263c2f009f6ad89759eabba24c2c5",
+                "record:58a26947adde83c8adcf568ba3c6ec8ca541781a255e191a7048daa23d0b001a"
+              ]
+            },
+            "record_type": "candidate.committed",
+            "schema_version": 1
+          },
+          {
+            "id": "record:e63dd2772c0f1f28a7d7f6546b369dbbbed246106b1efe0ad3141f85691e8031",
+            "causal_parents": [],
+            "payload": {
+              "trace": {
+                "accepted_asset_names": [],
+                "accepted_fragments": [
+                  "{\"candidate_id\": \"candidate:v1:09ccabeb5c1c67cb74352d80e312f5a7730937eab521f967eed7e6be533f2c8b\", \"effect_type\": \"contract.declare\", \"relation_target\": \"task:v3:6380f51e48679fc2701703f1430745e03cfa3b7dcd185b01c6dbaa23908a3cd2\"}"
+                ],
+                "authority_policy": null,
+                "authority_result": "accepted",
+                "budget_remaining": 0,
+                "candidate_raw": null,
+                "contract_id": "commitment",
+                "disclosed_assets": [],
+                "event_type": "candidate_committed",
+                "id": "event:9352f1cc207595fea279efbeeab1af981acf0c30ca00371fba4398fbbf8d368b",
+                "parent_id": "candidate:v1:09ccabeb5c1c67cb74352d80e312f5a7730937eab521f967eed7e6be533f2c8b",
+                "rejected_fragments": [],
+                "relation_target": "task:v3:6380f51e48679fc2701703f1430745e03cfa3b7dcd185b01c6dbaa23908a3cd2",
+                "relation_type": null,
+                "timestamp": "",
+                "usage_metadata": null,
+                "worker_id": "human:operator"
+              }
+            },
+            "record_type": "trace.recorded",
+            "schema_version": 1
+          },
+          {
+            "id": "record:1f1e112f42a16a17da24ab93872067c8add14735b50fed0aaec0a2b74af0bddd",
+            "causal_parents": [],
+            "payload": {
+              "actor_id": "human:operator",
+              "candidate_id": "candidate:v1:bdbd917c0e2c88000d0854eb8b7a279b8ab04d11e46eab7608fd2e90a86d207a",
+              "domain_id": "genesis:a281981599140dbee751fdc6473c7412881f48613b2f00c27fa060a7ced8420c",
+              "effect_types": [
+                "contract.declare"
+              ],
+              "key_id": "operator-key",
+              "metadata": {},
+              "signature": "ed25519:ACKxKBfytmbrbEPJOq2tdRR6vwHzCyj1CWXXY8LwpR9tLPDbRv1c4FadxkDK74YGMgrsyTB1w86W0owED59rCg==",
+              "signature_kind": "ed25519"
+            },
+            "record_type": "candidate.received",
+            "schema_version": 1
+          },
+          {
+            "id": "record:f2935f9649119d50f666e54a67306b8930caadabef7d0eb04e5e5f40bcf87a1a",
+            "causal_parents": [
+              "record:1f1e112f42a16a17da24ab93872067c8add14735b50fed0aaec0a2b74af0bddd"
+            ],
+            "payload": {
+              "candidate_id": "candidate:v1:bdbd917c0e2c88000d0854eb8b7a279b8ab04d11e46eab7608fd2e90a86d207a",
+              "contract": {
+                "acceptance_policy": null,
+                "activation": "",
+                "budget": 2,
+                "context_asset_ids": [],
+                "delegation_capabilities": [],
+                "delegation_pools": [],
+                "description": "expanded-grandchild",
+                "id": "task:v3:cd184f98bca79b2994df1d9605283cf3ea24d2c83bbfac8714fce5c1ad5ed284",
+                "inputs": [],
+                "labels": [],
+                "minting_authority": [],
+                "name": "expanded-grandchild",
+                "origin": "human",
+                "outputs": [],
+                "parent_id": "task:v3:6380f51e48679fc2701703f1430745e03cfa3b7dcd185b01c6dbaa23908a3cd2",
+                "sensitive_input_policy": null,
+                "tool_scope": [],
+                "worker_capabilities": [],
+                "worker_pools": []
+              }
+            },
+            "record_type": "contract.declared",
+            "schema_version": 1
+          },
+          {
+            "id": "record:80352276d878dce94a9057eacb4273ab73cf0f138e9b7d6c2d6d20580898fb2f",
+            "causal_parents": [
+              "record:1f1e112f42a16a17da24ab93872067c8add14735b50fed0aaec0a2b74af0bddd"
+            ],
+            "payload": {
+              "amount": 2,
+              "child_contract_id": "task:v3:cd184f98bca79b2994df1d9605283cf3ea24d2c83bbfac8714fce5c1ad5ed284",
+              "purpose": "execution",
+              "reservation_id": "reservation:b0f955766b8dbac0483391aae605f4516c9a3a9022f73790496b889a6f373426",
+              "source_contract_id": "task:v3:6380f51e48679fc2701703f1430745e03cfa3b7dcd185b01c6dbaa23908a3cd2"
+            },
+            "record_type": "allowance.reserved",
+            "schema_version": 1
+          },
+          {
+            "id": "record:adac2ea9c3c4299dca91ccbf1827b74f17a5062038522af10376c3d1f3ac825b",
+            "causal_parents": [
+              "record:80352276d878dce94a9057eacb4273ab73cf0f138e9b7d6c2d6d20580898fb2f"
+            ],
+            "payload": {
+              "amount": 2,
+              "contract_id": "task:v3:cd184f98bca79b2994df1d9605283cf3ea24d2c83bbfac8714fce5c1ad5ed284",
+              "grant_id": "grant:task:v3:cd184f98bca79b2994df1d9605283cf3ea24d2c83bbfac8714fce5c1ad5ed284",
+              "purpose": "execution",
+              "reservation_id": "reservation:b0f955766b8dbac0483391aae605f4516c9a3a9022f73790496b889a6f373426",
+              "source_contract_id": "task:v3:6380f51e48679fc2701703f1430745e03cfa3b7dcd185b01c6dbaa23908a3cd2"
+            },
+            "record_type": "allowance.granted",
+            "schema_version": 1
+          },
+          {
+            "id": "record:303f84fce76cb50fa966f9d9dc65b934a0675f5b2575f5b83846ea31a490b4e6",
+            "causal_parents": [
+              "record:1f1e112f42a16a17da24ab93872067c8add14735b50fed0aaec0a2b74af0bddd",
+              "record:f2935f9649119d50f666e54a67306b8930caadabef7d0eb04e5e5f40bcf87a1a",
+              "record:80352276d878dce94a9057eacb4273ab73cf0f138e9b7d6c2d6d20580898fb2f",
+              "record:adac2ea9c3c4299dca91ccbf1827b74f17a5062038522af10376c3d1f3ac825b"
+            ],
+            "payload": {
+              "candidate_id": "candidate:v1:bdbd917c0e2c88000d0854eb8b7a279b8ab04d11e46eab7608fd2e90a86d207a",
+              "committed_record_ids": [
+                "record:f2935f9649119d50f666e54a67306b8930caadabef7d0eb04e5e5f40bcf87a1a",
+                "record:80352276d878dce94a9057eacb4273ab73cf0f138e9b7d6c2d6d20580898fb2f",
+                "record:adac2ea9c3c4299dca91ccbf1827b74f17a5062038522af10376c3d1f3ac825b"
+              ]
+            },
+            "record_type": "candidate.committed",
+            "schema_version": 1
+          },
+          {
+            "id": "record:69ff3bb816a9160dcd1e2c17272afa9a24327707670ed1a835efe70583246b0d",
+            "causal_parents": [],
+            "payload": {
+              "trace": {
+                "accepted_asset_names": [],
+                "accepted_fragments": [
+                  "{\"candidate_id\": \"candidate:v1:bdbd917c0e2c88000d0854eb8b7a279b8ab04d11e46eab7608fd2e90a86d207a\", \"effect_type\": \"contract.declare\", \"relation_target\": \"task:v3:cd184f98bca79b2994df1d9605283cf3ea24d2c83bbfac8714fce5c1ad5ed284\"}"
+                ],
+                "authority_policy": null,
+                "authority_result": "accepted",
+                "budget_remaining": 0,
+                "candidate_raw": null,
+                "contract_id": "commitment",
+                "disclosed_assets": [],
+                "event_type": "candidate_committed",
+                "id": "event:ab470955c5e003fcf4f986297d167bdc584dca28faf5dbefaf821b55aa439b46",
+                "parent_id": "candidate:v1:bdbd917c0e2c88000d0854eb8b7a279b8ab04d11e46eab7608fd2e90a86d207a",
+                "rejected_fragments": [],
+                "relation_target": "task:v3:cd184f98bca79b2994df1d9605283cf3ea24d2c83bbfac8714fce5c1ad5ed284",
+                "relation_type": null,
+                "timestamp": "",
+                "usage_metadata": null,
+                "worker_id": "human:operator"
+              }
+            },
+            "record_type": "trace.recorded",
+            "schema_version": 1
+          },
+          {
+            "id": "record:9866011e888a238cee89002d51a6ff57b3052ac9457545e7b23bdfd5a7edcbdb",
+            "causal_parents": [],
+            "payload": {
+              "actor_id": "human:operator",
+              "candidate_id": "candidate:v1:a755441e0a7f04345d12c5f83ed318ff274202b1185f7078f0e8c4eb06359b12",
+              "domain_id": "genesis:a281981599140dbee751fdc6473c7412881f48613b2f00c27fa060a7ced8420c",
+              "effect_types": [
+                "contract.declare"
+              ],
+              "key_id": "operator-key",
+              "metadata": {},
+              "signature": "ed25519:Xycm0LzZXKoYHvx97PHxS4ad8yyLoGBs+C7XaDFhfU+YC4ZWklzec4gEY11wQ3ntXPcki7Zu6PwQ+QyyOeNaDg==",
+              "signature_kind": "ed25519"
+            },
+            "record_type": "candidate.received",
+            "schema_version": 1
+          },
+          {
+            "id": "record:72b0641757dd960f6080d549970529f9f0063abffe7a74868edbc94f1b0e7ef7",
+            "causal_parents": [
+              "record:9866011e888a238cee89002d51a6ff57b3052ac9457545e7b23bdfd5a7edcbdb"
+            ],
+            "payload": {
+              "candidate_id": "candidate:v1:a755441e0a7f04345d12c5f83ed318ff274202b1185f7078f0e8c4eb06359b12",
+              "contract": {
+                "acceptance_policy": null,
+                "activation": "",
+                "budget": 1,
+                "context_asset_ids": [],
+                "delegation_capabilities": [],
+                "delegation_pools": [],
+                "description": "expanded-great-grandchild",
+                "id": "task:v3:d13c7626344abe2fadc6e6948d3cc4865a8929f8891c8cdf6b043cd6a576d9d4",
+                "inputs": [],
+                "labels": [],
+                "minting_authority": [],
+                "name": "expanded-great-grandchild",
+                "origin": "human",
+                "outputs": [],
+                "parent_id": "task:v3:cd184f98bca79b2994df1d9605283cf3ea24d2c83bbfac8714fce5c1ad5ed284",
+                "sensitive_input_policy": null,
+                "tool_scope": [],
+                "worker_capabilities": [],
+                "worker_pools": []
+              }
+            },
+            "record_type": "contract.declared",
+            "schema_version": 1
+          },
+          {
+            "id": "record:b62f954c59d35371522fbef485722cba04863b8daeec7e61d08ccc1f05e32dfd",
+            "causal_parents": [
+              "record:9866011e888a238cee89002d51a6ff57b3052ac9457545e7b23bdfd5a7edcbdb"
+            ],
+            "payload": {
+              "amount": 1,
+              "child_contract_id": "task:v3:d13c7626344abe2fadc6e6948d3cc4865a8929f8891c8cdf6b043cd6a576d9d4",
+              "purpose": "execution",
+              "reservation_id": "reservation:9793e67d0a860f2457360b923497bde9736ef810a9aa1ab97ac9ba17e7ea4f8f",
+              "source_contract_id": "task:v3:cd184f98bca79b2994df1d9605283cf3ea24d2c83bbfac8714fce5c1ad5ed284"
+            },
+            "record_type": "allowance.reserved",
+            "schema_version": 1
+          },
+          {
+            "id": "record:f98de48bf59cfbc57bcbfee767c129497e17ff40ab3b4437036b4d5629067004",
+            "causal_parents": [
+              "record:b62f954c59d35371522fbef485722cba04863b8daeec7e61d08ccc1f05e32dfd"
+            ],
+            "payload": {
+              "amount": 1,
+              "contract_id": "task:v3:d13c7626344abe2fadc6e6948d3cc4865a8929f8891c8cdf6b043cd6a576d9d4",
+              "grant_id": "grant:task:v3:d13c7626344abe2fadc6e6948d3cc4865a8929f8891c8cdf6b043cd6a576d9d4",
+              "purpose": "execution",
+              "reservation_id": "reservation:9793e67d0a860f2457360b923497bde9736ef810a9aa1ab97ac9ba17e7ea4f8f",
+              "source_contract_id": "task:v3:cd184f98bca79b2994df1d9605283cf3ea24d2c83bbfac8714fce5c1ad5ed284"
+            },
+            "record_type": "allowance.granted",
+            "schema_version": 1
+          },
+          {
+            "id": "record:aee3d0bd6bdee17749161efb88f981e750a650f53a58d16eeca2c3a1cbf7ccaf",
+            "causal_parents": [
+              "record:9866011e888a238cee89002d51a6ff57b3052ac9457545e7b23bdfd5a7edcbdb",
+              "record:72b0641757dd960f6080d549970529f9f0063abffe7a74868edbc94f1b0e7ef7",
+              "record:b62f954c59d35371522fbef485722cba04863b8daeec7e61d08ccc1f05e32dfd",
+              "record:f98de48bf59cfbc57bcbfee767c129497e17ff40ab3b4437036b4d5629067004"
+            ],
+            "payload": {
+              "candidate_id": "candidate:v1:a755441e0a7f04345d12c5f83ed318ff274202b1185f7078f0e8c4eb06359b12",
+              "committed_record_ids": [
+                "record:72b0641757dd960f6080d549970529f9f0063abffe7a74868edbc94f1b0e7ef7",
+                "record:b62f954c59d35371522fbef485722cba04863b8daeec7e61d08ccc1f05e32dfd",
+                "record:f98de48bf59cfbc57bcbfee767c129497e17ff40ab3b4437036b4d5629067004"
+              ]
+            },
+            "record_type": "candidate.committed",
+            "schema_version": 1
+          },
+          {
+            "id": "record:67ba524720c30f44971cca9fe466c982b23f45c1a3f1dd811b5c83cb318295a2",
+            "causal_parents": [],
+            "payload": {
+              "trace": {
+                "accepted_asset_names": [],
+                "accepted_fragments": [
+                  "{\"candidate_id\": \"candidate:v1:a755441e0a7f04345d12c5f83ed318ff274202b1185f7078f0e8c4eb06359b12\", \"effect_type\": \"contract.declare\", \"relation_target\": \"task:v3:d13c7626344abe2fadc6e6948d3cc4865a8929f8891c8cdf6b043cd6a576d9d4\"}"
+                ],
+                "authority_policy": null,
+                "authority_result": "accepted",
+                "budget_remaining": 0,
+                "candidate_raw": null,
+                "contract_id": "commitment",
+                "disclosed_assets": [],
+                "event_type": "candidate_committed",
+                "id": "event:7ea245c818fee31188e5ee5dabb5ac5816b5ee41bfa2b429807478de92627cf4",
+                "parent_id": "candidate:v1:a755441e0a7f04345d12c5f83ed318ff274202b1185f7078f0e8c4eb06359b12",
+                "rejected_fragments": [],
+                "relation_target": "task:v3:d13c7626344abe2fadc6e6948d3cc4865a8929f8891c8cdf6b043cd6a576d9d4",
+                "relation_type": null,
+                "timestamp": "",
+                "usage_metadata": null,
+                "worker_id": "human:operator"
+              }
+            },
+            "record_type": "trace.recorded",
+            "schema_version": 1
+          }
+        ]
+      },
+      "records": [
+        {
+          "id": "record:431000aeaff6b1254786c933a772478c361427a58b98cf737372510e6e300581",
+          "causal_parents": [
+            "record:cb08db36174fb9707a615aadf1a09910cb84af9f0d84f89e0e45a74a9cb0ff76"
+          ],
+          "payload": {
+            "contract_id": "task:v3:2ae5fd4c6efcf39fd8ac2d455b8d23aff64f3df700afde42a5af8614ed284067",
+            "terminal": "cancelled",
+            "reason": "继续同一目标 café；结束旧执行树",
+            "actor_id": "human:operator"
+          },
+          "record_type": "lifecycle.terminal",
+          "schema_version": 1
+        },
+        {
+          "id": "record:5a8fd9fbca478fe7d9902ae4e38b4910449a1f6b9ca4d899c28ffb7eb158f806",
+          "causal_parents": [
+            "record:cb08db36174fb9707a615aadf1a09910cb84af9f0d84f89e0e45a74a9cb0ff76"
+          ],
+          "payload": {
+            "contract_id": "task:v3:6380f51e48679fc2701703f1430745e03cfa3b7dcd185b01c6dbaa23908a3cd2",
+            "terminal": "cancelled",
+            "reason": "继续同一目标 café；结束旧执行树",
+            "actor_id": "human:operator"
+          },
+          "record_type": "lifecycle.terminal",
+          "schema_version": 1
+        },
+        {
+          "id": "record:e388d26586e1dd7588ec3ccb3af517ae7363acfbf9d50ed0c6418c414805403e",
+          "causal_parents": [
+            "record:cb08db36174fb9707a615aadf1a09910cb84af9f0d84f89e0e45a74a9cb0ff76"
+          ],
+          "payload": {
+            "contract_id": "task:v3:cd184f98bca79b2994df1d9605283cf3ea24d2c83bbfac8714fce5c1ad5ed284",
+            "terminal": "cancelled",
+            "reason": "继续同一目标 café；结束旧执行树",
+            "actor_id": "human:operator"
+          },
+          "record_type": "lifecycle.terminal",
+          "schema_version": 1
+        },
+        {
+          "id": "record:2040260dcc2f7639a6b38cf8ea855f315d46c8c2b58f4ac2a5117ce64b799c6a",
+          "causal_parents": [
+            "record:cb08db36174fb9707a615aadf1a09910cb84af9f0d84f89e0e45a74a9cb0ff76"
+          ],
+          "payload": {
+            "contract_id": "task:v3:d13c7626344abe2fadc6e6948d3cc4865a8929f8891c8cdf6b043cd6a576d9d4",
+            "terminal": "cancelled",
+            "reason": "继续同一目标 café；结束旧执行树",
+            "actor_id": "human:operator"
+          },
+          "record_type": "lifecycle.terminal",
+          "schema_version": 1
+        },
+        {
+          "id": "record:a1d32eaeefc3ed305a369ae9ad51005c461550382b48b7c40172ab5a0733ed59",
+          "causal_parents": [
+            "record:cb08db36174fb9707a615aadf1a09910cb84af9f0d84f89e0e45a74a9cb0ff76",
+            "record:5a8fd9fbca478fe7d9902ae4e38b4910449a1f6b9ca4d899c28ffb7eb158f806",
+            "record:450f551248625ff5a6e725b1895bdf7704f223025032eb2c0e228c497105be8a",
+            "record:3587842099e07a29e233c85237c0ed65d63263c2f009f6ad89759eabba24c2c5",
+            "record:58a26947adde83c8adcf568ba3c6ec8ca541781a255e191a7048daa23d0b001a"
+          ],
+          "payload": {
+            "amount": 3,
+            "candidate_id": "candidate:v1:8e973e0941e3f122b8cff46539df86503c6645aff88ab45449898bf3c0d988da",
+            "cancellation_record_id": "record:5a8fd9fbca478fe7d9902ae4e38b4910449a1f6b9ca4d899c28ffb7eb158f806",
+            "from_contract_id": "task:v3:6380f51e48679fc2701703f1430745e03cfa3b7dcd185b01c6dbaa23908a3cd2",
+            "funding_path_record_ids": [
+              "record:450f551248625ff5a6e725b1895bdf7704f223025032eb2c0e228c497105be8a",
+              "record:3587842099e07a29e233c85237c0ed65d63263c2f009f6ad89759eabba24c2c5",
+              "record:58a26947adde83c8adcf568ba3c6ec8ca541781a255e191a7048daa23d0b001a"
+            ],
+            "receipt_id": "record:cb08db36174fb9707a615aadf1a09910cb84af9f0d84f89e0e45a74a9cb0ff76",
+            "return_id": "return:d9440f8c3c0977529a3c0735e1f2c7f862115d995e23f7a1df61543ee238e5c8",
+            "source_contract_id": "task:v3:2ae5fd4c6efcf39fd8ac2d455b8d23aff64f3df700afde42a5af8614ed284067"
+          },
+          "record_type": "allowance.returned",
+          "schema_version": 1
+        },
+        {
+          "id": "record:5867287a1f7c5f9619f0af64beca9bf9541af4ffbf6c941ef55bf0b70c4616d4",
+          "causal_parents": [
+            "record:cb08db36174fb9707a615aadf1a09910cb84af9f0d84f89e0e45a74a9cb0ff76",
+            "record:e388d26586e1dd7588ec3ccb3af517ae7363acfbf9d50ed0c6418c414805403e",
+            "record:450f551248625ff5a6e725b1895bdf7704f223025032eb2c0e228c497105be8a",
+            "record:80352276d878dce94a9057eacb4273ab73cf0f138e9b7d6c2d6d20580898fb2f",
+            "record:adac2ea9c3c4299dca91ccbf1827b74f17a5062038522af10376c3d1f3ac825b",
+            "record:3587842099e07a29e233c85237c0ed65d63263c2f009f6ad89759eabba24c2c5",
+            "record:58a26947adde83c8adcf568ba3c6ec8ca541781a255e191a7048daa23d0b001a"
+          ],
+          "payload": {
+            "amount": 1,
+            "candidate_id": "candidate:v1:8e973e0941e3f122b8cff46539df86503c6645aff88ab45449898bf3c0d988da",
+            "cancellation_record_id": "record:e388d26586e1dd7588ec3ccb3af517ae7363acfbf9d50ed0c6418c414805403e",
+            "from_contract_id": "task:v3:cd184f98bca79b2994df1d9605283cf3ea24d2c83bbfac8714fce5c1ad5ed284",
+            "funding_path_record_ids": [
+              "record:450f551248625ff5a6e725b1895bdf7704f223025032eb2c0e228c497105be8a",
+              "record:80352276d878dce94a9057eacb4273ab73cf0f138e9b7d6c2d6d20580898fb2f",
+              "record:adac2ea9c3c4299dca91ccbf1827b74f17a5062038522af10376c3d1f3ac825b",
+              "record:3587842099e07a29e233c85237c0ed65d63263c2f009f6ad89759eabba24c2c5",
+              "record:58a26947adde83c8adcf568ba3c6ec8ca541781a255e191a7048daa23d0b001a"
+            ],
+            "receipt_id": "record:cb08db36174fb9707a615aadf1a09910cb84af9f0d84f89e0e45a74a9cb0ff76",
+            "return_id": "return:22b85afb7d0029eaf366586a9e90788f50b5b72b5776c46e9756989342c91b72",
+            "source_contract_id": "task:v3:2ae5fd4c6efcf39fd8ac2d455b8d23aff64f3df700afde42a5af8614ed284067"
+          },
+          "record_type": "allowance.returned",
+          "schema_version": 1
+        },
+        {
+          "id": "record:75452ae83558b3e66d221cc733f5c74ff833a075cc04051bdd9e70ffdd7e6972",
+          "causal_parents": [
+            "record:cb08db36174fb9707a615aadf1a09910cb84af9f0d84f89e0e45a74a9cb0ff76",
+            "record:2040260dcc2f7639a6b38cf8ea855f315d46c8c2b58f4ac2a5117ce64b799c6a",
+            "record:450f551248625ff5a6e725b1895bdf7704f223025032eb2c0e228c497105be8a",
+            "record:b62f954c59d35371522fbef485722cba04863b8daeec7e61d08ccc1f05e32dfd",
+            "record:f98de48bf59cfbc57bcbfee767c129497e17ff40ab3b4437036b4d5629067004",
+            "record:80352276d878dce94a9057eacb4273ab73cf0f138e9b7d6c2d6d20580898fb2f",
+            "record:adac2ea9c3c4299dca91ccbf1827b74f17a5062038522af10376c3d1f3ac825b",
+            "record:3587842099e07a29e233c85237c0ed65d63263c2f009f6ad89759eabba24c2c5",
+            "record:58a26947adde83c8adcf568ba3c6ec8ca541781a255e191a7048daa23d0b001a"
+          ],
+          "payload": {
+            "amount": 1,
+            "candidate_id": "candidate:v1:8e973e0941e3f122b8cff46539df86503c6645aff88ab45449898bf3c0d988da",
+            "cancellation_record_id": "record:2040260dcc2f7639a6b38cf8ea855f315d46c8c2b58f4ac2a5117ce64b799c6a",
+            "from_contract_id": "task:v3:d13c7626344abe2fadc6e6948d3cc4865a8929f8891c8cdf6b043cd6a576d9d4",
+            "funding_path_record_ids": [
+              "record:450f551248625ff5a6e725b1895bdf7704f223025032eb2c0e228c497105be8a",
+              "record:b62f954c59d35371522fbef485722cba04863b8daeec7e61d08ccc1f05e32dfd",
+              "record:f98de48bf59cfbc57bcbfee767c129497e17ff40ab3b4437036b4d5629067004",
+              "record:80352276d878dce94a9057eacb4273ab73cf0f138e9b7d6c2d6d20580898fb2f",
+              "record:adac2ea9c3c4299dca91ccbf1827b74f17a5062038522af10376c3d1f3ac825b",
+              "record:3587842099e07a29e233c85237c0ed65d63263c2f009f6ad89759eabba24c2c5",
+              "record:58a26947adde83c8adcf568ba3c6ec8ca541781a255e191a7048daa23d0b001a"
+            ],
+            "receipt_id": "record:cb08db36174fb9707a615aadf1a09910cb84af9f0d84f89e0e45a74a9cb0ff76",
+            "return_id": "return:af2b0df0daadae618b81040a1f82613a057e3b18db0cdc47bc358a4b416c331e",
+            "source_contract_id": "task:v3:2ae5fd4c6efcf39fd8ac2d455b8d23aff64f3df700afde42a5af8614ed284067"
+          },
+          "record_type": "allowance.returned",
+          "schema_version": 1
+        },
+        {
+          "id": "record:dace92e4bc60d9bc6e190f42b0caaf69a268a1961c87447f7e15e7279bf3b826",
+          "causal_parents": [
+            "record:cb08db36174fb9707a615aadf1a09910cb84af9f0d84f89e0e45a74a9cb0ff76"
+          ],
+          "payload": {
+            "candidate_id": "candidate:v1:8e973e0941e3f122b8cff46539df86503c6645aff88ab45449898bf3c0d988da",
+            "contract": {
+              "id": "task:v6:738a1d6e0edd359fe2ace01491229c2bdecb46e55c490deb670c2838f22d2bdb",
+              "parent_id": "task:v3:2ae5fd4c6efcf39fd8ac2d455b8d23aff64f3df700afde42a5af8614ed284067",
+              "name": "expanded-source.handoff.expanded.8e973e0941e3f122b8cff46539df86503c6645aff88ab45449898bf3c0d988da",
+              "description": "root obligation\n\nTask handoff reason: 继续同一目标 café；结束旧执行树",
+              "inputs": [],
+              "outputs": [
+                "final"
+              ],
+              "activation": "",
+              "budget": 3,
+              "tool_scope": [],
+              "labels": [],
+              "context_asset_ids": [],
+              "worker_capabilities": [],
+              "worker_pools": [],
+              "delegation_capabilities": [],
+              "delegation_pools": [],
+              "origin": "human",
+              "minting_authority": [],
+              "sensitive_input_policy": {
+                "input_asset_bindings": {}
+              },
+              "acceptance_policy": null
+            }
+          },
+          "record_type": "contract.declared",
+          "schema_version": 1
+        },
+        {
+          "id": "record:c8ac2a8444c9bfab770ba09f2ba317d09db568fd11f5342014a5153b972febdf",
+          "causal_parents": [
+            "record:cb08db36174fb9707a615aadf1a09910cb84af9f0d84f89e0e45a74a9cb0ff76",
+            "record:431000aeaff6b1254786c933a772478c361427a58b98cf737372510e6e300581",
+            "record:dace92e4bc60d9bc6e190f42b0caaf69a268a1961c87447f7e15e7279bf3b826",
+            "record:5a8fd9fbca478fe7d9902ae4e38b4910449a1f6b9ca4d899c28ffb7eb158f806",
+            "record:e388d26586e1dd7588ec3ccb3af517ae7363acfbf9d50ed0c6418c414805403e",
+            "record:2040260dcc2f7639a6b38cf8ea855f315d46c8c2b58f4ac2a5117ce64b799c6a",
+            "record:a1d32eaeefc3ed305a369ae9ad51005c461550382b48b7c40172ab5a0733ed59",
+            "record:5867287a1f7c5f9619f0af64beca9bf9541af4ffbf6c941ef55bf0b70c4616d4",
+            "record:75452ae83558b3e66d221cc733f5c74ff833a075cc04051bdd9e70ffdd7e6972"
+          ],
+          "payload": {
+            "actor_id": "human:operator",
+            "allowance_returns": [
+              {
+                "donor_contract_id": "task:v3:6380f51e48679fc2701703f1430745e03cfa3b7dcd185b01c6dbaa23908a3cd2",
+                "amount": 3,
+                "record_id": "record:a1d32eaeefc3ed305a369ae9ad51005c461550382b48b7c40172ab5a0733ed59"
+              },
+              {
+                "donor_contract_id": "task:v3:cd184f98bca79b2994df1d9605283cf3ea24d2c83bbfac8714fce5c1ad5ed284",
+                "amount": 1,
+                "record_id": "record:5867287a1f7c5f9619f0af64beca9bf9541af4ffbf6c941ef55bf0b70c4616d4"
+              },
+              {
+                "donor_contract_id": "task:v3:d13c7626344abe2fadc6e6948d3cc4865a8929f8891c8cdf6b043cd6a576d9d4",
+                "amount": 1,
+                "record_id": "record:75452ae83558b3e66d221cc733f5c74ff833a075cc04051bdd9e70ffdd7e6972"
+              }
+            ],
+            "budget": 3,
+            "candidate_id": "candidate:v1:8e973e0941e3f122b8cff46539df86503c6645aff88ab45449898bf3c0d988da",
+            "cancel_record_ids": [
+              "record:5a8fd9fbca478fe7d9902ae4e38b4910449a1f6b9ca4d899c28ffb7eb158f806",
+              "record:e388d26586e1dd7588ec3ccb3af517ae7363acfbf9d50ed0c6418c414805403e",
+              "record:2040260dcc2f7639a6b38cf8ea855f315d46c8c2b58f4ac2a5117ce64b799c6a"
+            ],
+            "cancelled_contract_ids": [
+              "task:v3:6380f51e48679fc2701703f1430745e03cfa3b7dcd185b01c6dbaa23908a3cd2",
+              "task:v3:cd184f98bca79b2994df1d9605283cf3ea24d2c83bbfac8714fce5c1ad5ed284",
+              "task:v3:d13c7626344abe2fadc6e6948d3cc4865a8929f8891c8cdf6b043cd6a576d9d4"
+            ],
+            "completed_outputs": [],
+            "contract_id": "task:v3:2ae5fd4c6efcf39fd8ac2d455b8d23aff64f3df700afde42a5af8614ed284067",
+            "hold_id": "",
+            "key_id": "operator-key",
+            "preserved_contract_ids": [],
+            "reason": "继续同一目标 café；结束旧执行树",
+            "retained_output_proofs": {},
+            "repair_output_proofs": {},
+            "repair_record_ids": [],
+            "repair_contract_ids": [],
+            "retained_asset_ids": [],
+            "return_record_ids": [
+              "record:a1d32eaeefc3ed305a369ae9ad51005c461550382b48b7c40172ab5a0733ed59",
+              "record:5867287a1f7c5f9619f0af64beca9bf9541af4ffbf6c941ef55bf0b70c4616d4",
+              "record:75452ae83558b3e66d221cc733f5c74ff833a075cc04051bdd9e70ffdd7e6972"
+            ],
+            "returned_allowance": 5,
+            "source_original_balance": 0,
+            "successor_id": "task:v6:738a1d6e0edd359fe2ace01491229c2bdecb46e55c490deb670c2838f22d2bdb"
+          },
+          "record_type": "task.handed_off",
+          "schema_version": 1
+        }
+      ],
+      "contract": {
+        "id": "task:v6:738a1d6e0edd359fe2ace01491229c2bdecb46e55c490deb670c2838f22d2bdb",
+        "parent_id": "task:v3:2ae5fd4c6efcf39fd8ac2d455b8d23aff64f3df700afde42a5af8614ed284067",
+        "name": "expanded-source.handoff.expanded.8e973e0941e3f122b8cff46539df86503c6645aff88ab45449898bf3c0d988da",
+        "description": "root obligation\n\nTask handoff reason: 继续同一目标 café；结束旧执行树",
+        "inputs": [],
+        "outputs": [
+          "final"
+        ],
+        "activation": "",
+        "budget": 3,
+        "tool_scope": [],
+        "labels": [],
+        "context_asset_ids": [],
+        "worker_capabilities": [],
+        "worker_pools": [],
+        "delegation_capabilities": [],
+        "delegation_pools": [],
+        "origin": "human",
+        "minting_authority": [],
+        "sensitive_input_policy": {
+          "input_asset_bindings": {}
+        },
+        "acceptance_policy": null
+      },
+      "additional_capabilities": [
+        "contract.cancel",
+        "contract.publish"
+      ]
+    }
+  ],
+  "genesis": {
+    "id": "genesis:a281981599140dbee751fdc6473c7412881f48613b2f00c27fa060a7ced8420c",
+    "domain": "expanded-handoff",
+    "policy_hash": "policy:test",
+    "root_keys": [
+      {
+        "actor_id": "human:operator",
+        "capabilities": [
+          "contract.cancel",
+          "contract.publish",
+          "task.block",
+          "task.handoff"
+        ],
+        "key_id": "operator-key",
+        "kind": "ed25519",
+        "public_key": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+        "revoked": false
+      },
+      {
+        "actor_id": "human:revoker",
+        "capabilities": [
+          "actor.revoke"
+        ],
+        "key_id": "revoker-key",
+        "kind": "ed25519",
+        "public_key": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+        "revoked": false
+      }
+    ],
+    "schema_version": 1
+  }
+}

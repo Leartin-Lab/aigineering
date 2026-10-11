@@ -11,15 +11,39 @@ from collections.abc import Iterable, Sequence
 from typing import TYPE_CHECKING
 
 from aigineering.core.ids import canonical_json, compute_content_hash
-from aigineering.protocol.runtime_record import RuntimeRecord, create_runtime_record
+from aigineering.protocol.runtime_record import (
+    RuntimeRecord,
+    create_runtime_record,
+    runtime_record_effective_payload,
+)
 from aigineering.protocol.types import Contract
+from aigineering.core.allowance_returns import (
+    CausalAllowanceConflict,
+    allowance_return_id,
+    project_causal_allowance_returns,
+    validate_allowance_grants,
+    validate_causal_allowance_returns,
+)
+
+__all__ = [
+    "CausalAllowanceConflict",
+    "allowance_available",
+    "allowance_is_recorded",
+    "allowance_purpose",
+    "allowance_reservation_id",
+    "allowance_return_id",
+    "project_causal_allowance_returns",
+    "project_contract_allowance_records",
+    "materialize_terminal_allowance",
+    "terminal_allowance_records",
+    "resolve_causal_allowance",
+    "validate_allowance_commit",
+    "validate_allowance_grants",
+    "validate_causal_allowance_returns",
+]
 
 if TYPE_CHECKING:
     from aigineering.core.store import StoreProtocol
-
-
-class CausalAllowanceConflict(ValueError):
-    """A projected reservation no longer fits the committed causal balance."""
 
 
 def project_contract_allowance_records(
@@ -102,7 +126,7 @@ def project_contract_allowance_records(
 
 
 def allowance_available(contract: Contract, records: Iterable[RuntimeRecord]) -> int:
-    relevant = tuple(records)
+    relevant = tuple({record.id: record for record in records}.values())
     grants = [
         int(record.payload.get("amount", 0))
         for record in relevant
@@ -122,13 +146,19 @@ def allowance_available(contract: Contract, records: Iterable[RuntimeRecord]) ->
         if record.record_type == "allowance.returned"
         and record.payload.get("source_contract_id") == contract.id
     )
+    returned_out = sum(
+        int(record.payload.get("amount", 0))
+        for record in relevant
+        if record.record_type == "allowance.returned"
+        and record.payload.get("from_contract_id") == contract.id
+    )
     extinguished = sum(
         int(record.payload.get("amount", 0))
         for record in relevant
         if record.record_type == "allowance.extinguished"
         and record.payload.get("contract_id") == contract.id
     )
-    return max(0, granted - reserved + returned - extinguished)
+    return max(0, granted - reserved + returned - returned_out - extinguished)
 
 
 def allowance_purpose(contract: Contract) -> str:
@@ -216,11 +246,51 @@ def validate_allowance_commit(
     contracts: Sequence[Contract],
     existing_records: Sequence[RuntimeRecord],
     pending_records: Sequence[RuntimeRecord],
+    *,
+    candidate_id: str | None = None,
 ) -> None:
     """Recheck allowance consequences against the commit-time fact snapshot."""
     by_id = {contract.id: contract for contract in contracts}
-    requested: dict[str, int] = defaultdict(int)
+    existing_by_id = {record.id: record for record in existing_records}
+    pending_by_id: dict[str, RuntimeRecord] = {}
     for record in pending_records:
+        existing = existing_by_id.get(record.id)
+        if existing is not None:
+            if runtime_record_effective_payload(
+                existing
+            ) != runtime_record_effective_payload(record):
+                raise CausalAllowanceConflict("allowance fact replay payload differs")
+            continue
+        prior = pending_by_id.get(record.id)
+        if prior is not None:
+            if runtime_record_effective_payload(
+                prior
+            ) != runtime_record_effective_payload(record):
+                raise CausalAllowanceConflict(
+                    "duplicate allowance fact payload differs"
+                )
+            continue
+        pending_by_id[record.id] = record
+    new_pending = tuple(pending_by_id.values())
+    validate_allowance_grants(contracts, existing_records, new_pending)
+    if (
+        any(record.record_type == "allowance.returned" for record in new_pending)
+        and not candidate_id
+    ):
+        raise CausalAllowanceConflict("allowance return requires a Candidate ID")
+    validate_causal_allowance_returns(
+        contracts,
+        existing_records,
+        new_pending,
+        candidate_id=candidate_id,
+        require_committed_head=True,
+    )
+    validated_returns = tuple(
+        record for record in new_pending if record.record_type == "allowance.returned"
+    )
+    records_with_returns = tuple(existing_records) + validated_returns
+    requested: dict[str, int] = defaultdict(int)
+    for record in new_pending:
         if record.record_type != "allowance.reserved":
             continue
         source_id = str(record.payload.get("source_contract_id", ""))
@@ -229,7 +299,7 @@ def validate_allowance_commit(
         source = by_id.get(source_id)
         if source is None:
             raise ValueError("allowance reservation references an unknown Contract")
-        available = allowance_available(source, existing_records)
+        available = allowance_available(source, records_with_returns)
         if amount > available:
             raise CausalAllowanceConflict(
                 f"causal allowance changed before commit for {source_id!r}: "
@@ -237,10 +307,10 @@ def validate_allowance_commit(
             )
     without_extinguishment = tuple(existing_records) + tuple(
         record
-        for record in pending_records
+        for record in new_pending
         if record.record_type != "allowance.extinguished"
     )
-    for record in pending_records:
+    for record in new_pending:
         if record.record_type != "allowance.extinguished":
             continue
         contract_id = str(record.payload.get("contract_id", ""))

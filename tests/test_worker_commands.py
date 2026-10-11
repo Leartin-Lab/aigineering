@@ -1,29 +1,41 @@
 """Tests for worker operational commands: package and submit."""
 
 import json
+from pathlib import Path
 
 from click.testing import CliRunner
 from conftest import candidate_runtime, hosted_worker
 
 from aigineering.cli.main import cli
+from aigineering.agent.worker import WorkerHost
 from aigineering.core.ids import (
     hash_asset_content,
     hash_asset_definition,
-    hash_contract,
+    hash_contract_v3,
 )
 from aigineering.core.provenance import sign_asset
 from aigineering.core.signing import Ed25519Signer
-from aigineering.core.sqlite_store import SQLiteStore
+from aigineering.core.sqlite_store import CURRENT_SCHEMA_VERSION, SQLiteStore
 from aigineering.core.domain import load_genesis
 from aigineering.core.trace import create_entry
+from aigineering.core.candidate_publisher import CandidatePublisher
+from aigineering.core.worker_routing import WorkerRegistration
+from aigineering.local_identity import ensure_local_domain, load_actor_signer
 from aigineering.protocol.candidate import (
+    ActorKey,
     CandidateClaimBinding,
     candidate_proposal_to_dict,
     create_candidate_proposal,
 )
 from aigineering.protocol.actions import parse_action
 from aigineering.protocol.envelope import CandidateEnvelope
-from aigineering.protocol.effect_builders import claim_bound_output_effects
+from aigineering.protocol.effect_builders import (
+    actor_authorization_effect,
+    claim_bound_output_effects,
+    contract_declaration_effect,
+    worker_claim_effect,
+    worker_registration_effect,
+)
 from aigineering.plugins import (
     StagedPlanningPlugin,
     StagedReplanningPlugin,
@@ -42,25 +54,30 @@ from aigineering.runtime import (
 
 def _seed_contract(store: SQLiteStore) -> Contract:
     """Add a test contract and return it."""
-    contract = Contract(
-        id=hash_contract(
-            name="test_contract",
-            description="A test contract",
-            inputs=["input1"],
-            outputs=["final_report"],
-            activation="input1",
-            budget=5,
-            tool_scope=[],
-            labels=[],
-            origin="human",
-        ),
-        name="test_contract",
-        inputs=["input1"],
-        outputs=["final_report"],
-        activation="input1",
-        budget=5,
+    fields = {
+        "name": "test_contract",
+        "description": "A test contract",
+        "inputs": ("input1",),
+        "outputs": ("final_report",),
+        "activation": "input1",
+        "budget": 5,
+        "tool_scope": (),
+        "labels": (),
+        "origin": "human",
+    }
+    contract = Contract(id=hash_contract_v3(**fields), **fields)
+    genesis = ensure_local_domain(store)
+    signer = load_actor_signer()
+    authority_key = next(
+        item
+        for item in genesis.root_keys
+        if item.public_key == signer.signer_id and not item.revoked
     )
-    store.add_contract(contract)
+    decision = CandidatePublisher(store, store, genesis, authority_key, signer).publish(
+        (contract_declaration_effect(contract),),
+        idempotency_key=f"worker-command-contract:{contract.id}",
+    )
+    assert decision.accepted, decision.runtime_records
     return contract
 
 
@@ -223,6 +240,7 @@ def _seed_continuation_with_method_context(
 
 
 _CLI_WORKER_SIGNER = Ed25519Signer()
+_CLI_CLAIM_SEQUENCE = 0
 
 
 def _ensure_cli_worker_identity(runner: CliRunner) -> None:
@@ -247,6 +265,33 @@ def _ensure_cli_worker_identity(runner: CliRunner) -> None:
             ],
         )
         assert result.exit_code == 0, result.output
+
+
+def _cli_claim_candidate_json(contract_id: str | None = None) -> str:
+    global _CLI_CLAIM_SEQUENCE
+    _CLI_CLAIM_SEQUENCE += 1
+    store = SQLiteStore(".aig/store.db")
+    try:
+        genesis = load_genesis(store)
+        registration = store.get_worker_registration("cli-worker")
+        assert registration is not None
+        candidate = create_candidate_proposal(
+            domain_id=genesis.id,
+            actor_id=registration.actor_id,
+            key_id=registration.key_id,
+            effects=(
+                worker_claim_effect(
+                    registration.worker_id,
+                    contract_id=contract_id,
+                    lease_seconds=60,
+                ),
+            ),
+            signer=_CLI_WORKER_SIGNER,
+            idempotency_key=f"cli-worker-test-claim-{_CLI_CLAIM_SEQUENCE}",
+        )
+        return json.dumps(candidate_proposal_to_dict(candidate), sort_keys=True)
+    finally:
+        store.close()
 
 
 def _signed_worker_candidate_json(envelope: CandidateEnvelope) -> str:
@@ -333,7 +378,8 @@ def _claimed_package(runner: CliRunner) -> dict:
     """Claim the next ready contract through the operational worker protocol."""
     _ensure_cli_worker_identity(runner)
     result = runner.invoke(
-        cli, ["worker", "next", "--worker-id", "cli-worker", "--json"]
+        cli,
+        ["worker", "next", "--candidate", _cli_claim_candidate_json(), "--json"],
     )
     assert result.exit_code == 0, f"stderr: {result.output}"
     data = json.loads(result.output)
@@ -404,10 +450,11 @@ def test_worker_package_missing_contract():
     """aig worker package --contract <nonexistent> reports error."""
     runner = CliRunner()
     with runner.isolated_filesystem():
+        assert runner.invoke(cli, ["domain", "init"]).exit_code == 0
         result = runner.invoke(
             cli, ["worker", "package", "--contract", "nonexistent", "--json"]
         )
-        assert result.exit_code == 0
+        assert result.exit_code == 1
         data = json.loads(result.output)
         assert "error" in data
         assert "not found" in data["error"]
@@ -521,7 +568,7 @@ def test_method_context_survives_file_reopen_and_materialization_rebuild(tmp_pat
         (original.id, original.name, original.content),
         (redacted.id, redacted.name, "[redacted]"),
     ]
-    assert before[2] == 17
+    assert before[2] == CURRENT_SCHEMA_VERSION
     store.close()
 
     reopened = SQLiteStore(str(path))
@@ -547,7 +594,7 @@ def test_worker_package_never_emits_method_context_content():
         result = runner.invoke(
             cli, ["worker", "package", "--contract", continuation.id, "--json"]
         )
-        assert result.exit_code == 0
+        assert result.exit_code == 0, result.output
         context = json.loads(result.output)["method_context_assets"]
         assert context[0]["id"] == obs.id
         assert "content" not in context[0]
@@ -599,7 +646,7 @@ def test_submit_creates_projection_assets():
             record
             for record in records
             if record.record_type == "candidate.received"
-            and record.payload.get("actor_id") == "cli-worker"
+            and record.id in committed_asset.causal_parents
         )
         assert committed_asset.causal_parents == (receipt.id,)
         claim_submitted = next(
@@ -614,12 +661,70 @@ def test_submit_creates_projection_assets():
         assert candidate_committed.id in claim_submitted.causal_parents
 
 
-def test_submit_rejects_tampered_signed_worker_candidate():
+def test_submit_rejects_tampered_signed_worker_candidate(monkeypatch):
     runner = CliRunner()
+    # This is a focused CLI/SQLite commitment regression; keep Redis relay
+    # availability outside its scope without changing the production path.
+    monkeypatch.setattr(
+        "aigineering.cli.worker.sync_runtime", lambda *args, **kwargs: None
+    )
+    monkeypatch.setattr(
+        "aigineering.cli.domain.sync_runtime", lambda *args, **kwargs: None
+    )
+    # CLI infrastructure preflight is outside this SQLite/submit regression.
+    monkeypatch.setattr("aigineering.cli.infrastructure.require_redis", lambda: None)
     with runner.isolated_filesystem():
         store = SQLiteStore(".aig/store.db")
         contract, _asset = _seed_contract_with_asset(store)
-        pkg_data = _claimed_package(runner)
+        genesis = load_genesis(store)
+        root_signer = load_actor_signer()
+        root_key = next(
+            key
+            for key in genesis.root_keys
+            if key.public_key == root_signer.signer_id and not key.revoked
+        )
+        worker_key = ActorKey(
+            "cli-worker",
+            "cli-worker-1",
+            _CLI_WORKER_SIGNER.kind,
+            _CLI_WORKER_SIGNER.signer_id,
+            ("worker.submit",),
+        )
+        registration = WorkerRegistration(
+            "cli-worker", actor_id="cli-worker", key_id="cli-worker-1"
+        )
+        registered = CandidatePublisher(
+            store, store, genesis, root_key, root_signer
+        ).publish(
+            (
+                actor_authorization_effect(worker_key),
+                worker_registration_effect(registration),
+            ),
+            idempotency_key="register-cli-worker-auth-rejection-test",
+        )
+        assert registered.accepted
+
+        class ClaimOnlyWorker:
+            worker_id = "cli-worker"
+
+        host = WorkerHost(
+            ClaimOnlyWorker(), genesis, worker_key, _CLI_WORKER_SIGNER, "1"
+        )
+        claim_candidate = host.claim_candidate(
+            request_id="tampered-submit-auth-rejection-claim",
+            contract_id=contract.id,
+            lease_seconds=60,
+        )
+        claimed = claim_next_package(
+            store,
+            worker_id="cli-worker",
+            lease_seconds=60,
+            contract_id=contract.id,
+            claim_candidate=claim_candidate,
+        )
+        assert claimed is not None
+        pkg_data = json.loads(claimed.package.to_json())
+        store.close()
         candidate = json.loads(_candidate_json_from_package(pkg_data))
         candidate["effects"][0]["payload"]["asset"]["content"] = (
             "tampered after signing"
@@ -629,7 +734,7 @@ def test_submit_rejects_tampered_signed_worker_candidate():
             cli, ["worker", "submit", "--json", json.dumps(candidate)]
         )
 
-        assert result.exit_code == 0
+        assert result.exit_code == 0, result.output
         data = json.loads(result.output)
         assert data["status"] == "rejected"
         assert any(
@@ -638,11 +743,24 @@ def test_submit_rejects_tampered_signed_worker_candidate():
         )
         persisted = SQLiteStore(".aig/store.db")
         assert persisted.get_assets_by_name("final_report") == []
-        assert persisted.get_claim(contract.id)["status"] == "submitted"
+        assert persisted.get_claim(contract.id)["status"] == "active"
         assert persisted.scan_runtime_records(
             record_type="candidate.authentication_rejected"
         )
         assert persisted.get_by_event_type("candidate_authentication_rejected")
+        assert not persisted.scan_runtime_records(record_type="attempt.closed")
+        assert not any(
+            record.payload.get("contract_id") == contract.id
+            for _, record in persisted.scan_runtime_records(
+                record_type="lifecycle.terminal"
+            )
+        )
+        assert not any(
+            record.payload.get("contract_id") == contract.id
+            for _, record in persisted.scan_runtime_records(
+                record_type="allowance.extinguished"
+            )
+        )
 
 
 def test_submit_without_claim_rejected_for_sqlite_store():
@@ -745,14 +863,64 @@ def test_different_key_conflict():
         assert "active worker claim predicate failed" in data2.get("error", "")
 
 
-def test_signed_submit_requires_idempotency_key():
-    """Authenticated submissions fail closed without a signed idempotency key."""
+def test_signed_submit_requires_idempotency_key(monkeypatch):
+    """A claim-bound proposal without key is audited before claim effects."""
     runner = CliRunner()
+    monkeypatch.setattr("aigineering.cli.infrastructure.require_redis", lambda: None)
+    monkeypatch.setattr(
+        "aigineering.cli.worker.sync_runtime", lambda *args, **kwargs: None
+    )
     with runner.isolated_filesystem():
         store = SQLiteStore(".aig/store.db")
         contract, asset = _seed_contract_with_asset(store)
+        genesis = load_genesis(store)
+        root_signer = load_actor_signer()
+        root_key = next(
+            key
+            for key in genesis.root_keys
+            if key.public_key == root_signer.signer_id and not key.revoked
+        )
+        worker_key = ActorKey(
+            "cli-worker",
+            "cli-worker-1",
+            _CLI_WORKER_SIGNER.kind,
+            _CLI_WORKER_SIGNER.signer_id,
+            ("worker.submit",),
+        )
+        registration = WorkerRegistration(
+            "cli-worker", actor_id="cli-worker", key_id="cli-worker-1"
+        )
+        registered = CandidatePublisher(
+            store, store, genesis, root_key, root_signer
+        ).publish(
+            (
+                actor_authorization_effect(worker_key),
+                worker_registration_effect(registration),
+            ),
+            idempotency_key="register-cli-worker-idempotency-rejection-test",
+        )
+        assert registered.accepted
 
-        pkg_data = _claimed_package(runner)
+        class ClaimOnlyWorker:
+            worker_id = "cli-worker"
+
+        host = WorkerHost(
+            ClaimOnlyWorker(), genesis, worker_key, _CLI_WORKER_SIGNER, "1"
+        )
+        claimed = claim_next_package(
+            store,
+            worker_id="cli-worker",
+            lease_seconds=60,
+            contract_id=contract.id,
+            claim_candidate=host.claim_candidate(
+                request_id="cli-worker-missing-idempotency-claim",
+                contract_id=contract.id,
+                lease_seconds=60,
+            ),
+        )
+        assert claimed is not None
+        pkg_data = json.loads(claimed.package.to_json())
+        store.close()
         envelope_json = _candidate_json_from_package(pkg_data, idempotency_key="")
 
         result = runner.invoke(cli, ["worker", "submit", "--json", envelope_json])
@@ -761,8 +929,18 @@ def test_signed_submit_requires_idempotency_key():
         assert data["status"] == "rejected"
         assert any("idempotency_key" in reason for reason in data["rejected"])
         persisted = SQLiteStore(".aig/store.db")
-        assert persisted.get_claim(contract.id)["status"] == "submitted"
-        assert persisted.get_by_event_type("failed")
+        try:
+            assert persisted.get_claim(contract.id)["status"] == "active"
+            assert persisted.scan_runtime_records(
+                record_type="candidate.authentication_rejected"
+            )
+            assert not persisted.scan_runtime_records(record_type="attempt.closed")
+            assert not persisted.scan_runtime_records(record_type="lifecycle.terminal")
+            assert not persisted.scan_runtime_records(
+                record_type="allowance.extinguished"
+            )
+        finally:
+            persisted.close()
 
 
 def test_sealed_config_not_in_output():
@@ -899,8 +1077,12 @@ def test_worker_next_returns_package():
     with runner.isolated_filesystem():
         store = SQLiteStore(".aig/store.db")
         contract, asset = _seed_contract_with_asset(store)
+        _ensure_cli_worker_identity(runner)
 
-        result = runner.invoke(cli, ["worker", "next", "--json"])
+        result = runner.invoke(
+            cli,
+            ["worker", "next", "--candidate", _cli_claim_candidate_json(), "--json"],
+        )
 
         assert result.exit_code == 0, f"stderr: {result.output}"
 
@@ -927,9 +1109,114 @@ def test_worker_next_returns_package():
         assert claim["status"] == "active"
         assert claim["package_id"] == pkg.package_id
 
-        second = runner.invoke(cli, ["worker", "next", "--json"])
+        second = runner.invoke(
+            cli,
+            ["worker", "next", "--candidate", _cli_claim_candidate_json(), "--json"],
+        )
         assert second.exit_code == 0, f"stderr: {second.output}"
         assert json.loads(second.output) is None
+
+
+def test_worker_next_accepts_signed_external_worker_and_rejects_flag_override():
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        assert runner.invoke(cli, ["domain", "init"]).exit_code == 0
+        store = SQLiteStore(".aig/store.db")
+        contract, _asset = _seed_contract_with_asset(store)
+        store.close()
+        remote_signer = Ed25519Signer()
+        registration = runner.invoke(
+            cli,
+            [
+                "worker",
+                "register",
+                "--worker-id",
+                "remote-worker",
+                "--key-id",
+                "remote-worker-key",
+                "--public-key",
+                remote_signer.signer_id,
+                "--json",
+            ],
+        )
+        assert registration.exit_code == 0, registration.output
+        before_identity_files = set(Path(".aig/identity").rglob("*.ed25519"))
+
+        store = SQLiteStore(".aig/store.db")
+        genesis = load_genesis(store)
+        candidate = create_candidate_proposal(
+            domain_id=genesis.id,
+            actor_id="remote-worker",
+            key_id="remote-worker-key",
+            effects=(
+                worker_claim_effect(
+                    "remote-worker", contract_id=contract.id, lease_seconds=30
+                ),
+            ),
+            signer=remote_signer,
+            idempotency_key="remote-worker-claim",
+        )
+        candidate_json = json.dumps(candidate_proposal_to_dict(candidate))
+        store.close()
+
+        mismatch = runner.invoke(
+            cli,
+            [
+                "worker",
+                "next",
+                "--candidate",
+                candidate_json,
+                "--worker-id",
+                "some-other-worker",
+                "--json",
+            ],
+        )
+        assert mismatch.exit_code != 0
+        assert "conflicts with the signed Candidate" in mismatch.output
+
+        result = runner.invoke(
+            cli, ["worker", "next", "--candidate", candidate_json, "--json"]
+        )
+        assert result.exit_code == 0, result.output
+        package = json.loads(result.output)
+        assert package["contract_id"] == contract.id
+        assert package["claim_id"]
+        assert set(Path(".aig/identity").rglob("*.ed25519")) == before_identity_files
+
+
+def test_worker_next_refuses_foreign_registered_worker_without_local_signer():
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        assert runner.invoke(cli, ["domain", "init"]).exit_code == 0
+        signer = Ed25519Signer()
+        registered = runner.invoke(
+            cli,
+            [
+                "worker",
+                "register",
+                "--worker-id",
+                "remote-worker",
+                "--key-id",
+                "remote-worker-key",
+                "--public-key",
+                signer.signer_id,
+                "--json",
+            ],
+        )
+        assert registered.exit_code == 0, registered.output
+        before_keys = set(Path(".aig/identity").glob("*.ed25519"))
+
+        result = runner.invoke(
+            cli,
+            ["worker", "next", "--worker-id", "remote-worker", "--json"],
+        )
+
+        assert result.exit_code == 1
+        error = json.loads(result.output)
+        assert error["status"] == "error"
+        assert "provide a signed Worker Candidate" in error["error"]
+        assert "Traceback" not in result.output
+        assert set(Path(".aig/identity").glob("*.ed25519")) == before_keys
 
 
 def test_worker_next_returns_continuation_with_method_context():
@@ -938,8 +1225,20 @@ def test_worker_next_returns_continuation_with_method_context():
     with runner.isolated_filesystem():
         store = SQLiteStore(".aig/store.db")
         _parent, continuation, obs = _seed_continuation_with_method_context(store)
+        _ensure_cli_worker_identity(runner)
 
-        result = runner.invoke(cli, ["worker", "next", "--json"])
+        result = runner.invoke(
+            cli,
+            [
+                "worker",
+                "next",
+                "--contract",
+                continuation.id,
+                "--candidate",
+                _cli_claim_candidate_json(continuation.id),
+                "--json",
+            ],
+        )
 
         assert result.exit_code == 0, f"stderr: {result.output}"
         data = json.loads(result.output)
@@ -1004,8 +1303,23 @@ def test_local_worker_usage_metadata_reaches_candidate_receipt_and_task_trace():
 
     store = SQLiteStore(":memory:")
     contract, _asset = _seed_contract_with_asset(store)
-    host = hosted_worker(store, UsageWorker())
-    claimed = claim_next_package(store, worker_id=host.worker_id)
+    genesis = load_genesis(store)
+    authority_signer = load_actor_signer()
+    authority_key = next(
+        item
+        for item in genesis.root_keys
+        if item.public_key == authority_signer.signer_id and not item.revoked
+    )
+    host = hosted_worker(
+        store,
+        UsageWorker(),
+        genesis=genesis,
+        authority_key=authority_key,
+        authority_signer=authority_signer,
+    )
+    claimed = claim_next_package(
+        store, worker_id=host.worker_id, contract_id=contract.id
+    )
     assert claimed is not None
 
     execute_claimed_package(claimed, host, store)
@@ -1035,6 +1349,7 @@ def test_worker_next_null_when_idle():
     runner = CliRunner()
     with runner.isolated_filesystem():
         # No contracts in store → null
+        assert runner.invoke(cli, ["domain", "init"]).exit_code == 0
         result = runner.invoke(cli, ["worker", "next", "--json"])
         assert result.exit_code == 0
 
@@ -1046,6 +1361,7 @@ def test_worker_next_reports_sensitive_policy_block_without_claim_or_content():
     runner = CliRunner()
     with runner.isolated_filesystem():
         store = SQLiteStore(".aig/store.db")
+        assert runner.invoke(cli, ["domain", "init"]).exit_code == 0
         asset = sign_asset(
             Asset(
                 id=hash_asset_content("sensitive", "private-value"),
@@ -1067,7 +1383,10 @@ def test_worker_next_reports_sensitive_policy_block_without_claim_or_content():
         store.add_asset(asset)
         store.add_contract(contract)
 
-        result = runner.invoke(cli, ["worker", "next", "--json"])
+        result = runner.invoke(
+            cli,
+            ["worker", "next", "--contract", contract.id, "--json"],
+        )
 
         assert result.exit_code == 0
         data = json.loads(result.output)
@@ -1092,7 +1411,10 @@ def test_worker_next_skips_completed_contract():
         runner.invoke(cli, ["worker", "submit", "--json", envelope_json])
 
         # Now next should return null (contract completed)
-        result = runner.invoke(cli, ["worker", "next", "--json"])
+        result = runner.invoke(
+            cli,
+            ["worker", "next", "--candidate", _cli_claim_candidate_json(), "--json"],
+        )
         assert result.exit_code == 0
 
         data = json.loads(result.output)
@@ -1126,7 +1448,10 @@ def test_worker_next_submit_full_cycle():
         assert "complete" in event_types, f"trace events: {event_types}"
 
         # ── Step 4: next after completion returns null ──────────────────
-        result = runner.invoke(cli, ["worker", "next", "--json"])
+        result = runner.invoke(
+            cli,
+            ["worker", "next", "--candidate", _cli_claim_candidate_json(), "--json"],
+        )
         assert result.exit_code == 0
         data = json.loads(result.output)
         assert data is None

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Protocol
@@ -13,6 +13,15 @@ from aigineering.core.activation import (
     check_activation,
     validate_execution_activation,
 )
+from aigineering.core.claim_holds import open_claim_holds
+from aigineering.core.claim_constraints import claim_constraint_blockers
+from aigineering.core.claim_assignments import (
+    assignment_blocker,
+    assignment_context_from_projection,
+    effective_assignment,
+)
+from aigineering.core.projection_context import EffectProjectionContext
+from aigineering.core.worker_routing import registration_from_record
 from aigineering.core.causal_allowance import (
     allowance_available,
     allowance_is_recorded,
@@ -58,6 +67,8 @@ class ContractView:
     claim_status: str | None
     budget_remaining: int
     projection_hash: str
+    assignment_worker_id: str | None = None
+    assignment_blocker: str | None = None
 
 
 class RuntimeProjection:
@@ -96,8 +107,14 @@ class RuntimeProjection:
                 contract, self._store
             )
             entries = self._entries_for(contract.id)
-            typed_terminal_events: tuple[str, ...] = ()
-            allowance_records = tuple(record for _, record in self._records())
+            current_records = tuple(record for _, record in self._records())
+            typed_terminal_events = tuple(
+                str(record.payload["terminal"])
+                for record in current_records
+                if record.record_type == "lifecycle.terminal"
+                and record.payload.get("contract_id") == contract.id
+            )
+            allowance_records = current_records
             typed_budget = (
                 allowance_available(contract, allowance_records)
                 if allowance_is_recorded(contract.id, allowance_records)
@@ -161,6 +178,14 @@ class RuntimeProjection:
             else _budget_remaining(contract, entries)
         )
         current_claim_id, claim_status = self._claim_view(contract.id)
+        claim_holds = open_claim_holds(
+            (
+                record
+                for revision, record in self._records()
+                if self._record_selected(revision, record.recorded_at)
+            ),
+            contract_id=contract.id,
+        )
         delegation_pending = False
         for entry in entries:
             if entry.event_type in {
@@ -172,6 +197,25 @@ class RuntimeProjection:
             elif entry.event_type == "method_resumed":
                 delegation_pending = False
 
+        selected_records = tuple(
+            record
+            for revision, record in self._records()
+            if self._record_selected(revision, record.recorded_at)
+        )
+        constraint_blockers = claim_constraint_blockers(
+            selected_records, contract_id=contract.id
+        )
+        assignment_context = _assignment_context(contract, selected_records)
+        assignment = effective_assignment(assignment_context, contract_id=contract.id)
+        assigned_worker_id = (
+            str(assignment.payload["worker_id"]) if assignment is not None else None
+        )
+        assignment_issue = assignment_blocker(
+            assignment_context, contract_id=contract.id
+        )
+        assignment_blocker_code = (
+            str(assignment_issue["reason"]) if assignment_issue else None
+        )
         blockers: list[str] = []
         if terminal == "conflict":
             blockers.append("terminal_conflict")
@@ -198,8 +242,20 @@ class RuntimeProjection:
                 blockers.append("budget_exhausted")
             if delegation_pending:
                 blockers.append("delegation_pending")
+            if assignment_issue is not None:
+                blockers.append(
+                    f"assignment:{assignment_issue['reason']}:{assignment_issue['worker_id']}"
+                )
             if current_claim_id is not None:
                 blockers.append(f"claim:{claim_status}")
+            blockers.extend(f"claim_hold:{record.id}" for record in claim_holds)
+            blockers.extend(
+                "prerequisite:"
+                f"{item['constraint_id']}:"
+                f"{item['prerequisite_contract_id']}:"
+                f"{item['observed_terminal']}"
+                for item in constraint_blockers
+            )
 
         canonical = {
             "activation_satisfied": activation_satisfied,
@@ -214,6 +270,9 @@ class RuntimeProjection:
             "terminal": terminal,
             "terminal_events": list(terminal_events),
         }
+        if assignment is not None:
+            canonical["assignment_worker_id"] = assigned_worker_id
+            canonical["assignment_blocker"] = assignment_blocker_code
         projection_hash = compute_content_hash(
             json.dumps(canonical, sort_keys=True, separators=(",", ":"))
         )
@@ -231,6 +290,8 @@ class RuntimeProjection:
             claim_status=claim_status,
             budget_remaining=budget_remaining,
             projection_hash=projection_hash,
+            assignment_worker_id=assigned_worker_id,
+            assignment_blocker=assignment_blocker_code,
         )
 
     def explain_not_enabled(self, contract: Contract) -> tuple[str, ...]:
@@ -354,3 +415,40 @@ def _budget_remaining(contract: Contract, entries: list[TraceEntry]) -> int:
         if entry.event_type == "budget_consumed"
     ]
     return consumed[-1] if consumed else initial
+
+
+def _assignment_context(contract, records):
+    """Build the assignment read model from the same selected fact cutoff."""
+    latest: dict[str, RuntimeRecord] = {}
+    active_claims: dict[str, str] = {}
+    for record in records:
+        if record.record_type == "worker.registered":
+            latest[str(record.payload.get("worker_id", ""))] = record
+        elif record.record_type == "claim.granted":
+            active_claims[str(record.payload.get("claim_id", ""))] = str(
+                record.payload.get("worker_id", "")
+            )
+        elif record.record_type in {
+            "claim.expired",
+            "claim.released",
+            "claim.submitted",
+        }:
+            active_claims.pop(str(record.payload.get("claim_id", "")), None)
+    counts: dict[str, int] = {}
+    for worker_id in active_claims.values():
+        counts[worker_id] = counts.get(worker_id, 0) + 1
+    registrations = tuple(
+        replace(
+            registration_from_record(record),
+            active_claims=counts.get(worker_id, 0),
+        )
+        for worker_id, record in sorted(latest.items())
+        if worker_id
+    )
+    return assignment_context_from_projection(
+        EffectProjectionContext(
+            contracts=(contract,),
+            runtime_records=tuple(records),
+            registrations=registrations,
+        )
+    )

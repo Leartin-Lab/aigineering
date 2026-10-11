@@ -16,6 +16,7 @@ from aigineering.core.asset_versions import (
     resolve_latest,
 )
 from aigineering.core.control_plane import build_control_plane_asset
+from aigineering.core.disclosure import redact_for_disclosure
 from aigineering.core.verification import verify_replacement_claims
 from aigineering.protocol.effect_builders import (
     asset_proposal_effect,
@@ -147,16 +148,28 @@ def asset_list(as_json: bool) -> None:
 
 
 @asset_group.command("show")
-@click.argument("name")
+@click.argument("name", required=False)
+@click.option("--id", "asset_id", default=None, help="Select one exact Asset ID.")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON.")
-def asset_show(name: str, as_json: bool) -> None:
-    """Show asset content and metadata by name."""
-    store = _persistent_store()
-    matches = _query_projection(store).get_assets_by_name(name)
-    if not matches:
-        raise click.ClickException(f"No asset named '{name}'")
+def asset_show(name: str | None, asset_id: str | None, as_json: bool) -> None:
+    """Show asset content and metadata by name or exact ID."""
+    if (name is None) == (asset_id is None):
+        raise click.UsageError("provide exactly one of NAME or --id")
+    if asset_id is not None and not asset_id.strip():
+        raise click.UsageError("--id must be a non-empty Asset ID")
 
-    asset = matches[0]
+    store = _persistent_store()
+    projection = _query_projection(store)
+    if asset_id is not None:
+        asset = projection.get_asset(asset_id)
+        if asset is None:
+            raise click.ClickException(f"No asset with ID '{asset_id}'")
+    else:
+        matches = projection.get_assets_by_name(name)
+        if not matches:
+            raise click.ClickException(f"No asset named '{name}'")
+        asset = matches[0]
+    asset = redact_for_disclosure(asset)
     if as_json:
         data = {
             "id": asset.id,
@@ -167,6 +180,7 @@ def asset_show(name: str, as_json: bool) -> None:
             "trust_tier": asset.trust_tier,
             "source_uri": asset.source_uri,
             "promptable": asset.promptable,
+            "disclosure_view": asset.disclosure_view,
             "signed_by": asset.signed_by,
             "definition_hash": asset.definition_hash,
             "content_hash": asset.content_hash,
@@ -178,6 +192,7 @@ def asset_show(name: str, as_json: bool) -> None:
         click.echo(f"origin:          {asset.origin}")
         click.echo(f"trust_tier:      {asset.trust_tier}")
         click.echo(f"promptable:      {asset.promptable}")
+        click.echo(f"disclosure_view: {asset.disclosure_view}")
         click.echo(f"definition_hash: {asset.definition_hash}")
         click.echo(f"content_hash:    {asset.content_hash}")
         click.echo("--- content ---")

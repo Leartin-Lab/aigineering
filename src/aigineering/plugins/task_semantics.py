@@ -450,7 +450,7 @@ def contracts_from_plan_asset(
             continue
         if (
             parent_contract is not None
-            and parent_contract.id.startswith("task:v5:")
+            and parent_contract.id.startswith(("task:v5:", "task:v6:"))
             and tool_scope
             and not capability_needs
         ):
@@ -863,12 +863,12 @@ def _plan_child_scope_findings(
     parent_capability_scope = (
         set(parent_contract.delegation_capabilities)
         | set(parent_contract.worker_capabilities)
-        if parent_contract.id.startswith("task:v5:")
+        if parent_contract.id.startswith(("task:v5:", "task:v6:"))
         else set(parent_contract.worker_capabilities)
     )
     parent_pool_scope = (
         set(parent_contract.delegation_pools) | set(parent_contract.worker_pools)
-        if parent_contract.id.startswith("task:v5:")
+        if parent_contract.id.startswith(("task:v5:", "task:v6:"))
         else set(parent_contract.worker_pools)
     )
     if not set(capability_needs) <= parent_capability_scope:

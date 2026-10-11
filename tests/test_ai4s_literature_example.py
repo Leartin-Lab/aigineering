@@ -223,6 +223,7 @@ def test_retrieval_action_commits_and_rebuilds_through_harness(tmp_path: Path):
         worker_id=adapter.worker_id,
         contract_id=contract.id,
         claim_runtime_records=claim.runtime_records,
+        claim_candidate=claim.candidate,
     )
     assert claimed is not None
 

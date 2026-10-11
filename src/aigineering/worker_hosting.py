@@ -17,6 +17,7 @@ from aigineering.protocol.candidate import ActorKey, GenesisManifest
 from aigineering.protocol.effect_builders import (
     actor_authorization_effect,
     worker_registration_effect,
+    worker_profile_promotion_effect,
 )
 
 
@@ -26,6 +27,9 @@ def authorize_worker_host(
     actor_key: ActorKey,
     signer: Signer,
     authority: CandidatePublisher,
+    *,
+    registration: WorkerRegistration | None = None,
+    promotion_previous_registration_id: str | None = None,
 ) -> WorkerHost:
     """Bind *worker* after publishing any missing identity facts."""
     if authority.genesis.id != genesis.id:
@@ -44,30 +48,50 @@ def authorize_worker_host(
         )
 
     registration_factory = getattr(worker, "registration", None)
-    registration = (
+    selected_registration = registration or (
         registration_factory()
         if callable(registration_factory)
         else WorkerRegistration(worker.worker_id)
     )
-    registration = replace(
-        registration,
+    selected_registration = replace(
+        selected_registration,
         worker_id=worker.worker_id,
         actor_id=actor_key.actor_id,
         key_id=actor_key.key_id,
     )
+    current_registration = authority.store.get_worker_registration(worker.worker_id)
+    registration_changed = current_registration is None or worker_registration_payload(
+        current_registration
+    ) != worker_registration_payload(selected_registration)
     effects = []
     if current_key is None:
         effects.append(actor_authorization_effect(actor_key))
-    if authority.store.get_worker_registration(worker.worker_id) != registration:
-        effects.append(worker_registration_effect(registration))
+    if promotion_previous_registration_id is not None and registration_changed:
+        if "worker.profile.promote" not in (authority.additional_effects or {}):
+            raise ValueError("profile promotion handler was not explicitly injected")
+        effects.append(
+            worker_profile_promotion_effect(
+                promotion_previous_registration_id, selected_registration
+            )
+        )
+    if registration_changed:
+        effects.append(worker_registration_effect(selected_registration))
     if effects:
         identity = compute_content_hash(
-            canonical_json(worker_registration_payload(registration))
+            canonical_json(
+                {
+                    "promotion_from": promotion_previous_registration_id or "",
+                    "registration": worker_registration_payload(selected_registration),
+                }
+            )
         )[:16]
         decision = authority.publish(
             tuple(effects),
             idempotency_key=f"worker-host:{worker.worker_id}:{identity}",
         )
+        from aigineering.runtime_services import sync_runtime
+
+        sync_runtime(authority.store, accepted=decision.accepted)
         if not decision.accepted:
             rejection = next(
                 (
@@ -81,4 +105,10 @@ def authorize_worker_host(
             raise ValueError(
                 f"worker {worker.worker_id!r} was not authorized: {reason}"
             )
-    return WorkerHost(worker, genesis, actor_key, signer)
+    return WorkerHost(
+        worker,
+        genesis,
+        actor_key,
+        signer,
+        registration_version=selected_registration.version,
+    )

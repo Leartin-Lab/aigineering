@@ -8,7 +8,7 @@ from click.testing import CliRunner
 
 from aigineering.cli.main import cli
 from aigineering.core.sqlite_store import SQLiteStore
-from aigineering.cli.task_state import project_task_status
+from aigineering.task_views import project_task_status
 from aigineering.core.control_plane import build_control_plane_contract
 from aigineering.protocol.identity import contract_from_fields
 
@@ -296,7 +296,7 @@ def test_recovery_status_does_not_cross_same_name_roots(monkeypatch, tmp_path):
         status = runner.invoke(cli, ["task", "status", other_id, "--json"])
         assert status.exit_code == 1, status.output
         assert json.loads(status.output)["recoveries"] == []
-        from aigineering.cli.task_state import _has_active_recovery
+        from aigineering.task_views import _has_active_recovery
 
         store = SQLiteStore(".aig/store.db")
         try:
@@ -403,8 +403,18 @@ def test_target_pool_claims_child_recovery_and_tool_descendants(monkeypatch):
     attempts = []
     available = {child.id, recovery.id}
 
-    def claim(_store, *, worker_id, contract_id, candidate_publishers):
+    def claim(
+        _store,
+        *,
+        worker_id,
+        contract_id,
+        candidate_publishers,
+        claim_candidate,
+        expected_registration_version,
+    ):
         del _store, worker_id, candidate_publishers
+        assert claim_candidate is not None
+        assert expected_registration_version == "1"
         attempts.append(contract_id)
         if contract_id in available:
             available.remove(contract_id)
@@ -412,7 +422,17 @@ def test_target_pool_claims_child_recovery_and_tool_descendants(monkeypatch):
         return None
 
     monkeypatch.setattr("aigineering.runtime.claim_next_package", claim)
-    host = _PoolHost(SimpleNamespace(worker_id="reasoner"))
+    monkeypatch.setattr(
+        "aigineering.cli.run.order_application_contract_ids",
+        lambda _store, ids: ids,
+    )
+    host = _PoolHost(
+        SimpleNamespace(
+            worker_id="reasoner",
+            registration_version="1",
+            claim_candidate=lambda **_kwargs: object(),
+        )
+    )
     first = _claim_for_target_pool_host(store, host, None, target_task_id=root.id)
     second = _claim_for_target_pool_host(store, host, None, target_task_id=root.id)
     assert {first.contract.id, second.contract.id} == {child.id, recovery.id}
@@ -420,8 +440,18 @@ def test_target_pool_claims_child_recovery_and_tool_descendants(monkeypatch):
 
     tool_attempts = []
 
-    def claim_tool(_store, *, worker_id, contract_id, candidate_publishers):
+    def claim_tool(
+        _store,
+        *,
+        worker_id,
+        contract_id,
+        candidate_publishers,
+        claim_candidate,
+        expected_registration_version,
+    ):
         del _store, worker_id, candidate_publishers
+        assert claim_candidate is not None
+        assert expected_registration_version == "1"
         tool_attempts.append(contract_id)
         return (
             SimpleNamespace(contract=tool_child)
@@ -430,7 +460,14 @@ def test_target_pool_claims_child_recovery_and_tool_descendants(monkeypatch):
         )
 
     monkeypatch.setattr("aigineering.runtime.claim_next_package", claim_tool)
-    tool_host = _PoolHost(SimpleNamespace(worker_id="tool-worker"), "tool-execution")
+    tool_host = _PoolHost(
+        SimpleNamespace(
+            worker_id="tool-worker",
+            registration_version="1",
+            claim_candidate=lambda **_kwargs: object(),
+        ),
+        "tool-execution",
+    )
     claimed_tool = _claim_for_target_pool_host(
         store, tool_host, None, target_task_id=root.id
     )

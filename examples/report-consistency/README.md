@@ -14,38 +14,16 @@ From an empty working directory:
 
 ```bash
 export DEEPSEEK_API_KEY=replace-me
-export AIGINEERING_REPORT_CONSISTENCY_DIR=/path/to/aigineering/examples/report-consistency
-
-aig domain init
-aig skill load "$AIGINEERING_REPORT_CONSISTENCY_DIR"
-aig asset add --name report_source \
-  --content-file "$AIGINEERING_REPORT_CONSISTENCY_DIR/source-data.json" --json
-aig asset add --name draft_report \
-  --content-file "$AIGINEERING_REPORT_CONSISTENCY_DIR/draft-report.json" --json
-aig asset add --name check_standard \
-  --content-file "$AIGINEERING_REPORT_CONSISTENCY_DIR/check-standard.json" --json
-aig task create --name report_consistency_audit \
-  --description-file "$AIGINEERING_REPORT_CONSISTENCY_DIR/task-description.txt" \
-  --input report_source --input draft_report --input check_standard \
-  --activation 'report_source AND draft_report AND check_standard' \
-  --output audit_report --budget 24 \
-  --label _skill_content_report_consistency \
-  --requires-capability planning --worker-pool reasoning \
-  --delegate-capability report.extract \
-  --delegate-capability report.check \
-  --delegate-capability report.revise \
-  --delegate-capability report.replan \
-  --delegate-capability report.verify \
-  --delegate-pool economy --delegate-pool reasoning --delegate-pool verification \
-  --acceptance-policy "$(cat "$AIGINEERING_REPORT_CONSISTENCY_DIR/acceptance-policy.json")" \
-  --json
-
-aig fleet run --config "$AIGINEERING_REPORT_CONSISTENCY_DIR/workers.toml" \
-  --task TASK_ID --wait-timeout 300 --json
-aig task audit TASK_ID --json
+mkdir -p workspaces/report-consistency
+aig -C workspaces/report-consistency run --config /path/to/aigineering/examples/report-consistency/run.toml \
+  --wait-timeout 300 --json
+# Use the returned contract_id for continuation or audit:
+aig -C workspaces/report-consistency run --config /path/to/aigineering/examples/report-consistency/run.toml \
+  --resume TASK_ID --wait-timeout 300 --json
+aig -C workspaces/report-consistency task audit TASK_ID --json
 ```
 
-Replace `TASK_ID` with the root Contract ID returned by `aig task create`.
+Replace `TASK_ID` with the root Contract ID returned by `aig run`.
 The fleet uses `deepseek-flash` at the configured DeepSeek endpoint and
 reads only `DEEPSEEK_API_KEY` from the environment. Never put the key in an
 Asset, task description, or checked-in file.
@@ -63,3 +41,10 @@ The manual review for this case passed in the recorded run. See the
 [`reports/063-runtime-native-cases-2026-09-13.md`](../../reports/063-runtime-native-cases-2026-09-13.md)
 for the measured execution details; that result is evidence for this fixture,
 not a guarantee for arbitrary reports.
+
+The preset paths are relative to `run.toml`; its database is relative to the
+selected workspace. Use a fresh workspace for an independent run; a new start
+refuses historical outputs. Resume does not reload inputs or reset a failed root.
+See [configured runs](../../docs/reference/configured-runs.md). The entrypoint
+migration has deterministic verification; the earlier linked live reports do not
+constitute new provider execution of this preset.

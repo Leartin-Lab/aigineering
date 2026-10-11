@@ -6,6 +6,7 @@ from dataclasses import replace
 from collections.abc import Mapping
 
 from aigineering.core.asset_reads import read_assets_by_ids
+from aigineering.core.input_bindings import read_contract_input_assets
 from aigineering.core.labels import BEHAVIOR_LABEL_PREFIX, is_behavior_asset_allowed
 from aigineering.core.store_capabilities import AssetReader
 from aigineering.core.trust_policy import TrustPolicy
@@ -43,18 +44,17 @@ def compute_disclosure(contract: Contract, store: AssetReader) -> list[Asset]:
     result: list[Asset] = []
     input_assets: list[Asset] = []
 
-    for input_name in contract.inputs:
-        for asset in store.get_assets_by_name(input_name):
-            if not asset.promptable:
-                continue
-            if asset.id not in seen:
-                seen.add(asset.id)
-                input_assets.append(asset)
-                result.append(asset)
+    for asset in read_contract_input_assets(contract, store):
+        if not asset.promptable:
+            continue
+        if asset.id not in seen:
+            seen.add(asset.id)
+            input_assets.append(asset)
+            result.append(asset)
 
     _enforce_sensitive_input_policy(contract, input_assets, store)
 
-    if contract.id.startswith(("task:v4:", "task:v5:")):
+    if contract.id.startswith(("task:v4:", "task:v5:", "task:v6:")):
         label_assets = tuple(
             asset
             for asset in read_assets_by_ids(store, contract.context_asset_ids)

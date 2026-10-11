@@ -5,6 +5,10 @@ Baseline: `d5d2470` (v0.5.8).
 Scope: local development implementation on `dev`; no remote publication claim.
 Environment: macOS arm64, project Python 3.11.15, SQLite 3.53.4.
 
+Public-path redaction, 2026-10-07: private local evidence paths have been
+omitted. The original report is retained privately; the run outcomes, hashes
+and measurements below are unchanged.
+
 ## Implemented closure
 
 `artifact-v1` composes ordinary signed Assets into an attachment, document,
@@ -53,7 +57,7 @@ Reopening the rebuilt database preserved the original PDF bytes and ancestry.
 
 Non-content evidence is retained in `reports/data/059-artifact-live.json`.
 The original PDF, exported passage, private fixture database and receipts remain
-under `/private/tmp/aigineering-059-live-yxyhxfuz`, outside the repository.
+in a private evidence directory outside the repository.
 This checks acquisition and provenance, not the paper's scientific conclusions.
 
 ## Distribution and verification
@@ -63,10 +67,10 @@ produced wheel and sdist; Twine accepted both. The installed-wheel smoke runs
 outside the source tree in a fresh environment and exercises signed ingress,
 an explicit mock task, artifact import/parse/cite/report/export in independent
 CLI processes, source reopen and backup-first reconstruction. Its retained
-diagnostic is under `/private/tmp/aigineering-059-installed-evidence`. The final
+diagnostic is retained in a private evidence directory. The final
 distribution is assembled with `build --no-isolation` after the isolated-build
 check so the sdist includes the closing evidence, and receives its own installed
-smoke check under `/private/tmp/aigineering-059-final-installed-evidence`.
+smoke check with a separate private evidence directory.
 
 The initial system-Python suite passed 1,286 tests with three optional dependency
 skips. Final API/Redis/PDF validation uses the project virtual environment with

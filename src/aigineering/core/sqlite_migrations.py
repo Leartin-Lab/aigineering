@@ -32,7 +32,7 @@ from aigineering.protocol.wire import (
     trace_entry_to_dict,
 )
 
-CURRENT_SCHEMA_VERSION = 17
+CURRENT_SCHEMA_VERSION = 21
 
 
 class SQLiteMigrator:
@@ -154,10 +154,68 @@ class SQLiteMigrator:
             if current < 17:
                 self._migrate_to_v17()
                 self._record_schema_version(17)
+            if current < 18:
+                self._migrate_to_v18()
+                self._record_schema_version(18)
+            if current < 19:
+                self._migrate_to_v19()
+                self._record_schema_version(19)
+            if current < 20:
+                self._migrate_to_v20()
+                self._record_schema_version(20)
+            if current < 21:
+                self._migrate_to_v21()
+                self._record_schema_version(21)
 
     def _migrate_to_v17(self) -> None:
         """Separate Contract execution requirements from delegation scope."""
         self._ensure_contract_columns()
+
+    def _migrate_to_v18(self) -> None:
+        """Mark readers that enforce input-binding identity versions."""
+
+    def _migrate_to_v19(self) -> None:
+        """Gate paired returns and audit historical allowance grant provenance."""
+        if self._conn.execute(
+            "SELECT 1 FROM runtime_records "
+            "WHERE record_type = 'allowance.returned' LIMIT 1"
+        ).fetchone():
+            raise ValueError(
+                "schema 19 upgrade refuses pre-existing allowance.returned facts"
+            )
+        from aigineering.core.causal_allowance import validate_allowance_grants
+
+        contracts = tuple(self._store.get_all_contracts())
+        records = tuple(record for _, record in self._store.scan_runtime_records())
+        try:
+            validate_allowance_grants(contracts, (), records)
+        except ValueError as exc:
+            raise ValueError(
+                "schema 19 upgrade refuses allowance facts without canonical "
+                "Candidate commitment provenance"
+            ) from exc
+
+    def _migrate_to_v20(self) -> None:
+        """Refuse imported prerequisite facts older readers would ignore."""
+        found = self._conn.execute(
+            "SELECT record_type FROM runtime_records WHERE record_type IN (?, ?) LIMIT 1",
+            ("claim.constraint.placed", "claim.constraint.released"),
+        ).fetchone()
+        if found is not None:
+            raise ValueError(
+                "schema 20 upgrade refuses pre-existing claim constraint facts"
+            )
+
+    def _migrate_to_v21(self) -> None:
+        """Refuse assignment facts written by readers without claim gates."""
+        found = self._conn.execute(
+            "SELECT record_type FROM runtime_records WHERE record_type = ? LIMIT 1",
+            ("claim.assignment.changed",),
+        ).fetchone()
+        if found is not None:
+            raise ValueError(
+                "schema 21 upgrade refuses pre-existing task assignment facts"
+            )
 
     def _migrate_to_v2(self) -> None:
         """Add 040 transactional worker state and contract authority metadata."""

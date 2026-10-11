@@ -15,7 +15,7 @@ from aigineering.core.asset_versions import (
 from aigineering.core.disclosure import DisclosurePolicyError, compute_disclosure
 from aigineering.core.ids import hash_asset_content, hash_asset_definition
 from aigineering.core.provenance import sign_asset
-from aigineering.core.sqlite_store import SQLiteStore
+from aigineering.core.sqlite_store import CURRENT_SCHEMA_VERSION, SQLiteStore
 from aigineering.core.store import MemoryStore
 from aigineering.core.verification import verify_replacement_claims
 from aigineering.protocol.types import Asset, Contract
@@ -155,5 +155,5 @@ def test_slice_derivation_reconstructs_after_sqlite_reopen(tmp_path: Path):
 
     assert restored == [claim]
     assert verify_replacement_claims(reopened, restored)["pass_count"] == 1
-    assert reopened.schema_version == 17
+    assert reopened.schema_version == CURRENT_SCHEMA_VERSION
     reopened.close()
