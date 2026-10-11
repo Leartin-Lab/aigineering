@@ -30,7 +30,30 @@ def test_operational_application_claims_use_shared_ordering_boundary():
             for node in ast.walk(tree)
         )
         assert not imported_runtime_claim, path
-        assert "claim_next_application_package" in _source(path), path
+        if path == "src/aigineering/cli/run.py":
+            assert "claim_next_application_package" not in _source(path)
+            local_fleet = _source("src/aigineering/local_fleet.py")
+            owner = ast.parse(local_fleet)
+            calls = [
+                node
+                for node in ast.walk(owner)
+                if isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "order_application_contract_ids"
+            ]
+            assert calls, "local cycle claim owner must preserve shared ordering"
+        else:
+            assert "claim_next_application_package" in _source(path), path
+
+    run_tree = ast.parse(_source("src/aigineering/cli/run.py"))
+    local_cycle_calls = [
+        node
+        for node in ast.walk(run_tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "run_local_cycle"
+    ]
+    assert local_cycle_calls, "ordinary --once must delegate to the shared cycle owner"
 
 
 def test_priority_is_composed_in_application_services_not_runtime_kernel():

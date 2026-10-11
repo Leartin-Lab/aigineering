@@ -13,7 +13,13 @@ from aigineering.core.control_plane import (
     bind_contract_label_assets,
     build_control_plane_contract,
 )
-from aigineering.local_fleet import FleetHost, FleetRunResult, run_local_fleet
+from aigineering.local_fleet import (
+    FleetHost,
+    FleetRunResult,
+    LocalCycleResult,
+    run_local_cycle,
+    run_local_fleet,
+)
 from aigineering.local_identity import (
     ensure_local_runtime_publishers,
     ensure_local_worker_host,
@@ -90,7 +96,8 @@ def run_configured(
     prepared: PreparedConfiguredRun,
     *,
     timeout: float = 300.0,
-) -> FleetRunResult:
+    once: bool = False,
+) -> FleetRunResult | LocalCycleResult:
     """Publish a new configured root (or resume an existing one), then launch Fleet."""
     if (
         isinstance(timeout, bool)
@@ -134,6 +141,14 @@ def run_configured(
             )
             hosts.append(FleetHost(host=host, capacity=spec.capacity))
         sync_runtime(store)
+        if once:
+            return run_local_cycle(
+                store,
+                tuple(hosts),
+                db_path=prepared.db_path,
+                target_contract_id=target_id,
+                timeout=timeout,
+            )
     finally:
         store.close()
 

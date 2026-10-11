@@ -11,7 +11,10 @@ from aigineering.protocol.identity import contract_from_fields
 from aigineering.run_failure_diagnostics import (
     format_worker_failure_detail,
     invocation_failure_detail,
+    safe_task_rejections,
+    safe_worker_error_messages,
 )
+from aigineering.cli._cycle_result import configured_cycle_payload
 from aigineering.task_diagnostics import task_runs
 from aigineering.task_publication import publish_task_contract
 
@@ -224,3 +227,94 @@ def test_run_failure_with_unavailable_proof_returns_no_claim_identifiers(
         assert "PRIVATE_DIAGNOSTIC_READ_MARKER" not in result.output
         assert "claim_id" not in detail
         assert "contract_id" not in detail
+
+
+def test_configured_failure_rendering_uses_exact_safe_details_only():
+    details = [
+        {
+            "kind": "invocation_failure",
+            "status": "invocation_failed",
+            "contract_id": "task:v3:" + "a" * 64,
+            "claim_id": "lease:" + "b" * 64,
+            "category": "worker_error:fixture_provider_failure",
+            "status_code": 0,
+        }
+    ]
+    projection = {
+        "status": "failed",
+        "blockers": ["terminal:failed"],
+        "rejections": [
+            "[recovery] worker_error:fixture_provider_failure (provider): "
+            "PRIVATE_RUN_FAILURE_MARKER"
+        ],
+    }
+    result = type(
+        "Result",
+        (),
+        {
+            "contract_id": "task:v3:" + "a" * 64,
+            "status": "failed",
+            "completed": False,
+            "timed_out": False,
+            "worker_errors": ("PRIVATE_RUN_FAILURE_MARKER",),
+            "worker_failure_details": tuple(details),
+            "capture_warnings": (),
+            "stop_reason": "worker_failure",
+            "cycles": (),
+            "submission_status": None,
+            "projection": projection,
+        },
+    )()
+
+    payload = configured_cycle_payload(result, resume_command="aig run --resume exact")
+    rendered = json.dumps(payload, sort_keys=True)
+
+    assert "PRIVATE_RUN_FAILURE_MARKER" not in rendered
+    assert payload["worker_errors"] == [
+        'worker invocation failed for task "task:v3:'
+        + "a" * 64
+        + '" claim "lease:'
+        + "b" * 64
+        + '"; claim was released; inspect task runs/diagnostics '
+        "(category=worker_error:fixture_provider_failure, status_code=0)"
+    ]
+    assert payload["projection"]["rejections"] == ["[recovery] details omitted"]
+    assert (
+        safe_task_rejections(projection["rejections"], details)
+        == payload["projection"]["rejections"]
+    )
+    assert safe_worker_error_messages(("PRIVATE_RUN_FAILURE_MARKER",), ()) == [
+        "worker invocation failed; exact claim diagnostics are unavailable"
+    ]
+    assert safe_worker_error_messages((), details) == []
+
+
+def test_terminal_resume_redacts_historical_recovery_text_without_current_proof():
+    marker = "PRIVATE_RUN_FAILURE_MARKER"
+    result = type(
+        "Result",
+        (),
+        {
+            "contract_id": "task:v3:" + "c" * 64,
+            "status": "failed",
+            "completed": False,
+            "timed_out": False,
+            "worker_errors": (),
+            "worker_failure_details": (),
+            "capture_warnings": (),
+            "stop_reason": "terminal",
+            "cycles": (),
+            "submission_status": None,
+            "projection": {
+                "status": "failed",
+                "blockers": ["terminal:failed"],
+                "rejections": ["[recovery] provider diagnostic: " + marker],
+            },
+        },
+    )()
+
+    payload = configured_cycle_payload(result, resume_command="aig run --resume exact")
+
+    assert marker not in json.dumps(payload, sort_keys=True)
+    assert payload["projection"]["rejections"] == ["[recovery] details omitted"]
+    assert "resume_command" not in payload

@@ -45,6 +45,34 @@ def test_all_operational_claim_next_calls_supply_or_derive_a_candidate():
             and isinstance(node.func, ast.Name)
             and node.func.id == "claim_next_application_package"
         ]
+        if path == "src/aigineering/cli/run.py":
+            assert not calls, "CLI must delegate claim authorization to the cycle owner"
+            delegated = [
+                node
+                for node in ast.walk(tree)
+                if isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "run_local_cycle"
+            ]
+            assert delegated, "CLI --once must call the shared local cycle owner"
+            owner = _tree("src/aigineering/local_fleet.py")
+            calls = [
+                node
+                for node in ast.walk(owner)
+                if isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "claim_next_application_package"
+            ]
+            ordered = [
+                node
+                for node in ast.walk(owner)
+                if isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "order_application_contract_ids"
+            ]
+            assert calls and ordered, (
+                "shared cycle owner must retain ordered signed claims"
+            )
         assert calls, f"expected shared application claim call in {path}"
         for call in calls:
             keywords = {item.arg: item.value for item in call.keywords}

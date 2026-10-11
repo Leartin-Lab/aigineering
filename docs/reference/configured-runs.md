@@ -16,6 +16,19 @@ and `worker_errors`. Completion satisfies the Contract policy; it does not prove
 general semantic correctness. `--json` emits one result object, not a streaming
 format shared with another harness.
 
+Add `--once` to traverse the configured Worker slots until one eligible
+package is claimed, invoke at most that one package, and return the current
+projection at the cycle boundary. This supports ordinary task planning and
+continuation between invocations; it does not imply that the root Contract is
+complete. For an existing target, use `--resume TASK_ID --once` (or the `--task`
+alias) with `aig run --config`, or `aig fleet run --config PATH --task TASK_ID
+--once`. These bounded commands share the one-package limit. Without `--once`,
+configured runs retain their existing run-until-terminal behavior. Incomplete
+JSON results include the exact Contract projection, blockers, stop reason and a
+state-aware next step. A submitted task blocked on independent acceptance
+directs the operator to review; it does not suggest rerunning the task. A
+resumable target includes an exact `--resume` command.
+
 To continue an existing root or a separately published recovery task:
 
 ```bash

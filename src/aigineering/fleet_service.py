@@ -44,6 +44,16 @@ _STATE_NAME = "state.json"
 _LOCK_NAME = "owner.lock"
 _STOP_NAME = "stop.json"
 _READINESS_TIMEOUT = 20.0
+_STATE_WRITE_LOCK = threading.RLock()
+_TERMINAL_SERVICE_STATES = frozenset({"stopped", "failed", "degraded"})
+_SERVICE_STATE_TRANSITIONS = {
+    "starting": frozenset({"starting", "ready", "failed", "degraded"}),
+    "ready": frozenset({"ready", "stopping", "stopped", "failed", "degraded"}),
+    "stopping": frozenset({"stopping", "stopped", "failed"}),
+    "stopped": frozenset({"stopped"}),
+    "failed": frozenset({"failed"}),
+    "degraded": frozenset({"degraded"}),
+}
 
 
 class FleetServiceError(RuntimeError):
@@ -533,13 +543,16 @@ def _serve_from_environment() -> int:
                 on_tick=maintenance_tick,
                 poll_interval=fleet.poll_interval,
             )
-            _update_state(state_path, initial, state="stopped", active_slots=0)
-            return 0
         finally:
             gate.close()
             stop_event.set()
-            stop_watcher.join(timeout=1.0)
+            # A timed join is not proof that an older watcher cannot write.
+            stop_watcher.join()
             maintenance_store.close()
+        # Publish successful termination only after the slot runner has joined,
+        # the stop watcher has exited, and the maintenance Store has closed.
+        _update_state(state_path, initial, state="stopped", active_slots=0)
+        return 0
     except QueryProjectionUnavailable:
         _update_state(
             state_path,
@@ -695,13 +708,32 @@ def _result_from_state(
 
 
 def _update_state(path, base, **updates) -> None:
-    current = read_service_metadata(path) or dict(base)
-    generation = base.get("generation")
-    if current.get("generation") != generation:
-        return
-    current.update(updates)
-    current["updated_at"] = time.time()
-    write_service_metadata(path, current)
+    # State is private process metadata, not a cross-process task/claim fence.
+    # Serialize the whole read/merge/replace among this generation's writers.
+    with _STATE_WRITE_LOCK:
+        current = read_service_metadata(path) or dict(base)
+        generation = base.get("generation")
+        if current.get("generation") != generation:
+            return
+
+        current_state = current.get("state")
+        requested_state = updates.get("state")
+        if current_state in _TERMINAL_SERVICE_STATES:
+            # Freeze the complete terminal snapshot, including active_slots and
+            # error_code; late callbacks cannot replay stale observations.
+            return
+        if requested_state is not None:
+            allowed = _SERVICE_STATE_TRANSITIONS.get(current_state)
+            if allowed is None or requested_state not in allowed:
+                # A late ready callback may still report the current slot count,
+                # but cannot reopen admission after stopping was observed.
+                updates = dict(updates)
+                updates.pop("state", None)
+                if not updates:
+                    return
+        current.update(updates)
+        current["updated_at"] = time.time()
+        write_service_metadata(path, current)
 
 
 def _write_control(path: Path, payload: dict[str, object]) -> None:

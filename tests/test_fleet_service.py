@@ -443,6 +443,150 @@ def test_live_generation_stop_uses_metadata_request_not_pid_signal(tmp_path):
         os.close(lock_fd)
 
 
+def test_state_read_merge_write_serializes_ready_and_stopping(tmp_path, monkeypatch):
+    service_dir = _service_dir(tmp_path)
+    state_path = service_dir / "state.json"
+    generation = "e" * 32
+    initial = {
+        "schema": "aig-fleet-service-v1",
+        "state": "ready",
+        "generation": generation,
+        "active_slots": 0,
+        "worker_ids": [],
+        "registration_versions": [],
+        "error_code": None,
+    }
+    write_service_metadata(state_path, initial)
+
+    ready_writer_entered = threading.Event()
+    release_ready_writer = threading.Event()
+    stop_writer_started = threading.Event()
+    original_write = fleet_service_module.write_service_metadata
+
+    def pause_old_ready_write(path, payload):
+        if (
+            threading.current_thread().name == "old-ready-writer"
+            and payload.get("state") == "ready"
+        ):
+            ready_writer_entered.set()
+            assert release_ready_writer.wait(timeout=2)
+        original_write(path, payload)
+
+    monkeypatch.setattr(
+        fleet_service_module, "write_service_metadata", pause_old_ready_write
+    )
+
+    ready_writer = threading.Thread(
+        name="old-ready-writer",
+        target=lambda: fleet_service_module._update_state(
+            state_path, initial, state="ready", active_slots=1
+        ),
+    )
+
+    def stop_writer():
+        stop_writer_started.set()
+        fleet_service_module._update_state(
+            state_path, initial, state="stopping", active_slots=1
+        )
+
+    stopping_writer = threading.Thread(name="stopping-writer", target=stop_writer)
+    ready_writer.start()
+    assert ready_writer_entered.wait(timeout=2)
+    # The lock covers the pending write as well as the preceding read/merge.
+    lock_available = fleet_service_module._STATE_WRITE_LOCK.acquire(blocking=False)
+    if lock_available:
+        fleet_service_module._STATE_WRITE_LOCK.release()
+    assert not lock_available
+    stopping_writer.start()
+    assert stop_writer_started.wait(timeout=2)
+    release_ready_writer.set()
+    ready_writer.join(timeout=2)
+    stopping_writer.join(timeout=2)
+    assert not ready_writer.is_alive()
+    assert not stopping_writer.is_alive()
+
+    state = read_service_metadata(state_path)
+    assert state is not None
+    assert state["state"] == "stopping"
+    assert state["active_slots"] == 1
+
+
+def test_late_ready_update_cannot_reopen_stopping_generation(tmp_path):
+    service_dir = _service_dir(tmp_path)
+    state_path = service_dir / "state.json"
+    generation = "f" * 32
+    initial = {
+        "schema": "aig-fleet-service-v1",
+        "state": "stopping",
+        "generation": generation,
+        "active_slots": 1,
+        "worker_ids": [],
+        "registration_versions": [],
+        "error_code": None,
+    }
+    write_service_metadata(state_path, initial)
+
+    fleet_service_module._update_state(
+        state_path, initial, state="ready", active_slots=0
+    )
+
+    state = read_service_metadata(state_path)
+    assert state is not None
+    assert state["state"] == "stopping"
+    # Late slot accounting remains observable without reopening admission.
+    assert state["active_slots"] == 0
+
+
+@pytest.mark.parametrize(
+    ("terminal_state", "active_slots", "error_code"),
+    [
+        ("stopped", 0, None),
+        ("failed", 1, "worker_failure"),
+        ("degraded", 0, "degraded"),
+    ],
+)
+def test_late_watcher_cannot_rewrite_terminal_service_snapshot(
+    tmp_path, terminal_state, active_slots, error_code
+):
+    service_dir = _service_dir(tmp_path)
+    state_path = service_dir / "state.json"
+    generation = "a" * 32
+    terminal = {
+        "schema": "aig-fleet-service-v1",
+        "state": terminal_state,
+        "generation": generation,
+        "active_slots": active_slots,
+        "worker_ids": ["worker:fixture"],
+        "registration_versions": ["registration-v1"],
+        "error_code": error_code,
+    }
+    write_service_metadata(state_path, terminal)
+    before = state_path.read_bytes()
+    gate = PullAdmissionGate()
+
+    class ImmediateStopEvent:
+        was_set = False
+
+        def wait(self, _timeout):
+            return False
+
+        def set(self):
+            self.was_set = True
+
+    stop_event = ImmediateStopEvent()
+    fleet_service_module._watch_stop(
+        lambda: True,
+        gate,
+        stop_event,
+        state_path,
+        {"generation": generation, "state": "ready"},
+    )
+
+    assert gate.closed
+    assert stop_event.was_set
+    assert state_path.read_bytes() == before
+
+
 def test_persistent_service_claims_domain_tasks_and_drains_without_reset(
     tmp_path, monkeypatch
 ):
@@ -671,10 +815,16 @@ def test_stop_gate_drains_admitted_invocation_and_blocks_later_claims(
 
     timed_out = stop_service(tmp_path, wait_timeout=0.05)
     assert timed_out.state == "stopping"
-    live_state = read_service_metadata(
-        tmp_path / ".aig" / "fleet-service" / "state.json"
-    )
+    state_path = tmp_path / ".aig" / "fleet-service" / "state.json"
+    ack_deadline = time.monotonic() + 2
+    live_state = None
+    while time.monotonic() < ack_deadline:
+        live_state = read_service_metadata(state_path)
+        if live_state is not None and live_state["state"] == "stopping":
+            break
+        time.sleep(0.01)
     assert live_state is not None and live_state["state"] == "stopping"
+    assert live_state["active_slots"] == 1
     with SQLiteStore(".aig/store.db") as store:
         admitted_claims = [
             record

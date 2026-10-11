@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from queue import Empty, Queue
 from threading import Condition, Event
 import time
+import math
 from typing import Any
 from uuid import uuid4
 
@@ -35,6 +36,9 @@ from aigineering.runtime import (
     run_runtime_maintenance_step,
 )
 from aigineering.task_logs import execute_captured_package
+from aigineering.task_views import project_task_status
+from aigineering.core.session import runtime_record_contract_references
+from collections.abc import Mapping
 
 
 @dataclass(frozen=True)
@@ -43,6 +47,7 @@ class FleetHost:
 
     host: WorkerHost
     capacity: int = 1
+    required_contract_capability: str | None = None
 
     def __post_init__(self) -> None:
         if self.capacity < 1:
@@ -57,6 +62,23 @@ class FleetRunResult:
     status: str
     completed: bool
     timed_out: bool
+    worker_errors: tuple[str, ...] = ()
+    capture_warnings: tuple[str, ...] = ()
+    worker_failure_details: tuple[dict[str, Any], ...] = ()
+
+
+@dataclass(frozen=True)
+class LocalCycleResult:
+    """Outcome of one bounded cycle that admits at most one package globally."""
+
+    contract_id: str | None
+    status: str
+    completed: bool
+    timed_out: bool
+    stop_reason: str
+    projection: dict[str, Any] | None = None
+    cycles: tuple[dict[str, Any], ...] = ()
+    submission_status: str | None = None
     worker_errors: tuple[str, ...] = ()
     capture_warnings: tuple[str, ...] = ()
     worker_failure_details: tuple[dict[str, Any], ...] = ()
@@ -218,6 +240,197 @@ def run_local_fleet(
         worker_errors=_drain_errors(errors),
         capture_warnings=tuple(capture_warnings),
         worker_failure_details=_drain_failure_details(failure_details),
+    )
+
+
+def run_local_cycle(
+    store,
+    hosts: tuple[FleetHost, ...],
+    *,
+    db_path: str,
+    target_contract_id: str | None = None,
+    timeout: float | None = None,
+) -> LocalCycleResult:
+    """Search configured slots until one canonical claim succeeds, then stop.
+
+    A bounded cycle admits and invokes at most one claimed package globally, even
+    when several distinct WorkerHosts or capacity slots are supplied. Slots that
+    find no eligible package may be followed by later slots. The caller owns the
+    selected Store and closes it after this bounded pass. ``timeout`` is a soft
+    admission deadline: an admitted synchronous Worker invocation is joined and
+    never interrupted.
+    """
+    if not hosts:
+        raise ValueError("local cycle requires at least one WorkerHost")
+    if timeout is not None and (
+        isinstance(timeout, bool)
+        or not isinstance(timeout, (int, float))
+        or not math.isfinite(float(timeout))
+        or timeout <= 0
+    ):
+        raise ValueError("timeout must be a finite positive number")
+    deadline = time.monotonic() + float(timeout) if timeout is not None else None
+    require_redis()
+    publishers = ensure_local_runtime_publishers(store)
+    registry = default_completion_registry()
+    initial_revision = store.get_runtime_revision()
+    maintenance_before = run_runtime_maintenance_step(
+        store, registry, candidate_publishers=publishers
+    )
+    sync_runtime(store)
+
+    target = None
+    if target_contract_id is not None:
+        target = store.get_contract(target_contract_id)
+        if target is None:
+            raise ValueError(
+                f"cycle target Contract {target_contract_id!r} does not exist"
+            )
+        target_projection = RuntimeProjection(store, store).contract_view(target)
+        if target_projection.terminal is not None:
+            projection = project_task_status(target, store)
+            sync_runtime(store)
+            return LocalCycleResult(
+                contract_id=target.id,
+                status=projection["status"],
+                completed=projection["status"] == "completed",
+                timed_out=False,
+                stop_reason="terminal",
+                projection=projection,
+            )
+
+    slots = tuple(host for item in hosts for host in (item,) * item.capacity)
+    claims = []
+    submissions: list[dict[str, Any]] = []
+    errors: list[str] = []
+    failure_details: list[dict[str, Any]] = []
+    capture_warnings: list[str] = []
+    deadline_stopped = False
+
+    for slot in slots:
+        if deadline is not None and time.monotonic() >= deadline:
+            deadline_stopped = True
+            break
+        claimed = _claim_cycle_slot(
+            store,
+            slot.host,
+            publishers,
+            target_contract_id=target_contract_id,
+            required_contract_capability=slot.required_contract_capability,
+            request_prefix="local-cycle-claim",
+        )
+        if claimed is None:
+            sync_runtime(store)
+            continue
+        claims.append(claimed)
+        try:
+            submissions.append(
+                execute_captured_package(
+                    claimed,
+                    slot.host,
+                    store,
+                    db_path=db_path,
+                    candidate_publishers=publishers,
+                    warnings=capture_warnings,
+                )
+            )
+        except WorkerInvocationError:
+            detail = _invocation_failure_detail(store, claimed)
+            failure_details.append(detail)
+            errors.append(_format_worker_failure_detail(detail))
+        sync_runtime(store)
+        # A bounded cycle admits at most one package. Invocation failure is
+        # already an observable outcome and never opens another slot.
+        break
+
+    maintenance_after = run_runtime_maintenance_step(
+        store, registry, candidate_publishers=publishers
+    )
+    sync_runtime(store)
+    end_revision = store.get_runtime_revision()
+    window = store.scan_runtime_records(
+        after_revision=initial_revision, through_revision=end_revision
+    )
+    touched_contracts, unassigned_trace_ids, trace_count = _cycle_trace_scope(window)
+
+    selected_contract = target
+    if selected_contract is None and claims:
+        selected_contract = store.get_contract(claims[0].contract.id)
+    projection = (
+        project_task_status(selected_contract, store)
+        if selected_contract is not None
+        else None
+    )
+    terminal = bool(projection and projection.get("terminal"))
+    completed = bool(projection and projection.get("status") == "completed")
+    if failure_details:
+        stop_reason = "worker_failure"
+    elif terminal:
+        stop_reason = "terminal"
+    elif deadline_stopped:
+        stop_reason = "deadline"
+    elif not claims and not any(
+        (
+            maintenance_before.worker_failures,
+            maintenance_before.rejected_submissions,
+            maintenance_before.task_completions,
+            maintenance_after.worker_failures,
+            maintenance_after.rejected_submissions,
+            maintenance_after.task_completions,
+        )
+    ):
+        stop_reason = "idle"
+    else:
+        stop_reason = "cycle_boundary"
+
+    cycle_summaries: list[dict[str, Any]] = []
+    if target_contract_id is None:
+        if claims:
+            cycle_summaries.append(
+                {
+                    "contracts": [claim.contract.id for claim in claims],
+                    "trace_events": sum(
+                        len(store.get_by_contract(claim.contract.id))
+                        for claim in claims
+                    ),
+                    "tasks_processed": list(maintenance_before.task_completions)
+                    + list(maintenance_after.task_completions),
+                    "rejections_recovered": list(
+                        maintenance_before.rejected_submissions
+                    )
+                    + list(maintenance_after.rejected_submissions),
+                }
+            )
+    elif trace_count:
+        cycle_summaries.append(
+            {
+                "contracts": touched_contracts,
+                "unassigned_trace_ids": unassigned_trace_ids,
+                "trace_events": trace_count,
+                "submission_status": submissions[-1].get("status")
+                if submissions
+                else None,
+                "tasks_processed": list(maintenance_before.task_completions)
+                + list(maintenance_after.task_completions),
+                "rejections_recovered": list(maintenance_before.rejected_submissions)
+                + list(maintenance_after.rejected_submissions),
+            }
+        )
+
+    contract_id = target_contract_id or (claims[0].contract.id if claims else None)
+    status = projection["status"] if projection is not None else "idle"
+    return LocalCycleResult(
+        contract_id=contract_id,
+        status=status,
+        completed=completed,
+        timed_out=deadline_stopped,
+        stop_reason=stop_reason,
+        projection=projection,
+        cycles=tuple(cycle_summaries),
+        submission_status=submissions[0].get("status") if submissions else None,
+        worker_errors=tuple(errors),
+        capture_warnings=tuple(capture_warnings),
+        worker_failure_details=tuple(failure_details),
     )
 
 
@@ -388,27 +601,56 @@ def _run_persistent_slot(
 
 
 def _claim_one(store, host, publishers, *, target_contract_id: str | None):
-    if target_contract_id is None:
+    return _claim_cycle_slot(
+        store,
+        host,
+        publishers,
+        target_contract_id=target_contract_id,
+        required_contract_capability=None,
+        request_prefix="fleet-claim",
+    )
+
+
+def _claim_cycle_slot(
+    store,
+    host,
+    publishers,
+    *,
+    target_contract_id: str | None,
+    required_contract_capability: str | None,
+    request_prefix: str,
+):
+    if target_contract_id is None and required_contract_capability is None:
         return claim_next_application_package(
             store,
             worker_id=host.worker_id,
             candidate_publishers=publishers,
             claim_candidate=host.claim_candidate(
-                request_id=f"fleet-claim:{uuid4().hex}"
+                request_id=f"{request_prefix}:{uuid4().hex}"
             ),
             expected_registration_version=host.registration_version,
         )
-    tree_ids = tuple(
-        sorted(contract_tree_ids(store.get_all_contracts(), target_contract_id))
+    contracts = store.get_all_contracts()
+    allowed = (
+        contract_tree_ids(contracts, target_contract_id)
+        if target_contract_id is not None
+        else {item.id for item in contracts}
     )
-    for contract_id in order_application_contract_ids(store, tree_ids):
+    if required_contract_capability is not None:
+        allowed = {
+            item.id
+            for item in contracts
+            if item.id in allowed
+            and required_contract_capability in item.worker_capabilities
+        }
+    for contract_id in order_application_contract_ids(store, tuple(sorted(allowed))):
         claimed = claim_next_application_package(
             store,
             worker_id=host.worker_id,
             contract_id=contract_id,
             candidate_publishers=publishers,
             claim_candidate=host.claim_candidate(
-                request_id=f"fleet-claim:{uuid4().hex}",
+                request_id=f"{request_prefix}:{uuid4().hex}",
                 contract_id=contract_id,
             ),
             expected_registration_version=host.registration_version,
@@ -416,6 +658,22 @@ def _claim_one(store, host, publishers, *, target_contract_id: str | None):
         if claimed is not None:
             return claimed
     return None
+
+
+def _cycle_trace_scope(window):
+    records = [record for _revision, record in window]
+    records_by_id = {record.id: record for record in records}
+    traces = [record for record in records if record.record_type == "trace.recorded"]
+    contracts: set[str] = set()
+    unassigned: list[str] = []
+    for record in traces:
+        refs = runtime_record_contract_references(record, records_by_id)
+        contracts.update(refs)
+        if not refs:
+            trace = record.payload.get("trace")
+            if isinstance(trace, Mapping) and isinstance(trace.get("id"), str):
+                unassigned.append(trace["id"])
+    return sorted(contracts), sorted(unassigned), len(traces)
 
 
 def _drain_errors(errors: Queue[str]) -> tuple[str, ...]:

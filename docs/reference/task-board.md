@@ -129,15 +129,21 @@ interval between waits. The loop does not reset a claim or publish a recovery
 task. If a retry or recovery successor exists, select that exact Contract ID.
 
 `--once` performs one pass through the local pool and includes domain-wide
-maintenance. The pass can check each configured host once, so it is a cycle
-boundary rather than an exactly-once provider-call guarantee. In the ordinary
-single-worker command this is one Worker host; an explicit tool registry can add
-a separate tool-execution host. `--once` cannot be combined with `--config`.
+maintenance. It may try configured host slots until it finds an eligible package,
+then claims and invokes at most one package for the command. Maintenance may
+process consequences of already recorded facts, but does not admit another
+package. This is a cycle boundary, not an exactly-once provider-call guarantee;
+run another command to try later work. An explicit tool registry can add a
+tool-execution host, and capability routing still decides which host may claim
+each task.
 
-For `--config`, `--resume ID` uses the Worker Fleet selected by the preset and
-waits for its target result; `--task` is the target-selection alias. Do not
-combine them. Configuration rejects command-line Worker and provider overrides;
-edit the explicit Fleet profile instead. See [configured runs](configured-runs.md).
+Configured `aig run --config PATH --once` uses the preset Workers for one bounded
+cycle. Add `--resume ID` or its `--task ID` alias to select an existing target;
+these forms also stop after at most one package invocation. Without `--once`,
+configured runs continue using their existing run-until-terminal behavior. Do
+not combine `--task` and `--resume`. Configuration rejects command-line Worker
+and provider overrides; edit the explicit Fleet profile instead. See
+[configured runs](configured-runs.md).
 
 For an LLM Worker, `--max-retries` defaults to 3 and retries eligible transient
 transport failures within one Worker invocation (up to one initial request plus

@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 import json
+import shlex
 
 from click.testing import CliRunner
 
@@ -75,10 +76,157 @@ def test_configured_run_delegates_new_preset(monkeypatch, tmp_path):
     assert calls == [("prepare", config, None), ("run", prepared, 2.0)]
 
 
+def test_configured_run_once_selects_shared_cycle_service(monkeypatch, tmp_path):
+    config = tmp_path / "scenario.toml"
+    config.write_text("[run]\nfleet='workers.toml'\n", encoding="utf-8")
+    prepared = object()
+    calls = []
+    monkeypatch.setattr("aigineering.cli.infrastructure.require_redis", lambda: None)
+    monkeypatch.setattr(
+        "aigineering.cli.run.prepare_configured_run",
+        lambda *_args, **_kwargs: prepared,
+    )
+
+    def run_service(value, *, timeout, once=False):
+        calls.append((value, timeout, once))
+        return SimpleNamespace(
+            contract_id="contract:cycle",
+            status="running",
+            completed=False,
+            timed_out=False,
+            worker_errors=(),
+            worker_failure_details=(),
+            capture_warnings=(),
+            stop_reason="cycle_boundary",
+            cycles=(),
+            submission_status="submitted",
+            projection={"status": "running", "blockers": ["claim:ready"]},
+        )
+
+    monkeypatch.setattr("aigineering.cli.run.run_configured", run_service)
+    result = CliRunner().invoke(
+        cli,
+        ["run", "--config", str(config), "--once", "--json"],
+    )
+    assert result.exit_code == 1
+    assert '"stop_reason": "cycle_boundary"' in result.output
+    assert calls == [(prepared, 60.0, True)]
+
+
+def test_cycle_presentation_does_not_offer_rerun_for_submitted_acceptance():
+    from aigineering.cli._cycle_result import configured_cycle_payload
+
+    result = SimpleNamespace(
+        contract_id="task:submitted",
+        status="submitted",
+        completed=False,
+        timed_out=False,
+        worker_errors=(),
+        worker_failure_details=(),
+        capture_warnings=(),
+        stop_reason="cycle_boundary",
+        cycles=(),
+        submission_status="submitted",
+        projection={
+            "status": "submitted",
+            "blockers": ["qualification:independent_acceptance"],
+        },
+    )
+    payload = configured_cycle_payload(result, resume_command="unused")
+    assert payload["blockers"] == ["qualification:independent_acceptance"]
+    assert "acceptance report" in payload["next_step"]
+    assert "resume_command" not in payload
+
+
+def test_cycle_resume_commands_quote_config_paths_with_spaces(monkeypatch, tmp_path):
+    config_dir = tmp_path / "configs with spaces"
+    config_dir.mkdir()
+    config = config_dir / "workers config.toml"
+    config.write_text("[run]\nfleet='workers.toml'\n", encoding="utf-8")
+    prepared = object()
+
+    def result():
+        return SimpleNamespace(
+            contract_id="task:resume",
+            status="running",
+            completed=False,
+            timed_out=False,
+            worker_errors=(),
+            worker_failure_details=(),
+            capture_warnings=(),
+            stop_reason="cycle_boundary",
+            cycles=(),
+            submission_status=None,
+            projection={"status": "running", "blockers": ["claim:ready"]},
+        )
+
+    monkeypatch.setattr("aigineering.cli.infrastructure.require_redis", lambda: None)
+    monkeypatch.setattr(
+        "aigineering.cli.run.prepare_configured_run",
+        lambda *_args, **_kwargs: prepared,
+    )
+    monkeypatch.setattr(
+        "aigineering.cli.run.run_configured",
+        lambda *_args, **_kwargs: result(),
+    )
+    configured = CliRunner().invoke(
+        cli, ["run", "--config", str(config), "--once", "--json"]
+    )
+    assert configured.exit_code == 1
+    configured_payload = json.loads(configured.output)
+    assert shlex.split(configured_payload["resume_command"]) == [
+        "aig",
+        "run",
+        "--config",
+        str(config.resolve()),
+        "--resume",
+        "task:resume",
+        "--once",
+        "--json",
+    ]
+
+    monkeypatch.setattr(
+        "aigineering.cli.fleet.prepare_configured_run",
+        lambda *_args, **_kwargs: prepared,
+    )
+    monkeypatch.setattr(
+        "aigineering.cli.fleet.run_configured",
+        lambda *_args, **_kwargs: result(),
+    )
+    fleet = CliRunner().invoke(
+        cli,
+        [
+            "fleet",
+            "run",
+            "--config",
+            str(config),
+            "--task",
+            "task:resume",
+            "--once",
+            "--json",
+        ],
+    )
+    assert fleet.exit_code == 1
+    fleet_payload = json.loads(fleet.output)
+    assert shlex.split(fleet_payload["resume_command"]) == [
+        "aig",
+        "fleet",
+        "run",
+        "--config",
+        str(config.resolve()),
+        "--task",
+        "task:resume",
+        "--once",
+        "--json",
+    ]
+
+
 def test_configured_run_accepts_task_and_resume_alias(monkeypatch, tmp_path):
     config = tmp_path / "workers.toml"
     config.write_text("", encoding="utf-8")
     resumes: list[str | None] = []
+    once_values: list[bool] = []
+    monkeypatch.setattr("aigineering.cli.infrastructure.require_redis", lambda: None)
     monkeypatch.setattr(
         "aigineering.cli.run.prepare_configured_run",
         lambda _path, *, resume_task_id=None: (
@@ -87,33 +235,148 @@ def test_configured_run_accepts_task_and_resume_alias(monkeypatch, tmp_path):
     )
     monkeypatch.setattr(
         "aigineering.cli.run.run_configured",
-        lambda *_args, **_kwargs: SimpleNamespace(
-            contract_id="contract:test",
-            status="completed",
-            completed=True,
-            timed_out=False,
-            worker_errors=(),
-            worker_failure_details=(
-                {
-                    "kind": "invocation_failure",
-                    "status": "invocation_failed",
-                    "contract_id": "task:failure",
-                    "claim_id": "lease:" + "b" * 64,
-                    "category": "provider_error",
-                },
-            ),
-            capture_warnings=(),
+        lambda *_args, **kwargs: (
+            once_values.append(kwargs.get("once", False))
+            or SimpleNamespace(
+                contract_id="contract:test",
+                status="completed",
+                completed=True,
+                timed_out=False,
+                worker_errors=(),
+                worker_failure_details=(
+                    {
+                        "kind": "invocation_failure",
+                        "status": "invocation_failed",
+                        "contract_id": "task:failure",
+                        "claim_id": "lease:" + "b" * 64,
+                        "category": "provider_error",
+                    },
+                ),
+                capture_warnings=(),
+            )
         ),
     )
 
     runner = CliRunner()
     for flag in ("--task", "--resume"):
-        result = runner.invoke(cli, ["run", "--config", str(config), flag, "target"])
+        result = runner.invoke(
+            cli, ["run", "--config", str(config), flag, "target", "--once"]
+        )
         assert result.exit_code == 0, result.output
         assert "worker error:" not in result.output
         assert "worker failure detail:" in result.output
         assert "lease:" + "b" * 64 in result.output
     assert resumes == ["target", "target"]
+    assert once_values == [True, True]
+
+
+def test_configured_fleet_once_selects_shared_cycle_service(monkeypatch, tmp_path):
+    config = tmp_path / "workers.toml"
+    config.write_text("", encoding="utf-8")
+    prepared = object()
+    calls = []
+    monkeypatch.setattr("aigineering.cli.infrastructure.require_redis", lambda: None)
+    monkeypatch.setattr(
+        "aigineering.cli.fleet.prepare_configured_run",
+        lambda _path, *, resume_task_id=None: prepared,
+    )
+
+    def run_service(value, *, timeout, once=False):
+        calls.append((value, timeout, once))
+        return SimpleNamespace(
+            contract_id="task:cycle",
+            status="submitted",
+            completed=False,
+            timed_out=False,
+            worker_errors=(),
+            worker_failure_details=(),
+            capture_warnings=(),
+            stop_reason="cycle_boundary",
+            cycles=(),
+            submission_status="submitted",
+            projection={
+                "status": "submitted",
+                "blockers": ["qualification:independent_acceptance"],
+            },
+        )
+
+    monkeypatch.setattr("aigineering.cli.fleet.run_configured", run_service)
+    result = CliRunner().invoke(
+        cli,
+        [
+            "fleet",
+            "run",
+            "--config",
+            str(config),
+            "--task",
+            "task:target",
+            "--once",
+            "--json",
+        ],
+    )
+    assert result.exit_code == 1
+    assert json.loads(result.output)["status"] == "submitted"
+    assert calls == [(prepared, 300.0, True)]
+
+
+def test_configured_fleet_once_human_shows_only_safe_failure_diagnostics(
+    monkeypatch, tmp_path
+):
+    config = tmp_path / "workers.toml"
+    config.write_text("", encoding="utf-8")
+    monkeypatch.setattr("aigineering.cli.infrastructure.require_redis", lambda: None)
+    monkeypatch.setattr(
+        "aigineering.cli.fleet.prepare_configured_run",
+        lambda *_args, **_kwargs: object(),
+    )
+    claim_id = "lease:" + "c" * 64
+    monkeypatch.setattr(
+        "aigineering.cli.fleet.run_configured",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            contract_id="task:failed",
+            status="failed",
+            completed=False,
+            timed_out=False,
+            worker_errors=("PRIVATE_RUN_FAILURE_MARKER",),
+            worker_failure_details=(
+                {
+                    "kind": "invocation_failure",
+                    "status": "invocation_failed",
+                    "contract_id": "task:failed",
+                    "claim_id": claim_id,
+                    "category": "provider_error",
+                    "status_code": None,
+                },
+            ),
+            capture_warnings=(),
+            stop_reason="invocation_failed",
+            cycles=(),
+            submission_status="failed",
+            projection={"status": "failed", "blockers": ["claim:failed"]},
+        ),
+    )
+
+    result = CliRunner().invoke(
+        cli,
+        [
+            "fleet",
+            "run",
+            "--config",
+            str(config),
+            "--task",
+            "task:failed",
+            "--once",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "fleet failed: task:failed" in result.output
+    assert "worker error: worker invocation failed for task" in result.output
+    assert '"task:failed"' in result.output
+    assert claim_id in result.output
+    assert "category=provider_error" in result.output
+    assert "next_step: Inspect task audit and diagnostics" in result.output
+    assert "PRIVATE_RUN_FAILURE_MARKER" not in result.output
 
 
 def test_resume_alias_preserves_legacy_single_worker_task_mode(monkeypatch):
@@ -153,10 +416,10 @@ def test_configured_run_rejects_conflicting_modes_before_service(monkeypatch, tm
         raise AssertionError("invalid CLI combination must fail before service")
 
     monkeypatch.setattr("aigineering.cli.run.prepare_configured_run", unexpected)
+    monkeypatch.setattr("aigineering.cli.infrastructure.require_redis", lambda: None)
     runner = CliRunner()
     for args in (
         ["goal"],
-        ["--once"],
         ["--input", "x=input.txt"],
         ["--output", "out.md"],
         ["--worker", "mock"],
@@ -172,6 +435,50 @@ def test_configured_run_rejects_conflicting_modes_before_service(monkeypatch, tm
         assert (
             "cannot be combined" in result.output or "Choose only one" in result.output
         )
+
+
+def test_configured_run_once_accepts_exact_resume_target(monkeypatch, tmp_path):
+    config = tmp_path / "workers.toml"
+    config.write_text("", encoding="utf-8")
+    prepared = object()
+    prepared_targets = []
+    service_calls = []
+    monkeypatch.setattr("aigineering.cli.infrastructure.require_redis", lambda: None)
+    monkeypatch.setattr(
+        "aigineering.cli.run.prepare_configured_run",
+        lambda _path, *, resume_task_id=None: (
+            prepared_targets.append(resume_task_id) or prepared
+        ),
+    )
+    monkeypatch.setattr(
+        "aigineering.cli.run.run_configured",
+        lambda value, *, timeout, once=False: (
+            service_calls.append((value, timeout, once))
+            or SimpleNamespace(
+                contract_id="task:resume",
+                status="running",
+                completed=False,
+                timed_out=False,
+                worker_errors=(),
+                worker_failure_details=(),
+                capture_warnings=(),
+                stop_reason="cycle_boundary",
+                cycles=(),
+                submission_status=None,
+                projection={"status": "running", "blockers": ["claim:ready"]},
+            )
+        ),
+    )
+    result = CliRunner().invoke(
+        cli,
+        ["run", "--config", str(config), "--resume", "task:resume", "--once", "--json"],
+    )
+    assert result.exit_code == 1
+    payload = json.loads(result.output)
+    assert payload["blockers"] == ["claim:ready"]
+    assert "--resume task:resume --once" in payload["resume_command"]
+    assert prepared_targets == ["task:resume"]
+    assert service_calls == [(prepared, 60.0, True)]
 
 
 def test_workspace_option_restores_process_cwd_after_invocation(tmp_path):
@@ -303,7 +610,11 @@ def test_legacy_fleet_run_delegates_and_reports_incomplete_result(
 
     assert result.exit_code == 1
     assert "fleet blocked: contract:blocked" in result.output
-    assert "worker error: no eligible worker" in result.output
+    assert (
+        "worker error: worker invocation failed; exact claim diagnostics are unavailable"
+        in result.output
+    )
+    assert "no eligible worker" not in result.output
     assert "capture warning: storage_limit" in result.output
     assert calls == [
         ("prepare", str(config), "contract:blocked"),
@@ -323,4 +634,9 @@ def test_legacy_fleet_run_delegates_and_reports_incomplete_result(
         ],
     )
     assert json_result.exit_code == 1
-    assert json.loads(json_result.output)["worker_failure_details"] == []
+    payload = json.loads(json_result.output)
+    assert payload["worker_failure_details"] == []
+    assert payload["worker_errors"] == [
+        "worker invocation failed; exact claim diagnostics are unavailable"
+    ]
+    assert "no eligible worker" not in json_result.output

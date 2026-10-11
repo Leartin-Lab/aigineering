@@ -45,3 +45,45 @@ def format_worker_failure_detail(detail: dict[str, Any]) -> str:
     if detail.get("kind") == "slot_error":
         return "worker slot failed unexpectedly; no claim binding is available"
     return "worker invocation failed; exact claim diagnostics are unavailable"
+
+
+def safe_worker_error_messages(
+    worker_errors: object, worker_failure_details: object
+) -> list[str]:
+    """Render failures from exact proven details; never echo adapter exception text."""
+    errors = list(worker_errors) if isinstance(worker_errors, (list, tuple)) else []
+    details = (
+        list(worker_failure_details)
+        if isinstance(worker_failure_details, (list, tuple))
+        else []
+    )
+    if not errors:
+        return []
+    if details:
+        return [
+            format_worker_failure_detail(detail)
+            if isinstance(detail, dict)
+            else "worker invocation failed; exact claim diagnostics are unavailable"
+            for detail in details
+        ]
+    if errors:
+        return [
+            "worker invocation failed; exact claim diagnostics are unavailable"
+            for _ in errors
+        ]
+    return []
+
+
+def safe_task_rejections(
+    rejections: object, worker_failure_details: object = ()
+) -> list[str]:
+    """Omit arbitrary persisted recovery text from human-facing cycle output."""
+    del worker_failure_details  # rendering policy does not infer from task facts
+    values = list(rejections) if isinstance(rejections, (list, tuple)) else []
+    return [
+        "[recovery] details omitted"
+        if isinstance(value, str) and value.startswith("[recovery] ")
+        else value
+        for value in values
+        if isinstance(value, str)
+    ]

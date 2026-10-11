@@ -423,7 +423,7 @@ def test_target_pool_claims_child_recovery_and_tool_descendants(monkeypatch):
 
     monkeypatch.setattr("aigineering.runtime.claim_next_package", claim)
     monkeypatch.setattr(
-        "aigineering.cli.run.order_application_contract_ids",
+        "aigineering.local_fleet.order_application_contract_ids",
         lambda _store, ids: ids,
     )
     host = _PoolHost(
