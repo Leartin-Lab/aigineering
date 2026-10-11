@@ -8,12 +8,120 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import tempfile
 import traceback
 import uuid
 import venv
+
+
+_FAILURE_SCHEMA = "installed-smoke-failure/v1"
+_FAILURE_PHASES = frozenset(
+    {
+        "input_validation",
+        "venv_create",
+        "wheel_install",
+        "installed_import",
+        "domain_init",
+        "fixture_seed",
+        "root_task_smoke",
+        "feature_smokes",
+        "reconstruction",
+        "configured_run",
+        "evidence_write",
+        "post_rebuild_check",
+        "unknown",
+    }
+)
+_FAILURE_CODES = frozenset(
+    {
+        "missing_input",
+        "command_failed",
+        "invalid_response",
+        "assertion_failed",
+        "reconstruction_failed",
+        "unexpected",
+    }
+)
+_ACTIVE_PHASE = "input_validation"
+
+
+class SmokeFailure(RuntimeError):
+    """A bounded failure classification for the installed-artifact runner."""
+
+    def __init__(self, message: str, *, error_code: str, returncode: int | None = None):
+        super().__init__(message)
+        self.error_code = error_code
+        self.returncode = returncode
+
+
+def _set_phase(phase: str) -> None:
+    global _ACTIVE_PHASE
+    _ACTIVE_PHASE = phase if phase in _FAILURE_PHASES else "unknown"
+
+
+def _safe_failure_payload(
+    *,
+    run_id: str,
+    phase: str,
+    error_code: str,
+    returncode: int | None,
+    source_revision: str | None,
+    wheel_sha256: str | None,
+) -> dict:
+    if not re.fullmatch(r"[0-9a-f]{32}", run_id):
+        raise ValueError("run_id must be a generated UUID hex")
+    phase = phase if isinstance(phase, str) and phase in _FAILURE_PHASES else "unknown"
+    error_code = (
+        error_code
+        if isinstance(error_code, str) and error_code in _FAILURE_CODES
+        else "unexpected"
+    )
+    if type(returncode) is not int or not -255 <= returncode <= 255:
+        returncode = None
+    if not isinstance(source_revision, str) or not re.fullmatch(
+        r"[0-9a-fA-F]{40}", source_revision
+    ):
+        source_revision = None
+    if not isinstance(wheel_sha256, str) or not re.fullmatch(
+        r"[0-9a-f]{64}", wheel_sha256
+    ):
+        wheel_sha256 = None
+    return {
+        "schema": _FAILURE_SCHEMA,
+        "run_id": run_id,
+        "phase": phase,
+        "error_code": error_code,
+        "returncode": returncode,
+        "source_revision": source_revision,
+        "wheel_sha256": wheel_sha256,
+    }
+
+
+def _write_safe_failure(directory: Path, payload: dict) -> Path:
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / f"installed-smoke-failure-{payload['run_id']}.json"
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+        json.dump(payload, stream, sort_keys=True)
+        stream.write("\n")
+    return path
+
+
+def _failure_code(exc: Exception) -> str:
+    if isinstance(exc, SmokeFailure):
+        return (
+            exc.error_code
+            if isinstance(exc.error_code, str) and exc.error_code in _FAILURE_CODES
+            else "unexpected"
+        )
+    if isinstance(exc, AssertionError):
+        return "assertion_failed"
+    if _ACTIVE_PHASE == "reconstruction":
+        return "reconstruction_failed"
+    return "unexpected"
 
 
 def _write_private_json(directory: Path, prefix: str, payload: dict) -> Path:
@@ -26,27 +134,81 @@ def _write_private_json(directory: Path, prefix: str, payload: dict) -> Path:
 
 
 @contextmanager
-def smoke_workspace(evidence_dir: Path | None):
+def smoke_workspace(
+    evidence_dir: Path | None,
+    *,
+    failure_context: dict | None = None,
+):
     """Keep failed installed runs available for phase-specific diagnosis."""
-    workdir = Path(tempfile.mkdtemp(prefix="aigineering-installed-smoke-"))
+    _set_phase("venv_create")
+    try:
+        workdir = Path(tempfile.mkdtemp(prefix="aigineering-installed-smoke-"))
+    except Exception:
+        safe_status = "not_configured"
+        if evidence_dir is not None:
+            safe_status = "failed"
+            try:
+                payload = _safe_failure_payload(
+                    run_id=(failure_context or {}).get("run_id") or uuid.uuid4().hex,
+                    phase=_ACTIVE_PHASE,
+                    error_code="unexpected",
+                    returncode=None,
+                    source_revision=(failure_context or {}).get("source_revision"),
+                    wheel_sha256=(failure_context or {}).get("wheel_sha256"),
+                )
+                _write_safe_failure(evidence_dir, payload)
+                safe_status = "written"
+            except Exception:
+                pass
+        raise RuntimeError(
+            "installed smoke failed "
+            f"(phase={_ACTIVE_PHASE}, error_code=unexpected, "
+            f"private_capture=unavailable, safe_capture={safe_status})"
+        ) from None
+    _set_phase("input_validation")
     try:
         yield workdir
     except Exception as exc:
-        summary_path = _write_private_json(
-            workdir,
-            "failed-installed-run",
-            {
-                "workspace": str(workdir),
-                "evidence_dir": str(evidence_dir) if evidence_dir is not None else None,
-                "error_type": type(exc).__name__,
-                "error": str(exc),
-                "traceback": traceback.format_exc(),
-            },
-        )
+        private_status = "failed"
+        try:
+            _write_private_json(
+                workdir,
+                "failed-installed-run",
+                {
+                    "workspace": str(workdir),
+                    "evidence_dir": str(evidence_dir)
+                    if evidence_dir is not None
+                    else None,
+                    "error_type": type(exc).__name__,
+                    "error": str(exc),
+                    "traceback": traceback.format_exc(),
+                },
+            )
+            private_status = "written"
+        except Exception:
+            pass
+        safe_status = "not_configured"
+        if evidence_dir is not None:
+            safe_status = "failed"
+            try:
+                payload = _safe_failure_payload(
+                    run_id=(failure_context or {}).get("run_id") or uuid.uuid4().hex,
+                    phase=_ACTIVE_PHASE,
+                    error_code=_failure_code(exc),
+                    returncode=(
+                        exc.returncode if isinstance(exc, SmokeFailure) else None
+                    ),
+                    source_revision=(failure_context or {}).get("source_revision"),
+                    wheel_sha256=(failure_context or {}).get("wheel_sha256"),
+                )
+                _write_safe_failure(evidence_dir, payload)
+                safe_status = "written"
+            except Exception:
+                pass
         raise RuntimeError(
             "installed smoke failed "
-            f"(error_type={type(exc).__name__}); workspace preserved at {workdir}; "
-            f"private summary: {summary_path}"
+            f"(phase={_ACTIVE_PHASE}, error_code={_failure_code(exc)}, "
+            f"private_capture={private_status}, safe_capture={safe_status})"
         ) from None
     else:
         shutil.rmtree(workdir)
@@ -62,16 +224,23 @@ def run(command: list[str], *, cwd: Path, env: dict[str, str]) -> str:
         capture_output=True,
     )
     if result.returncode != 0:
-        raise RuntimeError(
+        raise SmokeFailure(
             f"installed command failed ({result.returncode}): {command[0]}\n"
-            f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+            f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}",
+            error_code="command_failed",
+            returncode=result.returncode,
         )
     return result.stdout.strip()
 
 
 def json_command(aig: Path, args: list[str], *, cwd: Path, env: dict[str, str]) -> dict:
     output = run([str(aig), *args, "--json"], cwd=cwd, env=env)
-    return json.loads(output)
+    try:
+        return json.loads(output)
+    except json.JSONDecodeError as error:
+        raise SmokeFailure(
+            "installed command returned invalid JSON", error_code="invalid_response"
+        ) from error
 
 
 def diagnostic(
@@ -112,13 +281,14 @@ def diagnostic(
             "stdout": result.stdout,
             "stderr": result.stderr,
         }
-        failure_path = _write_private_json(
-            Path(cwd), "installed-diagnostic-failure", failure
-        )
-        raise RuntimeError(
-            "reconstruction diagnostic failed "
-            f"(exit={result.returncode}, error_type={error_type}); "
-            f"private details saved to {failure_path}"
+        try:
+            _write_private_json(Path(cwd), "installed-diagnostic-failure", failure)
+        except Exception:
+            pass
+        raise SmokeFailure(
+            "reconstruction diagnostic failed",
+            error_code="reconstruction_failed",
+            returncode=result.returncode,
         )
     try:
         report = json.loads(result.stdout)
@@ -1008,13 +1178,42 @@ def main() -> int:
     parser.add_argument("--evidence-dir", type=Path)
     options = parser.parse_args()
 
-    wheel = options.wheel.resolve()
-    source_root = options.source_root.resolve()
-    if not wheel.is_file():
-        parser.error(f"wheel does not exist: {wheel}")
-
-    with smoke_workspace(options.evidence_dir) as workdir:
+    wheel = options.wheel
+    source_root = options.source_root
+    run_id = uuid.uuid4().hex
+    revision = os.environ.get("GITHUB_SHA", "")
+    source_revision = revision if re.fullmatch(r"[0-9a-fA-F]{40}", revision) else None
+    failure_context = {
+        "run_id": run_id,
+        "source_revision": source_revision,
+        "wheel_sha256": None,
+    }
+    with smoke_workspace(
+        options.evidence_dir, failure_context=failure_context
+    ) as workdir:
+        _set_phase("input_validation")
+        try:
+            wheel = wheel.resolve()
+            source_root = source_root.resolve()
+        except (OSError, RuntimeError) as error:
+            raise SmokeFailure(
+                "wheel or source root could not be resolved",
+                error_code="missing_input",
+            ) from error
+        if not wheel.is_file():
+            raise SmokeFailure("required wheel is missing", error_code="missing_input")
+        digest = hashlib.sha256()
+        try:
+            with wheel.open("rb") as wheel_stream:
+                for chunk in iter(lambda: wheel_stream.read(1024 * 1024), b""):
+                    digest.update(chunk)
+        except OSError as error:
+            raise SmokeFailure(
+                "required wheel could not be read", error_code="missing_input"
+            ) from error
+        failure_context["wheel_sha256"] = digest.hexdigest()
         venv_dir = workdir / "venv"
+        _set_phase("venv_create")
         venv.EnvBuilder(with_pip=True, clear=True).create(venv_dir)
         venv_bin = venv_dir / ("Scripts" if os.name == "nt" else "bin")
         executable_suffix = ".exe" if os.name == "nt" else ""
@@ -1029,6 +1228,7 @@ def main() -> int:
         if os.environ.get("AIGINEERING_REDIS_URL"):
             env["AIGINEERING_REDIS_URL"] = os.environ["AIGINEERING_REDIS_URL"]
 
+        _set_phase("wheel_install")
         run(
             [
                 str(python),
@@ -1041,6 +1241,7 @@ def main() -> int:
             cwd=workdir,
             env=env,
         )
+        _set_phase("installed_import")
         module_path = run(
             [
                 str(python),
@@ -1061,9 +1262,11 @@ def main() -> int:
                 f"installed version {module_path[1]!r} != {options.expected_version!r}"
             )
 
+        _set_phase("domain_init")
         domain = json_command(aig, ["domain", "init"], cwd=workdir, env=env)
         if not domain.get("domain_id"):
             raise RuntimeError("domain init did not return a domain ID")
+        _set_phase("fixture_seed")
         source = json_command(
             aig,
             ["asset", "add", "--name", "source", "--content", "smoke evidence"],
@@ -1095,6 +1298,7 @@ def main() -> int:
         if not contract_id:
             raise RuntimeError("task create did not return a contract ID")
         hold_result = task_hold_smoke(aig, python, contract_id, cwd=workdir, env=env)
+        _set_phase("root_task_smoke")
         run_result = json_command(
             aig, ["run", "--once", "--worker", "mock"], cwd=workdir, env=env
         )
@@ -1119,6 +1323,7 @@ def main() -> int:
             or contract_id not in productivity.get("contract_ids", [])
         ):
             raise RuntimeError("task audit did not contain the completed root lineage")
+        _set_phase("feature_smokes")
         task_cli_result = task_cli_smoke(aig, python, contract_id, cwd=workdir, env=env)
         handoff_result = task_handoff_smoke(aig, python, cwd=workdir, env=env)
         from installed_review_smoke import task_review_smoke
@@ -1179,6 +1384,7 @@ def main() -> int:
             python, source_root, cwd=workdir, env=env
         )
         artifact_id = artifact_smoke(aig, cwd=workdir, env=env)
+        _set_phase("reconstruction")
         report = diagnostic(
             python,
             workdir / ".aig" / "store.db",
@@ -1191,9 +1397,11 @@ def main() -> int:
             or report.get("status") != "passed"
         ):
             raise RuntimeError("reconstruction evidence is missing or incomplete")
+        _set_phase("configured_run")
         configured_result = configured_run_smoke(
             aig, python, evidence_dir, cwd=workdir, env=env
         )
+        _set_phase("evidence_write")
         with (evidence_dir / "quick-goal.json").open("x", encoding="utf-8") as stream:
             json.dump(quick_goal_result, stream, ensure_ascii=False, sort_keys=True)
             stream.write("\n")
@@ -1251,6 +1459,7 @@ def main() -> int:
             json.dumps(method_result, sort_keys=True) + "\n", encoding="utf-8"
         )
 
+        _set_phase("post_rebuild_check")
         source_status = json_command(
             aig, ["task", "status", contract_id], cwd=workdir, env=env
         )
