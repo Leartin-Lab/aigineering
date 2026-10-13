@@ -8,7 +8,12 @@ from pathlib import Path
 
 from aigineering.application import require_redis
 from aigineering.core.actor_facts import load_effective_actor_keys
-from aigineering.core.acceptance import acceptance_policy_id, validate_output_shape
+from aigineering.core.acceptance import (
+    acceptance_policy_id,
+    validate_claim_bound_output,
+    validate_output_shape,
+)
+from aigineering.core.projection_context import load_effect_projection_context
 from aigineering.core.candidate_publisher import CandidatePublisher
 from aigineering.core.commitment import CandidateCommitRejected
 from aigineering.core.domain import load_genesis
@@ -101,6 +106,13 @@ def _source_asset_scope(store, source, output_name: str, asset_id: str):
         )
     if not _asset_has_committed_fact(store, asset.id):
         raise ValueError("review target Asset has no immutable committed fact")
+    records = load_effect_projection_context(store)
+    producer = next(
+        (item for item in records.contracts if item.id == asset.created_by), None
+    )
+    if producer is None:
+        raise ValueError("review target producer Contract is missing")
+    validate_claim_bound_output(records, asset, producer)
     policy = source.acceptance_policy
     validate_output_shape(policy, output_name, asset.content)
     policy_version = policy.get("policy_version")
@@ -240,6 +252,17 @@ def _validate_decision_target(
         raise ValueError(
             "review source or report Asset has no immutable committed fact"
         )
+    records = load_effect_projection_context(store)
+    target_producer = next(
+        (item for item in records.contracts if item.id == target.created_by), None
+    )
+    report_producer = next(
+        (item for item in records.contracts if item.id == report.created_by), None
+    )
+    if target_producer is None or report_producer is None:
+        raise ValueError("review source or report producer Contract is missing")
+    validate_claim_bound_output(records, target, target_producer)
+    validate_claim_bound_output(records, report, report_producer)
     if child.acceptance_policy is not None:
         raise ValueError("reviewer Contract must remain an ordinary report task")
     policy = source.acceptance_policy

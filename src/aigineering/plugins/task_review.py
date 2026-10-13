@@ -8,6 +8,7 @@ from types import MappingProxyType
 from aigineering.core.acceptance import (
     acceptance_policy_id,
     project_asset_attestation_records,
+    validate_claim_bound_output,
 )
 from aigineering.core.causal_allowance import allowance_available
 from aigineering.core.disclosure import REDACTED_CONTENT, compute_disclosure
@@ -140,6 +141,9 @@ def project_task_review_request_effect(
         )
     ):
         raise ValueError("task.review.request target is not an eligible source output")
+    validate_claim_bound_output(
+        context, target, _contract(context.contracts, target.created_by)
+    )
     target_commit = _asset_commit_record(target.id, context.runtime_records)
     if target_commit is None:
         raise ValueError("task.review.request target has no committed Asset fact")
@@ -314,6 +318,9 @@ def project_task_review_decision_effect(
         target.created_by, source.id, _ContextContractReader(context.contracts)
     ):
         raise ValueError("task.review.decide target is no longer source-owned")
+    validate_claim_bound_output(
+        context, target, _contract(context.contracts, target.created_by)
+    )
 
     report = next(
         (asset for asset in context.assets if asset.id == report_asset_id), None
@@ -331,6 +338,9 @@ def project_task_review_decision_effect(
         )
     ):
         raise ValueError("task.review.decide requires the exact reviewer report output")
+    validate_claim_bound_output(
+        context, report, _contract(context.contracts, report.created_by)
+    )
     _validated_context_assets(
         (
             target.id,

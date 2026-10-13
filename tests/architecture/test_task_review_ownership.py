@@ -33,3 +33,15 @@ def test_review_contract_and_links_are_ordinary_immutable_runtime_facts():
         "CREATE TABLE review"
         not in (ROOT / "src/aigineering/core/sqlite_migrations.py").read_text()
     )
+
+
+def test_task_output_claim_provenance_has_one_shared_acceptance_owner():
+    acceptance = (ROOT / "src/aigineering/core/acceptance.py").read_text()
+    plugin = (ROOT / "src/aigineering/plugins/task_review.py").read_text()
+    views = (ROOT / "src/aigineering/task_views.py").read_text()
+    policy_review = (ROOT / "src/aigineering/task_policy_review.py").read_text()
+    assert "def validate_claim_bound_output(" in acceptance
+    assert "validate_published_member(rows, member)" in acceptance
+    assert "validate_claim_bound_output(" in plugin
+    assert "validate_claim_bound_output(" in views
+    assert "validate_claim_bound_output(records, asset, producer)" in policy_review

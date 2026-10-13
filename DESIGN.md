@@ -1069,6 +1069,18 @@ and complete the source; changes records rejected attestation, without publishin
 revision work. Exact replay restores committed projection before mutable state
 or duplicate-verifier checks; the writer snapshot fence arbitrates decisions.
 
+Attestation, task review, and submitted-output views require the selected Asset
+to be an exact member of its producer Contract's declared output and of the
+producer Candidate's committed head, with a matching `claim.submitted` fact and
+claim grant. A graph Asset's signed source URI alone is not output provenance.
+The proof keeps the graph assertion signer separate from the outer Worker who
+publishes the accepted Candidate.
+This changes no Candidate schema, Store schema, or existing materialization and
+does not rewrite historical facts. Deployments must stop old Worker and
+committer processes before relying on the new qualification boundary; an
+already-open old process is not fenced by a reader floor. The ordinary
+single-task, single-round claim and submission flow is unchanged.
+
 The current review slice accepts live independent-policy business sources, not
 retrospective gates for ordinary work. Default decision authority is fixed to
 `verify.human`; custom keys must already be authorized. Report-task completion

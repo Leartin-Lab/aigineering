@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import pytest
-from dataclasses import replace
+from dataclasses import fields, replace
 from threading import Event, Thread
 
-from aigineering.core.acceptance import acceptance_policy_id
+from aigineering.core.acceptance import (
+    acceptance_policy_id,
+    validate_claim_bound_output,
+)
 from aigineering.core.causal_allowance import allowance_available
 from aigineering.core.candidate_publisher import publish_effect
 from aigineering.core.commitment import CandidateCommitRejected, CandidateCommitter
@@ -20,7 +23,10 @@ from aigineering.core.control_plane import (
 from aigineering.core.domain import initialize_genesis
 from aigineering.core.signing import Ed25519Signer
 from aigineering.core.sqlite_store import SQLiteStore
+from aigineering.core.publication_history import validate_published_member
 from aigineering.core.worker_routing import WorkerRegistration
+from aigineering.runtime import claim_next_package
+from aigineering.task_policy_review import _validate_decision_target
 from aigineering.plugins.task_review import (
     TASK_REVIEW_EFFECTS,
     project_task_review_request_effect,
@@ -37,15 +43,32 @@ from aigineering.protocol.effect_builders import (
     asset_attestation_effect,
     asset_proposal_effect,
     contract_declaration_effect,
+    content_publication_effect,
+    definition_content_assertion_effect,
+    definition_publication_effect,
     task_review_decision_effect,
     task_review_request_effect,
+    worker_claim_effect,
 )
 from aigineering.protocol.identity import contract_from_fields
 from aigineering.protocol.types import Asset
+from aigineering.protocol.runtime_record import create_runtime_record
 from aigineering.core.disclosure import compute_disclosure
+from aigineering.protocol.asset_graph import (
+    create_content_object,
+    create_definition_content_assertion,
+    create_signed_definition,
+)
 
 
-def _workspace(tmp_path, *, self_verifier=False):
+def _workspace(
+    tmp_path,
+    *,
+    self_verifier=False,
+    graph_target=False,
+    source_outputs=("final",),
+    output_shapes=None,
+):
     tmp_path.mkdir(parents=True, exist_ok=True)
     store = SQLiteStore(tmp_path / "review.sqlite")
     signer = Ed25519Signer()
@@ -69,7 +92,7 @@ def _workspace(tmp_path, *, self_verifier=False):
         signer.signer_id,
         ("contract.publish",),
     )
-    target_caps = ["asset.publish", "worker.submit"]
+    target_caps = ["asset.publish", "asset.relate", "worker.submit", "worker.claim"]
     if self_verifier:
         target_caps.extend(("asset.attest", "task.review.decide", "policy.review"))
     target_worker = ActorKey(
@@ -100,6 +123,13 @@ def _workspace(tmp_path, *, self_verifier=False):
         signer.signer_id,
         ("asset.attest", "task.review.decide"),
     )
+    graph_publisher = ActorKey(
+        "human:graph-publisher",
+        "graph-publisher-key",
+        signer.kind,
+        signer.signer_id,
+        ("asset.publish", "asset.relate"),
+    )
     genesis = create_genesis_manifest(
         "task-review-test",
         (
@@ -109,6 +139,7 @@ def _workspace(tmp_path, *, self_verifier=False):
             review_worker,
             verifier,
             limited_verifier,
+            graph_publisher,
         ),
         "policy:test",
     )
@@ -160,10 +191,12 @@ def _workspace(tmp_path, *, self_verifier=False):
         "evidence_asset_ids": [evidence.id],
         "verifier_capabilities": ["policy.review"],
     }
+    if output_shapes is not None:
+        policy["output_shapes"] = output_shapes
     source = build_control_plane_contract(
         name="research report",
         description="Produce the requested result.",
-        outputs=("final",),
+        outputs=source_outputs,
         budget=8,
         acceptance_policy=policy,
     )
@@ -177,11 +210,16 @@ def _workspace(tmp_path, *, self_verifier=False):
         idempotency_key="declare-review-source",
     )
     assert declared.accepted
-    target_asset = _publish_output(
-        store, signer, genesis, target_worker, source, "final", "Research result"
+    target_asset = (
+        None
+        if graph_target
+        else _publish_output(
+            store, signer, genesis, target_worker, source, "final", "Research result"
+        )
     )
     return {
         "store": store,
+        "store_path": tmp_path / "review.sqlite",
         "signer": signer,
         "genesis": genesis,
         "operator": operator,
@@ -190,6 +228,7 @@ def _workspace(tmp_path, *, self_verifier=False):
         "review_worker": review_worker,
         "verifier": verifier,
         "limited_verifier": limited_verifier,
+        "graph_publisher": graph_publisher,
         "source": source,
         "target": target_asset,
         "rubric": rubric,
@@ -224,6 +263,537 @@ def _publish_output(store, signer, genesis, actor, contract, name, content):
     decision = CandidateCommitter(store, store).commit(candidate, genesis)
     assert decision.accepted, decision
     return decision.assets[0]
+
+
+def _publish_unclaimed_graph(
+    env,
+    *,
+    claimed=False,
+    contract=None,
+    name="final",
+    content_text="unclaimed graph output",
+):
+    source = contract or env["source"]
+    actor = env["target_worker"] if claimed else env["graph_publisher"]
+    signer = env["signer"]
+    content = create_content_object(content_text)
+    definition = create_signed_definition(
+        domain_id=env["genesis"].id,
+        name=name,
+        description="Unsigned task relationship is only a source declaration",
+        content_type="text/plain",
+        source_kind="contract-output",
+        source_uri=source.id,
+        actor_id=actor.actor_id,
+        key_id=actor.key_id,
+        signer=signer,
+    )
+    assertion = create_definition_content_assertion(
+        domain_id=env["genesis"].id,
+        definition_id=definition.id,
+        content_id=content.id,
+        relation_type="satisfies",
+        actor_id=actor.actor_id,
+        key_id=actor.key_id,
+        signer=signer,
+    )
+    claim = None
+    claim_candidate = None
+    if claimed:
+        if source.parent_id is None:
+            input_assertion = create_definition_content_assertion(
+                domain_id=env["genesis"].id,
+                definition_id=definition.id,
+                content_id=content.id,
+                relation_type="references",
+                actor_id=actor.actor_id,
+                key_id=actor.key_id,
+                signer=signer,
+            )
+            input_publication = CandidateCommitter(env["store"], env["store"]).commit(
+                create_candidate_proposal(
+                    domain_id=env["genesis"].id,
+                    actor_id=actor.actor_id,
+                    key_id=actor.key_id,
+                    effects=(
+                        content_publication_effect(content),
+                        definition_publication_effect(definition),
+                        definition_content_assertion_effect(input_assertion),
+                    ),
+                    signer=signer,
+                    idempotency_key="publish-reused-graph-input",
+                ),
+                env["genesis"],
+            )
+            assert input_publication.accepted, input_publication
+        env["store"].register_worker(
+            WorkerRegistration(
+                actor.actor_id, actor_id=actor.actor_id, key_id=actor.key_id
+            )
+        )
+        claim_candidate = create_candidate_proposal(
+            domain_id=env["genesis"].id,
+            actor_id=actor.actor_id,
+            key_id=actor.key_id,
+            effects=(worker_claim_effect(actor.actor_id, contract_id=source.id),),
+            signer=signer,
+            idempotency_key=f"signed-graph-output-claim:{source.id}",
+        )
+        claim = claim_next_package(
+            env["store"],
+            worker_id=actor.actor_id,
+            contract_id=source.id,
+            claim_candidate=claim_candidate,
+        )
+        assert claim is not None, "ordinary signed Worker claim was not granted"
+        claim_id = (
+            claim["claim_id"] if isinstance(claim, dict) else claim.package.claim_id
+        )
+        claim_epoch = (
+            claim["epoch"] if isinstance(claim, dict) else claim.package.claim_epoch
+        )
+        package_id = (
+            claim["package_id"] if isinstance(claim, dict) else claim.package.package_id
+        )
+    graph_candidate = create_candidate_proposal(
+        domain_id=env["genesis"].id,
+        actor_id=actor.actor_id,
+        key_id=actor.key_id,
+        effects=(
+            content_publication_effect(content),
+            definition_publication_effect(definition),
+            definition_content_assertion_effect(assertion),
+        ),
+        signer=signer,
+        idempotency_key=f"graph-output:{source.id}:{name}:{'claimed' if claimed else 'unclaimed'}",
+        claim_binding=(
+            CandidateClaimBinding(
+                source.id,
+                claim_id,
+                claim_epoch,
+                package_id,
+            )
+            if claim is not None
+            else None
+        ),
+    )
+    env["graph_candidate"] = graph_candidate
+    decision = CandidateCommitter(env["store"], env["store"]).commit(
+        graph_candidate, env["genesis"]
+    )
+    assert decision.accepted, decision
+    assert len(decision.assets) == 1
+    assert decision.assets[0].created_by == source.id
+    return decision.assets[0]
+
+
+def test_unclaimed_graph_asset_cannot_be_qualified(tmp_path):
+    env = _workspace(tmp_path)
+    rogue = _publish_unclaimed_graph(env)
+    candidate = create_candidate_proposal(
+        domain_id=env["genesis"].id,
+        actor_id=env["verifier"].actor_id,
+        key_id=env["verifier"].key_id,
+        effects=(
+            asset_attestation_effect(
+                env["source"].id,
+                "final",
+                rogue.id,
+                policy_id=acceptance_policy_id(env["policy"]),
+                policy_version="review-v1",
+                rubric_asset_ids=tuple(env["policy"]["rubric_asset_ids"]),
+                evidence_asset_ids=tuple(env["policy"]["evidence_asset_ids"]),
+            ),
+        ),
+        signer=env["signer"],
+        idempotency_key="attest-unclaimed-graph-output",
+    )
+    decision = CandidateCommitter(env["store"], env["store"]).commit(
+        candidate, env["genesis"]
+    )
+
+    assert not decision.accepted
+    assert env["store"].scan_runtime_records(record_type="output.qualified") == []
+    env["store"].close()
+
+
+def test_unclaimed_graph_asset_cannot_be_review_requested(tmp_path):
+    env = _workspace(tmp_path)
+    rogue = _publish_unclaimed_graph(env)
+    candidate = _request_candidate(env, asset_id=rogue.id)
+    decision = CandidateCommitter(
+        env["store"], env["store"], additional_effects=TASK_REVIEW_EFFECTS
+    ).commit(candidate, env["genesis"])
+
+    assert not decision.accepted
+    assert project_task_reviews(decision.runtime_records) == ()
+    env["store"].close()
+
+
+def test_public_review_request_rejects_published_input_graph_without_claim(tmp_path):
+    env = _workspace(tmp_path)
+    rogue = _publish_unclaimed_graph(env)
+    context = load_effect_projection_context(env["store"])
+    committed = next(
+        record
+        for record in context.runtime_records
+        if record.record_type == "asset.committed"
+        and record.payload.get("asset", {}).get("id") == rogue.id
+    )
+    assertion = next(
+        record
+        for record in context.runtime_records
+        if record.id == committed.causal_parents[0]
+    )
+    validate_published_member(context.runtime_records, assertion)
+
+    from aigineering.task_policy_review import validate_task_review_request
+
+    with pytest.raises(ValueError, match="task output receipt"):
+        validate_task_review_request(
+            env["store"],
+            env["source"].id,
+            "final",
+            rogue.id,
+            "Review this published input.",
+        )
+    env["store"].close()
+
+
+def test_nonclaim_graph_report_cannot_decide_task_review(tmp_path):
+    env = _workspace(tmp_path)
+    _candidate, request_decision = _request(env)
+    request = project_task_reviews(request_decision.runtime_records)[0]
+    reviewer = env["store"].get_contract(str(request.payload["child_contract_id"]))
+    assert reviewer is not None
+    report = _publish_unclaimed_graph(env, contract=reviewer, name=reviewer.outputs[0])
+    with pytest.raises(ValueError, match="producer Contract|claim"):
+        _validate_decision_target(
+            env["store"],
+            request.id,
+            report.id,
+            "accept",
+            "Review report lacks a submitted claim.",
+        )
+    env["store"].close()
+
+
+def test_claim_bound_graph_output_can_be_attested_by_distinct_verifier(tmp_path):
+    env = _workspace(tmp_path, graph_target=True)
+    asset_id = _publish_unclaimed_graph(env, claimed=True).id
+    replay = CandidateCommitter(env["store"], env["store"]).commit(
+        env["graph_candidate"], env["genesis"]
+    )
+    assert replay.accepted, replay
+    env["store"].close()
+    env["store"] = SQLiteStore(env["store_path"])
+    before = env["store"].runtime_materialization_digest()
+    assert env["store"].rebuild_runtime_materializations(strict=True) == before
+    asset = env["store"].get_asset(asset_id)
+    assert asset is not None
+    candidate = create_candidate_proposal(
+        domain_id=env["genesis"].id,
+        actor_id=env["verifier"].actor_id,
+        key_id=env["verifier"].key_id,
+        effects=(
+            asset_attestation_effect(
+                env["source"].id,
+                "final",
+                asset.id,
+                policy_id=acceptance_policy_id(env["policy"]),
+                policy_version="review-v1",
+                rubric_asset_ids=tuple(env["policy"]["rubric_asset_ids"]),
+                evidence_asset_ids=tuple(env["policy"]["evidence_asset_ids"]),
+            ),
+        ),
+        signer=env["signer"],
+        idempotency_key="attest-claimed-graph-output",
+    )
+    decision = CandidateCommitter(env["store"], env["store"]).commit(
+        candidate, env["genesis"]
+    )
+    assert decision.accepted, decision
+    assert len(env["store"].scan_runtime_records(record_type="output.qualified")) == 1
+    env["store"].close()
+
+
+def test_claim_bound_descendant_output_can_be_attested(tmp_path):
+    env = _workspace(tmp_path, graph_target=True)
+    child = contract_from_fields(
+        name="source output continuation",
+        description="Produce the source output in ordinary descendant work.",
+        parent_id=env["source"].id,
+        inputs=(),
+        outputs=("final",),
+        activation="",
+        budget=2,
+        tool_scope=(),
+        labels=(),
+        origin="continuation",
+    )
+    declared = publish_effect(
+        env["store"],
+        env["store"],
+        env["genesis"],
+        env["operator"],
+        env["signer"],
+        contract_declaration_effect(child),
+        idempotency_key="declare-output-continuation",
+    )
+    assert declared.accepted, declared
+    asset = _publish_unclaimed_graph(env, claimed=True, contract=child, name="final")
+    context = load_effect_projection_context(env["store"])
+    validate_claim_bound_output(context, asset, child)
+    assert child.parent_id == env["source"].id
+    verifier_candidate = create_candidate_proposal(
+        domain_id=env["genesis"].id,
+        actor_id=env["verifier"].actor_id,
+        key_id=env["verifier"].key_id,
+        effects=(
+            asset_attestation_effect(
+                env["source"].id,
+                "final",
+                asset.id,
+                policy_id=acceptance_policy_id(env["policy"]),
+                policy_version="review-v1",
+                rubric_asset_ids=tuple(env["policy"]["rubric_asset_ids"]),
+                evidence_asset_ids=tuple(env["policy"]["evidence_asset_ids"]),
+            ),
+        ),
+        signer=env["signer"],
+        idempotency_key="attest-descendant-final-output",
+    )
+    attested = CandidateCommitter(env["store"], env["store"]).commit(
+        verifier_candidate, env["genesis"]
+    )
+    assert attested.accepted, attested
+    qualified = env["store"].scan_runtime_records(record_type="output.qualified")
+    assert len(qualified) == 1
+    assert qualified[0][1].payload["asset_id"] == asset.id
+    assert qualified[0][1].payload["contract_id"] == env["source"].id
+    env["store"].close()
+
+
+def test_two_graph_outputs_share_one_claim_candidate_head(tmp_path):
+    env = _workspace(tmp_path, graph_target=True)
+    source_fields = {
+        field.name: getattr(env["source"], field.name)
+        for field in fields(env["source"])
+        if field.name != "id"
+    }
+    source_fields["outputs"] = ("final", "appendix")
+    source = contract_from_fields(**source_fields)
+    declared = publish_effect(
+        env["store"],
+        env["store"],
+        env["genesis"],
+        env["operator"],
+        env["signer"],
+        contract_declaration_effect(source),
+        idempotency_key="declare-two-graph-output-source",
+    )
+    assert declared.accepted, declared
+    actor = env["target_worker"]
+    env["store"].register_worker(
+        WorkerRegistration(actor.actor_id, actor_id=actor.actor_id, key_id=actor.key_id)
+    )
+    claim_candidate = create_candidate_proposal(
+        domain_id=env["genesis"].id,
+        actor_id=actor.actor_id,
+        key_id=actor.key_id,
+        effects=(worker_claim_effect(actor.actor_id, contract_id=source.id),),
+        signer=env["signer"],
+        idempotency_key="claim-two-graph-output-source",
+    )
+    claim = claim_next_package(
+        env["store"],
+        worker_id=actor.actor_id,
+        contract_id=source.id,
+        claim_candidate=claim_candidate,
+    )
+    assert claim is not None
+    effects = []
+    final_definition = None
+    for name, text in (
+        ("final", "Main result"),
+        ("appendix", "Supporting material"),
+    ):
+        content = create_content_object(text)
+        definition = create_signed_definition(
+            domain_id=env["genesis"].id,
+            name=name,
+            description=f"Claim-bound {name}",
+            content_type="text/plain",
+            source_kind="contract-output",
+            source_uri=source.id,
+            actor_id=actor.actor_id,
+            key_id=actor.key_id,
+            signer=env["signer"],
+        )
+        if name == "final":
+            final_definition = definition
+        assertion = create_definition_content_assertion(
+            domain_id=env["genesis"].id,
+            definition_id=definition.id,
+            content_id=content.id,
+            relation_type="satisfies",
+            actor_id=actor.actor_id,
+            key_id=actor.key_id,
+            signer=env["signer"],
+        )
+        effects.extend(
+            (
+                content_publication_effect(content),
+                definition_publication_effect(definition),
+                definition_content_assertion_effect(assertion),
+            )
+        )
+    assert final_definition is not None
+    reused_content = create_content_object("Revised assertion under reused definition")
+    reused_assertion = create_definition_content_assertion(
+        domain_id=env["genesis"].id,
+        definition_id=final_definition.id,
+        content_id=reused_content.id,
+        relation_type="satisfies",
+        actor_id=actor.actor_id,
+        key_id=actor.key_id,
+        signer=env["signer"],
+    )
+    effects.extend(
+        (
+            content_publication_effect(reused_content),
+            definition_content_assertion_effect(reused_assertion),
+        )
+    )
+    candidate = create_candidate_proposal(
+        domain_id=env["genesis"].id,
+        actor_id=actor.actor_id,
+        key_id=actor.key_id,
+        effects=tuple(effects),
+        signer=env["signer"],
+        idempotency_key="publish-two-graph-output-source",
+        claim_binding=CandidateClaimBinding(
+            source.id,
+            claim.package.claim_id,
+            claim.package.claim_epoch,
+            claim.package.package_id,
+        ),
+    )
+    decision = CandidateCommitter(env["store"], env["store"]).commit(
+        candidate, env["genesis"]
+    )
+    assert decision.accepted, decision
+    assert {asset.name for asset in decision.assets} == {"final", "appendix"}
+    assert len(decision.assets) == 3
+    context = load_effect_projection_context(env["store"])
+    for asset in decision.assets:
+        validate_claim_bound_output(context, asset, source)
+    env["store"].close()
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("claim_id", "claim:wrong"),
+        ("package_id", "pkg:wrong"),
+        ("epoch", 999),
+        ("candidate_id", None),
+        ("causal_parents", "head:wrong"),
+    ],
+)
+def test_claim_bound_graph_output_rejects_mismatched_submission_binding(
+    tmp_path, field, value
+):
+    env = _workspace(tmp_path, graph_target=True)
+    asset = _publish_unclaimed_graph(env, claimed=True)
+    context = load_effect_projection_context(env["store"])
+    committed = next(
+        record
+        for record in context.runtime_records
+        if record.record_type == "asset.committed"
+        and record.payload["asset"]["id"] == asset.id
+    )
+    assertion = next(
+        record
+        for record in context.runtime_records
+        if record.record_type == "asset.definition-content.asserted"
+        and committed.causal_parents == (record.id,)
+    )
+    validate_published_member(context.runtime_records, assertion)
+    receipt = next(
+        record
+        for record in context.runtime_records
+        if record.record_type == "candidate.received"
+        and record.payload.get("candidate_id") == env["graph_candidate"].id
+    )
+    submitted = next(
+        record
+        for record in context.runtime_records
+        if record.record_type == "claim.submitted"
+        and record.payload.get("candidate_id") == receipt.payload["candidate_id"]
+    )
+    payload = dict(submitted.payload)
+    if value is None:
+        payload.pop(field)
+    elif field != "causal_parents":
+        payload[field] = value
+    grant = next(
+        record
+        for record in context.runtime_records
+        if record.record_type == "claim.granted"
+        and record.id in submitted.causal_parents
+    )
+    malformed = create_runtime_record(
+        "claim.submitted",
+        payload,
+        causal_parents=(
+            (grant.id, value) if field == "causal_parents" else submitted.causal_parents
+        ),
+        recorded_at=submitted.recorded_at,
+    )
+    malformed_context = replace(
+        context,
+        runtime_records=tuple(
+            malformed if row.id == submitted.id else row
+            for row in context.runtime_records
+        ),
+    )
+    producer = next(
+        contract for contract in context.contracts if contract.id == asset.created_by
+    )
+    with pytest.raises(ValueError):
+        validate_claim_bound_output(malformed_context, asset, producer)
+    env["store"].close()
+
+
+def test_claim_bound_graph_output_rejects_inconsistent_reused_object_payload(
+    tmp_path,
+):
+    env = _workspace(tmp_path, graph_target=True)
+    asset = _publish_unclaimed_graph(env, claimed=True)
+    context = load_effect_projection_context(env["store"])
+    original_content = next(
+        record
+        for record in context.runtime_records
+        if record.record_type == "asset.content.published"
+        and record.payload["content"]["id"] == asset.content_hash
+    )
+    inconsistent_content = dict(original_content.payload["content"])
+    inconsistent_content["content"] += " inconsistent"
+    inconsistent = create_runtime_record(
+        "asset.content.published",
+        {"content": inconsistent_content},
+        causal_parents=original_content.causal_parents,
+    )
+    inconsistent_context = replace(
+        context, runtime_records=(*context.runtime_records, inconsistent)
+    )
+    producer = next(
+        contract for contract in context.contracts if contract.id == asset.created_by
+    )
+    with pytest.raises(ValueError, match="graph task output"):
+        validate_claim_bound_output(inconsistent_context, asset, producer)
+    env["store"].close()
 
 
 def _request_candidate(

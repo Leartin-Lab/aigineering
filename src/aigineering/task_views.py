@@ -15,7 +15,10 @@ from aigineering.core.claim_constraints import (
     open_claim_constraints,
 )
 from aigineering.core.store import require_operational_store
-from aigineering.core.acceptance import validate_output_shape
+from aigineering.core.acceptance import (
+    validate_claim_bound_output,
+    validate_output_shape,
+)
 from aigineering.core.contract_admission import validate_acceptance_policy
 from aigineering.core.output_satisfaction import (
     _is_contract_or_descendant,
@@ -109,15 +112,15 @@ def project_task_status(
     terminal = _latest_terminal(entries) or _runtime_terminal(store, contract.id)
     attempt_outcome = _latest_attempt_outcome(store, contract.id)
     output_assets = _output_assets(contract, store)
-    candidate_qualification_outputs = (
-        _submitted_independent_output_assets(contract, store)
-        if view.claim_status == "submitted"
-        else {}
-    )
     projection_context = projection_context or (
         query_context.effect_projection
         if query_context is not None
         else load_effect_projection_context(store)
+    )
+    candidate_qualification_outputs = (
+        _submitted_independent_output_assets(contract, store, projection_context)
+        if view.claim_status == "submitted"
+        else {}
     )
     assignment_context = assignment_context_from_projection(projection_context)
     assignment_fact = assignment_head(assignment_context, contract_id=contract.id)
@@ -453,7 +456,9 @@ def _silent_failure_risks(
     return risks
 
 
-def _submitted_independent_output_assets(contract: Contract, store) -> dict[str, str]:
+def _submitted_independent_output_assets(
+    contract: Contract, store, projection_context=None
+) -> dict[str, str]:
     """Return exact eligible output Assets awaiting independent qualification."""
     policy = contract.acceptance_policy
     if policy is None or policy.get("mode") != "independent" or not contract.outputs:
@@ -462,6 +467,7 @@ def _submitted_independent_output_assets(contract: Contract, store) -> dict[str,
         validate_acceptance_policy(contract)
     except (TypeError, ValueError):
         return {}
+    projection_context = projection_context or load_effect_projection_context(store)
 
     committed_asset_ids = {
         str(asset_payload.get("id", ""))
@@ -503,6 +509,18 @@ def _submitted_independent_output_assets(contract: Contract, store) -> dict[str,
 
         eligible_asset_id = None
         for asset in matching_assets:
+            try:
+                validate_claim_bound_output(
+                    projection_context,
+                    asset,
+                    next(
+                        item
+                        for item in projection_context.contracts
+                        if item.id == asset.created_by
+                    ),
+                )
+            except (LookupError, StopIteration, ValueError):
+                continue
             if (
                 asset.tombstoned
                 or not asset.promptable

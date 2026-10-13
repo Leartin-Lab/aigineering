@@ -230,6 +230,68 @@ def test_signed_submitted_independent_outputs_are_a_qualification_blocker(
     reopened.close()
 
 
+def test_submitted_view_ignores_earlier_unclaimed_graph_asset(tmp_path):
+    import test_task_review as review
+    from aigineering.core.projection_context import load_effect_projection_context
+    from aigineering.core.publication_history import validate_published_member
+
+    env = review._workspace(
+        tmp_path,
+        graph_target=True,
+    )
+    store = env["store"]
+    try:
+        fake = review._publish_unclaimed_graph(
+            env,
+            content_text='{"answer":"looks shaped but has no claim"}',
+        )
+        context = load_effect_projection_context(store)
+        fake_committed = next(
+            record
+            for record in context.runtime_records
+            if record.record_type == "asset.committed"
+            and record.payload.get("asset", {}).get("id") == fake.id
+        )
+        fake_assertion = next(
+            record
+            for record in context.runtime_records
+            if record.id == fake_committed.causal_parents[0]
+        )
+        validate_published_member(context.runtime_records, fake_assertion)
+        fake_definition_id = fake_assertion.payload["assertion"]["definition_id"]
+        fake_definition = next(
+            record.payload["definition"]
+            for record in context.runtime_records
+            if record.record_type == "asset.definition.published"
+            and record.payload.get("definition", {}).get("id") == fake_definition_id
+        )
+        assert fake_definition["source_uri"] == env["source"].id
+
+        canonical = review._publish_unclaimed_graph(
+            env,
+            claimed=True,
+            content_text='{"answer":"claim-bound output"}',
+        )
+        env["target"] = canonical
+        same_name_assets = store.get_assets_by_name("final")
+        same_name_ids = [asset.id for asset in same_name_assets]
+        assert same_name_ids[0] == fake.id
+        assert same_name_ids.index(canonical.id) > 0
+        submitted = store.scan_runtime_records(record_type="claim.submitted")
+        assert len(submitted) == 1
+        assert submitted[0][1].payload["contract_id"] == env["source"].id
+        assert canonical.content == '{"answer":"claim-bound output"}'
+
+        status = project_task_status(env["source"], store)
+        assert status["status"] == "submitted"
+        assert status["outputs_satisfied"] is False
+        assert status["qualification_pending_outputs"] == {"final": canonical.id}
+        assert fake.id not in status["qualification_pending_outputs"].values()
+        assert "qualification:independent_acceptance" in status["blockers"]
+    finally:
+        store.close()
+
+
 def test_incomplete_outputs_and_foreign_or_tool_assets_are_not_qualification_pending(
     tmp_path, monkeypatch
 ):
