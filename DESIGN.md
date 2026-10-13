@@ -395,9 +395,13 @@ Projection does not mutate the Store. The commitment coordinator is the only
 owner of the write transaction.
 
 For ordinary Worker output, declared output names are the exclusive allow-list.
-Reserved runtime namespaces require exact inherited minting authority. Tools
-and observations cannot satisfy business outputs merely because their names
-appear in the Store.
+Reserved runtime namespaces require the current Candidate actor's protected
+publication capability or exact inherited minting authority. This applies to
+new signed graph definitions and Assets materialized by new graph assertions,
+including assertions that reuse a historical definition. Tools and observations
+cannot satisfy business outputs merely because their names appear in the Store.
+The guard affects new projections; committed historical facts are not rewritten
+by rebuild. Stop older Worker processes before relying on the repaired boundary.
 
 ## Plugins and recursive work
 

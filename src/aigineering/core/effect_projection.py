@@ -13,7 +13,10 @@ from aigineering.core.effect_projectors import (
 )
 from aigineering.core.asset_graph_facts import project_new_graph_assets
 from aigineering.core.acceptance import validate_output_shape
-from aigineering.core.authority import matched_reserved_prefix
+from aigineering.core.authority import (
+    matched_reserved_prefix,
+    validate_reserved_name_authority,
+)
 from aigineering.core.causal_allowance import (
     project_contract_allowance_records,
     validate_causal_allowance_returns,
@@ -321,6 +324,20 @@ def project_effect_batch(
         effective_context.runtime_records + projection_records,
         projection_records,
     )
+    delegated_names = claimed_parent.minting_authority if claimed_parent else ()
+    for record in projection_records:
+        if record.record_type == "asset.definition.published":
+            validate_reserved_name_authority(
+                str(record.payload["definition"]["name"]),
+                actor_capabilities,
+                delegated_names,
+            )
+    for asset, _assertion in graph_assets:
+        validate_reserved_name_authority(
+            asset.name,
+            actor_capabilities,
+            delegated_names,
+        )
     assets = assets + tuple(asset for asset, _ in graph_assets)
     if claimed_parent is not None:
         _validate_claim_bound_projection(claimed_parent, contracts, assets)

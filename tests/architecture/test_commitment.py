@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 import hashlib
+import ast
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier, Lock
@@ -84,6 +85,43 @@ def _contract_named(name: str, output: str) -> Contract:
         "origin": "human",
     }
     return Contract(id=hash_contract_v3(**fields), **fields)
+
+
+def test_graph_reserved_namespace_authority_stays_in_candidate_batch_projection():
+    source_root = Path(__file__).resolve().parents[2] / "src" / "aigineering" / "core"
+    authority_tree = ast.parse((source_root / "authority.py").read_text())
+    projection_tree = ast.parse((source_root / "effect_projection.py").read_text())
+    assert any(
+        isinstance(node, ast.FunctionDef) and node.name == "matched_reserved_prefix"
+        for node in authority_tree.body
+    )
+    assert any(
+        isinstance(node, ast.FunctionDef)
+        and node.name == "validate_reserved_name_authority"
+        for node in authority_tree.body
+    )
+    batch = next(
+        node
+        for node in projection_tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == "project_effect_batch"
+    )
+    imports_authority_helper = any(
+        isinstance(node, ast.ImportFrom)
+        and node.module == "aigineering.core.authority"
+        and any(
+            alias.name == "validate_reserved_name_authority" for alias in node.names
+        )
+        for node in projection_tree.body
+    )
+    invokes_authority_helper = any(
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "validate_reserved_name_authority"
+        for node in ast.walk(batch)
+    )
+
+    assert imports_authority_helper
+    assert invokes_authority_helper
 
 
 def _proposal(*, capabilities=("asset.publish", "contract.publish"), effect=None):

@@ -19,6 +19,7 @@ from aigineering.protocol.effect_builders import (
 )
 from aigineering.protocol.runtime_record import create_runtime_record
 from aigineering.protocol.types import Asset
+from aigineering.core.authority import RESERVED_PREFIXES
 from aigineering.core.signing import Ed25519Signer
 from aigineering.protocol.asset_graph import (
     assertion_signing_bytes,
@@ -36,6 +37,13 @@ from aigineering.protocol.asset_graph import (
     verify_signed_definition,
 )
 from aigineering.protocol.candidate import ActorKey
+from aigineering.protocol.candidate import (
+    CandidateClaimBinding,
+    create_candidate_proposal,
+)
+from aigineering.protocol.types import Contract
+from aigineering.runtime import claim_next_package, submit_worker_proposal
+from conftest import hosted_worker
 
 
 def _identity(actor_id: str = "human:owner"):
@@ -265,6 +273,323 @@ def test_graph_facts_enter_through_candidate_commitment(temp_sqlite_store) -> No
     verification = batch_verify_definition(temp_sqlite_store, definition.id)
     assert verification["pass_count"] == 1
     assert verification["fail_count"] == 0
+
+
+@pytest.mark.parametrize(
+    "reserved_name",
+    sorted(
+        {
+            name
+            for prefix in RESERVED_PREFIXES
+            for name in (f"{prefix}graph_payload", prefix.rstrip("_"))
+        }
+    ),
+)
+def test_graph_materialization_rejects_reserved_name_without_protected_capability(
+    temp_sqlite_store, reserved_name
+) -> None:
+    from aigineering.core.candidate_publisher import CandidatePublisher
+
+    runtime = candidate_runtime(temp_sqlite_store)
+    actor_signer, actor_key = _identity("worker:graph-writer")
+    actor_key = replace(actor_key, capabilities=("asset.publish", "asset.relate"))
+    runtime.authorize_actor(actor_key)
+    publisher = CandidatePublisher(
+        temp_sqlite_store,
+        temp_sqlite_store,
+        runtime.genesis,
+        actor_key,
+        actor_signer,
+    )
+    content = create_content_object("reserved graph value")
+    definition = _definition(
+        actor_signer,
+        actor_id=actor_key.actor_id,
+        domain_id=runtime.genesis.id,
+        key_id=actor_key.key_id,
+        name=reserved_name,
+    )
+    assertion = create_definition_content_assertion(
+        domain_id=runtime.genesis.id,
+        definition_id=definition.id,
+        content_id=content.id,
+        relation_type="satisfies",
+        actor_id=actor_key.actor_id,
+        key_id=actor_key.key_id,
+        signer=actor_signer,
+    )
+
+    decision = publisher.publish(
+        (
+            content_publication_effect(content),
+            definition_publication_effect(definition),
+            definition_content_assertion_effect(assertion),
+        ),
+        idempotency_key=f"reserved-graph-without-protected-capability-{reserved_name}",
+    )
+
+    assert not decision.accepted
+    assert any(
+        "asset.publish.protected" in str(record.payload.get("reason", ""))
+        for record in decision.runtime_records
+        if record.record_type.endswith("rejected")
+    )
+    if reserved_name == "_sys_graph_payload":
+        assert temp_sqlite_store.get_content_objects() == []
+        assert temp_sqlite_store.get_asset_definitions() == []
+        assert temp_sqlite_store.get_definition_content_assertions() == []
+        assert temp_sqlite_store.get_all_assets() == []
+        rejected = temp_sqlite_store.scan_runtime_records(
+            record_type="candidate.rejected"
+        )
+        assert any(
+            record.payload["candidate_id"] == decision.candidate_id
+            for _, record in rejected
+        )
+        traces = temp_sqlite_store.scan_runtime_records(record_type="trace.recorded")
+        assert any(
+            record.payload["trace"]["parent_id"] == decision.candidate_id
+            and record.payload["trace"]["event_type"] == "candidate_rejected"
+            for _, record in traces
+        )
+
+
+def test_graph_assertion_reusing_historical_reserved_definition_is_rejected(
+    temp_sqlite_store,
+) -> None:
+    from aigineering.core.candidate_publisher import CandidatePublisher
+
+    runtime = candidate_runtime(temp_sqlite_store)
+    content = create_content_object("historical reserved content")
+    definition = _definition(
+        runtime.signer,
+        actor_id=runtime.actor_key.actor_id,
+        domain_id=runtime.genesis.id,
+        key_id=runtime.actor_key.key_id,
+        name="_sys_historical_graph",
+    )
+    assert runtime._publish(content_publication_effect(content)).accepted
+    assert runtime._publish(definition_publication_effect(definition)).accepted
+
+    actor_signer, actor_key = _identity("worker:historical-graph-writer")
+    actor_key = replace(actor_key, capabilities=("asset.relate",))
+    runtime.authorize_actor(actor_key)
+    assertion = create_definition_content_assertion(
+        domain_id=runtime.genesis.id,
+        definition_id=definition.id,
+        content_id=content.id,
+        relation_type="satisfies",
+        actor_id=actor_key.actor_id,
+        key_id=actor_key.key_id,
+        signer=actor_signer,
+    )
+    decision = CandidatePublisher(
+        temp_sqlite_store,
+        temp_sqlite_store,
+        runtime.genesis,
+        actor_key,
+        actor_signer,
+    ).publish(
+        (definition_content_assertion_effect(assertion),),
+        idempotency_key="historical-reserved-graph-assertion",
+    )
+
+    assert not decision.accepted
+    assert any(
+        "asset.publish.protected" in str(record.payload.get("reason", ""))
+        for record in decision.runtime_records
+        if record.record_type.endswith("rejected")
+    )
+    assert temp_sqlite_store.get_content_objects() == [content_object_to_dict(content)]
+    assert temp_sqlite_store.get_asset_definitions() == [
+        signed_definition_to_dict(definition)
+    ]
+    assert temp_sqlite_store.get_definition_content_assertions() == []
+    assert temp_sqlite_store.get_all_assets() == []
+    rejected = temp_sqlite_store.scan_runtime_records(record_type="candidate.rejected")
+    assert any(
+        record.payload["candidate_id"] == decision.candidate_id
+        for _, record in rejected
+    )
+    traces = temp_sqlite_store.scan_runtime_records(record_type="trace.recorded")
+    assert any(
+        record.payload["trace"]["parent_id"] == decision.candidate_id
+        and record.payload["trace"]["event_type"] == "candidate_rejected"
+        for _, record in traces
+    )
+
+
+class _ClaimGraphWorker:
+    worker_id = "worker:claim-graph-writer"
+
+    def registration(self):
+        from aigineering.core.worker_routing import WorkerRegistration
+
+        return WorkerRegistration(self.worker_id)
+
+    def invoke(self, contract, disclosed_assets):
+        del contract, disclosed_assets
+        raise AssertionError("the test submits a signed Candidate directly")
+
+
+def _submit_claimed_graph(
+    monkeypatch,
+    *,
+    output_name: str,
+    minting_authority: tuple[str, ...],
+    graph_name: str,
+):
+    monkeypatch.setattr(
+        "aigineering.runtime_services.sync_runtime", lambda store, **kwargs: None
+    )
+    runtime_store = SQLiteStore(":memory:")
+    ingress = candidate_runtime(runtime_store)
+    contract = ingress.accept_contract(
+        Contract(
+            id=f"task:graph-claim-{output_name.replace('_', '-')}",
+            name="graph claim output",
+            outputs=(output_name,),
+            budget=1,
+            minting_authority=minting_authority,
+        )
+    )
+    host = hosted_worker(
+        runtime_store,
+        _ClaimGraphWorker(),
+        genesis=ingress.genesis,
+        authority_key=ingress.actor_key,
+        authority_signer=ingress.signer,
+    )
+    claimed = claim_next_package(
+        runtime_store,
+        worker_id=host.worker_id,
+        contract_id=contract.id,
+        claim_candidate=host.claim_candidate(
+            request_id=f"claim-{output_name}", contract_id=contract.id
+        ),
+    )
+    assert claimed is not None
+    content = create_content_object("claimed graph output")
+    definition = _definition(
+        host.signer,
+        actor_id=host.actor_key.actor_id,
+        domain_id=host.genesis.id,
+        key_id=host.actor_key.key_id,
+        name=graph_name,
+        source_uri=contract.id,
+    )
+    assertion = create_definition_content_assertion(
+        domain_id=host.genesis.id,
+        definition_id=definition.id,
+        content_id=content.id,
+        relation_type="satisfies",
+        actor_id=host.actor_key.actor_id,
+        key_id=host.actor_key.key_id,
+        signer=host.signer,
+    )
+    package = claimed.package
+    proposal = create_candidate_proposal(
+        domain_id=host.genesis.id,
+        actor_id=host.actor_key.actor_id,
+        key_id=host.actor_key.key_id,
+        effects=(
+            content_publication_effect(content),
+            definition_publication_effect(definition),
+            definition_content_assertion_effect(assertion),
+        ),
+        signer=host.signer,
+        idempotency_key=f"submit-{output_name}",
+        claim_binding=CandidateClaimBinding(
+            contract.id,
+            package.claim_id,
+            package.claim_epoch,
+            package.package_id,
+        ),
+    )
+    result = submit_worker_proposal(proposal, runtime_store)
+    return runtime_store, result
+
+
+def test_claim_minting_authority_allows_exact_reserved_graph_output(monkeypatch):
+    name = "_sys_claimed_graph"
+    store, result = _submit_claimed_graph(
+        monkeypatch, output_name=name, minting_authority=(name,), graph_name=name
+    )
+    try:
+        assert result["status"] == "accepted", result
+        assert store.get_assets_by_name(name)
+    finally:
+        store.close()
+
+
+def test_claim_without_exact_minting_authority_rejects_reserved_graph_asset(
+    monkeypatch,
+):
+    store, result = _submit_claimed_graph(
+        monkeypatch,
+        output_name="ordinary_result",
+        minting_authority=(),
+        graph_name="_sys_unminted_graph",
+    )
+    try:
+        assert result["status"] == "rejected", result
+        assert any("asset.publish.protected" in reason for reason in result["rejected"])
+        assert store.get_assets_by_name("_sys_unminted_graph") == []
+    finally:
+        store.close()
+
+
+def test_graph_materialization_rebuilds_strictly_and_reopens(tmp_path):
+    path = str(tmp_path / "graph-materialization-rebuild.db")
+    store = SQLiteStore(path)
+    runtime = candidate_runtime(store)
+    definition = _definition(
+        runtime.signer,
+        actor_id=runtime.actor_key.actor_id,
+        domain_id=runtime.genesis.id,
+        key_id=runtime.actor_key.key_id,
+        name="_sys_graph_materialized",
+    )
+    content = create_content_object("rebuild graph value")
+    assertion = create_definition_content_assertion(
+        domain_id=runtime.genesis.id,
+        definition_id=definition.id,
+        content_id=content.id,
+        relation_type="satisfies",
+        actor_id=runtime.actor_key.actor_id,
+        key_id=runtime.actor_key.key_id,
+        signer=runtime.signer,
+    )
+    effects = (
+        content_publication_effect(content),
+        definition_publication_effect(definition),
+        definition_content_assertion_effect(assertion),
+    )
+    decision = runtime.publisher.publish(
+        effects, idempotency_key="graph-materialization-rebuild-control"
+    )
+    assert decision.accepted
+    replay = runtime.publisher.publish(
+        effects, idempotency_key="graph-materialization-rebuild-control"
+    )
+    assert replay.accepted
+    assert (
+        len(store.scan_runtime_records(record_type="asset.definition-content.asserted"))
+        == 1
+    )
+    before = store.runtime_materialization_digest()
+    assert store.rebuild_runtime_materializations(strict=True) == before
+    store.close()
+
+    reopened = SQLiteStore(path)
+    try:
+        assert reopened.runtime_materialization_digest() == before
+        assert reopened.rebuild_runtime_materializations(strict=True) == before
+        assert reopened.get_assets_by_name("_sys_graph_materialized")[0].content == (
+            content.content
+        )
+    finally:
+        reopened.close()
 
 
 def test_graph_assertion_materializes_same_compatibility_asset_in_memory() -> None:

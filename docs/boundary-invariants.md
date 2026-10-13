@@ -22,16 +22,23 @@ different publishers or definitions.
 
 ## 2. Only declared outputs become facts
 
-Undeclared names — even if parseable — are rejected with `authority_rejection`.
-The contract's `outputs` list is the exclusive allow-list. No name-mutation,
-no fallback, no silent acceptance.
+For claim-bound Worker output, undeclared names — even if parseable — are
+rejected with `authority_rejection`. The claimed Contract's `outputs` list is
+the exclusive allow-list; a Worker cannot widen it. A valid non-claim signed
+Candidate, such as an operator publication, is authorized by its current
+actor's signed capabilities and is not subject to a Worker's output allow-list.
+No name-mutation, fallback, or silent acceptance is permitted.
 
 ## 3. Reserved namespace is runtime-only
 
-Reserved prefixes (`_sys_`, `_tool_obs_`, `_memory_`, etc.) cannot be minted by
-an LLM or `/exec` call. Names starting with any reserved prefix are rejected
-with `protected_name_rejection` regardless of whether they appear in the
-contract's declared outputs.
+Reserved names (`_sys_`, `_tool_obs_`, `_memory_`, etc.) do not grant authority
+through their spelling or through declaration alone. Publishing one requires
+the current signed Candidate actor's `asset.publish.protected` capability, or
+a claim-bound Candidate whose already-authorized parent Contract lists that
+exact name in `minting_authority`. Without either authority, reserved names are
+rejected by the protected-name authority check, including when declared as an output.
+This applies to graph definitions and graph assertions that materialize Assets,
+as well as the existing `asset.propose` path.
 
 ## 4. Projection is pure
 

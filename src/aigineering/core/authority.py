@@ -47,6 +47,23 @@ def matched_reserved_prefix(
     return None
 
 
+def validate_reserved_name_authority(
+    name: str,
+    actor_capabilities: tuple[str, ...] | frozenset[str],
+    delegated_names: tuple[str, ...] | frozenset[str] = (),
+) -> None:
+    """Require protected publication authority for a reserved asset name."""
+    if (
+        matched_reserved_prefix(name) is not None
+        and "asset.publish.protected" not in actor_capabilities
+        and name not in delegated_names
+    ):
+        raise ValueError(
+            f"reserved Asset name {name!r} requires 'asset.publish.protected' "
+            "or exact parent minting authority"
+        )
+
+
 def _is_protected_name(name: str) -> bool:
     return matched_reserved_prefix(name) is not None
 
