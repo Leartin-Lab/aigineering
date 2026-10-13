@@ -2286,7 +2286,7 @@ class SQLiteStore:
             )
             trace_entries = list(trace_entries) + list(derived_traces)
             runtime_records = runtime_records + derived_records
-            self._validate_allowance_records(derived_records, candidate_id=candidate_id)
+            self._validate_allowance_records(runtime_records, candidate_id=candidate_id)
             if reducer_callback is not None:
                 reducer_traces: list[TraceEntry] = reducer_callback()
                 trace_entries = list(trace_entries) + reducer_traces

@@ -17,6 +17,7 @@ from aigineering.core.causal_allowance import (
     validate_allowance_commit,
     validate_causal_allowance_returns,
 )
+from aigineering.core.effect_projection import EffectHandler, EffectProjection
 from aigineering.core.ids import hash_contract_v3
 from aigineering.core.lifecycle_facts import create_terminal_record
 from aigineering.core.signing import Ed25519Signer
@@ -25,16 +26,18 @@ from aigineering.core.store import MemoryStore
 from aigineering.core.trace import MemoryTraceStore
 from aigineering.protocol.candidate import (
     ActorKey,
+    CandidateEffect,
     create_genesis_manifest,
 )
 from aigineering.protocol.effect_builders import (
+    asset_proposal_effect,
     contract_cancellation_effect,
     contract_declaration_effect,
 )
 from aigineering.protocol.runtime_record import create_runtime_record
-from aigineering.protocol.types import Contract
+from aigineering.protocol.types import Asset, Contract
 from aigineering.protocol.wire import contract_to_dict
-from aigineering.core.candidate_publisher import publish_effect
+from aigineering.core.candidate_publisher import publish_effect, publish_effects
 
 
 def _contract(name: str, *, budget: int, parent_id: str | None = None) -> Contract:
@@ -92,6 +95,314 @@ def _candidate_facts(candidate_id: str):
         "candidate.received", {"candidate_id": candidate_id, "actor_id": "human:test"}
     )
     return receipt
+
+
+def test_extinguishment_requires_one_exact_terminal_proof_and_positive_amount():
+    signer, actor, genesis, store, trace = _world()
+    contract = _contract("terminal-proof", budget=5)
+    _publish(store, trace, genesis, actor, signer, contract, "terminal-proof-root")
+    existing = tuple(record for _, record in store.scan_runtime_records())
+    terminal = create_terminal_record(contract.id, "failed")
+    valid = create_runtime_record(
+        "allowance.extinguished",
+        {"amount": 5, "contract_id": contract.id, "reason": "failed"},
+        causal_parents=(terminal.id,),
+    )
+
+    validate_allowance_commit((contract,), existing, (terminal, valid))
+    validate_allowance_commit((contract,), existing, (terminal, valid, valid))
+
+    invalid_records = (
+        (valid,),
+        (
+            create_terminal_record("task:another-contract", "failed"),
+            valid,
+        ),
+        (
+            terminal,
+            create_runtime_record(
+                "allowance.extinguished",
+                {"amount": 5, "contract_id": contract.id, "reason": "cancelled"},
+                causal_parents=(terminal.id,),
+            ),
+        ),
+        (
+            terminal,
+            create_runtime_record(
+                "allowance.extinguished",
+                {"amount": 5, "contract_id": contract.id, "reason": "failed"},
+                causal_parents=(terminal.id, "record:extra-parent"),
+            ),
+        ),
+        (
+            create_runtime_record(
+                "lifecycle.terminal",
+                {"contract_id": contract.id, "terminal": "not-a-terminal"},
+            ),
+            valid,
+        ),
+        (
+            terminal,
+            create_terminal_record(contract.id, "cancelled"),
+            valid,
+        ),
+        *(
+            (
+                terminal,
+                create_runtime_record(
+                    "allowance.extinguished",
+                    {"amount": amount, "contract_id": contract.id, "reason": "failed"},
+                    causal_parents=(terminal.id,),
+                ),
+            )
+            for amount in (0, -1, 5.0, "5")
+        ),
+    )
+    for pending in invalid_records:
+        with pytest.raises((CausalAllowanceConflict, ValueError)):
+            validate_allowance_commit((contract,), existing, pending)
+
+    version_two_duplicate = create_runtime_record(
+        "allowance.extinguished",
+        {"amount": 5, "contract_id": contract.id, "reason": "failed"},
+        causal_parents=(terminal.id,),
+        schema_version=2,
+    )
+    with pytest.raises(CausalAllowanceConflict):
+        validate_allowance_commit(
+            (contract,), existing, (terminal, valid, version_two_duplicate)
+        )
+
+    unit_contract = _contract("terminal-proof-unit", budget=1)
+    _publish(store, trace, genesis, actor, signer, unit_contract, "terminal-proof-unit")
+    unit_existing = tuple(record for _, record in store.scan_runtime_records())
+    unit_terminal = create_terminal_record(unit_contract.id, "complete")
+    unit_bool_extinguishment = create_runtime_record(
+        "allowance.extinguished",
+        {"amount": True, "contract_id": unit_contract.id, "reason": "complete"},
+        causal_parents=(unit_terminal.id,),
+    )
+    with pytest.raises(CausalAllowanceConflict):
+        validate_allowance_commit(
+            (unit_contract,),
+            unit_existing,
+            (unit_terminal, unit_bool_extinguishment),
+        )
+
+    already_extinguished = (*existing, terminal, valid)
+    # Exact replay adds no second debit; historical facts are not retroactively
+    # revalidated when a later unrelated commit is checked.
+    validate_allowance_commit((contract,), already_extinguished, (valid,))
+    validate_allowance_commit((contract,), already_extinguished, ())
+    with pytest.raises((CausalAllowanceConflict, ValueError)):
+        validate_allowance_commit(
+            (contract,),
+            already_extinguished,
+            (
+                create_runtime_record(
+                    "allowance.extinguished",
+                    {"amount": 5, "contract_id": contract.id, "reason": "failed"},
+                    causal_parents=(terminal.id, "different-parent"),
+                ),
+            ),
+        )
+    malformed_historical = create_runtime_record(
+        "allowance.extinguished",
+        {"amount": 5, "contract_id": contract.id, "reason": "unpaired"},
+        causal_parents=("record:historical-nonterminal",),
+    )
+    validate_allowance_commit((contract,), (*existing, malformed_historical), ())
+
+
+def test_signed_injected_extinguishment_without_terminal_is_audited_and_rejected(
+    tmp_path,
+):
+    store = SQLiteStore(tmp_path / "unpaired-extinguishment.sqlite")
+    signer = Ed25519Signer()
+    actor = ActorKey(
+        "human:allowance-audit-injected",
+        "allowance-audit-key",
+        signer.kind,
+        signer.signer_id,
+        ("contract.publish", "contract.cancel", "audit.extinguish"),
+    )
+    genesis = create_genesis_manifest(
+        "allowance-audit-injected", (actor,), "policy:allowance-audit"
+    )
+    from aigineering.core.domain import initialize_genesis
+
+    initialize_genesis(store, genesis)
+    trace = MemoryTraceStore()
+    contract = _contract("signed-unpaired-extinguishment", budget=5)
+    _publish(
+        store,
+        trace,
+        genesis,
+        actor,
+        signer,
+        contract,
+        "signed-unpaired-extinguishment-root",
+    )
+
+    def projector(effect, candidate, receipt_id, context):
+        del effect, candidate, context
+        extinguished = create_runtime_record(
+            "allowance.extinguished",
+            {"amount": 5, "contract_id": contract.id, "reason": "failed"},
+            causal_parents=(receipt_id,),
+        )
+        return EffectProjection(records=(extinguished,), relation_target=None)
+
+    handler = EffectHandler(
+        "audit.extinguish",
+        projector,
+        frozenset({"allowance.extinguished"}),
+        direct_output_fact_types=frozenset({"allowance.extinguished"}),
+        reserved_fact_types=frozenset({"allowance.extinguished"}),
+    )
+    decision = publish_effect(
+        store,
+        trace,
+        genesis,
+        actor,
+        signer,
+        CandidateEffect("audit.extinguish", {"contract_id": contract.id}),
+        idempotency_key="signed-unpaired-extinguishment",
+        additional_effects={"audit.extinguish": handler},
+    )
+
+    assert not decision.accepted
+    assert any(
+        "terminal" in str(record.payload.get("reason", ""))
+        for record in decision.runtime_records
+        if record.record_type == "candidate.rejected"
+    )
+    assert _records(store, "allowance.extinguished") == ()
+    assert any(
+        record.payload.get("candidate_id") == decision.candidate_id
+        for record in _records(store, "candidate.rejected")
+    )
+    assert any(
+        record.payload["trace"]["parent_id"] == decision.candidate_id
+        and record.payload["trace"]["event_type"] == "candidate_rejected"
+        for record in _records(store, "trace.recorded")
+    )
+    store.close()
+
+
+def test_sqlite_terminal_allowance_revalidation_includes_main_reservation(tmp_path):
+    path = str(tmp_path / "terminal-allowance-interleave.sqlite")
+    store = SQLiteStore(path)
+    writer = SQLiteStore(path)
+    signer = Ed25519Signer()
+    actor = ActorKey(
+        "human:allowance-interleave",
+        "interleave-key",
+        signer.kind,
+        signer.signer_id,
+        ("contract.publish", "contract.cancel", "asset.publish"),
+    )
+    genesis = create_genesis_manifest(
+        "allowance-interleave", (actor,), "policy:interleave"
+    )
+    from aigineering.core.domain import initialize_genesis
+
+    initialize_genesis(store, genesis)
+    trace = MemoryTraceStore()
+    parent_fields = {
+        "name": "allowance-interleave-parent",
+        "description": "two outputs completed across writers",
+        "inputs": (),
+        "outputs": ("allowance-interleave-a", "allowance-interleave-b"),
+        "activation": "",
+        "budget": 10,
+        "tool_scope": (),
+        "labels": (),
+        "origin": "human",
+        "parent_id": None,
+    }
+    parent = Contract(id=hash_contract_v3(**parent_fields), **parent_fields)
+    _publish(store, trace, genesis, actor, signer, parent, "interleave-parent")
+    child = _contract("allowance-interleave-child", budget=4, parent_id=parent.id)
+    asset_a = Asset(id="", name=parent.outputs[0], content="part-a")
+    asset_b = Asset(id="", name=parent.outputs[1], content="part-b")
+    interleaved = False
+    commit_main = store.commit_ingress_batch
+
+    def publish_other_output(**kwargs):
+        nonlocal interleaved
+        if not interleaved:
+            interleaved = True
+            concurrent = publish_effect(
+                writer,
+                writer,
+                genesis,
+                actor,
+                signer,
+                asset_proposal_effect(asset_b),
+                idempotency_key="interleave-output-b",
+            )
+            assert concurrent.accepted
+        return commit_main(**kwargs)
+
+    store.commit_ingress_batch = publish_other_output
+    result = publish_effects(
+        store,
+        trace,
+        genesis,
+        actor,
+        signer,
+        (contract_declaration_effect(child), asset_proposal_effect(asset_a)),
+        idempotency_key="interleave-child-output-a",
+    )
+    assert interleaved
+    assert result.accepted, result
+    extinguishments_before_replay = _records(store, "allowance.extinguished")
+    replay = publish_effects(
+        store,
+        trace,
+        genesis,
+        actor,
+        signer,
+        (contract_declaration_effect(child), asset_proposal_effect(asset_a)),
+        idempotency_key="interleave-child-output-a",
+    )
+    assert replay.accepted, replay
+    assert _records(store, "allowance.extinguished") == extinguishments_before_replay
+    assert store.get_contract(child.id) == child
+    assert {asset.name for asset in store.get_all_assets()} == set(parent.outputs)
+    terminals = {
+        record.payload["contract_id"]: record.payload["terminal"]
+        for record in _records(store, "lifecycle.terminal")
+    }
+    assert terminals[parent.id] == "complete"
+    assert terminals[child.id] == "cancelled"
+    extinguished = _records(store, "allowance.extinguished")
+    parent_ext = next(
+        record for record in extinguished if record.payload["contract_id"] == parent.id
+    )
+    assert parent_ext.payload["amount"] == 6
+    assert parent_ext.causal_parents == tuple(
+        record.id
+        for record in _records(store, "lifecycle.terminal")
+        if record.payload.get("contract_id") == parent.id
+    )
+    child_ext = next(
+        record for record in extinguished if record.payload["contract_id"] == child.id
+    )
+    assert child_ext.payload["amount"] == 4
+    before_rebuild = store.runtime_materialization_digest()
+    assert store.rebuild_runtime_materializations(strict=True) == before_rebuild
+    store.close()
+    writer.close()
+    reopened = SQLiteStore(path)
+    try:
+        assert reopened.runtime_materialization_digest() == before_rebuild
+        assert reopened.rebuild_runtime_materializations(strict=True) == before_rebuild
+        assert len(_records(reopened, "allowance.extinguished")) == 2
+        assert reopened.get_contract(child.id) == child
+    finally:
+        reopened.close()
 
 
 def _writer_batch(store, source, donors, successor, candidate_id):

@@ -2,14 +2,20 @@
 
 from __future__ import annotations
 
+import ast
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 from aigineering.core.candidate_publisher import publish_effect, publish_effects
 from aigineering.core.ids import hash_contract_v3
-from aigineering.core.runtime_projection import RuntimeProjection
+from aigineering.core.runtime_projection import (
+    TERMINAL_EVENTS as RUNTIME_TERMINAL_EVENTS,
+    RuntimeProjection,
+)
 from aigineering.core.signing import Ed25519Signer
 from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.core.store import MemoryStore
+from aigineering.core.terminal_types import TERMINAL_EVENTS
 from aigineering.core.trace import MemoryTraceStore
 from aigineering.plugins import PluginRequest, StagedPlanningPlugin
 from aigineering.protocol.candidate import (
@@ -19,6 +25,89 @@ from aigineering.protocol.candidate import (
 )
 from aigineering.protocol.effect_builders import contract_declaration_effect
 from aigineering.protocol.types import Contract
+
+
+def test_terminal_event_values_have_one_dependency_neutral_owner():
+    core = Path(__file__).resolve().parents[2] / "src" / "aigineering" / "core"
+    definitions = []
+    for path in core.glob("*.py"):
+        tree = ast.parse(path.read_text())
+        if any(
+            isinstance(node, ast.Assign)
+            and any(
+                isinstance(target, ast.Name) and target.id == "TERMINAL_EVENTS"
+                for target in node.targets
+            )
+            for node in tree.body
+        ):
+            definitions.append(path.name)
+
+    assert definitions == ["terminal_types.py"]
+    assert TERMINAL_EVENTS == frozenset(
+        {"complete", "failed", "cancelled", "unreachable"}
+    )
+    assert RUNTIME_TERMINAL_EVENTS is TERMINAL_EVENTS
+    allowance_tree = ast.parse((core / "causal_allowance.py").read_text())
+    assert any(
+        isinstance(node, ast.ImportFrom)
+        and node.module == "aigineering.core.terminal_types"
+        and any(alias.name == "TERMINAL_EVENTS" for alias in node.names)
+        for node in allowance_tree.body
+    )
+    terminal_tree = ast.parse((core / "terminal_types.py").read_text())
+    assert not any(
+        isinstance(node, ast.ImportFrom)
+        and node.module
+        in {
+            "aigineering.core.causal_allowance",
+            "aigineering.core.lifecycle_facts",
+            "aigineering.core.runtime_projection",
+        }
+        for node in terminal_tree.body
+    )
+
+
+def test_allowance_second_writer_check_uses_complete_pending_records():
+    core = Path(__file__).resolve().parents[2] / "src" / "aigineering" / "core"
+    tree = ast.parse((core / "sqlite_store.py").read_text())
+    commit = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.ClassDef) and node.name == "SQLiteStore"
+    )
+    method = next(
+        node
+        for node in commit.body
+        if isinstance(node, ast.FunctionDef) and node.name == "commit_ingress_batch"
+    )
+    merge_line = next(
+        node.lineno
+        for node in ast.walk(method)
+        if isinstance(node, ast.Assign)
+        and any(
+            isinstance(target, ast.Name) and target.id == "runtime_records"
+            for target in node.targets
+        )
+        and isinstance(node.value, ast.BinOp)
+        and isinstance(node.value.op, ast.Add)
+        and isinstance(node.value.left, ast.Name)
+        and node.value.left.id == "runtime_records"
+        and isinstance(node.value.right, ast.Name)
+        and node.value.right.id == "derived_records"
+    )
+    complete_pending_checks = [
+        node
+        for node in ast.walk(method)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "_validate_allowance_records"
+        and node.lineno > merge_line
+        and node.args
+        and isinstance(node.args[0], ast.Name)
+        and node.args[0].id == "runtime_records"
+    ]
+
+    assert complete_pending_checks
 
 
 def _contract(

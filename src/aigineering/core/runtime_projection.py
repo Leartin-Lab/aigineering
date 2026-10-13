@@ -26,6 +26,7 @@ from aigineering.core.causal_allowance import (
     allowance_available,
     allowance_is_recorded,
 )
+from aigineering.core.terminal_types import TERMINAL_EVENTS
 from aigineering.core.ids import compute_content_hash
 from aigineering.core.output_satisfaction import (
     all_outputs_satisfied,
@@ -41,9 +42,6 @@ from aigineering.protocol.wire import trace_entry_from_dict
 if TYPE_CHECKING:
     from aigineering.protocol.runtime_record import RuntimeRecord
     from aigineering.protocol.types import Contract, TraceEntry
-
-
-TERMINAL_EVENTS = frozenset({"complete", "failed", "cancelled", "unreachable"})
 
 
 class RuntimeProjectionReader(AssetReader, RuntimeRecordReader, Protocol):

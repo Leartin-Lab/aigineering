@@ -15,6 +15,7 @@ from aigineering.protocol.runtime_record import (
     RuntimeRecord,
     create_runtime_record,
     runtime_record_effective_payload,
+    validate_runtime_record,
 )
 from aigineering.protocol.types import Contract
 from aigineering.core.allowance_returns import (
@@ -24,6 +25,7 @@ from aigineering.core.allowance_returns import (
     validate_allowance_grants,
     validate_causal_allowance_returns,
 )
+from aigineering.core.terminal_types import TERMINAL_EVENTS
 
 __all__ = [
     "CausalAllowanceConflict",
@@ -313,11 +315,67 @@ def validate_allowance_commit(
     for record in new_pending:
         if record.record_type != "allowance.extinguished":
             continue
-        contract_id = str(record.payload.get("contract_id", ""))
+        raw_contract_id = record.payload.get("contract_id")
+        if not isinstance(raw_contract_id, str) or not raw_contract_id:
+            raise CausalAllowanceConflict(
+                "allowance extinguishment requires a nonempty Contract ID"
+            )
+        contract_id = raw_contract_id
         contract = by_id.get(contract_id)
         if contract is None:
             raise ValueError("allowance extinguishment references an unknown Contract")
-        projected = int(record.payload.get("amount", 0))
+        raw_amount = record.payload.get("amount")
+        if type(raw_amount) is not int or raw_amount <= 0:
+            raise CausalAllowanceConflict(
+                "allowance extinguishment amount must be a positive integer"
+            )
+        validate_runtime_record(record)
+        ext_ids = {
+            existing.id
+            for existing in existing_records
+            if existing.record_type == "allowance.extinguished"
+            and existing.payload.get("contract_id") == contract_id
+        }
+        ext_ids.update(
+            pending.id
+            for pending in new_pending
+            if pending.record_type == "allowance.extinguished"
+            and pending.payload.get("contract_id") == contract_id
+        )
+        if len(ext_ids) != 1:
+            raise CausalAllowanceConflict(
+                "Contract allowance may be extinguished only once"
+            )
+        terminal_records = {
+            item.id: item
+            for item in (*existing_records, *new_pending)
+            if item.record_type == "lifecycle.terminal"
+            and item.payload.get("contract_id") == contract_id
+        }
+        if len(terminal_records) != 1:
+            raise CausalAllowanceConflict(
+                "allowance extinguishment requires one matching contract terminal fact"
+            )
+        terminal = next(iter(terminal_records.values()))
+        terminal_value = terminal.payload.get("terminal")
+        try:
+            validate_runtime_record(terminal)
+        except ValueError as exc:
+            raise CausalAllowanceConflict(
+                "allowance extinguishment requires a canonical terminal fact"
+            ) from exc
+        if not isinstance(terminal_value, str) or terminal_value not in TERMINAL_EVENTS:
+            raise CausalAllowanceConflict(
+                "allowance extinguishment requires a valid terminal event"
+            )
+        if (
+            record.causal_parents != (terminal.id,)
+            or record.payload.get("reason") != terminal_value
+        ):
+            raise CausalAllowanceConflict(
+                "allowance extinguishment must name its exact terminal parent and reason"
+            )
+        projected = raw_amount
         available = allowance_available(contract, without_extinguishment)
         if projected != available:
             raise CausalAllowanceConflict(

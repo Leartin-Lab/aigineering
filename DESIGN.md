@@ -467,12 +467,17 @@ Allowance is lineage authority, not a Worker wallet or mutable counter.
 
 - a root declaration creates an immutable grant;
 - child publication reserves from its causal parent and grants the child;
-- terminal projection extinguishes the unreserved remainder;
+- terminal projection extinguishes the positive integer remainder once, paired
+  to the Contract's unique typed terminal fact by exact causal parent and
+  terminal reason;
 - exact Candidate replay cannot reserve twice.
 
 Pure projection rejects an oversized batch. SQLite repeats the balance check in
-the commitment transaction so concurrent publishers cannot overspend the same
-grant.
+the commitment transaction against the complete pending Candidate and derived
+fact batch so concurrent publishers cannot overspend the same grant or cause a
+valid terminal consequence to omit a same-batch reservation. Exact replay adds
+no second debit; validating an unrelated new batch does not rewrite historical
+facts.
 
 Completion, recovery, continuation, task status, and audit traces read the same
 allowance projection. There is no process-local budget owner. Historical
