@@ -693,6 +693,19 @@ with bounded waits, and return to SQLite for every claim and submission decision
 See [ADR-027](docs/adr/ADR-027-required-redis-collaboration.md) and the
 [task operations reference](docs/reference/task-board.md).
 
+Redis query generations are built from one consistent SQLite Store snapshot.
+The snapshot binds Assets, Contracts, graph indexes and the revision in the same
+read view, then closes its temporary copy. A commit after capture can make a
+generation older than SQLite; its older revision remains visible to existing
+freshness checks rather than labeling mixed rows as current. Full generation
+rebuilds use SQLite's in-memory backup, so copy cost grows with Store size;
+ordinary current reads and incremental catch-up do not make that copy. A query
+snapshot source must provide an independently closable consistent snapshot.
+Because the Redis query schema version is unchanged, deploy this behavior and
+run `aig redis rebuild` once for Stores that may have a generation built from
+the earlier multi-read capture. Only generations rebuilt by the corrected
+code have this consistency guarantee.
+
 Task conversations use a dedicated `task.comment` capability. The collaboration
 plugin projects an exact Contract, bounded text and optional same-task reply to
 an immutable `task.commented` record with authenticated actor/key attribution.

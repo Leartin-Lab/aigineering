@@ -47,6 +47,18 @@ class QuerySnapshotReader(AssetReader, ContractReader, RuntimeRecordReader, Prot
     """Authoritative read capabilities needed to build query projections."""
 
 
+class SnapshotQueryReader(QuerySnapshotReader, Protocol):
+    """A read surface that can provide a consistent, independently closable copy."""
+
+    def snapshot(self) -> ClosableQuerySnapshotReader: ...
+
+
+class ClosableQuerySnapshotReader(QuerySnapshotReader, Protocol):
+    """A consistent read copy owned by one query snapshot build."""
+
+    def close(self) -> None: ...
+
+
 class StoreQueryProjection:
     """Authoritative fallback using the Store's existing read surface."""
 
@@ -148,9 +160,27 @@ def _wire_json(value: dict[str, object]) -> str:
 
 
 def build_query_snapshot(
+    store: SnapshotQueryReader, *, domain_id: str
+) -> QuerySnapshot:
+    """Build one deterministic snapshot from a single owned Store copy."""
+    snapshot_factory = getattr(store, "snapshot", None)
+    if not callable(snapshot_factory):
+        raise TypeError("query snapshot source must provide a consistent snapshot")
+    snapshot_store = snapshot_factory()
+    if snapshot_store is store:
+        raise TypeError("query snapshot source must return an independent snapshot")
+    close_snapshot = getattr(snapshot_store, "close", None)
+    if not callable(close_snapshot):
+        raise TypeError("query snapshot must be independently closable")
+    try:
+        return _build_query_snapshot_from_store(snapshot_store, domain_id=domain_id)
+    finally:
+        close_snapshot()
+
+
+def _build_query_snapshot_from_store(
     store: QuerySnapshotReader, *, domain_id: str
 ) -> QuerySnapshot:
-    """Build one deterministic read snapshot from authoritative Store facts."""
     assets = StoreQueryProjection(store).get_all_assets()
     contracts = sorted(store.get_all_contracts(), key=lambda contract: contract.id)
     asset_rows = tuple((asset.id, _wire_json(asset_to_dict(asset))) for asset in assets)

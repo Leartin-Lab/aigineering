@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import sqlite3
 from copy import deepcopy
 from concurrent.futures import ThreadPoolExecutor
 
@@ -185,6 +186,181 @@ def test_snapshot_is_deterministic_and_binds_domain_and_revision(temp_sqlite_sto
     assert first.revision == temp_sqlite_store.get_runtime_revision()
     assert first.domain_id == runtime.genesis.id
     assert first.digest
+
+
+def test_query_snapshot_includes_signed_commit_before_backup(temp_sqlite_store):
+    runtime, first, _ = _facts(temp_sqlite_store)
+    writer = SQLiteStore(temp_sqlite_store._db_path)
+    writer_runtime = candidate_runtime(
+        writer,
+        genesis=runtime.genesis,
+        actor_key=runtime.actor_key,
+        signer=runtime.signer,
+    )
+    try:
+        second = writer_runtime.accept_asset(
+            build_control_plane_asset(name="before-backup", content="new fact")
+        )
+        source_digest = temp_sqlite_store.runtime_materialization_digest()
+        source_revision = temp_sqlite_store.get_runtime_revision()
+
+        snapshot = build_query_snapshot(temp_sqlite_store, domain_id=runtime.genesis.id)
+
+        assert snapshot.revision == source_revision
+        assert {item[0] for item in snapshot.assets} == {first.id, second.id}
+        assert temp_sqlite_store.runtime_materialization_digest() == source_digest
+        assert temp_sqlite_store.get_runtime_revision() == source_revision
+    finally:
+        writer.close()
+
+
+def test_rebuild_uses_one_closed_sqlite_snapshot_during_signed_interleave(
+    temp_sqlite_store, monkeypatch
+):
+    runtime, first, _ = _facts(temp_sqlite_store)
+    writer = SQLiteStore(temp_sqlite_store._db_path)
+    writer_runtime = candidate_runtime(
+        writer,
+        genesis=runtime.genesis,
+        actor_key=runtime.actor_key,
+        signer=runtime.signer,
+    )
+    client = FakeRedis()
+    projection = _projection(temp_sqlite_store, runtime, client)
+    interleaved_asset = build_control_plane_asset(
+        name="after-snapshot-copy", content="signed concurrent fact"
+    )
+    source_revision_before = temp_sqlite_store.get_runtime_revision()
+    source_digest_before = temp_sqlite_store.runtime_materialization_digest()
+    captured_source_state = []
+    captured_copies = []
+    source_snapshot = temp_sqlite_store.snapshot
+
+    def snapshot_with_interleaved_writer():
+        copied_store = source_snapshot()
+        captured_copies.append(copied_store)
+        original_get_assets = copied_store.get_all_assets
+        original_close = copied_store.close
+        closed = []
+        captured_copies.append(closed)
+
+        def read_assets_then_publish():
+            assets = original_get_assets()
+            accepted = writer_runtime.accept_asset(interleaved_asset)
+            captured_source_state.append(
+                (
+                    accepted,
+                    temp_sqlite_store.get_runtime_revision(),
+                    temp_sqlite_store.runtime_materialization_digest(),
+                )
+            )
+            return assets
+
+        def close_copy():
+            original_close()
+            closed.append(True)
+
+        copied_store.get_all_assets = read_assets_then_publish
+        copied_store.close = close_copy
+        return copied_store
+
+    monkeypatch.setattr(temp_sqlite_store, "snapshot", snapshot_with_interleaved_writer)
+    try:
+        snapshot = projection.rebuild()
+
+        accepted, source_revision_after, source_digest_after = captured_source_state[0]
+        assert accepted.name == interleaved_asset.name
+        assert source_revision_after > source_revision_before
+        assert snapshot.revision == source_revision_before
+        assert snapshot.revision < source_revision_after
+        assert {item[0] for item in snapshot.assets} == {first.id}
+        assert temp_sqlite_store.get_runtime_revision() == source_revision_after
+        assert temp_sqlite_store.runtime_materialization_digest() == source_digest_after
+        assert source_digest_after != source_digest_before
+        with pytest.raises(sqlite3.ProgrammingError):
+            captured_copies[0].get_runtime_revision()
+        assert captured_copies[1] == [True]
+
+        # The rebuilt generation is coherent but older than the concurrent commit.
+        # The ordinary freshness path catches up on the next indexed read.
+        assert projection.get_assets_by_name(interleaved_asset.name) == [accepted]
+        active_generation = projection._generation_root(
+            client.get(projection.active_key)
+        )
+        assert client.smembers(
+            f"{active_generation}:asset-name:{projection._index_token(interleaved_asset.name)}"
+        ) == {accepted.id}
+        assert client.get(f"{active_generation}:asset:{accepted.id}") is not None
+        assert client.hgetall(f"{active_generation}:meta")["revision"] == str(
+            source_revision_after
+        )
+    finally:
+        writer.close()
+
+
+def test_snapshot_projection_failure_closes_copy_without_publishing_generation(
+    temp_sqlite_store, monkeypatch
+):
+    runtime, _, _ = _facts(temp_sqlite_store)
+    client = FakeRedis()
+    projection = _projection(temp_sqlite_store, runtime, client)
+    active = projection.rebuild().digest
+    redis_state_before = (
+        deepcopy(client.strings),
+        deepcopy(client.hashes),
+        deepcopy(client.sets),
+    )
+    source_revision = temp_sqlite_store.get_runtime_revision()
+    source_digest = temp_sqlite_store.runtime_materialization_digest()
+    source_snapshot = temp_sqlite_store.snapshot
+    captured = []
+
+    def failing_snapshot():
+        copied_store = source_snapshot()
+        captured.append(copied_store)
+        original_close = copied_store.close
+        close_count = []
+
+        def close_copy():
+            close_count.append(True)
+            original_close()
+
+        def fail_read():
+            raise RuntimeError("injected query projection read failure")
+
+        copied_store.get_all_contracts = fail_read
+        copied_store.close = close_copy
+        captured.append(close_count)
+        return copied_store
+
+    monkeypatch.setattr(temp_sqlite_store, "snapshot", failing_snapshot)
+    with pytest.raises(RuntimeError, match="injected query projection read failure"):
+        projection.rebuild()
+
+    assert captured[1] == [True]
+    with pytest.raises(sqlite3.ProgrammingError):
+        captured[0].get_runtime_revision()
+    assert client.get(projection.active_key) == active
+    assert (
+        client.strings,
+        client.hashes,
+        client.sets,
+    ) == redis_state_before
+    assert temp_sqlite_store.get_runtime_revision() == source_revision
+    assert temp_sqlite_store.runtime_materialization_digest() == source_digest
+
+
+def test_query_snapshot_refuses_reader_without_snapshot_capability(temp_sqlite_store):
+    runtime, _, _ = _facts(temp_sqlite_store)
+
+    class LiveReader:
+        def __getattr__(self, name):
+            if name == "snapshot":
+                raise AttributeError(name)
+            return getattr(temp_sqlite_store, name)
+
+    with pytest.raises(TypeError, match="must provide a consistent snapshot"):
+        build_query_snapshot(LiveReader(), domain_id=runtime.genesis.id)
 
 
 def test_redis_projection_rebuilds_and_serves_entity_indexes(temp_sqlite_store):
