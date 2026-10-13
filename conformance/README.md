@@ -9,6 +9,7 @@ Python reference consumes the same files in `tests/conformance/`.
 Candidate effect payloads and metadata use this interoperable JSON subset:
 
 - object keys are strings;
+- object keys are already NFC and unique after NFC normalization;
 - values are objects, arrays, strings, booleans, null, or integers in
   `[-9007199254740991, 9007199254740991]`;
 - floating-point values are forbidden; encode exact decimals as strings;
@@ -24,6 +25,17 @@ lowercase SHA-256 hex digest of the same NFC-normalized string.
 Array order is significant. Builders must sort protocol fields whose schema
 defines set semantics before constructing the Candidate; a generic canonical
 JSON encoder must not reorder arrays.
+
+Candidate causal parents are arrays of non-empty strings. Parent order and
+duplicates are preserved; references are not required to resolve or use a
+particular ID prefix. The shared v0.5.13 boundary vectors include a fixed-key
+Candidate with the valid NFC-key object and ordered parents, expected signing
+bytes, ID and signature, plus invalid key and parent cases. Python and Node
+consume and verify the same file:
+
+```bash
+node scripts/check_signed_json_boundary_vectors.mjs
+```
 
 The v1 decoder rejects any `protocol_version` other than `1`. Typed integers
 inside the signed envelope, including `claim_epoch`, obey the same safe range.

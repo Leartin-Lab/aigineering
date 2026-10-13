@@ -470,6 +470,38 @@ def test_generic_candidate_endpoint_returns_decision_evidence(tmp_path, monkeypa
     assert "candidate.received" in decision["record_types"]
 
 
+def test_candidate_endpoint_rejects_non_nfc_keys_before_store_write(
+    tmp_path, monkeypatch
+):
+    from aigineering.server.app import _request_store
+
+    store = SQLiteStore(str(tmp_path / "candidate-boundary.db"))
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("aigineering.server.app.sync_runtime", lambda *a, **k: None)
+    previous_override = app.dependency_overrides.get(_request_store)
+    app.dependency_overrides[_request_store] = lambda: store
+    try:
+        client, actor = _signed_client()
+        body = _candidate_body(
+            actor,
+            CandidateEffect("asset.propose", {"asset": {"name": "boundary-control"}}),
+        )
+        body["effects"][0]["payload"] = {"asset": {"café": "value"}}
+        before = store.get_runtime_revision()
+
+        response = client.post("/candidates", json=body)
+
+        assert response.status_code == 422
+        assert "NFC" in response.json()["detail"]
+        assert store.get_runtime_revision() == before
+    finally:
+        if previous_override is None:
+            app.dependency_overrides.pop(_request_store, None)
+        else:
+            app.dependency_overrides[_request_store] = previous_override
+        store.close()
+
+
 def test_create_and_get_contract(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     client, actor = _signed_client()

@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
+import ast
 import json
-import pytest
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from threading import Barrier
+
+import pytest
 
 from aigineering.core.commitment import CandidateCommitter
 from aigineering.core.acceptance import (
     OutputQualificationConflict,
     validate_output_qualification_commit,
+    validate_output_shape,
 )
 from aigineering.core.domain import initialize_genesis
 from aigineering.core.ids import acceptance_policy_id, hash_contract_v3
@@ -22,6 +26,7 @@ from aigineering.core.signing import Ed25519Signer
 from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.protocol.candidate import (
     ActorKey,
+    CandidateClaimBinding,
     create_candidate_proposal,
     create_genesis_manifest,
 )
@@ -29,6 +34,7 @@ from aigineering.protocol.effect_builders import (
     asset_attestation_effect,
     asset_proposal_effect,
     contract_declaration_effect,
+    worker_claim_effect,
     worker_registration_effect,
 )
 from aigineering.protocol.types import Asset, Candidate, Contract
@@ -59,7 +65,7 @@ def acceptance_domain(tmp_path):
                 "producer-key",
                 producer.kind,
                 producer.signer_id,
-                ("worker.submit", "asset.attest", "verify.compliance"),
+                ("worker.submit", "worker.claim", "asset.attest", "verify.compliance"),
             ),
             ActorKey(
                 "worker:verifier",
@@ -230,6 +236,254 @@ def _attestation_effect(contract, asset, *, verdict="accepted"):
         rubric_asset_ids=tuple(policy.get("rubric_asset_ids", ())),
         evidence_asset_ids=tuple(policy.get("evidence_asset_ids", ())),
     )
+
+
+def test_declared_output_number_shapes_reject_non_finite_values_recursively():
+    shape = {"samples": [{"value": "number"}]}
+    for content in (
+        '{"samples":[{"value":NaN}]}',
+        '{"samples":[{"value":Infinity}]}',
+        '{"samples":[{"value":-Infinity}]}',
+        '{"samples":[{"value":1e9999}]}',
+    ):
+        with pytest.raises(ValueError):
+            validate_output_shape(
+                {"output_shapes": {"report": shape}}, "report", content
+            )
+
+    validate_output_shape(
+        {"output_shapes": {"report": shape}},
+        "report",
+        '{"samples":[{"value":12.5},{"value":0},{"value":-123456789012345678901234567890}]}',
+    )
+    for content in (
+        '{"samples":[{"value":true}]}',
+        '{"samples":[{"value":"Infinity"}]}',
+    ):
+        with pytest.raises(ValueError):
+            validate_output_shape(
+                {"output_shapes": {"report": shape}}, "report", content
+            )
+    validate_output_shape(
+        {"output_shapes": {"report": {"samples": [{"value": "string"}]}}},
+        "report",
+        '{"samples":[{"value":"Infinity"}]}',
+    )
+
+
+def test_unshaped_output_content_is_not_parsed_as_json():
+    validate_output_shape(
+        {"output_shapes": {"another_output": "number"}},
+        "report",
+        "ordinary text that is not JSON: NaN Infinity 1e9999",
+    )
+
+
+def test_output_shape_validator_does_not_import_tool_schema():
+    source = Path(__file__).resolve().parents[2] / "src/aigineering/core/acceptance.py"
+    tree = ast.parse(source.read_text())
+    assert not any(
+        isinstance(node, ast.ImportFrom)
+        and node.module == "aigineering.core.tool_schema"
+        or isinstance(node, ast.Import)
+        and any(alias.name == "aigineering.core.tool_schema" for alias in node.names)
+        for node in ast.walk(tree)
+    )
+
+
+def _signed_claim_output_candidate(domain, *, output_shapes, output_content, key):
+    store, genesis, committer, _, producer, _, _, _, _ = domain
+    contract, _ = _publish_contract_and_output(
+        domain, produce_output=False, output_shapes=output_shapes
+    )
+    claim_request = _candidate(
+        genesis,
+        "worker:producer",
+        "producer-key",
+        producer,
+        worker_claim_effect("worker:producer", contract_id=contract.id),
+        f"signed-output-claim:{key}",
+    )
+    claimed = claim_next_package(
+        store,
+        worker_id="worker:producer",
+        contract_id=contract.id,
+        claim_candidate=claim_request,
+    )
+    assert claimed is not None, "signed worker.claim did not produce a claim"
+    candidate = create_candidate_proposal(
+        domain_id=genesis.id,
+        actor_id="worker:producer",
+        key_id="producer-key",
+        effects=(
+            asset_proposal_effect(
+                Asset(id="untrusted-output", name="report", content=output_content)
+            ),
+        ),
+        signer=producer,
+        idempotency_key=f"signed-output:{key}",
+        claim_binding=CandidateClaimBinding(
+            contract.id,
+            claimed.package.claim_id,
+            claimed.package.claim_epoch,
+            claimed.package.package_id,
+        ),
+    )
+    return contract, candidate, committer
+
+
+def test_signed_claim_submission_rejects_non_finite_output_without_business_facts(
+    acceptance_domain,
+):
+    store, genesis, committer, _, _, _, _, _, _ = acceptance_domain
+    contract, candidate, committer = _signed_claim_output_candidate(
+        acceptance_domain,
+        output_shapes={"report": {"score": "number"}},
+        output_content='{"score":1e9999}',
+        key="non-finite",
+    )
+    decision = committer.commit(candidate, genesis)
+    assert not decision.accepted
+    assert any(
+        record.record_type == "candidate.received"
+        and record.payload.get("candidate_id") == candidate.id
+        for _, record in store.scan_runtime_records()
+    )
+    assert any(
+        record.record_type == "candidate.rejected"
+        and record.payload.get("candidate_id") == candidate.id
+        and "finite number" in str(record.payload)
+        for _, record in store.scan_runtime_records()
+    )
+    assert not any(
+        record.record_type == "asset.committed"
+        and record.payload.get("contract_id") == contract.id
+        and record.payload.get("asset", {}).get("name") == "report"
+        for _, record in store.scan_runtime_records()
+    )
+    assert not store.scan_runtime_records(record_type="output.qualified")
+
+
+def test_attestation_rejects_preexisting_non_finite_claim_output_without_rewriting_history(
+    acceptance_domain, monkeypatch
+):
+    import aigineering.core.effect_projection as effect_projection
+
+    store, genesis, committer, _, _, verifier, _, _, db_path = acceptance_domain
+    original_guard = effect_projection.validate_output_shape
+    monkeypatch.setattr(effect_projection, "validate_output_shape", lambda *_: None)
+    contract, candidate, committer = _signed_claim_output_candidate(
+        acceptance_domain,
+        output_shapes={"report": {"score": "number"}},
+        output_content='{"score":1e9999}',
+        key="pre-fix-history",
+    )
+    prepared = committer.commit(candidate, genesis)
+    monkeypatch.setattr(effect_projection, "validate_output_shape", original_guard)
+    assert prepared.accepted, prepared
+    asset = store.get_assets_by_name("report")[0]
+    from aigineering.core.projection_context import load_effect_projection_context
+    from aigineering.core.acceptance import validate_claim_bound_output
+
+    context = load_effect_projection_context(store)
+    validate_claim_bound_output(context, asset, contract)
+    committed_before = tuple(
+        record
+        for _, record in store.scan_runtime_records(record_type="asset.committed")
+        if record.payload.get("asset", {}).get("id") == asset.id
+    )
+    assert len(committed_before) == 1
+    claim_provenance_before = tuple(
+        (record.record_type, record.id)
+        for _, record in store.scan_runtime_records()
+        if record.record_type in {"claim.granted", "claim.submitted"}
+        and record.payload.get("contract_id") == contract.id
+    )
+    attestation = _candidate(
+        genesis,
+        "worker:verifier",
+        "verifier-key",
+        verifier,
+        _attestation_effect(contract, asset),
+        "reject-preexisting-nonfinite-output",
+    )
+    rejected = committer.commit(attestation, genesis)
+    assert not rejected.accepted
+    attestation_rejections = tuple(
+        record
+        for _, record in store.scan_runtime_records(record_type="candidate.rejected")
+        if record.payload.get("candidate_id") == attestation.id
+    )
+    assert len(attestation_rejections) == 1
+    rejection_reason = str(attestation_rejections[0].payload.get("reason", ""))
+    assert "output shape mismatch" in rejection_reason
+    assert "finite number" in rejection_reason
+    assert not store.scan_runtime_records(record_type="asset.attested")
+    assert not store.scan_runtime_records(record_type="output.qualified")
+    committed_after = tuple(
+        record
+        for _, record in store.scan_runtime_records(record_type="asset.committed")
+        if record.payload.get("asset", {}).get("id") == asset.id
+    )
+    assert committed_after == committed_before
+    claim_provenance_after = tuple(
+        (record.record_type, record.id)
+        for _, record in store.scan_runtime_records()
+        if record.record_type in {"claim.granted", "claim.submitted"}
+        and record.payload.get("contract_id") == contract.id
+    )
+    assert claim_provenance_after == claim_provenance_before
+    assert store.get_assets_by_name("report")[0] == asset
+    post_rejection_digest = store.runtime_materialization_digest()
+    assert store.rebuild_runtime_materializations(strict=True) == post_rejection_digest
+    reopened = SQLiteStore(db_path)
+    try:
+        assert reopened.runtime_materialization_digest() == post_rejection_digest
+        assert (
+            reopened.rebuild_runtime_materializations(strict=True)
+            == post_rejection_digest
+        )
+        assert reopened.get_assets_by_name("report")[0] == asset
+    finally:
+        reopened.close()
+
+
+def test_finite_claim_bound_output_qualifies_replays_and_rebuilds(acceptance_domain):
+    store, genesis, committer, _, _, verifier, _, _, db_path = acceptance_domain
+    contract, candidate, committer = _signed_claim_output_candidate(
+        acceptance_domain,
+        output_shapes={"report": {"score": "number"}},
+        output_content='{"score":12.5}',
+        key="finite-positive",
+    )
+    produced = committer.commit(candidate, genesis)
+    assert produced.accepted, produced
+    asset = store.get_assets_by_name("report")[0]
+    assert asset.content == '{"score":12.5}'
+    replayed_output = committer.commit(candidate, genesis)
+    assert replayed_output.accepted
+    assert len(store.get_assets_by_name("report")) == 1
+
+    attestation = _candidate(
+        genesis,
+        "worker:verifier",
+        "verifier-key",
+        verifier,
+        _attestation_effect(contract, asset),
+        "attest-finite-output",
+    )
+    qualified = committer.commit(attestation, genesis)
+    assert qualified.accepted, qualified
+    assert len(store.scan_runtime_records(record_type="output.qualified")) == 1
+    digest = store.runtime_materialization_digest()
+    reopened = SQLiteStore(db_path)
+    try:
+        assert reopened.runtime_materialization_digest() == digest
+        assert reopened.rebuild_runtime_materializations(strict=True) == digest
+        assert len(reopened.scan_runtime_records(record_type="output.qualified")) == 1
+        assert reopened.get_assets_by_name("report")[0] == asset
+    finally:
+        reopened.close()
 
 
 def test_producer_cannot_attest_its_own_output(acceptance_domain):

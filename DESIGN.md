@@ -118,7 +118,8 @@ do not depend back on runtime-core implementations.
 Signed JSON uses a language-neutral canonical subset:
 
 - string object keys;
-- Unicode NFC normalization;
+- object keys are already NFC and unique after normalization;
+- Candidate causal parents are arrays of non-empty strings;
 - no floats, NaN, Infinity, bytes, sets, or unsafe integers;
 - stable ordering and serialization.
 
@@ -502,10 +503,12 @@ of an already qualified slot fail closed.
 
 An independent policy may additionally bind deterministic `output_shapes`.
 The small language supports exact JSON objects, non-empty arrays, strings,
-non-empty strings, numbers, and booleans. Shape validation runs when the
-producer submits an output and again before qualification. Planning,
-recovery, retry, and continuation inherit the relevant shapes, so a verifier
-opinion cannot legalize mechanically malformed content.
+non-empty strings, finite numbers, and booleans. Shape-parsed JSON rejects
+non-standard numeric constants and exponent overflow; an output without a
+shape remains ordinary text. Shape validation runs when the producer submits
+an output and again before qualification. Planning, recovery, retry, and
+continuation inherit the relevant shapes, so a verifier opinion cannot
+legalize mechanically malformed content.
 
 The exact Asset may be produced by the Contract itself or by a Contract whose
 immutable parent chain reaches it. This supports plan and tool descendants

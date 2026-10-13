@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 import json
+import math
 
 from aigineering.core.output_satisfaction import all_outputs_satisfied
 from aigineering.core.publication_history import (
@@ -351,11 +352,10 @@ def _output_shape_error(value: object, shape: object, path: str = "$") -> str | 
             else f"{path} must be a non-empty string"
         )
     if shape == "number":
-        return (
-            None
-            if isinstance(value, (int, float)) and not isinstance(value, bool)
-            else f"{path} must be a number"
+        is_finite_number = (isinstance(value, int) and not isinstance(value, bool)) or (
+            isinstance(value, float) and math.isfinite(value)
         )
+        return None if is_finite_number else f"{path} must be a finite number"
     if shape == "boolean":
         return None if isinstance(value, bool) else f"{path} must be a boolean"
     if isinstance(shape, Mapping):
@@ -380,6 +380,10 @@ def _output_shape_error(value: object, shape: object, path: str = "$") -> str | 
     return f"{path} uses an unsupported output shape"
 
 
+def _reject_non_finite_json_constant(value: str):
+    raise ValueError(f"non-finite JSON constant {value}")
+
+
 def validate_output_shape(
     policy: Mapping[str, object], output_name: str, content: str
 ) -> None:
@@ -390,8 +394,10 @@ def validate_output_shape(
     if output_name not in output_shapes:
         return
     try:
-        output_value = json.loads(content)
-    except json.JSONDecodeError as exc:
+        output_value = json.loads(
+            content, parse_constant=_reject_non_finite_json_constant
+        )
+    except (json.JSONDecodeError, ValueError) as exc:
         raise ValueError("acceptance output shape requires valid JSON") from exc
     shape_error = _output_shape_error(output_value, output_shapes[output_name])
     if shape_error is not None:
