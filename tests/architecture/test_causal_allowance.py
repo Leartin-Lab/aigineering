@@ -110,6 +110,53 @@ def test_allowance_second_writer_check_uses_complete_pending_records():
     assert complete_pending_checks
 
 
+def test_all_terminal_store_writers_use_the_shared_allowance_materializer():
+    core = Path(__file__).resolve().parents[2] / "src" / "aigineering" / "core"
+
+    def class_method(path, class_name, method_name):
+        tree = ast.parse(path.read_text())
+        owner = next(
+            node
+            for node in tree.body
+            if isinstance(node, ast.ClassDef) and node.name == class_name
+        )
+        return next(
+            node
+            for node in owner.body
+            if isinstance(node, ast.FunctionDef) and node.name == method_name
+        )
+
+    sqlite = core / "sqlite_store.py"
+    for name in (
+        "commit_ingress_batch",
+        "commit_worker_invocation_failure",
+        "commit_claim_expiration",
+    ):
+        method = class_method(sqlite, "SQLiteStore", name)
+        assert any(
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "_commit_time_ingress_consequences"
+            for node in ast.walk(method)
+        )
+    consequence_owner = class_method(
+        sqlite, "SQLiteStore", "_commit_time_ingress_consequences"
+    )
+    assert any(
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "materialize_terminal_allowance"
+        for node in ast.walk(consequence_owner)
+    )
+    memory = class_method(core / "store.py", "MemoryStore", "commit_ingress_batch")
+    assert any(
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "materialize_terminal_allowance"
+        for node in ast.walk(memory)
+    )
+
+
 def _contract(
     name: str,
     *,

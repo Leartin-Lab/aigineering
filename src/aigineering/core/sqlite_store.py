@@ -2002,9 +2002,7 @@ class SQLiteStore:
     ) -> bool:
         """Atomically record provider failure, terminal fact, and fenced release."""
         with self._conn:
-            self._insert_trace_entry(trace_entry)
-            for record in runtime_records:
-                self._insert_runtime_record(record)
+            self._conn.execute("BEGIN IMMEDIATE")
             recorded_at = now_iso()
             cursor = self._conn.execute(
                 "UPDATE worker_claims SET status = 'released', updated_at = ? "
@@ -2032,21 +2030,26 @@ class SQLiteStore:
                 for record in runtime_records
                 if record.record_type == "worker.invocation_failed"
             ]
-            self._insert_runtime_record(
-                create_runtime_record(
-                    "claim.released",
-                    {
-                        "claim_id": claim_id,
-                        "contract_id": claim_row["contract_id"],
-                        "epoch": int(claim_row["epoch"]),
-                        "package_id": claim_row["package_id"],
-                        "worker_id": claim_row["worker_id"],
-                    },
-                    causal_parents=[self._claim_granted_record_id(claim_id)]
-                    + failure_parents,
-                    recorded_at=recorded_at,
-                )
+            released = create_runtime_record(
+                "claim.released",
+                {
+                    "claim_id": claim_id,
+                    "contract_id": claim_row["contract_id"],
+                    "epoch": int(claim_row["epoch"]),
+                    "package_id": claim_row["package_id"],
+                    "worker_id": claim_row["worker_id"],
+                },
+                causal_parents=[self._claim_granted_record_id(claim_id)]
+                + failure_parents,
+                recorded_at=recorded_at,
             )
+            pending = runtime_records + (released,)
+            derived = self._commit_time_ingress_consequences((), (), (), pending)
+            pending += derived[1]
+            self._validate_allowance_records(pending)
+            self._insert_trace_entry(trace_entry)
+            for record in pending:
+                self._insert_runtime_record(record)
         return True
 
     def commit_claim_expiration(
@@ -2061,6 +2064,7 @@ class SQLiteStore:
     ) -> bool:
         """Atomically turn an expired lease into durable failure facts."""
         with self._conn:
+            self._conn.execute("BEGIN IMMEDIATE")
             cursor = self._conn.execute(
                 "UPDATE worker_claims SET status = 'expired', updated_at = ? "
                 "WHERE claim_id = ? AND epoch = ? AND status = 'active' "
@@ -2069,13 +2073,20 @@ class SQLiteStore:
             )
             if cursor.rowcount != 1:
                 return False
-            self._insert_trace_entry(trace_entry)
-            for record in runtime_records:
-                self._insert_runtime_record(record)
             if not any(
                 record.record_type == "claim.expired" for record in runtime_records
             ):
                 raise ValueError("claim expiration commit requires claim.expired fact")
+            derived = self._commit_time_ingress_consequences(
+                (), (), (), runtime_records
+            )
+            pending = runtime_records + derived[1]
+            self._validate_allowance_records(pending)
+            self._insert_trace_entry(trace_entry)
+            for record in runtime_records:
+                self._insert_runtime_record(record)
+            for record in derived[1]:
+                self._insert_runtime_record(record)
         return True
 
     def commit_ingress_batch(
@@ -2278,7 +2289,7 @@ class SQLiteStore:
             self._validate_allowance_records(runtime_records, candidate_id=candidate_id)
             self._insert_ingress_assets(accepted_assets)
             check_crash_point("after_asset_before_trace")
-            derived_traces, derived_records = self._commit_time_asset_consequences(
+            derived_traces, derived_records = self._commit_time_ingress_consequences(
                 accepted_assets,
                 declarations,
                 trace_entries,
@@ -2331,14 +2342,14 @@ class SQLiteStore:
                 )
             return derived_traces, derived_records
 
-    def _commit_time_asset_consequences(
+    def _commit_time_ingress_consequences(
         self,
         accepted_assets: list[Asset],
         declarations: tuple[Contract, ...],
         trace_entries: list[TraceEntry],
         runtime_records: tuple[RuntimeRecord, ...],
     ) -> tuple[tuple[TraceEntry, ...], tuple[RuntimeRecord, ...]]:
-        """Close races between pure reduction and serialized commitment.
+        """Close races between pure projection and serialized commitment.
 
         Candidate reduction normally derives these facts before the write
         transaction.  A concurrent Candidate may commit another output before
@@ -2346,27 +2357,29 @@ class SQLiteStore:
         pure reducer against the transaction-visible snapshot materializes
         only consequences that the earlier snapshot could not observe.
         """
-        if not accepted_assets:
-            return (), ()
-
         from aigineering.core.causal_allowance import materialize_terminal_allowance
-        from aigineering.core.fact_materialization import (
-            reduce_asset_facts,
-            trace_records,
-        )
 
-        projected_traces, projected_records = reduce_asset_facts(
-            self,
-            self,
-            accepted_assets,
-            pending_contracts=declarations,
-        )
+        if accepted_assets:
+            from aigineering.core.fact_materialization import (
+                reduce_asset_facts,
+                trace_records,
+            )
+
+            projected_traces, projected_records = reduce_asset_facts(
+                self,
+                self,
+                accepted_assets,
+                pending_contracts=declarations,
+            )
+        else:
+            projected_traces, projected_records = (), ()
         known_trace_ids = {entry.id for entry in trace_entries}
         known_record_ids = {record.id for record in runtime_records}
         new_traces = tuple(
             entry for entry in projected_traces if entry.id not in known_trace_ids
         )
-        candidates = tuple(projected_records) + trace_records(new_traces)
+        projected_trace_records = trace_records(new_traces) if accepted_assets else ()
+        candidates = tuple(projected_records) + projected_trace_records
         new_records = tuple(
             record for record in candidates if record.id not in known_record_ids
         )

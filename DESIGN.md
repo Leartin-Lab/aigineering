@@ -480,6 +480,12 @@ valid terminal consequence to omit a same-batch reservation. Exact replay adds
 no second debit; validating an unrelated new batch does not rewrite historical
 facts.
 
+The same allowance owner materializes terminal consequences for Candidate
+ingress, Worker invocation failure, and claim expiration. SQLite commits a claim
+transition, its terminal fact, and any remaining-allowance extinguishment in one
+writer transaction. A new reservation cannot use a source Contract that already
+has a terminal fact; exact replay does not backfill missing historical burns.
+
 Completion, recovery, continuation, task status, and audit traces read the same
 allowance projection. There is no process-local budget owner. Historical
 Contracts without allowance facts fall back to their declared budget only for

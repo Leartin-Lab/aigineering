@@ -196,6 +196,12 @@ def terminal_allowance_records(
 ) -> tuple[RuntimeRecord, ...]:
     """Extinguish the remaining allowance of newly terminal Contracts."""
     by_id = {contract.id: contract for contract in contracts}
+    existing_ids = {record.id for record in existing_records}
+    pending_extinguished = {
+        str(record.payload.get("contract_id", ""))
+        for record in pending_records
+        if record.record_type == "allowance.extinguished"
+    }
     all_records = tuple(existing_records) + tuple(pending_records)
     terminals = {
         str(record.payload.get("contract_id", "")): record
@@ -204,6 +210,8 @@ def terminal_allowance_records(
     }
     consequences: list[RuntimeRecord] = []
     for contract_id, terminal in sorted(terminals.items()):
+        if terminal.id in existing_ids or contract_id in pending_extinguished:
+            continue
         contract = by_id.get(contract_id)
         if contract is None:
             continue
@@ -236,6 +244,10 @@ def materialize_terminal_allowance(
     pending_records: Sequence[RuntimeRecord],
 ) -> tuple[RuntimeRecord, ...]:
     """Load the append-only snapshot needed by terminal allowance projection."""
+    if not any(
+        record.record_type == "lifecycle.terminal" for record in pending_records
+    ):
+        return ()
     existing_records = tuple(record for _, record in store.scan_runtime_records())
     return terminal_allowance_records(
         tuple(store.get_all_contracts()) + tuple(contracts),
@@ -291,6 +303,11 @@ def validate_allowance_commit(
         record for record in new_pending if record.record_type == "allowance.returned"
     )
     records_with_returns = tuple(existing_records) + validated_returns
+    terminal_source_ids = {
+        str(record.payload.get("contract_id", ""))
+        for record in existing_records
+        if record.record_type == "lifecycle.terminal"
+    }
     requested: dict[str, int] = defaultdict(int)
     for record in new_pending:
         if record.record_type != "allowance.reserved":
@@ -301,6 +318,10 @@ def validate_allowance_commit(
         source = by_id.get(source_id)
         if source is None:
             raise ValueError("allowance reservation references an unknown Contract")
+        if source_id in terminal_source_ids:
+            raise CausalAllowanceConflict(
+                "cannot reserve allowance from a terminal Contract"
+            )
         available = allowance_available(source, records_with_returns)
         if amount > available:
             raise CausalAllowanceConflict(

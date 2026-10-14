@@ -418,6 +418,12 @@ class MemoryStore(_ProjectionIndexMixin):
             )
         del trace_entries
         declarations = ((contract,) if contract is not None else ()) + tuple(contracts)
+        from aigineering.core.causal_allowance import materialize_terminal_allowance
+
+        derived_records = materialize_terminal_allowance(
+            self, declarations, runtime_records
+        )
+        runtime_records = runtime_records + derived_records
         if any(
             record.record_type
             in {"claim.constraint.placed", "claim.constraint.released"}
@@ -515,7 +521,7 @@ class MemoryStore(_ProjectionIndexMixin):
             for record in runtime_records:
                 self._append_runtime_record(record)
             committed = True
-            return (), ()
+            return (), derived_records
         finally:
             if not committed:
                 (

@@ -8,6 +8,12 @@ SQLite's second allowance proof now includes the Candidate's main pending facts
 and the derived terminal consequences, preserving same-transaction
 reservations when another writer completes a Contract during projection.
 
+SQLite Candidate ingress, Worker invocation failure, and claim expiration now
+use the same terminal-allowance materializer. Claim status, terminal outcome,
+and any remaining allowance are committed together; a new child reservation
+cannot draw from an already terminal source. This applies to new writes only:
+exact replay and reconstruction do not repair historical missing burns.
+
 The existing terminal-event values have one dependency-neutral owner while
 `runtime_projection.TERMINAL_EVENTS` remains available to existing readers.
 No new protocol field, fact type, terminal authorization path, or schema was
