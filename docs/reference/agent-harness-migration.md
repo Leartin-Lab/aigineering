@@ -55,10 +55,47 @@ Ed25519 signatures.
 2. POST it to `/worker/claims` and retain the returned WorkerPackage unchanged.
 3. Give the harness only `contract`, `disclosed_assets`,
    `method_context_assets`, `tool_scope`, and the visible remaining allowance.
-4. Convert the harness outcome into exactly one Aigineering action.
-5. Compile the action with `result_candidate(package, raw_action)`.
-6. POST the signed Candidate to `/worker/submissions`.
+4. Convert the harness outcome into exactly one Aigineering action string.
+5. Compile that raw action text with `result_candidate(package, raw_action)`.
+6. Serialize the returned signed Candidate for the submission transport.
 7. Read task status and audit; never infer commitment from an HTTP send alone.
+
+For a normal `/exec`, build the action string with the declared output names
+and non-empty text values. This copyable single-output example assumes the
+package Contract declares an output named `report`:
+
+```python
+import json
+import subprocess
+
+from aigineering.agent.harness import candidate_json
+
+raw_action = "/exec " + json.dumps(
+    {"outputs": {"report": "A concise report based on the package"}}
+)
+result = adapter.result_candidate(package, raw_action)
+signed_candidate_json = candidate_json(result)
+subprocess.run(
+    ["aig", "worker", "submit", "--json", signed_candidate_json], check=True
+)
+```
+
+This action/sign/submit fragment assumes `adapter` and a claimed `package`
+are already available from the preceding loop. For an HTTP client whose
+`json=` parameter serializes a Python object, pass `candidate_dict(result)`.
+Use `candidate_json(result)` for the CLI's JSON-text option or an HTTP raw
+JSON body; do not pass that string to a client's `json=` parameter, which
+would encode the JSON string a second time.
+
+For multiple outputs, the `outputs` mapping must contain every exact declared
+output name and no undeclared names; each value must be non-empty text. The
+nested `outputs` mapping is the recommended canonical example. The existing
+action parser also supports a direct output-name mapping, such as
+`/exec {"report":"A concise report"}`. In either form, the `/exec` prefix
+and JSON body are part of the raw action string; a JSON object keyed by
+`/exec` is not action syntax. `candidate_json()` serializes the signed
+Candidate produced from that raw action, and that signed Candidate JSON is
+what the submission endpoint consumes.
 
 One claimed package produces one signed action. If the work needs another
 invocation, publish a bounded ordinary child task through that action; keep the

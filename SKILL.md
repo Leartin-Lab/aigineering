@@ -20,6 +20,11 @@ For an existing agent harness, follow the exact loop in
 [`agent-harness-migration.md`](docs/reference/agent-harness-migration.md):
 create or select a task, claim one package, produce one signed action, submit
 that Candidate, then inspect task status and export only qualified outputs.
+`result_candidate(package, raw_action)` takes action text, for example
+`'/exec ' + json.dumps({"outputs": {"report": "A concise report"}})`;
+replace `report` with the exact declared output name. Submit the signed
+Candidate JSON returned by `candidate_json`, not the raw action text. The
+migration guide shows the complete example and supported body forms.
 If independent acceptance is required, follow the exact
 [review workflow](docs/reference/task-board.md#request-an-exact-independent-review)
 before exporting.

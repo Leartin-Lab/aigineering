@@ -114,7 +114,15 @@ class HarnessCandidateAdapter:
         usage_metadata: Mapping[str, Any] | None = None,
         idempotency_key: str | None = None,
     ) -> CandidateProposal:
-        """Compile and sign one harness result against its exact package."""
+        """Compile and sign one raw action string against its exact package.
+
+        For example, build ``/exec `` plus ``json.dumps({"outputs":
+        {"declared_name": "non-empty text"}})`` using the package's exact
+        declared output names. The returned proposal is a signed Candidate.
+        Use ``candidate_dict()`` when an HTTP client's ``json=`` parameter
+        encodes Python objects; use ``candidate_json()`` for CLI JSON text or
+        a raw JSON body. The raw action string is not Candidate JSON.
+        """
         package = _worker_package(package)
         if not package.claim_id or package.claim_epoch < 1:
             raise ValueError("result requires a claimed WorkerPackage")
