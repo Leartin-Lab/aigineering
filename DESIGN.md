@@ -690,12 +690,24 @@ SQLite committed RuntimeRecords (replayable source)
 ```
 
 An application relay publishes only record metadata and typed task references to
-the event stream. Fixed revision IDs, Lua-atomic append/watermark updates and
-conditional repair provide idempotent concurrent catch-up. Stream deletion can
-be repaired from SQLite without resetting tasks. Derived query generations retain
-revision fencing and atomic publication. Connection and corruption failures are
-visible in strict application reads; low-level compatibility fallback requires
-explicit selection.
+the event stream. Before synchronization it proves the complete Redis prefix
+against the caller's SQLite snapshot while watching the stream and metadata keys.
+Small suffixes append with one watched transaction; larger suffixes stage a full
+snapshot in bounded chunks whose TTL is committed with each page, then publish it
+with one prevalidated Lua swap that checks the exact staged event count. Ordinary
+synchronization never clears or repairs a mismatched projection. The explicit
+`aig redis rebuild` command watches the live fence before opening a fresh snapshot
+from its fixed routed Store path. Only its first watched attempt may repair the
+captured damaged or ahead projection; a retry must prove the newer live state as
+a prefix of a fresh routed snapshot. An older snapshot reports a newer Redis
+watermark as noncurrent; its event view remains bounded to the exact source-known
+prefix. Empty history is represented by both live Redis keys being absent. Wait
+operations use XREAD as a wake hint and poll the caller's source revision, so a
+committed suffix becomes observable even without a new wake event; empty polls
+do not rescan the full history. Query-index generation publication has a separate
+owner; collaboration-prefix validation does not validate query-index contents.
+Connection and corruption failures are visible in strict application reads;
+low-level compatibility fallback requires explicit selection.
 
 Redis is independently rebuildable infrastructure, not a second Store authority.
 Commitment, authority, allowance, acceptance, claims, fencing, idempotency and

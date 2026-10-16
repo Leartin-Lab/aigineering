@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import math
 import time
+import uuid
 from typing import Any
 
 from aigineering.core.ids import compute_content_hash
@@ -17,49 +18,98 @@ from aigineering.adapters.redis_query import QueryProjectionUnavailable
 COLLABORATION_SCHEMA = "v2"
 DEFAULT_REDIS_URL = "redis://127.0.0.1:6379/0"
 
-_APPEND_EVENT = """
-local current = tonumber(redis.call('HGET', KEYS[2], 'watermark') or '0')
-local target = tonumber(ARGV[1])
-if current >= target then
-    return 0
+_READ_FENCE = """
+local st = redis.call('TYPE', KEYS[1]).ok
+local mt = redis.call('TYPE', KEYS[2]).ok
+local watermark = ''
+local schema = ''
+local tail_id = ''
+if mt == 'hash' then
+    watermark = redis.call('HGET', KEYS[2], 'watermark') or ''
+    schema = redis.call('HGET', KEYS[2], 'schema') or ''
 end
-if current ~= tonumber(ARGV[7]) then
-    return -1
+if st == 'stream' then
+    local tail = redis.call('XREVRANGE', KEYS[1], '+', '-', 'COUNT', 1)
+    if #tail > 0 then tail_id = tail[1][1] end
 end
-redis.call('XADD', KEYS[1], ARGV[1] .. '-0',
-    'revision', ARGV[1],
-    'record_id', ARGV[2],
-    'record_type', ARGV[3],
-    'contract_ids', ARGV[4],
-    'worker_ids', ARGV[5])
-redis.call('HSET', KEYS[2], 'watermark', ARGV[1], 'schema', ARGV[6])
+return {st, mt, watermark, schema, tail_id}
+"""
+
+_SWAP_STAGED = """
+local live_stream = KEYS[1]
+local live_meta = KEYS[2]
+local stage_stream = KEYS[3]
+local stage_meta = KEYS[4]
+local seen = {}
+for _, key in ipairs(KEYS) do
+    if seen[key] then return -1 end
+    seen[key] = true
+end
+local function keytype(key) return redis.call('TYPE', key).ok end
+local lst = keytype(live_stream)
+local lmt = keytype(live_meta)
+local sst = keytype(stage_stream)
+local smt = keytype(stage_meta)
+local repair = ARGV[10] == '1'
+if not repair and (lst ~= 'none' and lst ~= 'stream') then return -2 end
+if not repair and (lmt ~= 'none' and lmt ~= 'hash') then return -2 end
+local target = ARGV[1]
+local schema = ARGV[2]
+local empty = ARGV[3] == '1'
+local expected_count = tonumber(ARGV[9])
+if not expected_count or expected_count < 0 then return -3 end
+if empty then
+    if sst ~= 'none' or smt ~= 'none' or target ~= '0' or expected_count ~= 0 then return -4 end
+else
+    if sst ~= 'stream' or smt ~= 'hash' then return -4 end
+end
+if not empty then
+    local staged_watermark = redis.call('HGET', stage_meta, 'watermark') or ''
+    local staged_schema = redis.call('HGET', stage_meta, 'schema') or ''
+    if staged_watermark ~= target or staged_schema ~= schema then return -5 end
+    if redis.call('XLEN', stage_stream) ~= expected_count then return -6 end
+    local staged_tail = ''
+    local stail = redis.call('XREVRANGE', stage_stream, '+', '-', 'COUNT', 1)
+    if #stail > 0 then staged_tail = stail[1][1] end
+    if staged_tail ~= target .. '-0' then return -7 end
+end
+local wm = ''
+local sch = ''
+local tail = ''
+if lmt == 'hash' then
+    wm = redis.call('HGET', live_meta, 'watermark') or ''
+    sch = redis.call('HGET', live_meta, 'schema') or ''
+end
+if lst == 'stream' then
+    local ltail = redis.call('XREVRANGE', live_stream, '+', '-', 'COUNT', 1)
+    if #ltail > 0 then tail = ltail[1][1] end
+end
+if lst ~= ARGV[4] or lmt ~= ARGV[5] or wm ~= ARGV[6] or sch ~= ARGV[7] or tail ~= ARGV[8] then return -8 end
+-- Every operand and required stage invariant has been checked before the first live write.
+if empty then
+    redis.call('DEL', live_stream, live_meta)
+    return 1
+end
+redis.call('PERSIST', stage_stream)
+redis.call('PERSIST', stage_meta)
+redis.call('RENAME', stage_stream, live_stream)
+redis.call('RENAME', stage_meta, live_meta)
 return 1
 """
 
-_READ_STATE = """
-local watermark = redis.call('HGET', KEYS[2], 'watermark') or '0'
-local schema = redis.call('HGET', KEYS[2], 'schema') or ''
-local tail = redis.call('XREVRANGE', KEYS[1], '+', '-', 'COUNT', 1)
-local tail_id = ''
-if #tail > 0 then tail_id = tail[1][1] end
-return {watermark, schema, tail_id}
-"""
-_CLEAR_IF_STATE = """
-local watermark = redis.call('HGET', KEYS[2], 'watermark') or '0'
-local schema = redis.call('HGET', KEYS[2], 'schema') or ''
-local tail = redis.call('XREVRANGE', KEYS[1], '+', '-', 'COUNT', 1)
-local tail_id = ''
-if #tail > 0 then tail_id = tail[1][1] end
-if watermark ~= ARGV[1] or schema ~= ARGV[2] or tail_id ~= ARGV[3] then
-    return 0
-end
-redis.call('DEL', KEYS[1], KEYS[2])
-return 1
-"""
+_MAX_APPEND_EVENTS = 256
+_MAX_APPEND_BYTES = 1_048_576
+_XRANGE_PAGE_SIZE = 256
+_STAGE_TTL_SECONDS = 600
+_MAX_WATCH_ATTEMPTS = 3
 
 
 class RedisCollaborationUnavailable(QueryProjectionUnavailable):
     """Required Redis collaboration service is unavailable or inconsistent."""
+
+    def __init__(self, message: str, *, reason: str = "redis_unavailable") -> None:
+        super().__init__(message)
+        self.reason = reason
 
 
 def _record_contract_ids(record, records_by_id=None) -> tuple[str, ...]:
@@ -109,143 +159,416 @@ class RedisCollaborationService:
             )
         return self._domain_id
 
-    def sync(self) -> dict[str, int | bool]:
-        """Relay all authoritative revisions through the current SQLite watermark."""
-        self._require_domain()
-        try:
-            for _attempt in range(16):
-                authoritative = int(self._store.get_runtime_revision())
-                watermark, schema, tail_id = self._state_snapshot()
-                if schema not in ("", COLLABORATION_SCHEMA):
-                    raise RedisCollaborationUnavailable(
-                        "Redis collaboration schema mismatch"
-                    )
-                if watermark < 0:
-                    raise RedisCollaborationUnavailable(
-                        "Redis collaboration watermark is inconsistent"
-                    )
-                consistent_tail = (
-                    not watermark and not tail_id
-                ) or tail_id == f"{watermark}-0"
-                if not consistent_tail:
-                    if not self._clear_if_state(watermark, schema, tail_id):
-                        continue
-                    continue
-                if watermark >= authoritative:
-                    return {
-                        "authoritative_revision": authoritative,
-                        "watermark": watermark,
-                        "lag": 0,
-                        "synced": True,
-                    }
-                source_records = self._store.scan_runtime_records(
-                    through_revision=authoritative
-                )
-                records_by_id = {record.id: record for _, record in source_records}
-                expected = watermark
-                for revision, record in source_records:
-                    revision = int(revision)
-                    if revision <= watermark:
-                        continue
-                    if revision <= expected:
-                        raise RedisCollaborationUnavailable(
-                            "SQLite runtime revisions are inconsistent"
-                        )
-                    event_contracts = json.dumps(
-                        _record_contract_ids(record, records_by_id),
-                        separators=(",", ":"),
-                    )
-                    event_workers = json.dumps(
-                        _record_worker_ids(record, records_by_id),
-                        separators=(",", ":"),
-                    )
-                    result = int(
-                        self._client.eval(
-                            _APPEND_EVENT,
-                            2,
-                            self.stream_key,
-                            self.metadata_key,
-                            str(revision),
-                            record.id,
-                            record.record_type,
-                            event_contracts,
-                            event_workers,
-                            COLLABORATION_SCHEMA,
-                            str(expected),
-                        )
-                    )
-                    if result < 0:
-                        break
-                    expected = int(revision)
-                else:
-                    final_watermark, final_schema, _ = self._state_snapshot()
-                    if final_schema not in ("", COLLABORATION_SCHEMA):
-                        raise RedisCollaborationUnavailable(
-                            "Redis collaboration schema mismatch"
-                        )
-                    if final_watermark == 0:
-                        self._client.hset(
-                            self.metadata_key,
-                            mapping={"watermark": "0", "schema": COLLABORATION_SCHEMA},
-                        )
-                    return {
-                        "authoritative_revision": authoritative,
-                        "watermark": final_watermark,
-                        "lag": max(0, authoritative - final_watermark),
-                        "synced": final_watermark >= authoritative,
-                    }
-            raise RedisCollaborationUnavailable("Redis collaboration sync contention")
-        except self._redis_errors as exc:
+    def _records(self, store, through: int | None = None):
+        revision = int(store.get_runtime_revision())
+        if through is not None:
+            revision = min(revision, through)
+        rows = store.scan_runtime_records(through_revision=revision)
+        rows = [(int(row_revision), record) for row_revision, record in rows]
+        if any(left[0] >= right[0] for left, right in zip(rows, rows[1:])):
             raise RedisCollaborationUnavailable(
-                "Redis collaboration service unavailable"
-            ) from exc
-        except (TypeError, ValueError, OverflowError) as exc:
-            raise RedisCollaborationUnavailable(
-                "Redis collaboration metadata is invalid"
-            ) from exc
-
-    def _state_snapshot(self) -> tuple[int, str, str]:
-        values = self._client.eval(_READ_STATE, 2, self.stream_key, self.metadata_key)
-        if not isinstance(values, (list, tuple)) or len(values) != 3:
-            raise RedisCollaborationUnavailable(
-                "Redis collaboration metadata is invalid"
+                "SQLite runtime revisions are inconsistent",
+                reason="source_inconsistent",
             )
-        watermark = int(_decode_text(values[0]))
-        schema = _decode_text(values[1])
-        tail_id = _decode_text(values[2])
-        return watermark, schema, tail_id
+        by_id = {record.id: record for _, record in rows}
+        return revision, rows, by_id
 
-    def _clear_if_state(self, watermark: int, schema: str, tail_id: str) -> bool:
-        return bool(
-            self._client.eval(
-                _CLEAR_IF_STATE,
-                2,
+    @staticmethod
+    def _event_fields(revision, record, records_by_id):
+        return {
+            "revision": str(revision),
+            "record_id": record.id,
+            "record_type": record.record_type,
+            "contract_ids": json.dumps(
+                _record_contract_ids(record, records_by_id), separators=(",", ":")
+            ),
+            "worker_ids": json.dumps(
+                _record_worker_ids(record, records_by_id), separators=(",", ":")
+            ),
+        }
+
+    @staticmethod
+    def _resp_command_size(parts):
+        # RESP2 array and bulk-string framing for one exact command.
+        size = len(f"*{len(parts)}\r\n".encode("ascii"))
+        for value in parts:
+            encoded = str(value).encode("utf-8")
+            size += len(f"${len(encoded)}\r\n".encode("ascii"))
+            size += len(encoded) + 2
+        return size
+
+    def _resp_size(self, event_id, fields):
+        parts = ["XADD", self.stream_key, event_id]
+        for key, value in fields.items():
+            parts.extend((key, value))
+        return self._resp_command_size(parts)
+
+    def _read_fence(self, pipe):
+        values = pipe.eval(_READ_FENCE, 2, self.stream_key, self.metadata_key)
+        if not isinstance(values, (list, tuple)) or len(values) != 5:
+            raise RedisCollaborationUnavailable(
+                "Redis collaboration metadata is invalid", reason="metadata_invalid"
+            )
+        return tuple(_decode_text(value) for value in values)
+
+    def _capture_events(self, store, through=None):
+        """Return the source revision and one canonical, ordered event capture.
+
+        Raw RuntimeRecord rows and the typed reference map stay local to this
+        function. Callers retain only (revision, sanitized fields) entries.
+        """
+        revision, rows, records_by_id = self._records(store, through=through)
+        entries = [
+            (row_revision, self._event_fields(row_revision, record, records_by_id))
+            for row_revision, record in rows
+        ]
+        return revision, entries
+
+    @staticmethod
+    def _iter_events(entries, after_revision=0):
+        for revision, fields in entries:
+            if revision > after_revision:
+                yield f"{revision}-0", fields
+
+    @staticmethod
+    def _entries_preserve_prefix(entries, prefix, through_revision):
+        index = 0
+        for revision, fields in entries:
+            if revision > through_revision:
+                break
+            if index >= len(prefix) or prefix[index] != (revision, fields):
+                return False
+            index += 1
+        return index == len(prefix)
+
+    def _prove_prefix(self, pipe, entries, state):
+        stream_type, meta_type, watermark_text, schema, tail = state
+        if stream_type not in ("none", "stream") or meta_type not in ("none", "hash"):
+            raise RedisCollaborationUnavailable(
+                "Redis collaboration projection is inconsistent",
+                reason="projection_inconsistent",
+            )
+        if (
+            stream_type != "none" or meta_type != "none"
+        ) and schema != COLLABORATION_SCHEMA:
+            raise RedisCollaborationUnavailable(
+                "Redis collaboration schema mismatch", reason="schema_mismatch"
+            )
+        if schema not in ("", COLLABORATION_SCHEMA):
+            raise RedisCollaborationUnavailable(
+                "Redis collaboration schema mismatch", reason="schema_mismatch"
+            )
+        try:
+            watermark = int(watermark_text or 0)
+        except ValueError as exc:
+            raise RedisCollaborationUnavailable(
+                "Redis collaboration metadata is invalid", reason="metadata_invalid"
+            ) from exc
+        if watermark < 0 or (stream_type == "none") != (meta_type == "none"):
+            raise RedisCollaborationUnavailable(
+                "Redis collaboration projection is inconsistent",
+                reason="projection_inconsistent",
+            )
+        if stream_type == "none":
+            if entries:
+                return watermark, 0, "empty"
+            return watermark, 0, "equal"
+        if not watermark or tail != f"{watermark}-0":
+            raise RedisCollaborationUnavailable(
+                "Redis collaboration projection is inconsistent",
+                reason="projection_inconsistent",
+            )
+        source_revision = entries[-1][0] if entries else 0
+        source_cap = min(watermark, source_revision)
+        expected_count = 0
+        while (
+            expected_count < len(entries) and entries[expected_count][0] <= source_cap
+        ):
+            expected_count += 1
+        # Bound before parsing and compare pages directly against the one ordered
+        # canonical capture; do not build a second event list or source-ID map.
+        cursor = "-"
+        observed = 0
+        while True:
+            page = pipe.xrange(
+                self.stream_key,
+                min=cursor,
+                max=f"{source_cap}-0" if source_cap else "0-0",
+                count=_XRANGE_PAGE_SIZE,
+            )
+            if not page:
+                break
+            for event_id, fields in page:
+                if observed >= expected_count:
+                    raise RedisCollaborationUnavailable(
+                        "Redis collaboration source prefix differs",
+                        reason="source_diverged",
+                    )
+                decoded_id = _decode_text(event_id)
+                expected_revision, expected_fields = entries[observed]
+                decoded_fields = {
+                    _decode_text(key): _decode_text(value)
+                    for key, value in fields.items()
+                }
+                if (
+                    decoded_id != f"{expected_revision}-0"
+                    or decoded_fields != expected_fields
+                ):
+                    raise RedisCollaborationUnavailable(
+                        "Redis collaboration source prefix differs",
+                        reason="source_diverged",
+                    )
+                observed += 1
+                cursor = f"({decoded_id}"
+            if len(page) < _XRANGE_PAGE_SIZE:
+                break
+        if observed != expected_count:
+            raise RedisCollaborationUnavailable(
+                "Redis collaboration projection is missing source events",
+                reason="projection_inconsistent",
+            )
+        expected_watermark = source_revision
+        if watermark > expected_watermark:
+            return watermark, observed, "ahead"
+        if watermark != expected_watermark:
+            return watermark, observed, "lag"
+        return watermark, observed, "equal"
+
+    def _append(self, pipe, expected_state, events, target_revision):
+        pipe.multi()
+        for event_id, fields in events:
+            pipe.xadd(self.stream_key, fields, id=event_id)
+        pipe.hset(
+            self.metadata_key,
+            mapping={"watermark": str(target_revision), "schema": COLLABORATION_SCHEMA},
+        )
+        pipe.execute()
+
+    def _stage_and_swap(
+        self, pipe, expected_state, entries, target_revision, *, allow_damaged=False
+    ):
+        suffix = uuid.uuid4().hex
+        stage_stream = f"{self._root}:stage:{suffix}:events"
+        stage_meta = f"{self._root}:stage:{suffix}:meta"
+        try:
+            if entries:
+                page: list[tuple[str, dict[str, str]]] = []
+                page_bytes = 0
+                for event_id, fields in self._iter_events(entries):
+                    size = self._resp_size(event_id, fields)
+                    if page and (
+                        len(page) >= _MAX_APPEND_EVENTS
+                        or page_bytes + size > _MAX_APPEND_BYTES
+                    ):
+                        self._write_stage_page(stage_stream, page)
+                        page, page_bytes = [], 0
+                    page.append((event_id, fields))
+                    page_bytes += size
+                if page:
+                    self._write_stage_page(stage_stream, page)
+                with self._client.pipeline(transaction=True) as stage_meta_pipe:
+                    stage_meta_pipe.hset(
+                        stage_meta,
+                        mapping={
+                            "watermark": str(target_revision),
+                            "schema": COLLABORATION_SCHEMA,
+                        },
+                    )
+                    stage_meta_pipe.expire(stage_meta, _STAGE_TTL_SECONDS)
+                    stage_meta_pipe.execute()
+            stream_type, meta_type, wm, schema, tail = expected_state
+            pipe.multi()
+            pipe.eval(
+                _SWAP_STAGED,
+                4,
                 self.stream_key,
                 self.metadata_key,
-                str(watermark),
+                stage_stream,
+                stage_meta,
+                str(target_revision),
+                COLLABORATION_SCHEMA,
+                "0" if entries else "1",
+                stream_type,
+                meta_type,
+                wm,
                 schema,
-                tail_id,
+                tail,
+                str(len(entries)),
+                "1" if allow_damaged else "0",
             )
-        )
+            results = pipe.execute()
+            if not results or int(results[0]) != 1:
+                raise RedisCollaborationUnavailable(
+                    "Redis collaboration sync contention",
+                    reason="sync_contention",
+                )
+        finally:
+            self._client.delete(stage_stream, stage_meta)
 
-    def rebuild(self) -> dict[str, int | bool]:
-        """Recreate this domain's event projection from immutable SQLite records."""
+    def _write_stage_page(self, stage_stream, page):
+        # Each bounded page and its TTL commit together, including the final page.
+        with self._client.pipeline(transaction=True) as stage:
+            for event_id, fields in page:
+                stage.xadd(stage_stream, fields, id=event_id)
+            stage.expire(stage_stream, _STAGE_TTL_SECONDS)
+            stage.execute()
+
+    def sync(self) -> dict[str, int | bool]:
+        """Prove and relay one canonical capture of the caller's source snapshot."""
         self._require_domain()
         try:
-            for _attempt in range(16):
-                watermark, schema, tail_id = self._state_snapshot()
-                if self._clear_if_state(watermark, schema, tail_id):
-                    return self.sync()
+            revision, entries = self._capture_events(self._store)
+            for _ in range(_MAX_WATCH_ATTEMPTS):
+                try:
+                    return self._sync_attempt(revision, entries)
+                except self._redis_errors as exc:
+                    if exc.__class__.__name__ != "WatchError":
+                        raise
             raise RedisCollaborationUnavailable(
-                "Redis collaboration rebuild contention"
+                "Redis collaboration sync contention", reason="sync_contention"
             )
         except self._redis_errors as exc:
             raise RedisCollaborationUnavailable(
                 "Redis collaboration service unavailable"
             ) from exc
-        except (TypeError, ValueError, OverflowError) as exc:
+
+    def _sync_attempt(self, revision, entries):
+        with self._client.pipeline() as pipe:
+            pipe.watch(self.stream_key, self.metadata_key)
+            state = self._read_fence(pipe)
+            watermark, _prefix_count, relation = self._prove_prefix(
+                pipe, entries, state
+            )
+            if relation == "ahead":
+                raise RedisCollaborationUnavailable(
+                    "Redis collaboration is ahead of this source snapshot",
+                    reason="redis_ahead",
+                )
+            if relation == "equal":
+                pipe.multi()
+                pipe.execute()
+                return {
+                    "authoritative_revision": revision,
+                    "watermark": watermark,
+                    "lag": 0,
+                    "synced": True,
+                }
+            suffix_count = 0
+            byte_count = 0
+            for event_id, fields in self._iter_events(entries, watermark):
+                suffix_count += 1
+                byte_count += self._resp_size(event_id, fields)
+            byte_count += (
+                self._resp_command_size(
+                    [
+                        "HSET",
+                        self.metadata_key,
+                        "watermark",
+                        revision,
+                        "schema",
+                        COLLABORATION_SCHEMA,
+                    ]
+                )
+                + 16
+            )
+            if suffix_count <= _MAX_APPEND_EVENTS and byte_count <= _MAX_APPEND_BYTES:
+                self._append(
+                    pipe,
+                    state,
+                    self._iter_events(entries, watermark),
+                    revision,
+                )
+            else:
+                self._stage_and_swap(pipe, state, entries, revision)
+            return {
+                "authoritative_revision": revision,
+                "watermark": revision,
+                "lag": 0,
+                "synced": True,
+            }
+
+    def rebuild(self, fresh_store_factory=None) -> dict[str, int | bool]:
+        """Sync safely, or repair from an explicitly supplied routed snapshot factory.
+
+        The caller owns every snapshot returned by ``fresh_store_factory``. The
+        service does not read its original Store after asking for a fresh snapshot.
+        """
+        if fresh_store_factory is None:
+            return self.sync()
+        self._require_domain()
+        source_revision, source_entries = self._capture_events(self._store)
+        try:
+            for attempt in range(_MAX_WATCH_ATTEMPTS):
+                fresh = None
+                fresh_entries = None
+                try:
+                    with self._client.pipeline() as pipe:
+                        # Fence live state before opening P; retain this WATCH through EXEC.
+                        pipe.watch(self.stream_key, self.metadata_key)
+                        state = self._read_fence(pipe)
+                        fresh = fresh_store_factory()
+                        from aigineering.core.domain import load_genesis
+
+                        if load_genesis(fresh).id != self._require_domain():
+                            raise RedisCollaborationUnavailable(
+                                "Routed snapshot belongs to a different domain",
+                                reason="source_domain_mismatch",
+                            )
+                        fresh_revision, fresh_entries = self._capture_events(fresh)
+                        if not self._entries_preserve_prefix(
+                            fresh_entries, source_entries, source_revision
+                        ):
+                            raise RedisCollaborationUnavailable(
+                                "Routed source does not preserve the captured snapshot",
+                                reason="source_diverged",
+                            )
+                        allow_damaged = attempt == 0
+                        try:
+                            _watermark, _prefix_count, relation = self._prove_prefix(
+                                pipe, fresh_entries, state
+                            )
+                        except RedisCollaborationUnavailable as exc:
+                            if not allow_damaged or exc.reason not in (
+                                "projection_inconsistent",
+                                "source_diverged",
+                                "schema_mismatch",
+                                "metadata_invalid",
+                            ):
+                                raise
+                            relation = "damaged"
+                        if relation == "ahead" and not allow_damaged:
+                            raise RedisCollaborationUnavailable(
+                                "Redis collaboration is ahead of the routed source",
+                                reason="redis_ahead",
+                            )
+                        self._stage_and_swap(
+                            pipe,
+                            state,
+                            fresh_entries,
+                            fresh_revision,
+                            allow_damaged=allow_damaged,
+                        )
+                        return {
+                            "authoritative_revision": fresh_revision,
+                            "watermark": fresh_revision,
+                            "lag": 0,
+                            "synced": True,
+                        }
+                except self._redis_errors as exc:
+                    if exc.__class__.__name__ == "WatchError":
+                        continue
+                    raise
+                finally:
+                    # Release per-attempt source materialization before factory
+                    # opens P again; the caller retains snapshot ownership.
+                    fresh_entries = None
+                    fresh = None
             raise RedisCollaborationUnavailable(
-                "Redis collaboration metadata is invalid"
+                "Redis collaboration rebuild contention", reason="sync_contention"
+            )
+        except self._redis_errors as exc:
+            raise RedisCollaborationUnavailable(
+                "Redis collaboration service unavailable"
             ) from exc
 
     def events(
@@ -267,23 +590,65 @@ class RedisCollaborationService:
             isinstance(block_ms, bool) or not isinstance(block_ms, int) or block_ms < 0
         ):
             raise ValueError("block_ms must be a non-negative integer")
-        self.sync()
+        self._require_domain()
         try:
-            response = self._client.xread(
-                {self.stream_key: f"{after_revision}-0"},
-                count=count,
-                block=block_ms,
-            )
-            # A blocking read can overlap a SQLite commit and its normal relay.
-            # Re-read this bound Store after XREAD so live readers can return
-            # that event; immutable snapshots still cap the feed to their own
-            # captured revision rather than Redis's possibly newer watermark.
-            max_revision = int(self._store.get_runtime_revision())
-            return [
-                event
-                for event in self._parse_stream_response(response)
-                if event["revision"] <= max_revision
-            ]
+            revision, entries = self._capture_events(self._store)
+            response = None
+            for _ in range(_MAX_WATCH_ATTEMPTS):
+                try:
+                    with self._client.pipeline() as pipe:
+                        pipe.watch(self.stream_key, self.metadata_key)
+                        state = self._read_fence(pipe)
+                        _watermark, _prefix_count, relation = self._prove_prefix(
+                            pipe, entries, state
+                        )
+                        if relation in ("ahead", "equal"):
+                            # Bound first, then parse only the source-known prefix.
+                            response = pipe.xrange(
+                                self.stream_key,
+                                min=f"({after_revision}-0",
+                                max=f"{revision}-0" if revision else "0-0",
+                                count=count,
+                            )
+                            pipe.multi()
+                            pipe.ping()
+                            pipe.execute()
+                    if response is not None:
+                        break
+                    self.sync()
+                except self._redis_errors as exc:
+                    if exc.__class__.__name__ == "WatchError":
+                        response = None
+                        continue
+                    raise
+            else:
+                raise RedisCollaborationUnavailable(
+                    "Redis collaboration sync contention", reason="sync_contention"
+                )
+            if response is None:
+                raise RedisCollaborationUnavailable(
+                    "Redis collaboration sync contention", reason="sync_contention"
+                )
+            parsed = self._parse_entries(response)
+            if parsed or block_ms is None:
+                return [event for event in parsed if event["revision"] <= revision]
+            cursor = f"{after_revision}-0"
+            while True:
+                wake = self._client.xread(
+                    {self.stream_key: cursor},
+                    count=count,
+                    block=250 if block_ms == 0 else block_ms,
+                )
+                for _stream, entries in wake or ():
+                    if entries:
+                        cursor = _decode_text(entries[-1][0])
+                if int(self._store.get_runtime_revision()) > revision:
+                    return self.events(
+                        after_revision=after_revision, count=count, block_ms=None
+                    )
+                if block_ms != 0:
+                    break
+            return [event for event in parsed if event["revision"] <= revision]
         except self._redis_errors as exc:
             raise RedisCollaborationUnavailable(
                 "Redis collaboration service unavailable"
@@ -299,18 +664,51 @@ class RedisCollaborationService:
         ):
             raise ValueError("timeout must be a finite non-negative number")
         deadline = time.monotonic() + float(timeout)
-        while True:
-            events = self.events(after_revision=after_revision, count=100)
-            if events or time.monotonic() >= deadline:
-                return events
-            block = max(1, min(250, int((deadline - time.monotonic()) * 1000)))
-            events = self.events(
-                after_revision=after_revision,
-                count=100,
-                block_ms=block,
-            )
-            if events or time.monotonic() >= deadline:
-                return events
+        source_revision = int(self._store.get_runtime_revision())
+        initial_events = self.events(after_revision=after_revision, count=100)
+        if initial_events:
+            return initial_events
+        try:
+            tail = self._client.xrevrange(self.stream_key, count=1)
+            latest_seen = source_revision
+            if tail:
+                tail_id = _decode_text(tail[0][0])
+                parts = tail_id.split("-")
+                if len(parts) != 2 or parts[1] != "0":
+                    raise RedisCollaborationUnavailable(
+                        "Redis collaboration projection is inconsistent",
+                        reason="projection_inconsistent",
+                    )
+                latest_seen = max(latest_seen, int(parts[0]))
+            cursor = f"{max(after_revision, source_revision, latest_seen)}-0"
+            current_revision = int(self._store.get_runtime_revision())
+            if current_revision != source_revision:
+                source_revision = current_revision
+                events = self.events(after_revision=after_revision, count=100)
+                if events:
+                    return events
+            while True:
+                if time.monotonic() >= deadline:
+                    return []
+                remaining_ms = max(
+                    1, min(250, int((deadline - time.monotonic()) * 1000))
+                )
+                response = self._client.xread(
+                    {self.stream_key: cursor}, count=100, block=remaining_ms
+                )
+                for _stream, entries in response or ():
+                    if entries:
+                        cursor = _decode_text(entries[-1][0])
+                current_revision = int(self._store.get_runtime_revision())
+                if current_revision != source_revision:
+                    source_revision = current_revision
+                    events = self.events(after_revision=after_revision, count=100)
+                    if events:
+                        return events
+        except self._redis_errors as exc:
+            raise RedisCollaborationUnavailable(
+                "Redis collaboration service unavailable"
+            ) from exc
 
     def status(self) -> dict[str, object]:
         """Return health and revision lag without exposing connection details."""
@@ -336,9 +734,34 @@ class RedisCollaborationService:
                 raise RedisCollaborationUnavailable(
                     "Redis collaboration service unavailable"
                 )
-            watermark, schema, tail_id = self._state_snapshot()
-            tail_valid = (watermark == 0 and not tail_id) or tail_id == f"{watermark}-0"
-            current = watermark >= revision and tail_valid
+            revision, source_entries = self._capture_events(self._store)
+            with self._client.pipeline() as pipe:
+                pipe.watch(self.stream_key, self.metadata_key)
+                state = self._read_fence(pipe)
+                watermark, _prefix_count, relation = self._prove_prefix(
+                    pipe, source_entries, state
+                )
+                schema = state[3]
+                if relation == "ahead":
+                    suffix = pipe.xrange(
+                        self.stream_key,
+                        min=f"({revision}-0" if revision else "-",
+                        max="+",
+                        count=None,
+                    )
+                    parsed_suffix = self._parse_entries(suffix)
+                    suffix_revisions = [event["revision"] for event in parsed_suffix]
+                    if suffix_revisions != sorted(set(suffix_revisions)) or (
+                        not suffix_revisions or suffix_revisions[-1] != watermark
+                    ):
+                        raise RedisCollaborationUnavailable(
+                            "Redis collaboration projection is inconsistent",
+                            reason="projection_inconsistent",
+                        )
+                pipe.multi()
+                pipe.ping()
+                pipe.execute()
+            current = watermark == revision and relation == "equal"
             if schema and schema != COLLABORATION_SCHEMA:
                 return {
                     "available": True,
@@ -360,12 +783,24 @@ class RedisCollaborationService:
                 "authoritative_revision": revision,
                 "watermark": watermark,
                 "lag": lag,
-                "reason": "stream_missing"
-                if not tail_valid
+                "reason": "redis_ahead"
+                if relation == "ahead"
                 else ("revision_lag" if lag else ""),
                 "schema": schema or COLLABORATION_SCHEMA,
             }
-        except self._redis_errors:
+        except self._redis_errors as exc:
+            if exc.__class__.__name__ == "WatchError":
+                return {
+                    "available": True,
+                    "backend": "redis",
+                    "configured": True,
+                    "current": False,
+                    "authoritative_revision": revision,
+                    "watermark": 0,
+                    "lag": revision,
+                    "reason": "sync_contention",
+                    "schema": COLLABORATION_SCHEMA,
+                }
             return {
                 "available": False,
                 "backend": "redis",
@@ -377,16 +812,16 @@ class RedisCollaborationService:
                 "reason": "redis_unavailable",
                 "schema": COLLABORATION_SCHEMA,
             }
-        except RedisCollaborationUnavailable:
+        except RedisCollaborationUnavailable as exc:
             return {
-                "available": False,
+                "available": exc.reason != "redis_unavailable",
                 "backend": "redis",
                 "configured": True,
                 "current": False,
                 "authoritative_revision": revision,
                 "watermark": 0,
                 "lag": revision,
-                "reason": "redis_unavailable",
+                "reason": exc.reason,
                 "schema": COLLABORATION_SCHEMA,
             }
         except (TypeError, ValueError, OverflowError):
@@ -402,11 +837,23 @@ class RedisCollaborationService:
                 "schema": COLLABORATION_SCHEMA,
             }
 
-    def _parse_stream_response(self, response) -> list[dict[str, Any]]:
+    def _parse_entries(self, response) -> list[dict[str, Any]]:
         events: list[dict[str, Any]] = []
-        for _stream, entries in response or ():
+        for item in response or ():
+            if len(item) == 2 and isinstance(item[1], dict):
+                entries = [item]
+            else:
+                entries = item[1]
             for event_id, fields in entries:
                 try:
+                    if set(fields) != {
+                        "revision",
+                        "record_id",
+                        "record_type",
+                        "contract_ids",
+                        "worker_ids",
+                    }:
+                        raise ValueError("invalid event fields")
                     revision = int(fields["revision"])
                     decoded_id = _decode_text(event_id)
                     record_id = _decode_text(fields["record_id"])
@@ -420,9 +867,13 @@ class RedisCollaborationService:
                         or not record_type
                     ):
                         raise ValueError("invalid event metadata")
-                    if not isinstance(contracts, list) or not all(
-                        isinstance(item, str) and item.startswith("task:v")
-                        for item in contracts
+                    if (
+                        not isinstance(contracts, list)
+                        or not all(
+                            isinstance(item, str) and item.startswith("task:v")
+                            for item in contracts
+                        )
+                        or contracts != sorted(set(contracts))
                     ):
                         raise ValueError("invalid Contract references")
                     if (
@@ -443,6 +894,10 @@ class RedisCollaborationService:
                     )
                 except (KeyError, TypeError, ValueError) as exc:
                     raise RedisCollaborationUnavailable(
-                        "Redis collaboration event is invalid"
+                        "Redis collaboration event is invalid",
+                        reason="projection_inconsistent",
                     ) from exc
         return events
+
+    def _parse_stream_response(self, response) -> list[dict[str, Any]]:
+        return self._parse_entries(response)

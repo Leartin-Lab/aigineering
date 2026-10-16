@@ -1289,7 +1289,9 @@ def test_local_worker_invocation_receives_continuation_method_context():
     store.close()
 
 
-def test_local_worker_usage_metadata_reaches_candidate_receipt_and_task_trace():
+def test_local_worker_usage_metadata_reaches_candidate_receipt_and_task_trace(
+    tmp_path, monkeypatch
+):
     class UsageWorker:
         worker_id = "local-worker"
 
@@ -1301,6 +1303,7 @@ def test_local_worker_usage_metadata_reaches_candidate_receipt_and_task_trace():
                 metadata={"model": "test-model", "total_tokens": 17},
             )
 
+    monkeypatch.chdir(tmp_path)
     store = SQLiteStore(":memory:")
     contract, _asset = _seed_contract_with_asset(store)
     genesis = load_genesis(store)

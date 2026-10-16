@@ -110,6 +110,99 @@ def test_redis_status_rebuild_and_workspace_isolation(live_cli, monkeypatch, tmp
     store.close()
 
 
+def test_rebuild_cli_uses_last_fresh_snapshot_for_query_and_final_status(monkeypatch):
+    from types import SimpleNamespace
+
+    import aigineering.cli.redis as redis_cli
+
+    class Snapshot:
+        def __init__(self, revision):
+            self.revision = revision
+            self.closed = False
+
+        def get_runtime_revision(self):
+            return self.revision
+
+        def close(self):
+            self.closed = True
+
+    original = Snapshot(10)
+    fresh = Snapshot(11)
+    snapshots = iter((original, fresh))
+    query_stores = []
+    service_stores = []
+
+    class Service:
+        def __init__(self, store):
+            self.store = store
+            service_stores.append(store)
+
+        def rebuild(self, *, fresh_store_factory):
+            assert fresh_store_factory() is fresh
+
+        def status(self):
+            return {
+                "available": True,
+                "current": True,
+                "authoritative_revision": self.store.get_runtime_revision(),
+                "watermark": self.store.get_runtime_revision(),
+                "lag": 0,
+            }
+
+    class Query:
+        def __init__(self, store):
+            query_stores.append(store)
+
+        def rebuild(self):
+            return SimpleNamespace(digest="fresh-digest")
+
+    monkeypatch.setattr(redis_cli, "require_redis", lambda: None)
+    monkeypatch.setattr(
+        redis_cli, "_persistent_snapshot", lambda _path: next(snapshots)
+    )
+    monkeypatch.setattr(redis_cli, "collaboration_service", Service)
+    monkeypatch.setattr(redis_cli, "query_projection", Query)
+
+    result = CliRunner().invoke(cli, ["redis", "rebuild", "--json"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["authoritative_revision"] == 11
+    assert payload["rebuilt_digest"] == "fresh-digest"
+    assert query_stores == [fresh]
+    assert service_stores == [original, fresh]
+    assert original.closed and fresh.closed
+
+
+def test_redis_sync_renders_conflict_reason_as_available_noncurrent_json(monkeypatch):
+    import aigineering.cli.redis as redis_cli
+    from aigineering.redis_collaboration import RedisCollaborationUnavailable
+
+    class Snapshot:
+        def close(self):
+            pass
+
+    monkeypatch.setattr(redis_cli, "require_redis", lambda: None)
+    monkeypatch.setattr(redis_cli, "_persistent_snapshot", lambda _path: Snapshot())
+
+    def conflicted(_store):
+        raise RedisCollaborationUnavailable("ahead", reason="redis_ahead")
+
+    monkeypatch.setattr(redis_cli, "collaboration_service", conflicted)
+
+    result = CliRunner().invoke(cli, ["redis", "sync", "--json"])
+
+    assert result.exit_code == 1
+    assert json.loads(result.output) == {
+        "ok": False,
+        "backend": "redis",
+        "available": True,
+        "required": True,
+        "current": False,
+        "reason": "redis_ahead",
+    }
+
+
 def test_outage_fails_before_publication_and_offline_audit_still_works(
     live_cli, monkeypatch
 ):

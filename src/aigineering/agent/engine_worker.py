@@ -73,6 +73,7 @@ class EngineWorker:
         self._worker_selector = worker_selector
         self.worker_id = worker_id
         self._max_steps = max_steps
+        self._uses_ephemeral_inner_domain = inner_store_factory is None
         self._inner_store_factory = inner_store_factory or (
             lambda: SQLiteStore(":memory:")
         )
@@ -102,8 +103,11 @@ class EngineWorker:
         inner = self._inner_store_factory()
         try:
             signer = self._inner_signer
+            domain_scope = uuid4().hex if self._uses_ephemeral_inner_domain else None
             actor_key, genesis, publisher, candidate_publishers = (
-                _initialize_inner_domain(inner, self.worker_id, signer)
+                _initialize_inner_domain(
+                    inner, self.worker_id, signer, domain_scope=domain_scope
+                )
             )
             input_error = _publish_disclosed_inputs(
                 inner, disclosed_assets, genesis, actor_key, signer
@@ -201,7 +205,13 @@ class EngineWorker:
         )
 
 
-def _initialize_inner_domain(store, worker_id: str, signer: Ed25519Signer):
+def _initialize_inner_domain(
+    store,
+    worker_id: str,
+    signer: Ed25519Signer,
+    *,
+    domain_scope: str | None = None,
+):
     actor_key = ActorKey(
         f"{worker_id}:runtime",
         "inner-root",
@@ -216,8 +226,11 @@ def _initialize_inner_domain(store, worker_id: str, signer: Ed25519Signer):
             "worker.register",
         ),
     )
+    invocation_domain = f"{worker_id}:invocation"
+    if domain_scope is not None:
+        invocation_domain = f"{invocation_domain}:{domain_scope}"
     genesis = create_genesis_manifest(
-        f"{worker_id}:invocation",
+        invocation_domain,
         [actor_key],
         "policy:engine-worker-inner-v1",
     )

@@ -13,6 +13,7 @@ from aigineering.application import (
 )
 from aigineering.cli._common import _output_json, _persistent_snapshot
 from aigineering.adapters.redis_query import QueryProjectionUnavailable
+from aigineering.redis_collaboration import RedisCollaborationUnavailable
 
 
 @click.group("redis")
@@ -78,17 +79,30 @@ def redis_status(as_json: bool) -> None:
 
 def _sync(as_json: bool, *, rebuild: bool) -> None:
     require_redis()
+    db_path = Path(".aig/store.db").resolve()
     try:
-        store = _persistent_snapshot()
+        store = _persistent_snapshot(db_path)
     except (OSError, RuntimeError, ValueError) as exc:
         raise click.ClickException(
             "Existing initialized workspace Store required."
         ) from exc
+    last_probe = None
+
+    def fresh_routed_snapshot():
+        nonlocal last_probe
+        if last_probe is not None:
+            last_probe.close()
+            last_probe = None
+        last_probe = _persistent_snapshot(db_path)
+        return last_probe
+
     try:
         service = collaboration_service(store)
         if rebuild:
-            service.rebuild()
-            snapshot = query_projection(store).rebuild()
+            service.rebuild(fresh_store_factory=fresh_routed_snapshot)
+            final_store = last_probe or store
+            snapshot = query_projection(final_store).rebuild()
+            service = collaboration_service(final_store)
         else:
             service.sync()
             # Bring the fact-derived read indexes to the same source snapshot.
@@ -105,11 +119,31 @@ def _sync(as_json: bool, *, rebuild: bool) -> None:
             click.echo(f"redis {'rebuilt' if rebuild else 'synchronized'}")
         if not payload["ok"]:
             raise click.exceptions.Exit(1)
+    except RedisCollaborationUnavailable as exc:
+        unavailable = exc.reason == "redis_unavailable"
+        payload = {
+            "ok": False,
+            "backend": "redis",
+            "available": not unavailable,
+            "required": True,
+            "current": False,
+            "reason": exc.reason,
+        }
+        if as_json:
+            _output_json(payload)
+        else:
+            click.echo(
+                f"redis: available={payload['available']} current=False "
+                f"reason={payload['reason']}"
+            )
+        raise click.exceptions.Exit(1)
     except LookupError as exc:
         raise click.ClickException(
             "Initialize this workspace with 'aig domain init'."
         ) from exc
     finally:
+        if last_probe is not None:
+            last_probe.close()
         store.close()
 
 

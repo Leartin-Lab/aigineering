@@ -23,6 +23,11 @@ report evidence remains tied to its original snapshot. Named boards and other
 conveniences support that workflow; copying every reference-project command is
 not a substitute for current operational acceptance.
 
+The collaboration relay now verifies the exact SQLite event prefix before
+synchronization. Explicit stream repair uses a fresh snapshot of the routed
+workspace; query-generation correctness and final scale qualification remain
+separate open work. See [change 100](changes/100-redis-collaboration-prefix-integrity.md).
+
 The current source version is **v0.5.13.dev0**. The earlier v0.5.12 snapshot
 completed deterministic, package, installed-artifact, long-chain and
 nested-replanning gates for local release preparation. Neither version is a published or tagged release. The

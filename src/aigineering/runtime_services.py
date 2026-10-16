@@ -21,6 +21,7 @@ class RedisSyncPending(QueryProjectionUnavailable):
         decision: CommitmentDecision | None = None,
         data: dict | None = None,
         revision: int | None = None,
+        reason: str = "redis_unavailable",
     ) -> None:
         super().__init__(
             "Redis synchronization pending; committed facts are retained. "
@@ -32,6 +33,7 @@ class RedisSyncPending(QueryProjectionUnavailable):
         self.decision = decision
         self.data = data
         self.revision = revision
+        self.reason = reason
 
 
 def sync_runtime(store, *, accepted: bool | None = None) -> None:
@@ -39,7 +41,9 @@ def sync_runtime(store, *, accepted: bool | None = None) -> None:
     try:
         collaboration_service(store).sync()
     except QueryProjectionUnavailable as exc:
-        raise RedisSyncPending(accepted=accepted) from exc
+        raise RedisSyncPending(
+            accepted=accepted, reason=getattr(exc, "reason", "redis_unavailable")
+        ) from exc
 
 
 def claim_next_application_package(store, **claim_options):
