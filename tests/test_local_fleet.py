@@ -881,7 +881,10 @@ def test_local_fleet_recovers_bad_output_with_frozen_skill_context(
     )
 
 
-def test_parallel_tool_method_runs_calls_concurrently_then_joins(tmp_path, monkeypatch):
+@pytest.mark.parametrize("fail_one_call", [False, True])
+def test_parallel_tool_method_runs_calls_concurrently_then_joins(
+    tmp_path, monkeypatch, fail_one_call
+):
     monkeypatch.chdir(tmp_path)
     db_path = str(tmp_path / "parallel-tools.db")
     store = SQLiteStore(db_path)
@@ -890,7 +893,10 @@ def test_parallel_tool_method_runs_calls_concurrently_then_joins(tmp_path, monke
     barrier = Barrier(2)
 
     def tool_result(args):
-        barrier.wait(timeout=2)
+        if fail_one_call and args["q"] == "a":
+            raise RuntimeError("private handler detail")
+        if not fail_one_call:
+            barrier.wait(timeout=2)
         return f"result:{args['q']}"
 
     for name in ("search", "lookup"):
@@ -935,11 +941,11 @@ def test_parallel_tool_method_runs_calls_concurrently_then_joins(tmp_path, monke
         db_path,
         hosts,
         target_contract_id=root.id,
-        timeout=5,
+        timeout=1 if fail_one_call else 5,
         poll_interval=0.01,
     )
 
-    assert result.completed is True
+    assert result.completed is not fail_one_call
     reopened = SQLiteStore(db_path)
     try:
         tool_items = [
@@ -948,24 +954,52 @@ def test_parallel_tool_method_runs_calls_concurrently_then_joins(tmp_path, monke
             if "plugin:parallel_tool_item" in contract.labels
         ]
         assert len(tool_items) == 2
-        assert all(
-            RuntimeProjection(reopened, reopened).contract_view(item).terminal
-            == "complete"
+        views = {
+            item.name: RuntimeProjection(reopened, reopened).contract_view(item)
             for item in tool_items
-        )
+        }
+        if fail_one_call:
+            failed = next(
+                item
+                for item in tool_items
+                if not reopened.get_assets_by_name(item.outputs[0])
+            )
+            succeeded = next(
+                item
+                for item in tool_items
+                if reopened.get_assets_by_name(item.outputs[0])
+            )
+            assert views[failed.name].terminal == "failed"
+            assert views[succeeded.name].terminal == "complete"
+            assert reopened.get_assets_by_name(failed.outputs[0]) == []
+            assert reopened.get_assets_by_name(succeeded.outputs[0])
+        else:
+            assert all(view.terminal == "complete" for view in views.values())
         continuation = next(
             contract
             for contract in reopened.get_all_contracts()
             if "plugin:parallel_tool.continuation" in contract.labels
         )
         assert continuation.activation == " AND ".join(continuation.inputs)
-        assert reopened.get_assets_by_name("report")
+        continuation_view = RuntimeProjection(reopened, reopened).contract_view(
+            continuation
+        )
+        if fail_one_call:
+            assert continuation_view.enabled is False
+            assert reopened.get_assets_by_name("report") == []
+            assert all(
+                "private handler detail" not in repr(record.payload)
+                for _, record in reopened.scan_runtime_records()
+            )
+        else:
+            assert reopened.get_assets_by_name("report")
     finally:
         reopened.close()
-    assert any(
-        len([name for name in names if name.startswith("tool_observation_")]) == 2
-        for names in orchestrator.disclosures
-    )
+    if not fail_one_call:
+        assert any(
+            len([name for name in names if name.startswith("tool_observation_")]) == 2
+            for names in orchestrator.disclosures
+        )
 
 
 def test_fleet_json_action_mode_rejects_tool_registry_before_loading():

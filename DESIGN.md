@@ -449,12 +449,31 @@ facts through registered Plugins.
 A successful tool task publishes a continuation whose scope omits that exact
 tool. Repeated calls are represented as separate ordinary tasks rather than an
 unbounded same-task tool loop; other parent-authorized tools remain available.
+Tool and synchronous MCP adapter preflight or invocation failures raise the
+existing `WorkerExecutionError` with a fixed safe code and message, so no
+observation Candidate is produced and the ordinary Worker failure path closes
+the claim and reports the safe cause through task runs and claim-bound
+diagnostics. Recovery, when available, is new ordinary work and may not have
+an executable target. Successful tool results remain observations,
+including business-level negative JSON returned as a string. Already committed
+legacy `ok:false` observations remain immutable local evidence: a live parent
+may continue through ordinary work using them as context, without treating them
+as tool success or qualifying business output. Completion preserves an
+existing typed parent terminal and publishes no new continuation for it.
 
 Projection and method-result repair publish new recovery Contracts and retain
 the failed task's Skill context, routing scope, tools, and acceptance policy.
 Recovery depth is bounded at three immutable successor attempts. A recovery
 with unresolved tool scope cannot publish tool-derived outputs directly; it
 must first publish a tool task and consume the committed observation.
+When a claim-proven system tool method fails, its bounded recovery successor
+retains the exact tool method, arguments, input scope, output roles, capabilities
+and acceptance policy. A normal signed Worker claim and ToolWorker execution
+can therefore retry the same authorized call, followed by the existing method
+completion and continuation owners. Invocation failure, authenticated claim
+expiration and admitted Candidate rejection use their existing exact claim
+proofs; an unverified historical rejection cannot publish successor work.
+Ordinary business-task repair retains its existing generic recovery shape.
 After an interruption, recovery recognizes an existing publication only when
 the original signed Candidate intent, receipt, committed head, canonical
 Contract/context projections, and current materializations match. This
@@ -893,6 +912,15 @@ accepted publication relation, while exact invocation failure and scheduling
 facts remain separate source diagnostics. Recovery diagnostics do not establish
 a one-to-one failure-to-publication mapping. Each member retains its canonical
 task status and blockers; unverified evidence cannot expand the component.
+Executable method recovery accepts only a canonical system successor whose
+direct predecessor has an exact authenticated claim-failure binding and whose
+full deterministic intent matches the accepted declaration and context member
+on one committed head. Recursive markers repeat that proof at each edge;
+context metadata only selects source facts for revalidation. Generic repair
+keeps its legacy outcome payload, including for ordinary JSON that happens to
+contain reserved recovery-marker names. Claim-proven unavailable outcomes may
+show their fixed reason and a reported target in read-only diagnostics; that
+observation does not verify the target or create a lineage edge.
 Read-only lineage, retry, recovery and attachment readers use one pure
 effect-type sequence reader; malformed containers such as mappings cannot
 qualify retry, recovery, handoff or revision edges.

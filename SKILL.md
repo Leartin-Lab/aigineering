@@ -428,9 +428,12 @@ Treat the registry factory as trusted local code. Never accept a registry path
 from untrusted task or model output. Declare a version, deterministic input and
 output schemas, and a bounded `max_output_bytes` on each `ToolSpec` when the
 tool returns JSON. The signed descriptor binds those fields to the registered
-handler; contract drift, invalid arguments, invalid JSON output, and oversized
-output become typed failed observations before business output can be
-published.
+handler. Contract drift, invalid arguments, handler failures, invalid results,
+and output-limit failures use the ordinary claimed Worker failure path and do
+not produce a successful observation. Inspect task runs and diagnostics for the
+safe cause. Recovery, when available, is new ordinary work and may not have an
+executable target. A handler-returned negative business result remains a
+successful observation.
 
 ## Publish one trustworthy task
 

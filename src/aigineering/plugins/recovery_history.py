@@ -39,6 +39,7 @@ class RecoveryHistorySnapshot:
     publisher_domain_id: str
     publisher_actor_id: str
     revision: int
+    query_context: object | None = None
 
 
 class RecoveryHistoryCaptureUnstable(RuntimeError):
@@ -53,6 +54,7 @@ class RecoveryPublicationProof:
     reason: str = ""
     contract: Contract | None = None
     context_asset: Asset | None = None
+    receipt_id: str | None = None
 
 
 def prove_recovery_publication(
@@ -63,6 +65,7 @@ def prove_recovery_publication(
     effects: tuple[CandidateEffect, ...],
     idempotency_key: str,
     causal_parents: tuple[str, ...],
+    source_record_ids: tuple[str, ...] = (),
 ) -> RecoveryPublicationProof:
     """Prove one exact accepted recovery Candidate and its materialized members.
 
@@ -124,6 +127,15 @@ def prove_recovery_publication(
     if len(receipts) != 1:
         return _conflict("recovery_receipt_missing_or_ambiguous")
     receipt = receipts[0]
+    positions = {row.id: index for index, row in enumerate(rows)}
+    if len(positions) != len(rows):
+        return _conflict("recovery_history_record_id_ambiguous")
+    receipt_position = positions.get(receipt.id)
+    if receipt_position is None or any(
+        source_id not in positions or positions[source_id] >= receipt_position
+        for source_id in source_record_ids
+    ):
+        return _conflict("recovery_source_order_invalid")
     receipt_payload = receipt.payload
     if (
         receipt_payload.get("domain_id") != snapshot.store_domain_id
@@ -236,7 +248,7 @@ def prove_recovery_publication(
     ):
         return _conflict("recovery_context_member_or_materialization_mismatch")
     return RecoveryPublicationProof(
-        "matched", contract=contracts[0], context_asset=assets[0]
+        "matched", contract=contracts[0], context_asset=assets[0], receipt_id=receipt.id
     )
 
 

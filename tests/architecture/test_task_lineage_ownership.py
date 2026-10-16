@@ -140,7 +140,23 @@ def test_claim_diagnostics_reuses_optional_immutable_query_context():
     )
     arguments = {arg.arg for arg in binding.args.kwonlyargs}
     assert "query_context" in arguments
-    assert "_select_proven_claim_run" in ast.unparse(binding)
+    functions = {
+        node.name: node for node in tree.body if isinstance(node, ast.FunctionDef)
+    }
+    pending = [binding.name]
+    visited = set()
+    calls = set()
+    while pending:
+        name = pending.pop()
+        if name in visited:
+            continue
+        visited.add(name)
+        for node in ast.walk(functions[name]):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+                calls.add(node.func.id)
+                if node.func.id in functions:
+                    pending.append(node.func.id)
+    assert "_select_proven_claim_run" in calls
     assert "_snapshot" in source
     assert "query_context.require_match(store)" in source
 

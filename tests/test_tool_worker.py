@@ -4,6 +4,7 @@ import json
 import pytest
 
 from aigineering.agent.tool_executor import ToolExecutor
+from aigineering.agent.worker import WorkerExecutionError
 from aigineering.agent.tool_worker import ToolWorker
 from aigineering.core.capability_descriptors import create_tool_descriptor
 from aigineering.core.store import MemoryStore
@@ -39,38 +40,38 @@ def test_worker_invokes_tool_and_returns_candidate():
     assert candidate.metadata["retryable"] is False
 
 
-def test_worker_returns_error_candidate_on_failure():
-    """ToolExecutor.invoke() returns an error Candidate when the tool is unknown."""
+def test_worker_raises_safe_error_when_tool_is_unknown():
     registry = ToolRegistry()
 
     worker = ToolExecutor(registry)
-    candidate = worker.invoke("missing_tool", {}, "contract_1")
-
-    assert isinstance(candidate, Candidate)
-    obs = json.loads(candidate.raw_output)
-    assert obs["ok"] is False
-    assert obs["tool"] == "missing_tool"
-    assert obs["result"] == ""
-    assert "unknown tool" in obs["error"]
-    assert obs["error_type"] == "KeyError"
-    assert obs["retryable"] is False
-    assert candidate.metadata["contract_id"] == "contract_1"
-    assert candidate.metadata["tool_version"] == "0.1.0"
-    assert candidate.metadata["result_bytes"] == 0
-    assert candidate.metadata["error_type"] == "KeyError"
+    with pytest.raises(WorkerExecutionError) as error:
+        worker.invoke("missing_tool", {}, "contract_1")
+    assert error.value.code == "tool_unavailable"
+    assert str(error.value) == "Tool is unavailable."
 
 
-def test_worker_rejects_non_string_tool_result_with_typed_error_candidate():
+def test_worker_rejects_non_string_tool_result_without_candidate():
     registry = ToolRegistry()
     registry.register(ToolSpec(name="bad"), lambda _args: {"not": "a string"})
 
-    candidate = ToolExecutor(registry).invoke("bad", {}, "contract_1")
-    observation = json.loads(candidate.raw_output)
+    with pytest.raises(WorkerExecutionError) as error:
+        ToolExecutor(registry).invoke("bad", {}, "contract_1")
+    assert error.value.code == "tool_execution_failed"
+    assert error.value.__cause__ is not None
 
-    assert observation["ok"] is False
-    assert observation["error_type"] == "TypeError"
-    assert observation["result"] == ""
-    assert candidate.metadata["retryable"] is False
+
+def test_handler_type_error_is_safe_generic_execution_failure():
+    registry = ToolRegistry()
+
+    def fail(_args):
+        raise TypeError("private handler detail")
+
+    registry.register(ToolSpec(name="bad"), fail)
+    with pytest.raises(WorkerExecutionError) as error:
+        ToolExecutor(registry).invoke("bad", {}, "contract_1")
+    assert error.value.code == "tool_execution_failed"
+    assert str(error.value) == "Tool execution failed."
+    assert "private handler detail" not in str(error.value)
 
 
 def test_worker_validates_tool_output_before_success_observation():
@@ -84,13 +85,23 @@ def test_worker_validates_tool_output_before_success_observation():
         lambda _args: '{"other":"x"}',
     )
 
-    candidate = ToolExecutor(registry).invoke("lookup", {}, "contract_1")
+    with pytest.raises(WorkerExecutionError) as error:
+        ToolExecutor(registry).invoke("lookup", {}, "contract_1")
+    assert error.value.code == "tool_schema_invalid"
+    assert isinstance(error.value.__cause__, ValueError)
+
+
+def test_negative_business_json_remains_a_successful_observation():
+    registry = ToolRegistry()
+    result = '{"ok":false,"reason":"business rejection"}'
+    registry.register(ToolSpec(name="check"), lambda _args: result)
+
+    candidate = ToolExecutor(registry).invoke("check", {}, "contract_1")
     observation = json.loads(candidate.raw_output)
 
-    assert observation["ok"] is False
-    assert observation["error_type"] == "ToolSchemaValidationError"
-    assert candidate.metadata["tool_version"] == "7"
-    assert candidate.metadata["result_bytes"] == len(b'{"other":"x"}')
+    assert observation["ok"] is True
+    assert observation["result"] == result
+    assert observation["error"] == ""
 
 
 def test_tool_worker_rejects_descriptor_contract_drift_before_handler():
@@ -113,13 +124,10 @@ def test_tool_worker_rejects_descriptor_contract_drift_before_handler():
         tool_scope=("lookup",),
     )
 
-    candidate = ToolWorker(registry).invoke(contract, [descriptor])
-    observation = json.loads(candidate.raw_output)
-    observation = json.loads(observation["outputs"]["_tool_obs_contract_1"])
-
-    assert observation["ok"] is False
-    assert observation["error_type"] == "ToolCapabilityDriftError"
-    assert candidate.metadata["contract_id"] == "contract_1"
+    with pytest.raises(WorkerExecutionError) as error:
+        ToolWorker(registry).invoke(contract, [descriptor])
+    assert error.value.code == "tool_descriptor_mismatch"
+    assert called is False
     assert called is False
 
 
@@ -155,15 +163,10 @@ def test_tool_worker_rejects_non_object_arguments_before_handler(args):
         tool_scope=("lookup",),
     )
 
-    candidate = ToolWorker(registry).invoke(contract, [descriptor])
-    observation = json.loads(candidate.parsed_action["outputs"][contract.outputs[0]])
-
+    with pytest.raises(WorkerExecutionError) as error:
+        ToolWorker(registry).invoke(contract, [descriptor])
     assert calls == []
-    assert observation["ok"] is False
-    assert observation["error_type"] == "ToolActionError"
-    assert "JSON object" in observation["error"]
-    assert candidate.metadata["error_type"] == "ToolActionError"
-    assert candidate.metadata["retryable"] is False
+    assert error.value.code == "tool_arguments_invalid"
 
 
 # ── Handler integration tests ──────────────────────────────────────────

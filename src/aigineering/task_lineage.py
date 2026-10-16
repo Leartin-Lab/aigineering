@@ -15,9 +15,13 @@ from aigineering.core.publication_history import (
 from aigineering.protocol.immutability import deep_thaw
 from aigineering.protocol.runtime_record import validate_runtime_record
 from aigineering.protocol.wire import asset_to_dict, contract_to_dict
+from aigineering.plugins.task_semantics import method_payload
 from aigineering.task_diagnostics import (
     TaskDiagnosticError,
-    task_invocation_failure_binding,
+    _task_invocation_failure_binding,
+    task_recovery_ancestor_source_bindings,
+    task_recovery_source_binding,
+    safe_recovery_reason,
 )
 from aigineering.task_publication import validate_retry_publication_relations
 from aigineering.plugins.handoff import validate_task_handoff_relations
@@ -30,7 +34,14 @@ from aigineering.task_views import project_task_status
 
 _RECOVERY_ACTOR = "plugin:recovery.publish.v1"
 _RECOVERY_EFFECTS = ("contract.declare", "asset.propose")
-_SCHEDULE_TYPES = frozenset({"worker_failure.recovery_scheduled"})
+_SCHEDULE_TYPES = frozenset(
+    {
+        "worker_failure.recovery_scheduled",
+        "candidate_rejection.recovery_scheduled",
+        "projection_rejection.recovery_scheduled",
+        "claim_expiration.recovery_scheduled",
+    }
+)
 
 
 class TaskLineageError(ValueError):
@@ -197,7 +208,14 @@ def task_lineage(store, selected_contract_id: str) -> dict:
             continue
         target_id = declared.get("id")
         target = by_contract.get(target_id) if isinstance(target_id, str) else None
-        if target is None or target.origin != "recovery":
+        if target is None:
+            continue
+        target_method_payload = method_payload(target)
+        current_method_recovery = target.origin == "system" and any(
+            key in target_method_payload
+            for key in ("recovery_intent_version", "recovery_source_contract_id")
+        )
+        if target.origin != "recovery" and not current_method_recovery:
             continue
         receipt_ids = tuple(declaration.causal_parents)
         declared_receipt = by_id.get(receipt_ids[0]) if len(receipt_ids) == 1 else None
@@ -228,12 +246,74 @@ def task_lineage(store, selected_contract_id: str) -> dict:
                 raise ValueError("recovery declaration differs from materialized task")
             source = by_contract[source_id]
             publication_for(source)
+            if current_method_recovery:
+                from aigineering.plugins.recovery import (
+                    MethodRecoveryIntent,
+                    _recovery_effects,
+                    prepare_method_recovery_intent,
+                )
+                from aigineering.plugins.recovery_history import (
+                    RecoveryHistorySnapshot,
+                    prove_recovery_publication,
+                )
+
+                if query.domain_id is None:
+                    raise ValueError("recovery domain is unavailable")
+                recovery_snapshot = RecoveryHistorySnapshot(
+                    context=query.effect_projection,
+                    store_domain_id=query.domain_id,
+                    publisher_domain_id=query.domain_id,
+                    publisher_actor_id=_RECOVERY_ACTOR,
+                    revision=query.revision,
+                    query_context=query,
+                )
+                verified_source = _verified_source_schedules(
+                    source_id,
+                    schedules=schedules_by_contract.get(source_id, ()),
+                    grants=grants_by_contract.get(source_id, ()),
+                    query=query,
+                    by_id=by_id,
+                    proof_cache=claim_proof_cache,
+                    observed_at=observation_time,
+                    receipt_revision=record_rows[receipt.id][0][0],
+                    record_revisions=record_revisions,
+                    target_contract_id=target.id,
+                )
+                if not verified_source:
+                    raise ValueError("method recovery source proof unavailable")
+                prepared = prepare_method_recovery_intent(
+                    recovery_snapshot,
+                    failed_contract=source,
+                    source_binding=verified_source[0][2],
+                    ancestor_source_bindings=task_recovery_ancestor_source_bindings(
+                        store, source.id, query_context=query
+                    ),
+                )
+                if not isinstance(prepared, MethodRecoveryIntent):
+                    raise ValueError("method recovery intent is unsupported")
+                proof = prove_recovery_publication(
+                    recovery_snapshot,
+                    recovery=prepared.recovery,
+                    context_template=prepared.context_asset,
+                    effects=_recovery_effects(
+                        prepared.recovery, prepared.context_asset
+                    ),
+                    idempotency_key=prepared.idempotency_key,
+                    causal_parents=prepared.causal_parents,
+                    source_record_ids=prepared.source_record_ids,
+                )
+                if proof.status != "matched" or proof.contract != target:
+                    raise ValueError("system method recovery publication mismatch")
             member_ids = tuple(head.payload.get("committed_record_ids", ()))
             members = tuple(by_id[item] for item in member_ids)
             declarations = tuple(
                 item for item in members if item.record_type == "contract.declared"
             )
-            context_name = f"_fail_context_{source_id}"
+            context_name = (
+                f"_fail_context_{source_id}.recovery"
+                if current_method_recovery
+                else f"_fail_context_{source_id}"
+            )
             context_rows = tuple(
                 item
                 for item in members
@@ -289,8 +369,15 @@ def task_lineage(store, selected_contract_id: str) -> dict:
                     observed_at=observation_time,
                     receipt_revision=receipt_rows[0][0],
                     record_revisions=record_revisions,
+                    target_contract_id=(target.id if current_method_recovery else None),
                 )
                 verified_schedule_cache[schedule_key] = schedules
+            if current_method_recovery:
+                schedules = tuple(
+                    item
+                    for item in schedules
+                    if item[1].payload.get("recovery_contract_id") == target.id
+                )
             if not schedules:
                 raise ValueError("no verified worker-failure recovery schedule")
             edges.append(
@@ -306,7 +393,7 @@ def task_lineage(store, selected_contract_id: str) -> dict:
                     "declaration_id": declaration.id,
                     "publisher_actor_id": _RECOVERY_ACTOR,
                     "diagnostic_schedule_record_ids": sorted(
-                        record.id for _revision, record in schedules
+                        record.id for _revision, record, _binding in schedules
                     ),
                 }
             )
@@ -678,14 +765,14 @@ def _source_diagnostics(contract_ids, query, edges, *, proof_cache, observed_at)
             raise
         except (KeyError, TypeError, ValueError, RuntimeError, AttributeError):
             verified_schedules = ()
-        verified_ids = {record.id for _revision, record in verified_schedules}
+        verified_ids = {record.id for _revision, record, _binding in verified_schedules}
         schedules = [
             {
                 "record_id": record.id,
                 "revision": revision,
                 "record_type": record.record_type,
             }
-            for revision, record in verified_schedules
+            for revision, record, _binding in verified_schedules
         ]
         for revision, record in schedule_rows:
             if record.id not in verified_ids:
@@ -718,6 +805,27 @@ def _source_diagnostics(contract_ids, query, edges, *, proof_cache, observed_at)
             )
         if schedules:
             result.append({"contract_id": contract_id, "schedule_records": schedules})
+        unavailable_rows = [
+            (revision, record)
+            for revision, record in records_by_contract[contract_id]
+            if record.record_type.endswith(".recovery_unavailable")
+        ]
+        if unavailable_rows:
+            observations = _verified_unavailable_observations(
+                contract_id,
+                unavailable_rows,
+                query=query,
+                by_id=by_id,
+                proof_cache=proof_cache,
+                observed_at=observed_at,
+            )
+            if observations:
+                result.append(
+                    {
+                        "contract_id": contract_id,
+                        "recovery_unavailable_observations": observations,
+                    }
+                )
         trace_observations = [
             {
                 "trace_id": entry.id,
@@ -741,7 +849,7 @@ def _source_diagnostics(contract_ids, query, edges, *, proof_cache, observed_at)
         for grant in grants:
             payload = grant.payload
             try:
-                binding = task_invocation_failure_binding(
+                binding = _task_invocation_failure_binding(
                     query.source_store,
                     contract_id,
                     payload.get("claim_id"),
@@ -751,6 +859,7 @@ def _source_diagnostics(contract_ids, query, edges, *, proof_cache, observed_at)
                     query_context=query,
                     _proof_cache=proof_cache,
                     _observed_at=observed_at,
+                    _include_witness_ids=True,
                 )
             except TaskViewQueryMismatch as exc:
                 raise TaskLineageError("snapshot_changed") from exc
@@ -773,6 +882,7 @@ def _verified_source_schedules(
     observed_at,
     receipt_revision,
     record_revisions,
+    target_contract_id=None,
 ):
     grants_by_claim = {
         record.payload.get("claim_id"): record
@@ -782,7 +892,7 @@ def _verified_source_schedules(
     verified = []
     for revision, schedule in schedules:
         if (
-            schedule.record_type != "worker_failure.recovery_scheduled"
+            schedule.record_type not in _SCHEDULE_TYPES
             or not isinstance(schedule.payload, Mapping)
             or schedule.payload.get("contract_id") != source_id
         ):
@@ -796,6 +906,18 @@ def _verified_source_schedules(
                 "failure_id",
                 "worker.invocation_failed",
             ),
+            "candidate_rejection.recovery_scheduled": (
+                "rejection_id",
+                "candidate.rejected",
+            ),
+            "projection_rejection.recovery_scheduled": (
+                "projection_id",
+                "projection.decided",
+            ),
+            "claim_expiration.recovery_scheduled": (
+                "expiration_id",
+                "claim.expired",
+            ),
         }[schedule.record_type]
         source_record_id = schedule.payload.get(field)
         source_record = by_id.get(source_record_id)
@@ -808,19 +930,48 @@ def _verified_source_schedules(
             or tuple(schedule.causal_parents) != (source_record_id,)
         ):
             continue
+        if (
+            target_contract_id is not None
+            and schedule.payload.get("recovery_contract_id") != target_contract_id
+        ):
+            continue
+        claim_id = source_record.payload.get("claim_id")
         if schedule.record_type == "worker_failure.recovery_scheduled":
-            claim_id = source_record.payload.get("claim_id")
+            linked_releases = [
+                record
+                for record in by_id.values()
+                if record.record_type == "claim.released"
+                and source_record_id in record.causal_parents
+            ]
+            if len(linked_releases) != 1:
+                continue
+            claim_id = linked_releases[0].payload.get("claim_id")
+        elif schedule.record_type == "projection_rejection.recovery_scheduled":
+            rejected = [
+                record
+                for record in by_id.values()
+                if record.record_type == "candidate.rejected"
+                and record.payload.get("candidate_id")
+                == source_record.payload.get("candidate_id")
+            ]
+            claim_ids = {record.payload.get("claim_id") for record in rejected}
+            claim_ids.discard(None)
+            if len(claim_ids) != 1:
+                continue
+            claim_id = next(iter(claim_ids))
+        if not isinstance(claim_id, str):
+            continue
+        if schedule.record_type in {"worker_failure.recovery_scheduled"}:
             grant = grants_by_claim.get(claim_id)
             if grant is None:
                 continue
             try:
-                binding = task_invocation_failure_binding(
+                binding = task_recovery_source_binding(
                     query.source_store,
                     source_id,
                     grant.payload.get("claim_id"),
-                    grant.payload.get("package_id"),
-                    grant.payload.get("worker_id"),
-                    grant.payload.get("epoch"),
+                    source_record_id,
+                    expected_type,
                     query_context=query,
                     _proof_cache=proof_cache,
                     _observed_at=observed_at,
@@ -831,18 +982,139 @@ def _verified_source_schedules(
                 continue
             if binding.get("failure_record_id") != source_record_id:
                 continue
-            before_receipt = (
-                binding.get("grant_record_id"),
-                binding.get("failure_record_id"),
-                binding.get("release_record_id"),
-            )
-            revisions = tuple(record_revisions.get(item) for item in before_receipt)
-            if receipt_revision is not None and any(
-                item is None or item >= receipt_revision for item in revisions
-            ):
+            witness_ids = binding.get("witness_record_ids", ())
+        else:
+            try:
+                binding = task_recovery_source_binding(
+                    query.source_store,
+                    source_id,
+                    claim_id,
+                    source_record_id,
+                    expected_type,
+                    query_context=query,
+                    _proof_cache=proof_cache,
+                    _observed_at=observed_at,
+                )
+            except TaskViewQueryMismatch as exc:
+                raise TaskLineageError("snapshot_changed") from exc
+            except TaskDiagnosticError:
                 continue
-        verified.append((revision, schedule))
+            witness_ids = binding.get("witness_record_ids", ())
+        revisions = tuple(record_revisions.get(item) for item in witness_ids)
+        if receipt_revision is not None and any(
+            item is None or item >= receipt_revision for item in revisions
+        ):
+            continue
+        verified.append((revision, schedule, binding))
     return verified
+
+
+def _verified_unavailable_observations(
+    source_id, rows, *, query, by_id, proof_cache, observed_at
+):
+    """Expose claim-proven unavailable outcomes as observations, never edges."""
+    source_shapes = {
+        "worker_failure.recovery_unavailable": (
+            "failure_id",
+            "worker.invocation_failed",
+        ),
+        "candidate_rejection.recovery_unavailable": (
+            "rejection_id",
+            "candidate.rejected",
+        ),
+        "projection_rejection.recovery_unavailable": (
+            "projection_id",
+            "projection.decided",
+        ),
+        "claim_expiration.recovery_unavailable": (
+            "expiration_id",
+            "claim.expired",
+        ),
+    }
+    observations = []
+    for revision, record in rows:
+        shape = source_shapes.get(record.record_type)
+        if shape is None or not isinstance(record.payload, Mapping):
+            continue
+        source_field, source_type = shape
+        payload = record.payload
+        source_record_id = payload.get(source_field)
+        source_record = by_id.get(source_record_id)
+        if (
+            payload.get("contract_id") != source_id
+            or not isinstance(source_record_id, str)
+            or source_record is None
+            or source_record.record_type != source_type
+            or not isinstance(source_record.payload, Mapping)
+            or source_record.payload.get("contract_id") != source_id
+            or tuple(record.causal_parents) != (source_record_id,)
+        ):
+            continue
+        reason = safe_recovery_reason(payload.get("reason"))
+        allowed = {"contract_id", source_field, "reason"}
+        if "recovery_contract_id" in payload:
+            allowed.add("recovery_contract_id")
+        try:
+            validate_runtime_record(record)
+        except (TypeError, ValueError):
+            continue
+        if set(payload) != allowed:
+            continue
+        claim_id = source_record.payload.get("claim_id")
+        if record.record_type == "projection_rejection.recovery_unavailable":
+            rejected = [
+                item
+                for item in by_id.values()
+                if item.record_type == "candidate.rejected"
+                and item.payload.get("candidate_id")
+                == source_record.payload.get("candidate_id")
+                and item.payload.get("contract_id") == source_id
+            ]
+            claim_ids = {item.payload.get("claim_id") for item in rejected}
+            claim_ids.discard(None)
+            claim_id = next(iter(claim_ids)) if len(claim_ids) == 1 else None
+        if not isinstance(claim_id, str):
+            continue
+        try:
+            binding = task_recovery_source_binding(
+                query.source_store,
+                source_id,
+                claim_id,
+                source_record_id,
+                source_type,
+                query_context=query,
+                _proof_cache=proof_cache,
+                _observed_at=observed_at,
+            )
+        except TaskViewQueryMismatch as exc:
+            raise TaskLineageError("snapshot_changed") from exc
+        except TaskDiagnosticError:
+            continue
+        if binding.get("source_record_id") != source_record_id:
+            continue
+        observation = {
+            "record_id": record.id,
+            "revision": revision,
+            "record_type": record.record_type,
+            "verification": "unverified_observation",
+        }
+        if reason is None:
+            observation["reason_status"] = "unsupported_observation"
+        else:
+            observation["reason"] = reason
+        target_id = payload.get("recovery_contract_id")
+        target = (
+            query.read_store.get_contract(target_id)
+            if isinstance(target_id, str)
+            else None
+        )
+        if target is not None:
+            observation["reported_recovery_contract_id"] = target.id
+            observation["target_verification"] = "unverified_observation"
+        elif "recovery_contract_id" in payload:
+            observation["target_verification"] = "missing_or_invalid_reference"
+        observations.append(observation)
+    return observations
 
 
 def _cycle_members(edges) -> set[str]:

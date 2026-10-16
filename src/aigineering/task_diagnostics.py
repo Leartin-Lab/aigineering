@@ -26,6 +26,25 @@ _FAILURE_CODES = frozenset(
         "task_delegation_rejected",
         "attestation_request_rejected",
         "tool_observation_required",
+        "tool_action_invalid",
+        "tool_arguments_invalid",
+        "tool_unavailable",
+        "tool_timeout",
+        "tool_schema_invalid",
+        "tool_result_too_large",
+        "tool_execution_failed",
+        "tool_contract_invalid",
+        "tool_scope_denied",
+        "tool_descriptor_invalid",
+        "tool_descriptor_mismatch",
+        "mcp_name_invalid",
+        "mcp_arguments_invalid",
+        "mcp_server_unavailable",
+        "mcp_call_failed",
+        "mcp_result_invalid",
+        "mcp_contract_invalid",
+        "mcp_scope_denied",
+        "mcp_descriptor_invalid",
         "invalid_action",
         "response_missing_content",
         "response_missing_choices",
@@ -80,6 +99,37 @@ _EVENT_RECORD_TYPES = frozenset(
         "claim_expiration.recovery_unavailable",
     }
 )
+_RECOVERY_REASON_CODES = frozenset(
+    {
+        "legacy_method_intent_missing",
+        "recovery_history_ambiguous",
+        "method_parent_missing",
+        "method_source_context_unverified",
+        "method_source_declaration_unavailable",
+        "method_source_history_unverified",
+        "method_source_noncanonical",
+        "method_source_publication_unverified",
+        "parallel_method_source_batch_unverified",
+        "parallel_method_source_batch_noncanonical",
+        "parallel_method_source_noncanonical",
+        "parallel_method_source_publication_unverified",
+        "recovery_depth_exceeded",
+        "recovery_history_conflict",
+        "recovery_history_unavailable",
+        "recovery_publication_rejected",
+        "recovery_publisher_unavailable",
+        "source_proof_missing",
+        "terminal_preserved",
+        "unsupported_method_intent",
+    }
+)
+
+
+def safe_recovery_reason(value: Any) -> str | None:
+    """Return only fixed recovery disposition codes suitable for read views."""
+    return value if isinstance(value, str) and value in _RECOVERY_REASON_CODES else None
+
+
 _CLAIM_ID_PATTERN = re.compile(r"lease:[0-9a-f]{64}\Z")
 _CANDIDATE_ID_PATTERN = re.compile(r"candidate:v1:[0-9a-f]{64}\Z")
 _CLAIM_TRANSITIONS = frozenset(
@@ -1314,7 +1364,7 @@ def _select_proven_claim_run(
     return contract, domain_id, revision, matches[0], indexed, by_id
 
 
-def task_invocation_failure_binding(
+def _task_invocation_failure_binding(
     store,
     contract_id: str,
     claim_id: str,
@@ -1325,6 +1375,7 @@ def task_invocation_failure_binding(
     query_context=None,
     _proof_cache=None,
     _observed_at=None,
+    _include_witness_ids=False,
 ) -> dict[str, Any]:
     """Return safe details for one exact, proven invocation-failed claim.
 
@@ -1380,7 +1431,7 @@ def task_invocation_failure_binding(
     ]
     if len(releases) != 1:
         raise TaskDiagnosticError("claim_integrity_error")
-    return {
+    binding = {
         "kind": "invocation_failure",
         "status": "invocation_failed",
         "contract_id": contract.id,
@@ -1398,6 +1449,319 @@ def task_invocation_failure_binding(
         "status_code": failure.get("status_code"),
         "usage": failure.get("usage"),
     }
+    if _include_witness_ids:
+        binding["witness_record_ids"] = tuple(run.get("fact_ids", ()))
+    return binding
+
+
+def task_invocation_failure_binding(
+    store,
+    contract_id: str,
+    claim_id: str,
+    package_id: str,
+    worker_id: str,
+    epoch: int,
+    *,
+    query_context=None,
+    _proof_cache=None,
+    _observed_at=None,
+) -> dict[str, Any]:
+    """Return the original exact invocation-failure diagnostic binding."""
+    return _task_invocation_failure_binding(
+        store,
+        contract_id,
+        claim_id,
+        package_id,
+        worker_id,
+        epoch,
+        query_context=query_context,
+        _proof_cache=_proof_cache,
+        _observed_at=_observed_at,
+    )
+
+
+def task_recovery_source_binding(
+    store,
+    contract_id: str,
+    claim_id: str,
+    source_record_id: str,
+    source_kind: str,
+    *,
+    query_context=None,
+    _proof_cache=None,
+    _observed_at=None,
+) -> dict[str, Any]:
+    """Bind every recovery source to one proven claim run."""
+    if (
+        not isinstance(source_record_id, str)
+        or not source_record_id
+        or source_kind
+        not in {
+            "worker.invocation_failed",
+            "claim.expired",
+            "candidate.rejected",
+            "projection.decided",
+        }
+    ):
+        raise TaskDiagnosticError("invalid_recovery_source")
+    contract, domain_id, watermark, run, _indexed, by_id = _select_proven_claim_run(
+        store,
+        contract_id,
+        claim_id,
+        query_context=query_context,
+        _proof_cache=_proof_cache,
+        _observed_at=_observed_at,
+    )
+    if source_kind == "worker.invocation_failed":
+        if source_record_id not in by_id:
+            raise TaskDiagnosticError("invocation_failure_not_found")
+        source_revision, source = by_id[source_record_id]
+        if (
+            source.record_type != source_kind
+            or not _record_is_valid(source)
+            or source.payload.get("contract_id") != contract_id
+            or source.payload.get("claim_id") != claim_id
+            or source.payload.get("package_id") != run.get("package_id")
+            or source.payload.get("worker_id") != run.get("worker_id")
+        ):
+            raise TaskDiagnosticError("recovery_source_integrity_error")
+        invocation = _task_invocation_failure_binding(
+            store,
+            contract_id,
+            claim_id,
+            run.get("package_id"),
+            run.get("worker_id"),
+            run.get("epoch"),
+            query_context=query_context,
+            _proof_cache=_proof_cache,
+            _observed_at=_observed_at,
+            _include_witness_ids=True,
+        )
+        if invocation.get("failure_record_id") != source_record_id:
+            raise TaskDiagnosticError("recovery_source_not_in_claim_proof")
+        return {
+            "kind": source_kind,
+            "contract_id": invocation["contract_id"],
+            "domain_id": invocation["domain_id"],
+            "claim_id": invocation["claim_id"],
+            "grant_record_id": invocation["grant_record_id"],
+            "failure_record_id": source_record_id,
+            "release_record_id": invocation["release_record_id"],
+            "witness_record_ids": invocation["witness_record_ids"],
+            "source_record_id": source_record_id,
+            "source_revision": source_revision,
+            "watermark": watermark,
+        }
+    expected_status = "expired" if source_kind == "claim.expired" else "rejected"
+    if run.get("status") != expected_status:
+        raise TaskDiagnosticError("recovery_source_status_mismatch")
+    if source_kind == "projection.decided":
+        if (
+            source_record_id not in by_id
+            or by_id[source_record_id][1].record_type != "projection.decided"
+        ):
+            raise TaskDiagnosticError("recovery_projection_source_missing")
+        source = by_id[source_record_id][1]
+        if (
+            source.payload.get("candidate_id") != run.get("candidate_id")
+            or source.payload.get("contract_id") != contract.id
+            or source.payload.get("status") != "rejected"
+            or not _record_is_valid(source)
+            or not any(
+                fact_id in by_id
+                and by_id[fact_id][1].record_type == "candidate.rejected"
+                and by_id[fact_id][1].payload.get("candidate_id")
+                == run.get("candidate_id")
+                for fact_id in run.get("fact_ids", ())
+            )
+        ):
+            raise TaskDiagnosticError("recovery_projection_source_unproven")
+        revision = by_id[source_record_id][0]
+    else:
+        if (
+            source_record_id not in run.get("fact_ids", ())
+            or source_record_id not in by_id
+        ):
+            raise TaskDiagnosticError("recovery_source_not_in_claim_proof")
+        revision, source = by_id[source_record_id]
+        if (
+            source.record_type != source_kind
+            or not _record_is_valid(source)
+            or source.payload.get("contract_id") != contract.id
+        ):
+            raise TaskDiagnosticError("recovery_source_integrity_error")
+    if source_kind == "claim.expired":
+        if source.id not in run.get("fact_ids", ()):
+            raise TaskDiagnosticError("recovery_expiration_not_proven")
+    elif source_kind == "candidate.rejected":
+        if (
+            run.get("candidate_id") != source.payload.get("candidate_id")
+            or run.get("attempt_outcome") != "rejected"
+            or source.payload.get("claim_id") != claim_id
+        ):
+            raise TaskDiagnosticError("recovery_rejection_not_proven")
+    return {
+        "kind": source_kind,
+        "status": expected_status,
+        "contract_id": contract.id,
+        "domain_id": domain_id,
+        "claim_id": claim_id,
+        "grant_record_id": run["grant_record_id"],
+        "source_record_id": source.id,
+        "source_revision": revision,
+        "witness_record_ids": tuple(
+            sorted(set(run.get("fact_ids", ())) | {source_record_id})
+        ),
+        "watermark": watermark,
+    }
+
+
+def task_recovery_ancestor_source_bindings(
+    store, contract_id: str, *, query_context
+) -> dict[str, dict[str, Any]]:
+    """Re-derive source bindings carried by exact accepted recovery members.
+
+    Context IDs and binding fields are only selectors. Each selected source is
+    authenticated again by ``task_recovery_source_binding`` against the same
+    immutable task query. The recovery feature later proves each declaration
+    against its canonical intent.
+    """
+    import json
+
+    from aigineering.core.publication_history import (
+        index_published_records,
+        read_effect_types,
+        validate_published_member,
+    )
+    from aigineering.plugins.task_semantics import method_payload
+
+    query_context.require_match(store)
+    records = tuple(record for _revision, record in query_context.runtime_records)
+    index = index_published_records(records)
+    bindings: dict[str, dict[str, Any]] = {}
+    target_id = contract_id
+    visited: set[str] = set()
+    for _depth in range(3):
+        if target_id in visited:
+            raise TaskDiagnosticError("recovery_source_history_cycle")
+        visited.add(target_id)
+        target = query_context.read_store.get_contract(target_id)
+        if target is None:
+            raise TaskDiagnosticError("recovery_source_contract_missing")
+        payload = method_payload(target)
+        if payload.get("recovery_intent_version") != 1:
+            return bindings
+        source_id = payload.get("recovery_source_contract_id")
+        if not isinstance(source_id, str) or not source_id:
+            raise TaskDiagnosticError("recovery_source_history_unverified")
+        declaration_rows = tuple(
+            record
+            for record in records
+            if record.record_type == "contract.declared"
+            and isinstance(record.payload.get("contract"), Mapping)
+            and record.payload["contract"].get("id") == target.id
+        )
+        if len(declaration_rows) != 1:
+            raise TaskDiagnosticError("recovery_source_publication_unverified")
+        declaration = declaration_rows[0]
+        candidate_id = declaration.payload.get("candidate_id")
+        if not isinstance(candidate_id, str) or not candidate_id:
+            raise TaskDiagnosticError("recovery_source_publication_unverified")
+        try:
+            receipt, head = validate_published_member(
+                records,
+                declaration,
+                expected_candidate=candidate_id,
+                domain_id=query_context.domain_id,
+                record_index=index,
+            )
+            effect_types = read_effect_types(receipt.payload)
+        except (TypeError, ValueError) as exc:
+            raise TaskDiagnosticError("recovery_source_publication_unverified") from exc
+        if effect_types != ("contract.declare", "asset.propose"):
+            raise TaskDiagnosticError("recovery_source_publication_unverified")
+        member_ids = head.payload.get("committed_record_ids")
+        if (
+            not isinstance(member_ids, (list, tuple))
+            or not member_ids
+            or len(member_ids) != len(set(member_ids))
+        ):
+            raise TaskDiagnosticError("recovery_source_publication_unverified")
+        members = tuple(
+            record
+            for member_id in member_ids
+            for record in index.by_id.get(member_id, ())
+        )
+        asset_members = tuple(
+            record for record in members if record.record_type == "asset.committed"
+        )
+        if len(asset_members) != 1:
+            raise TaskDiagnosticError("recovery_source_context_unverified")
+        try:
+            asset_receipt, asset_head = validate_published_member(
+                records,
+                asset_members[0],
+                expected_candidate=candidate_id,
+                expected_receipt=receipt.id,
+                expected_head=head.id,
+                domain_id=query_context.domain_id,
+                record_index=index,
+            )
+        except (TypeError, ValueError) as exc:
+            raise TaskDiagnosticError("recovery_source_context_unverified") from exc
+        del asset_receipt, asset_head
+        asset_id = asset_members[0].payload.get("asset", {}).get("id")
+        contexts = tuple(
+            asset for asset in query_context.assets if asset.id == asset_id
+        )
+        if len(contexts) != 1:
+            raise TaskDiagnosticError("recovery_source_context_unverified")
+        try:
+            context = json.loads(contexts[0].content)
+            hint = context["source_binding"]
+        except (TypeError, ValueError, KeyError) as exc:
+            raise TaskDiagnosticError("recovery_source_context_unverified") from exc
+        if (
+            not isinstance(hint, dict)
+            or context.get("failed_contract_id") != source_id
+            or hint.get("contract_id") != source_id
+            or not isinstance(hint.get("claim_id"), str)
+            or not isinstance(hint.get("source_record_id"), str)
+            or not isinstance(hint.get("kind"), str)
+        ):
+            raise TaskDiagnosticError("recovery_source_context_unverified")
+        binding = task_recovery_source_binding(
+            store,
+            source_id,
+            hint["claim_id"],
+            hint["source_record_id"],
+            hint["kind"],
+            query_context=query_context,
+        )
+        for key in (
+            "kind",
+            "contract_id",
+            "claim_id",
+            "grant_record_id",
+            "failure_record_id",
+            "release_record_id",
+            "source_record_id",
+            "witness_record_ids",
+        ):
+            observed = hint.get(key)
+            if key == "witness_record_ids" and isinstance(observed, list):
+                observed = tuple(observed)
+            if observed != binding.get(key):
+                raise TaskDiagnosticError("recovery_source_context_unverified")
+        bindings[source_id] = binding
+        target_id = source_id
+    target = query_context.read_store.get_contract(target_id)
+    if (
+        target is not None
+        and method_payload(target).get("recovery_intent_version") == 1
+    ):
+        raise TaskDiagnosticError("recovery_source_history_depth_exceeded")
+    return bindings
 
 
 def _diagnostic_events(
@@ -1407,6 +1771,7 @@ def _diagnostic_events(
     indexed: list[tuple[int, RuntimeRecord]],
     by_id: dict[str, tuple[int, RuntimeRecord]],
     issues: list[dict[str, Any]],
+    store,
 ) -> list[dict[str, Any]]:
     matching = [run for run in runs if run.get("claim_id") == claim_id]
     if not matching:
@@ -1536,6 +1901,11 @@ def _diagnostic_events(
         expected_payload_keys = {"contract_id", source_field}
         if record.payload.get("reason") == "terminal_preserved":
             expected_payload_keys.update({"reason", "terminal"})
+        else:
+            if "reason" in record.payload:
+                expected_payload_keys.add("reason")
+            if "recovery_contract_id" in record.payload:
+                expected_payload_keys.add("recovery_contract_id")
         if (
             record.payload.get("contract_id") != contract_id
             or record.causal_parents != (source_id,)
@@ -1543,6 +1913,17 @@ def _diagnostic_events(
             or source_pair is None
             or source_pair[1].record_type != expected_source_type
             or set(record.payload) != expected_payload_keys
+            or (
+                "reason" in record.payload
+                and not isinstance(record.payload.get("reason"), str)
+            )
+            or (
+                "recovery_contract_id" in record.payload
+                and (
+                    not isinstance(record.payload.get("recovery_contract_id"), str)
+                    or not record.payload.get("recovery_contract_id")
+                )
+            )
             or (
                 "terminal" in record.payload
                 and not _is_one_of(
@@ -1602,6 +1983,21 @@ def _diagnostic_events(
                 )
                 else "unknown"
             )
+        elif record.record_type.endswith(".recovery_unavailable"):
+            reason = safe_recovery_reason(payload.get("reason"))
+            if reason is not None:
+                row["reason"] = reason
+            elif "reason" in payload:
+                row["reason_status"] = "unsupported_observation"
+            target_id = payload.get("recovery_contract_id")
+            target = (
+                store.get_contract(target_id) if isinstance(target_id, str) else None
+            )
+            if target is not None:
+                row["reported_recovery_contract_id"] = target.id
+                row["target_verification"] = "unverified_observation"
+            elif "recovery_contract_id" in payload:
+                row["target_verification"] = "missing_or_invalid_reference"
         elif record.record_type in {
             "claim.granted",
             "claim.renewed",
@@ -1654,7 +2050,9 @@ def task_diagnostics(
         if run.get("claim_id") == claim_id
         for issue in run["integrity"]["issues"]
     ]
-    events = _diagnostic_events(contract.id, claim_id, runs, indexed, by_id, issues)
+    events = _diagnostic_events(
+        contract.id, claim_id, runs, indexed, by_id, issues, store
+    )
     cursor_base = {
         "version": _CURSOR_VERSION,
         "command": "diagnostics",

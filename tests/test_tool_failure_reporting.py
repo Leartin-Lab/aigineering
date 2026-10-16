@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from conftest import candidate_runtime, hosted_worker
 
 from aigineering.agent.mock import MockWorker
 from aigineering.agent.tool_worker import ToolWorker
+from aigineering.runtime import WorkerInvocationError
+from aigineering.run_failure_diagnostics import invocation_failure_detail
+from aigineering.task_diagnostics import task_diagnostics, task_runs
 from aigineering.application import default_completion_registry
-from aigineering.cli.task_state import project_task_status
 from aigineering.core.capability_descriptors import create_tool_descriptor
 from aigineering.core.candidate_publisher import CandidatePublisherRegistry
 from aigineering.core.sqlite_store import SQLiteStore
@@ -23,7 +27,9 @@ from aigineering.runtime import (
 )
 
 
-def test_signed_tool_schema_failure_is_reported_on_root_status(tmp_path) -> None:
+def test_signed_tool_schema_failure_is_local_and_commits_no_observation(
+    tmp_path,
+) -> None:
     db_path = tmp_path / "tool-failure-report.db"
     store = SQLiteStore(str(db_path))
     secret_result = "sealed-tool-result-marker"
@@ -124,41 +130,87 @@ def test_signed_tool_schema_failure_is_reported_on_root_status(tmp_path) -> None
         failed_tool = store.get_contract(delegated_failure["child_contract_id"])
         assert failed_tool is not None
 
+        claim_request_id = "signed-tool-schema-failure-claim"
+        claim_proposal = tool_host.claim_candidate(
+            request_id=claim_request_id, contract_id=failed_tool.id
+        )
         failed_claim = claim_next_package(
-            store, worker_id=tool_host.worker_id, contract_id=failed_tool.id
+            store,
+            worker_id=tool_host.worker_id,
+            contract_id=failed_tool.id,
+            claim_candidate=claim_proposal,
         )
         assert failed_claim is not None
-        assert (
-            execute_claimed_package(failed_claim, tool_host, store)["status"]
-            == "accepted"
+        request_record = next(
+            record
+            for _, record in store.scan_runtime_records(
+                record_type="worker.claim.requested"
+            )
+            if record.payload.get("idempotency_key") == claim_request_id
         )
-        process_task_completions(
-            store,
-            default_completion_registry(),
-            candidate_publishers=publishers,
+        receipt_record = next(
+            record
+            for _, record in store.scan_runtime_records(
+                record_type="candidate.received"
+            )
+            if record.payload.get("candidate_id") == claim_proposal.id
         )
+        grant_record = next(
+            record
+            for _, record in store.scan_runtime_records(record_type="claim.granted")
+            if record.payload.get("claim_id") == failed_claim.package.claim_id
+        )
+        assert request_record.payload["candidate_id"] == claim_proposal.id
+        assert request_record.causal_parents == (receipt_record.id,)
+        assert grant_record.payload["contract_id"] == failed_tool.id
+        assert grant_record.causal_parents == (request_record.id,)
+        with pytest.raises(WorkerInvocationError):
+            execute_claimed_package(failed_claim, tool_host, store)
 
-        status = project_task_status(root, store)
-        failure = status["failure_details"][0]
-        related = failure["related_tool_failures"]
-        assert len(related) == 1
-        assert related[0]["source_contract_id"] == failed_tool.id
-        assert related[0]["tool"] == "schema_bad"
-        assert related[0]["error_type"] == "ToolSchemaValidationError"
-        assert related[0]["retryable"] is False
-        assert related[0]["trace_id"]
-        assert related[0]["source_contract_id"] != successful_tool.id
-        assert all(item["source_contract_id"] != successful_tool.id for item in related)
+        assert store.get_assets_by_name(failed_tool.outputs[0]) == []
+        failure_record = next(
+            record
+            for _, record in store.scan_runtime_records(
+                record_type="worker.invocation_failed"
+            )
+            if record.payload.get("contract_id") == failed_tool.id
+        )
+        assert failure_record.payload["category"] == "worker_error:tool_schema_invalid"
+        assert (
+            failure_record.payload["diagnostic"] == "Tool input or output is invalid."
+        )
+        run_view = task_runs(store, failed_tool.id)
+        assert run_view["ok"] is True
+        failed_run = next(
+            run
+            for run in run_view["data"]["runs"]
+            if run["claim_id"] == failed_claim.package.claim_id
+        )
+        assert failed_run["failure"]["category"] == "tool_schema_invalid"
+        diagnostic_view = task_diagnostics(
+            store, failed_tool.id, failed_claim.package.claim_id
+        )
+        assert diagnostic_view["ok"] is True
+        failed_event = next(
+            event
+            for event in diagnostic_view["data"]["events"]
+            if event.get("category") == "tool_schema_invalid"
+        )
+        assert failed_event["category"] == "tool_schema_invalid"
+        public_detail = invocation_failure_detail(store, failed_claim)
+        assert public_detail["status"] == "invocation_failed"
+        assert public_detail["category"] == "tool_schema_invalid"
 
         records = [record for _, record in store.scan_runtime_records()]
-        serialized_status = json.dumps(status, sort_keys=True)
         serialized_facts = json.dumps(
             [deep_thaw(record.payload) for record in records], sort_keys=True
         )
-        assert secret_result not in serialized_status
         assert secret_result not in serialized_facts
-        assert related[0]["trace_id"] in {
-            entry.id for entry in store.get_by_contract(failed_tool.id)
+        assert root.id not in {
+            record.payload.get("contract_id")
+            for _, record in store.scan_runtime_records(
+                record_type="lifecycle.terminal"
+            )
         }
     finally:
         store.close()

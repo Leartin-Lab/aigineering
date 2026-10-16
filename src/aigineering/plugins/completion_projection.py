@@ -7,13 +7,13 @@ resumed, or method-scheduled process state.
 
 from __future__ import annotations
 
-import json
 from typing import TYPE_CHECKING, Protocol
 
 from aigineering.core.causal_allowance import resolve_causal_allowance
 from aigineering.core.disclosure import compute_disclosure
 from aigineering.core.output_satisfaction import all_outputs_satisfied
 from aigineering.core.lifecycle_facts import commit_terminal_outcome
+from aigineering.core.terminal_types import TERMINAL_EVENTS
 from aigineering.core.trace_manager import TraceManager
 from aigineering.core.store_capabilities import (
     AssetReader,
@@ -84,8 +84,10 @@ class TaskCompletionContext:
 
     def capture_recovery_history(self) -> RecoveryHistorySnapshot | None:
         """Capture exact read-only recovery facts and configured public identity."""
-        from aigineering.core.domain import load_genesis
-        from aigineering.core.projection_context import load_effect_projection_context
+        from aigineering.task_view_query import (
+            TaskViewQueryMismatch,
+            load_task_view_query_context,
+        )
         from aigineering.plugins.recovery_history import (
             RecoveryHistoryCaptureUnstable,
             RecoveryHistorySnapshot,
@@ -100,16 +102,19 @@ class TaskCompletionContext:
             return None
         for _attempt in range(3):
             before = self._store.get_runtime_revision()
-            context = load_effect_projection_context(self._store)
-            genesis = load_genesis(self._store)
+            try:
+                query_context = load_task_view_query_context(self._store)
+            except TaskViewQueryMismatch:
+                continue
             after = self._store.get_runtime_revision()
             if before == after:
                 return RecoveryHistorySnapshot(
-                    context=context,
-                    store_domain_id=genesis.id,
+                    context=query_context.effect_projection,
+                    store_domain_id=query_context.domain_id or "",
                     publisher_domain_id=publisher.genesis.id,
                     publisher_actor_id=publisher.actor_key.actor_id,
                     revision=after,
+                    query_context=query_context,
                 )
         raise RecoveryHistoryCaptureUnstable(
             "recovery history changed during bounded capture"
@@ -208,6 +213,9 @@ class TaskCompletionProjector:
         parent_id = contract.parent_id
         if parent_id is None:
             return False
+        parent = self._store.get_contract(parent_id)
+        if parent is not None and _has_typed_terminal(self._store, parent.id):
+            return True
         assets = [
             asset
             for asset in self._store.get_assets_by_contract(contract.id)
@@ -222,16 +230,12 @@ class TaskCompletionProjector:
             if plugin is not None and plugin.can_handle(action_type):
                 handled = plugin.handle_completion(self._context, contract, assets)
 
-        parent = self._store.get_contract(parent_id)
         if handled:
             if parent is not None and all_outputs_satisfied(parent, self._store):
                 self._complete_contract(parent)
                 self._complete_satisfied_ancestors(parent)
             elif action_type == "tool" and parent is not None:
-                if _tool_observation_succeeded(assets):
-                    self._publish_continuation(parent, contract, assets)
-                else:
-                    self._record_terminal(parent, "failed")
+                self._publish_continuation(parent, contract, assets)
             else:
                 self._complete_satisfied_ancestors(contract)
             return True
@@ -339,12 +343,10 @@ class TaskCompletionProjector:
         commit_terminal_outcome(self._store, contract, event_type)
 
 
-def _tool_observation_succeeded(assets: list[Asset]) -> bool:
-    for asset in assets:
-        try:
-            payload = json.loads(asset.content)
-        except (TypeError, ValueError):
-            continue
-        if isinstance(payload, dict) and payload.get("ok") is True:
-            return True
-    return False
+def _has_typed_terminal(store: CompletionStoreProtocol, contract_id: str) -> bool:
+    return any(
+        record.record_type == "lifecycle.terminal"
+        and record.payload.get("contract_id") == contract_id
+        and record.payload.get("terminal") in TERMINAL_EVENTS
+        for _, record in store.scan_runtime_records(record_type="lifecycle.terminal")
+    )

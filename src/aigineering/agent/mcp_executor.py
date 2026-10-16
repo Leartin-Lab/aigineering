@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from aigineering.agent.worker import WorkerExecutionError
 from aigineering.protocol.types import Candidate
 
 
@@ -39,33 +40,36 @@ class MCPExecutor:
             Candidate whose ``raw_output`` is a JSON object with fields
             ``ok``, ``tool``, ``result``, and ``error``.
         """
+        if not isinstance(tool_name, str) or not tool_name:
+            raise WorkerExecutionError(
+                "mcp_name_invalid", "MCP tool name must be nonempty."
+            )
+        if not isinstance(args, dict):
+            raise WorkerExecutionError(
+                "mcp_arguments_invalid", "MCP arguments must be an object."
+            )
+        server_name = tool_name.split(".", 1)[0]
+        server = self._servers.get(server_name)
+        if not callable(server):
+            raise WorkerExecutionError(
+                "mcp_server_unavailable", "MCP server is unavailable."
+            )
         try:
-            server_name = tool_name.split(".", 1)[0]
-            server = self._servers[server_name]
             result = server(tool_name, args)
-            if not isinstance(result, str):
-                raise TypeError("MCP result must be a string")
-            ok = True
-            error = ""
-            error_type = ""
-        except KeyError:
-            result = ""
-            ok = False
-            error = f"unknown mcp server for tool '{tool_name}'"
-            error_type = "KeyError"
         except Exception as e:
-            result = ""
-            ok = False
-            error = str(e)
-            error_type = type(e).__name__
+            raise WorkerExecutionError("mcp_call_failed", "MCP call failed.") from e
+        if not isinstance(result, str):
+            raise WorkerExecutionError(
+                "mcp_result_invalid", "MCP server returned an invalid result."
+            )
 
         obs = json.dumps(
             {
-                "ok": ok,
+                "ok": True,
                 "tool": tool_name,
                 "result": result,
-                "error": error,
-                "error_type": error_type,
+                "error": "",
+                "error_type": "",
             },
             sort_keys=True,
             ensure_ascii=False,

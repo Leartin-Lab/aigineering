@@ -171,10 +171,18 @@ covers the source, completed ordinary review child and ready revision successor,
 full endpoint views and task cards, exact replay, required Redis outage, reopen
 and private-copy rebuild. Its fixture Workers are explicit mocks; it establishes
 no current-provider output qualification.
-Passive tool continuation and other recovery sources still need independently
-proved relation readers; folding and hundreds-node complex-task acceptance
-remain later stages. This command does
-not replace current-provider productivity or the remaining release gates.
+[Executable method recovery](changes/098-executable-method-recovery.md) now
+preserves the original tool request through ordinary successors after a proven
+invocation failure, claim expiry or admitted output rejection. The lineage
+reader shares exact source and publication proof; unavailable-target references
+remain explicitly unverified observations rather than runnable edges.
+[Tool and callable MCP failures](changes/099-tool-mcp-failure-convergence.md)
+now enter the existing claimed Worker failure path without an observation
+Candidate. Successful negative business data remains an observation.
+Explicit-fail and common maintenance coordination, passive-continuation
+relation proof, folding and complex-task scale acceptance remain open.
+These changes do not replace current-artifact actual-work acceptance or the
+remaining release gates.
 
 1. Signed conversations have [development evidence](reports/074-signed-task-comments-2026-10-04.md).
    [Operator holds](reports/075-signed-task-holds-2026-10-04.md) arbitrate against

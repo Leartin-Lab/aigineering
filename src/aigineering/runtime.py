@@ -741,6 +741,7 @@ def _schedule_rejected_recovery(
     trace,
     *,
     candidate_publishers=None,
+    source_binding=None,
 ) -> Contract | None:
     if candidate_publishers is None:
         raise RuntimeError(
@@ -748,30 +749,157 @@ def _schedule_rejected_recovery(
         )
     trace_manager = TraceManager(trace)
     runtime = TaskCompletionContext(store, trace_manager, candidate_publishers)
+    ancestor_source_bindings = None
+    recovery_snapshot = None
+    if source_binding is not None:
+        from aigineering.task_diagnostics import TaskDiagnosticError
+
+        snapshot = runtime.capture_recovery_history()
+        recovery_snapshot = snapshot
+        if snapshot is None or snapshot.query_context is None:
+            raise TaskDiagnosticError("recovery_source_snapshot_unavailable")
+        from aigineering.task_diagnostics import (
+            task_recovery_ancestor_source_bindings,
+            task_recovery_source_binding,
+        )
+
+        query = snapshot.query_context
+        source_record_id = source_binding.get("source_record_id")
+        claim_id = source_binding.get("claim_id")
+        source_kind = source_binding.get("kind")
+        if not all(
+            isinstance(value, str) and value
+            for value in (source_record_id, claim_id, source_kind)
+        ):
+            from aigineering.task_diagnostics import TaskDiagnosticError
+
+            raise TaskDiagnosticError("recovery_source_integrity_error")
+        proven_binding = task_recovery_source_binding(
+            store,
+            contract.id,
+            claim_id,
+            source_record_id,
+            source_kind,
+            query_context=query,
+        )
+        for key in (
+            "kind",
+            "contract_id",
+            "claim_id",
+            "grant_record_id",
+            "failure_record_id",
+            "release_record_id",
+            "source_record_id",
+            "witness_record_ids",
+        ):
+            if source_binding.get(key) != proven_binding.get(key):
+                from aigineering.task_diagnostics import TaskDiagnosticError
+
+                raise TaskDiagnosticError("recovery_source_snapshot_mismatch")
+        source_binding = proven_binding
+        try:
+            ancestor_source_bindings = task_recovery_ancestor_source_bindings(
+                store, contract.id, query_context=query
+            )
+        except TaskDiagnosticError:
+            # The current failure is authenticated, so malformed prior history
+            # is an unsupported method disposition; it cannot authorize work.
+            ancestor_source_bindings = {}
     recovery = schedule_projection_recovery(
         runtime,
         failed_contract=contract,
         candidate_raw=candidate_raw,
         rejections=rejections,
+        source_binding=source_binding,
+        ancestor_source_bindings=ancestor_source_bindings,
+        recovery_snapshot=recovery_snapshot,
+        include_disposition=True,
     )
     return recovery
+
+
+def _recovery_source_binding(store, contract: Contract, source_record) -> dict | None:
+    """Select the shared exact claim proof for a typed recovery source fact."""
+    payload = source_record.payload
+    method = method_payload(contract)
+    requires_proof = method.get("method") in {"tool", "parallel_tool_item"}
+    if not requires_proof:
+        return None
+    source_kind = source_record.record_type
+    claim_id = payload.get("claim_id")
+    if source_kind == "projection.decided":
+        candidate_id = payload.get("candidate_id")
+        rejected = [
+            record
+            for _, record in store.scan_runtime_records(
+                record_type="candidate.rejected"
+            )
+            if record.payload.get("candidate_id") == candidate_id
+            and record.payload.get("contract_id") == contract.id
+        ]
+        claim_ids = {record.payload.get("claim_id") for record in rejected}
+        claim_ids.discard(None)
+        if not claim_ids:
+            from aigineering.task_diagnostics import TaskDiagnosticError
+
+            raise TaskDiagnosticError("recovery_projection_claim_missing")
+        if len(claim_ids) != 1:
+            from aigineering.task_diagnostics import TaskDiagnosticError
+
+            raise TaskDiagnosticError("recovery_projection_claim_ambiguous")
+        claim_id = next(iter(claim_ids))
+    if not isinstance(claim_id, str) or not claim_id:
+        from aigineering.task_diagnostics import TaskDiagnosticError
+
+        raise TaskDiagnosticError("recovery_source_claim_missing")
+    try:
+        from aigineering.task_diagnostics import (
+            TaskDiagnosticError,
+            task_recovery_source_binding,
+        )
+
+        return task_recovery_source_binding(
+            store, contract.id, claim_id, source_record.id, source_kind
+        )
+    except TaskDiagnosticError:
+        raise
+    except (KeyError, TypeError, ValueError) as exc:
+        raise TaskDiagnosticError("recovery_source_integrity_error") from exc
 
 
 def _commit_recovery_outcome(
     store,
     contract: Contract,
-    recovery: Contract | None,
+    recovery,
     *,
     source_record,
     record_prefix: str,
     source_field: str,
     record_terminal: bool,
 ) -> None:
+    from aigineering.plugins.recovery import RecoveryDisposition
+    from aigineering.plugins.task_semantics import method_payload
+
+    disposition = (
+        recovery
+        if isinstance(recovery, RecoveryDisposition)
+        else RecoveryDisposition(recovery)
+    )
+    recovery_contract = disposition.contract
+    method_fields = method_payload(contract)
+    include_method_details = method_fields.get("method") in {
+        "tool",
+        "parallel_tool_item",
+    }
     entry = create_entry(
         contract.id,
         "failed",
         relation_type="projection",
-        relation_target=recovery.id if recovery is not None else "unrecoverable",
+        relation_target=(
+            recovery_contract.id
+            if recovery_contract is not None
+            else disposition.recovery_contract_id or "unrecoverable"
+        ),
         authority_result="rejected",
         budget_remaining=contract.budget,
     )
@@ -789,8 +917,26 @@ def _commit_recovery_outcome(
             trace_record(entry, causal_parents=[source_record.id]),
             create_runtime_record(
                 f"{record_prefix}.recovery_"
-                f"{'scheduled' if recovery is not None else 'unavailable'}",
-                {"contract_id": contract.id, source_field: source_record.id},
+                f"{'scheduled' if recovery_contract is not None else 'unavailable'}",
+                {
+                    "contract_id": contract.id,
+                    source_field: source_record.id,
+                    **(
+                        {"reason": disposition.reason}
+                        if include_method_details and disposition.reason
+                        else {}
+                    ),
+                    **(
+                        {"recovery_contract_id": recovery_contract.id}
+                        if include_method_details and recovery_contract is not None
+                        else {}
+                    ),
+                    **(
+                        {"recovery_contract_id": disposition.recovery_contract_id}
+                        if include_method_details and disposition.recovery_contract_id
+                        else {}
+                    ),
+                },
                 causal_parents=[source_record.id],
             ),
         )
@@ -887,6 +1033,14 @@ def process_rejected_submissions(store, *, candidate_publishers=None) -> list[st
                 f"rejected projection {record.id!r} has no replayable raw "
                 f"Candidate evidence for {candidate_id!r}"
             )
+        source_binding = _recovery_source_binding(store, contract, record)
+        if (
+            method_payload(contract).get("method") in {"tool", "parallel_tool_item"}
+            and source_binding is None
+        ):
+            from aigineering.task_diagnostics import TaskDiagnosticError
+
+            raise TaskDiagnosticError("recovery_source_binding_missing")
         terminal = terminal_contracts.get(contract_id)
         if terminal is not None and terminal != "failed":
             _commit_terminal_preserved_outcome(
@@ -924,6 +1078,7 @@ def process_rejected_submissions(store, *, candidate_publishers=None) -> list[st
             store,
             store,
             candidate_publishers=candidate_publishers,
+            source_binding=source_binding,
         )
         _commit_recovery_outcome(
             store,
@@ -1048,6 +1203,14 @@ def process_expired_claims(store, *, candidate_publishers=None) -> list[str]:
                 f"claim expiration {expiration.id!r} references missing "
                 f"Contract {contract_id!r}"
             )
+        source_binding = _recovery_source_binding(store, contract, expiration)
+        if (
+            method_payload(contract).get("method") in {"tool", "parallel_tool_item"}
+            and source_binding is None
+        ):
+            from aigineering.task_diagnostics import TaskDiagnosticError
+
+            raise TaskDiagnosticError("recovery_source_binding_missing")
         recovery = _schedule_rejected_recovery(
             contract,
             "worker claim expired before Candidate submission",
@@ -1063,6 +1226,7 @@ def process_expired_claims(store, *, candidate_publishers=None) -> list[str]:
             store,
             store,
             candidate_publishers=candidate_publishers,
+            source_binding=source_binding,
         )
         _commit_recovery_outcome(
             store,
@@ -1188,6 +1352,7 @@ def process_worker_failures(store, *, candidate_publishers=None) -> list[str]:
             store,
             store,
             candidate_publishers=candidate_publishers,
+            source_binding=_recovery_source_binding(store, contract, failure),
         )
         _commit_recovery_outcome(
             store,
