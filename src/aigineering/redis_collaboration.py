@@ -270,14 +270,18 @@ class RedisCollaborationService:
             isinstance(block_ms, bool) or not isinstance(block_ms, int) or block_ms < 0
         ):
             raise ValueError("block_ms must be a non-negative integer")
-        snapshot = self.sync()
-        max_revision = int(snapshot["authoritative_revision"])
+        self.sync()
         try:
             response = self._client.xread(
                 {self.stream_key: f"{after_revision}-0"},
                 count=count,
                 block=block_ms,
             )
+            # A blocking read can overlap a SQLite commit and its normal relay.
+            # Re-read this bound Store after XREAD so live readers can return
+            # that event; immutable snapshots still cap the feed to their own
+            # captured revision rather than Redis's possibly newer watermark.
+            max_revision = int(self._store.get_runtime_revision())
             return [
                 event
                 for event in self._parse_stream_response(response)
