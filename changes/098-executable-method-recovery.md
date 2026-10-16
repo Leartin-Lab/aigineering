@@ -27,7 +27,15 @@ selection and recovery-outcome wire shape, even when unrelated JSON happens to
 use the reserved marker key names. Missing or ambiguous historical source proof
 is an observable safe diagnostic and does not write recovery or terminal facts.
 
-This change does not add a scheduler, task kind, registry, authority, allowance
-or provider behavior. Verification uses signed local fixtures and explicit
+Parallel delegation now leaves bounded ordinary parent balance for up to one
+first recovery publication per item when the signed allowance permits it, while
+retaining at least one unit for the existing join. This does not mint or return
+allowance, reserve an earmarked pool, guarantee recursive recovery, or take
+budget from verification tasks. The minimum `calls + 1` allowance still has no
+recovery capacity. Existing accepted parallel histories remain verified against
+their exact original join budget and declaration IDs.
+
+This change does not add a scheduler, task kind, registry, authority, or provider
+behavior. Verification uses signed local fixtures and explicit
 test-only Workers; it is not evidence of external-provider or production tool
 execution.

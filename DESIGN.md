@@ -484,8 +484,14 @@ Publication and the later recovery outcome remain separate writes.
 `/parallel_tool` compiles two to eight calls into independently claimable tool
 Contracts and one continuation activated by the boolean conjunction of their
 observation names. Tool-specific capabilities route each call; the continuation
-cannot run until every observation is committed. No thread, future, or in-memory
-join is part of task truth.
+cannot run until every observation is committed. When the signed allowance has
+room beyond one unit per call and the one-unit join minimum, publication leaves
+up to one unreserved parent unit per item for a first recovery publication. The
+remaining allowance still determines the join budget. This is ordinary
+available balance, not an earmark or a guarantee if other authorized work spends
+it first; recursive recovery and failures beyond the retained capacity can remain
+unavailable. At the minimum `calls + 1` allowance, no recovery unit is retained.
+No thread, future, or in-memory join is part of task truth.
 
 ## Causal allowance
 

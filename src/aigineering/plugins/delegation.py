@@ -38,7 +38,17 @@ class TaskDelegationPlugin:
         from aigineering.plugins.base import PluginProposal
 
         if action.type == "parallel_tool":
-            children = _parallel_tool_contracts(parent, action, allowance)
+            payload = deep_thaw(action.payload)
+            calls = payload.get("calls")
+            reserve = (
+                min(len(calls), max(0, allowance - len(calls) - 1))
+                if isinstance(calls, list) and 2 <= len(calls) <= 8
+                else 0
+            )
+            # Preserve up to one bounded first-recovery slot per item, while
+            # keeping at least one unit for the join. This is ordinary parent
+            # balance, so existing signed publication checks remain decisive.
+            children = _parallel_tool_contracts(parent, action, allowance - reserve)
             return PluginProposal(
                 effects=tuple(contract_declaration_effect(child) for child in children)
             )

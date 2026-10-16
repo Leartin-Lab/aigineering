@@ -638,7 +638,9 @@ def test_parallel_tool_method_compiles_independent_tasks_and_boolean_join():
     assert set(continuation.inputs) == {item.outputs[0] for item in tools}
     assert continuation.activation == " AND ".join(continuation.inputs)
     assert continuation.outputs == parent.outputs
-    assert sum(item.budget for item in contracts) == parent.budget
+    assert all(item.budget == 1 for item in tools)
+    assert continuation.budget == 1
+    assert sum(item.budget for item in contracts) == parent.budget - 1
 
 
 @pytest.mark.parametrize("action_type", ["tool", "fail"])

@@ -32,6 +32,7 @@ from aigineering.protocol.effect_builders import (
     contract_declaration_effect,
 )
 from aigineering.protocol.types import Candidate, Contract, ToolSpec
+from aigineering.plugins.task_semantics import method_payload
 from aigineering.agent.tool_worker import ToolWorker
 from aigineering.runtime_services import RedisSyncPending
 
@@ -952,8 +953,16 @@ def test_parallel_tool_method_runs_calls_concurrently_then_joins(
             contract
             for contract in reopened.get_all_contracts()
             if "plugin:parallel_tool_item" in contract.labels
+            and method_payload(contract).get("recovery_source_contract_id") is None
         ]
         assert len(tool_items) == 2
+        recoveries = [
+            contract
+            for contract in reopened.get_all_contracts()
+            if method_payload(contract).get("method") == "parallel_tool_item"
+            and method_payload(contract).get("recovery_source_contract_id")
+            in {item.id for item in tool_items}
+        ]
         views = {
             item.name: RuntimeProjection(reopened, reopened).contract_view(item)
             for item in tool_items
@@ -971,7 +980,20 @@ def test_parallel_tool_method_runs_calls_concurrently_then_joins(
             )
             assert views[failed.name].terminal == "failed"
             assert views[succeeded.name].terminal == "complete"
-            assert reopened.get_assets_by_name(failed.outputs[0]) == []
+            assert len(recoveries) == 1
+            recovery = recoveries[0]
+            assert recovery.parent_id == failed.parent_id
+            assert recovery.inputs == failed.inputs
+            assert recovery.outputs == failed.outputs
+            assert recovery.tool_scope == failed.tool_scope
+            assert (
+                method_payload(recovery)["payload"] == method_payload(failed)["payload"]
+            )
+            failed_output_assets = reopened.get_assets_by_name(failed.outputs[0])
+            assert not any(
+                asset.created_by in {failed.id, recovery.id}
+                for asset in failed_output_assets
+            )
             assert reopened.get_assets_by_name(succeeded.outputs[0])
         else:
             assert all(view.terminal == "complete" for view in views.values())
