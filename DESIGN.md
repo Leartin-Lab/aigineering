@@ -455,6 +455,12 @@ the failed task's Skill context, routing scope, tools, and acceptance policy.
 Recovery depth is bounded at three immutable successor attempts. A recovery
 with unresolved tool scope cannot publish tool-derived outputs directly; it
 must first publish a tool task and consume the committed observation.
+After an interruption, recovery recognizes an existing publication only when
+the original signed Candidate intent, receipt, committed head, canonical
+Contract/context projections, and current materializations match. This
+read-only proof can reconcile an accepted publication after its signing key is
+revoked; any new publication still uses current Candidate authentication.
+Publication and the later recovery outcome remain separate writes.
 
 `/parallel_tool` compiles two to eight calls into independently claimable tool
 Contracts and one continuation activated by the boolean conjunction of their

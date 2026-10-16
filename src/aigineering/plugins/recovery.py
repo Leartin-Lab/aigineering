@@ -15,6 +15,8 @@ from aigineering.protocol.types import Contract
 
 if TYPE_CHECKING:
     from aigineering.plugins.completion_projection import TaskCompletionContext
+    from aigineering.plugins.recovery_history import RecoveryPublicationProof
+    from aigineering.protocol.candidate import CandidateEffect
     from aigineering.protocol.types import Asset
 
 
@@ -93,8 +95,6 @@ def schedule_method_result_recovery(
         acceptance_policy=acceptance_policy,
         context_asset_ids=failed_contract.context_asset_ids,
     )
-    if runtime.get_contract(recovery.id) is not None:
-        return None
     context_template = system_asset(
         name=context_name,
         content=json.dumps(context, sort_keys=True, ensure_ascii=False),
@@ -217,8 +217,6 @@ def schedule_projection_recovery(
         acceptance_policy=acceptance_policy,
         context_asset_ids=failed_contract.context_asset_ids,
     )
-    if runtime.get_contract(recovery.id) is not None:
-        return None
     context_template = system_asset(
         name=context_name,
         content=json.dumps(context, sort_keys=True, ensure_ascii=False),
@@ -268,20 +266,60 @@ def _publish_recovery(
     rejection_contract_id: str,
     relation_type: str,
 ) -> tuple[Contract, Asset] | None:
+    effects = (
+        contract_declaration_effect(recovery),
+        asset_proposal_effect(context_template),
+    )
+    proof = _prove_existing_recovery(
+        runtime,
+        recovery=recovery,
+        context_template=context_template,
+        effects=effects,
+        idempotency_key=idempotency_key,
+        causal_parents=causal_parents,
+    )
+    if proof is not None:
+        if proof.status == "matched":
+            assert proof.contract is not None and proof.context_asset is not None
+            return proof.contract, proof.context_asset
+        if proof.status == "conflict":
+            reason = (
+                f"{relation_type} recovery publication history conflict: {proof.reason}"
+            )
+            runtime.record_rejection(
+                rejection_contract_id,
+                reason,
+                relation_type=relation_type,
+                relation_target=recovery.id,
+                authority_result="rejected",
+            )
+            return None
     reason = f"{relation_type} recovery Candidate publisher unavailable"
     if runtime.can_publish_candidates("recovery.publish.v1"):
         decision = runtime.publish_task_effects(
             "recovery.publish.v1",
-            (
-                contract_declaration_effect(recovery),
-                asset_proposal_effect(context_template),
-            ),
+            effects,
             idempotency_key=idempotency_key,
             causal_parents=causal_parents,
         )
         if decision is not None and decision.accepted:
             return decision.contracts[0], decision.assets[0]
         reason = f"{relation_type} recovery Candidate publication was rejected"
+        proof = _prove_existing_recovery(
+            runtime,
+            recovery=recovery,
+            context_template=context_template,
+            effects=effects,
+            idempotency_key=idempotency_key,
+            causal_parents=causal_parents,
+        )
+        if proof is not None and proof.status == "matched":
+            assert proof.contract is not None and proof.context_asset is not None
+            return proof.contract, proof.context_asset
+        if proof is not None and proof.status == "conflict":
+            reason = (
+                f"{relation_type} recovery publication history conflict: {proof.reason}"
+            )
     runtime.record_rejection(
         rejection_contract_id,
         reason,
@@ -290,6 +328,37 @@ def _publish_recovery(
         authority_result="rejected",
     )
     return None
+
+
+def _prove_existing_recovery(
+    runtime: TaskCompletionContext,
+    *,
+    recovery: Contract,
+    context_template: Asset,
+    effects: tuple[CandidateEffect, ...],
+    idempotency_key: str,
+    causal_parents: tuple[str, ...],
+) -> RecoveryPublicationProof | None:
+    from aigineering.plugins.recovery_history import (
+        RecoveryHistoryCaptureUnstable,
+        RecoveryPublicationProof,
+        prove_recovery_publication,
+    )
+
+    try:
+        snapshot = runtime.capture_recovery_history()
+    except RecoveryHistoryCaptureUnstable:
+        return RecoveryPublicationProof("conflict", reason="history_capture_unstable")
+    if snapshot is None:
+        return None
+    return prove_recovery_publication(
+        snapshot,
+        recovery=recovery,
+        context_template=context_template,
+        effects=effects,
+        idempotency_key=idempotency_key,
+        causal_parents=causal_parents,
+    )
 
 
 def _method_result_output_name(method_type: str, parent_id: str) -> str:

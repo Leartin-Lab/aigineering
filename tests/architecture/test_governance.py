@@ -641,6 +641,20 @@ def test_local_recovery_replay_publishes_contract_and_context_as_candidate():
     assert not (ROOT / "src/aigineering/core/method_handlers/recovery.py").exists()
 
 
+def test_recovery_history_proof_is_read_only_and_uses_shared_exact_membership():
+    recovery_history = (ROOT / "src/aigineering/plugins/recovery_history.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "validate_published_member" in recovery_history
+    assert "candidate_content_id" in recovery_history
+    assert "project_asset_proposal" in recovery_history
+    assert "CandidatePublisher" not in recovery_history
+    assert "SQLiteStore" not in recovery_history
+    assert "commit_ingress_batch" not in recovery_history
+    assert "Signer" not in recovery_history
+
+
 def test_completion_plugins_have_no_direct_contract_mutation_fallback():
     completion = (ROOT / "src/aigineering/plugins/completion_projection.py").read_text(
         encoding="utf-8"

@@ -473,6 +473,541 @@ def test_rejected_submission_recovery_replays_after_crash_gap():
     store.close()
 
 
+def test_recovery_builder_recognizes_exact_accepted_publication():
+    from aigineering.core.trace_manager import TraceManager
+    from aigineering.plugins.completion_projection import TaskCompletionContext
+    from aigineering.plugins.recovery import schedule_projection_recovery
+
+    store = SQLiteStore(":memory:")
+    failed = Contract(
+        id="task:exact-recovery-replay",
+        name="exact-recovery-replay",
+        outputs=("report",),
+        budget=1,
+    )
+    store.add_contract(failed)
+    publishers = _recovery_publishers(store, "exact-recovery-replay")
+    context = TaskCompletionContext(store, TraceManager(store), publishers)
+    args = {
+        "runtime": context,
+        "failed_contract": failed,
+        "candidate_raw": "malformed output",
+        "rejections": [
+            {"category": "fixture", "name": "report", "reject_reason": "invalid"}
+        ],
+    }
+
+    first = schedule_projection_recovery(**args)
+    second = schedule_projection_recovery(**args)
+
+    assert first is not None
+    assert second == first, [
+        (entry.event_type, entry.rejected_fragments) for entry in store.get_all()
+    ]
+    assert (
+        len(
+            [
+                record
+                for _, record in store.scan_runtime_records(
+                    record_type="candidate.received"
+                )
+                if str(record.payload.get("actor_id", "")).startswith(
+                    "plugin:recovery.publish."
+                )
+            ]
+        )
+        == 1
+    )
+    store.close()
+
+
+def test_same_id_unpublished_recovery_contract_is_not_recognized_as_success():
+    from aigineering.core.candidate_publisher import (
+        CandidatePublisher,
+        CandidatePublisherRegistry,
+    )
+    from aigineering.core.domain import initialize_genesis
+    from aigineering.core.signing import Ed25519Signer
+    from aigineering.core.trace_manager import TraceManager
+    from aigineering.plugins.completion_projection import TaskCompletionContext
+    from aigineering.plugins.recovery import schedule_projection_recovery
+    from aigineering.protocol.candidate import ActorKey, create_genesis_manifest
+
+    failed = Contract(
+        id="task:unpublished-recovery",
+        name="unpublished-recovery",
+        outputs=("report",),
+        budget=1,
+    )
+    seed_store = SQLiteStore(":memory:")
+    seed_store.add_contract(failed)
+    seed_signer = Ed25519Signer()
+    seed_actor = ActorKey(
+        "plugin:recovery.publish.v1",
+        "seed-recovery",
+        seed_signer.kind,
+        seed_signer.signer_id,
+        (
+            "asset.publish",
+            "asset.publish.protected",
+            "contract.publish",
+            "contract.publish.protected",
+        ),
+    )
+    seed_genesis = create_genesis_manifest(
+        "seed-recovery", (seed_actor,), "policy:seed"
+    )
+    initialize_genesis(seed_store, seed_genesis)
+    seed_publishers = CandidatePublisherRegistry(
+        (
+            (
+                "recovery.publish.v1",
+                CandidatePublisher(
+                    seed_store, seed_store, seed_genesis, seed_actor, seed_signer
+                ),
+            ),
+        )
+    )
+    seed_context = TaskCompletionContext(
+        seed_store, TraceManager(seed_store), seed_publishers
+    )
+    existing = schedule_projection_recovery(
+        seed_context,
+        failed_contract=failed,
+        candidate_raw="malformed output",
+        rejections=[
+            {"category": "fixture", "name": "report", "reject_reason": "invalid"}
+        ],
+    )
+    assert existing is not None
+    seed_store.close()
+
+    store = SQLiteStore(":memory:")
+    store.add_contract(failed)
+    store.add_contract(existing)
+    signer = Ed25519Signer()
+    actor = ActorKey(
+        "plugin:recovery.publish.v1",
+        "unpublished-recovery",
+        signer.kind,
+        signer.signer_id,
+        (
+            "asset.publish",
+            "asset.publish.protected",
+            "contract.publish",
+            "contract.publish.protected",
+        ),
+    )
+    genesis = create_genesis_manifest(
+        "unpublished-recovery", (actor,), "policy:unpublished"
+    )
+    initialize_genesis(store, genesis)
+    publishers = CandidatePublisherRegistry(
+        (
+            (
+                "recovery.publish.v1",
+                CandidatePublisher(store, store, genesis, actor, signer),
+            ),
+        )
+    )
+    context = TaskCompletionContext(store, TraceManager(store), publishers)
+
+    result = schedule_projection_recovery(
+        context,
+        failed_contract=failed,
+        candidate_raw="malformed output",
+        rejections=[
+            {"category": "fixture", "name": "report", "reject_reason": "invalid"}
+        ],
+    )
+
+    assert result is None
+    assert not any(
+        record.record_type == "candidate.received"
+        for _, record in store.scan_runtime_records()
+    )
+    store.close()
+
+
+def test_existing_child_recovery_is_recognized_after_parent_allowance_is_spent():
+    from aigineering.core.trace_manager import TraceManager
+    from aigineering.plugins.completion_projection import TaskCompletionContext
+    from aigineering.plugins.recovery import schedule_projection_recovery
+    from aigineering.protocol.candidate import ActorKey, create_genesis_manifest
+
+    store = SQLiteStore(":memory:")
+    setup_signer = Ed25519Signer()
+    setup_key = ActorKey(
+        "test:recovery-allowance",
+        "setup",
+        setup_signer.kind,
+        setup_signer.signer_id,
+        ("contract.publish",),
+    )
+    recovery_signer = Ed25519Signer()
+    recovery_key = ActorKey(
+        "plugin:recovery.publish.allowance",
+        "recovery",
+        recovery_signer.kind,
+        recovery_signer.signer_id,
+        (
+            "asset.publish",
+            "asset.publish.protected",
+            "contract.publish",
+            "contract.publish.protected",
+        ),
+    )
+    genesis = create_genesis_manifest(
+        "recovery-allowance", (setup_key, recovery_key), "policy:recovery-allowance"
+    )
+    initialize_genesis(store, genesis)
+    setup = candidate_runtime(
+        store, genesis=genesis, actor_key=setup_key, signer=setup_signer
+    )
+    root = setup.accept_contract(
+        Contract(id="task:allowance-root", name="allowance-root", budget=3)
+    )
+    failed = setup.accept_contract(
+        Contract(
+            id="task:allowance-child",
+            name="allowance-child",
+            parent_id=root.id,
+            outputs=("report",),
+            budget=1,
+        )
+    )
+    recovery_publishers = CandidatePublisherRegistry(
+        (
+            (
+                "recovery.publish.v1",
+                CandidatePublisher(
+                    store, store, genesis, recovery_key, recovery_signer
+                ),
+            ),
+        )
+    )
+    context = TaskCompletionContext(store, TraceManager(store), recovery_publishers)
+    args = {
+        "runtime": context,
+        "failed_contract": failed,
+        "candidate_raw": "malformed child output",
+        "rejections": [
+            {"category": "fixture", "name": "report", "reject_reason": "invalid"}
+        ],
+    }
+    first = schedule_projection_recovery(**args)
+    assert first is not None
+    setup.accept_contract(
+        Contract(
+            id="task:allowance-sibling",
+            name="allowance-sibling",
+            parent_id=root.id,
+            outputs=("sibling",),
+            budget=1,
+        )
+    )
+    receipts_before = len(
+        [
+            record
+            for _, record in store.scan_runtime_records(
+                record_type="candidate.received"
+            )
+            if record.payload.get("actor_id") == recovery_key.actor_id
+        ]
+    )
+    allowance_records_before = [
+        record.record_type
+        for _, record in store.scan_runtime_records()
+        if record.record_type in {"allowance.granted", "allowance.reserved"}
+    ]
+
+    second = schedule_projection_recovery(**args)
+
+    assert second == first
+    assert (
+        len(
+            [
+                record
+                for _, record in store.scan_runtime_records(
+                    record_type="candidate.received"
+                )
+                if record.payload.get("actor_id") == recovery_key.actor_id
+            ]
+        )
+        == receipts_before
+    )
+    assert [
+        record.record_type
+        for _, record in store.scan_runtime_records()
+        if record.record_type in {"allowance.granted", "allowance.reserved"}
+    ] == allowance_records_before
+    store.close()
+
+
+@pytest.mark.parametrize(
+    ("revoke_after_publish", "read_failure", "unstable_capture"),
+    [
+        (False, False, False),
+        (True, False, False),
+        (False, True, False),
+        (False, False, True),
+    ],
+)
+def test_signed_worker_failure_reconciles_accepted_recovery_after_reopen(
+    tmp_path, monkeypatch, revoke_after_publish, read_failure, unstable_capture
+):
+    from aigineering.agent.worker import WorkerExecutionError
+    from aigineering.agent.worker import WorkerHost
+    from aigineering.core.domain import initialize_genesis
+    from aigineering.core.worker_routing import WorkerRegistration
+    from aigineering.protocol.effect_builders import (
+        actor_authorization_effect,
+        worker_registration_effect,
+    )
+    from aigineering.protocol.effect_builders import actor_revocation_effect
+    from aigineering.runtime import execute_claimed_package
+
+    class FailingWorker:
+        worker_id = "worker:recovery-crash-gap"
+
+        def invoke(self, contract, disclosed_assets):
+            del contract, disclosed_assets
+            raise WorkerExecutionError("fixture_failure", "safe fixture failure")
+
+    db_path = tmp_path / f"recovery-crash-gap-{revoke_after_publish}.db"
+    store = SQLiteStore(str(db_path))
+    setup_signer = Ed25519Signer()
+    setup_key = ActorKey(
+        "test:recovery-crash-gap",
+        "setup",
+        setup_signer.kind,
+        setup_signer.signer_id,
+        (
+            "actor.authorize",
+            "actor.revoke",
+            "contract.publish",
+            "worker.register",
+        ),
+    )
+    recovery_signer = Ed25519Signer()
+    recovery_key = ActorKey(
+        "plugin:recovery.publish.crash-gap",
+        "recovery",
+        recovery_signer.kind,
+        recovery_signer.signer_id,
+        (
+            "asset.publish",
+            "asset.publish.protected",
+            "contract.publish",
+            "contract.publish.protected",
+        ),
+    )
+    genesis = create_genesis_manifest(
+        "recovery-crash-gap", (setup_key, recovery_key), "policy:recovery-crash-gap"
+    )
+    initialize_genesis(store, genesis)
+    setup = candidate_runtime(
+        store, genesis=genesis, actor_key=setup_key, signer=setup_signer
+    )
+    failed = setup.accept_contract(
+        Contract(
+            id="task:signed-recovery-crash-gap",
+            name="signed-recovery-crash-gap",
+            outputs=("report",),
+            budget=1,
+        )
+    )
+    worker_signer = Ed25519Signer()
+    worker_key = ActorKey(
+        "worker:recovery-crash-gap",
+        "worker-key",
+        worker_signer.kind,
+        worker_signer.signer_id,
+        ("worker.submit",),
+    )
+    registration = WorkerRegistration(
+        worker_key.actor_id,
+        version="1",
+        actor_id=worker_key.actor_id,
+        key_id=worker_key.key_id,
+    )
+    registration_decision = setup.publisher.publish(
+        (
+            actor_authorization_effect(worker_key),
+            worker_registration_effect(registration),
+        ),
+        idempotency_key="register:signed-recovery-crash-gap",
+    )
+    assert registration_decision.accepted
+    host = WorkerHost(
+        FailingWorker(),
+        genesis,
+        worker_key,
+        worker_signer,
+        registration_version="1",
+    )
+    claim = host.claim_candidate(
+        request_id="claim:signed-recovery-crash-gap", contract_id=failed.id
+    )
+    claimed = claim_next_package(
+        store,
+        worker_id=host.worker_id,
+        contract_id=failed.id,
+        expected_registration_version=host.registration_version,
+        claim_candidate=claim,
+    )
+    assert claimed is not None
+    publishers = CandidatePublisherRegistry(
+        (
+            (
+                "recovery.publish.v1",
+                CandidatePublisher(
+                    store, store, genesis, recovery_key, recovery_signer
+                ),
+            ),
+        )
+    )
+
+    import aigineering.runtime as runtime_module
+
+    def crash_before_outcome(*args, **kwargs):
+        del args, kwargs
+        raise RuntimeError("injected crash before recovery outcome")
+
+    monkeypatch.setattr(
+        runtime_module, "_commit_recovery_outcome", crash_before_outcome
+    )
+    with pytest.raises(RuntimeError, match="injected crash"):
+        execute_claimed_package(claimed, host, store, candidate_publishers=publishers)
+    monkeypatch.undo()
+    recovery_contracts = [
+        contract
+        for contract in store.get_all_contracts()
+        if contract.origin == "recovery"
+    ]
+    assert len(recovery_contracts) == 1
+    assert store.get_assets_by_name(f"_fail_context_{failed.id}")
+    assert any(
+        record.record_type == "worker.invocation_failed"
+        for _, record in store.scan_runtime_records()
+    )
+    assert not any(
+        record.record_type
+        in {
+            "worker_failure.recovery_scheduled",
+            "worker_failure.recovery_unavailable",
+        }
+        for _, record in store.scan_runtime_records()
+    )
+    if revoke_after_publish:
+        revocation = setup.publisher.publish(
+            (
+                actor_revocation_effect(
+                    recovery_key.actor_id, recovery_key.key_id, "fixture rotation"
+                ),
+            ),
+            idempotency_key="revoke:recovery-crash-gap",
+        )
+        assert revocation.accepted
+    receipt_count = len(
+        [
+            record
+            for _, record in store.scan_runtime_records(
+                record_type="candidate.received"
+            )
+            if record.payload.get("actor_id") == recovery_key.actor_id
+        ]
+    )
+    store.close()
+
+    reopened = SQLiteStore(str(db_path))
+    reopened_publishers = CandidatePublisherRegistry(
+        (
+            (
+                "recovery.publish.v1",
+                CandidatePublisher(
+                    reopened, reopened, genesis, recovery_key, recovery_signer
+                ),
+            ),
+        )
+    )
+    if read_failure:
+        monkeypatch.setattr(
+            reopened,
+            "get_runtime_revision",
+            lambda: (_ for _ in ()).throw(OSError("fixture Store read failure")),
+        )
+        with pytest.raises(OSError, match="fixture Store read failure"):
+            process_worker_failures(reopened, candidate_publishers=reopened_publishers)
+        assert not any(
+            record.record_type
+            in {
+                "worker_failure.recovery_scheduled",
+                "worker_failure.recovery_unavailable",
+            }
+            for _, record in reopened.scan_runtime_records()
+        )
+        monkeypatch.undo()
+    if unstable_capture:
+        revisions = iter((1, 2, 3, 4, 5, 6))
+        monkeypatch.setattr(reopened, "get_runtime_revision", lambda: next(revisions))
+        assert process_worker_failures(
+            reopened, candidate_publishers=reopened_publishers
+        ) == [failed.id]
+        assert (
+            len(
+                reopened.scan_runtime_records(
+                    record_type="worker_failure.recovery_unavailable"
+                )
+            )
+            == 1
+        )
+        assert not reopened.scan_runtime_records(
+            record_type="worker_failure.recovery_scheduled"
+        )
+        assert (
+            process_worker_failures(reopened, candidate_publishers=reopened_publishers)
+            == []
+        )
+        reopened.close()
+        return
+    assert process_worker_failures(
+        reopened, candidate_publishers=reopened_publishers
+    ) == [failed.id]
+    assert (
+        process_worker_failures(reopened, candidate_publishers=reopened_publishers)
+        == []
+    )
+    assert (
+        len(
+            [
+                record
+                for _, record in reopened.scan_runtime_records(
+                    record_type="candidate.received"
+                )
+                if record.payload.get("actor_id") == recovery_key.actor_id
+            ]
+        )
+        == receipt_count
+    )
+    assert (
+        len(
+            [
+                record
+                for _, record in reopened.scan_runtime_records(
+                    record_type="worker_failure.recovery_scheduled"
+                )
+            ]
+        )
+        == 1
+    )
+    assert not any(
+        record.record_type == "candidate.authentication_rejected"
+        for _, record in reopened.scan_runtime_records()
+    )
+    reopened.close()
+
+
 def test_rejected_projection_without_raw_candidate_fails_loudly():
     store = SQLiteStore(":memory:")
     contract = Contract(id="task:missing-candidate", outputs=("report",), budget=1)

@@ -30,11 +30,16 @@ if TYPE_CHECKING:
     from aigineering.core.commitment import CommitmentDecision
     from aigineering.plugins.completion import CompletionRegistry
     from aigineering.protocol.candidate import CandidateEffect
+    from aigineering.plugins.recovery_history import RecoveryHistorySnapshot
     from aigineering.protocol.types import Asset, Contract
 
 
 class CompletionStoreProtocol(
-    AssetReader, ContractReader, RuntimeRecordReader, TraceReader, Protocol
+    AssetReader,
+    ContractReader,
+    RuntimeRecordReader,
+    TraceReader,
+    Protocol,
 ):
     """Store surface required by stateless completion projection."""
 
@@ -75,6 +80,39 @@ class TaskCompletionContext:
         return (
             self._candidate_publishers is not None
             and self._candidate_publishers.get(plugin_id) is not None
+        )
+
+    def capture_recovery_history(self) -> RecoveryHistorySnapshot | None:
+        """Capture exact read-only recovery facts and configured public identity."""
+        from aigineering.core.domain import load_genesis
+        from aigineering.core.projection_context import load_effect_projection_context
+        from aigineering.plugins.recovery_history import (
+            RecoveryHistoryCaptureUnstable,
+            RecoveryHistorySnapshot,
+        )
+
+        publisher = (
+            self._candidate_publishers.get("recovery.publish.v1")
+            if self._candidate_publishers is not None
+            else None
+        )
+        if publisher is None:
+            return None
+        for _attempt in range(3):
+            before = self._store.get_runtime_revision()
+            context = load_effect_projection_context(self._store)
+            genesis = load_genesis(self._store)
+            after = self._store.get_runtime_revision()
+            if before == after:
+                return RecoveryHistorySnapshot(
+                    context=context,
+                    store_domain_id=genesis.id,
+                    publisher_domain_id=publisher.genesis.id,
+                    publisher_actor_id=publisher.actor_key.actor_id,
+                    revision=after,
+                )
+        raise RecoveryHistoryCaptureUnstable(
+            "recovery history changed during bounded capture"
         )
 
     def publish_task_effects(
