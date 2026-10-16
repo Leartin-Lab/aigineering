@@ -145,9 +145,13 @@ class FactReducer:
             events.extend(self._detect_method_result(asset, contracts))
 
         # 2. Activation satisfaction
+        available_names = (
+            {asset.name for asset in self._store.get_all_assets()} if assets else set()
+        )
+        available_names.update(pending_names)
         activated: set[str] = set()
         for asset in assets:
-            for event in self._detect_activation(asset, pending_names, contracts):
+            for event in self._detect_activation(asset, available_names, contracts):
                 if event.contract_id not in activated:
                     events.append(event)
                     activated.add(event.contract_id)
@@ -218,21 +222,14 @@ class FactReducer:
     def _detect_activation(
         self,
         asset: Asset,
-        pending_names: set[str],
+        available_names: set[str],
         contracts: tuple[Contract, ...],
     ) -> list[FactReducerEvent]:
         """Find contracts whose activation expression references *asset.name*
         and is now satisfied."""
         events: list[FactReducerEvent] = []
 
-        # Build the set of currently available asset names (after this asset).
-        available_names: set[str] = {a.name for a in self._store.get_all_assets()}
-        # SQLite computes reducer consequences inside the transaction before
-        # physically inserting the new fact; MemoryStore computes after. Make
-        # the reducer's transaction view explicit so both adapters agree.
-        available_names.update(pending_names)
-
-        # The new asset is already in the store, so its name is included.
+        # The caller supplies committed names plus the atomic pending batch.
         for contract in contracts:
             if not contract.activation or not contract.activation.strip():
                 continue
