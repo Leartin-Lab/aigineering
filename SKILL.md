@@ -377,6 +377,8 @@ work. `aig run --once` still claims one enabled task from the domain-wide pool;
 runtime maintenance remains domain-wide for both commands. A target run's JSON
 and human output include the projected status and blockers, a `stop_reason`
 (`terminal`, `idle`, `timeout`, or `worker_failure`), and a suggested `next_step`.
+An active, unexpired claim on unfinished work in that tree keeps the polling
+loop running. Each cycle rechecks it; the run can still end at `--wait-timeout`.
 It does not automatically execute a root recovery successor. `completed` means
 the declared output obligation is satisfied; it does not establish independent
 semantic truth. `--wait-timeout`, `--interval`, and provider `--timeout` must
@@ -527,6 +529,10 @@ replayed, recovered, or accepted.
 - `expanded`, `ready`, `claimed`, `submitted`, `blocked`, and `stalled` are not
   success.
 - A timeout is not completion; read `task status` and `task audit`.
+- When ordinary `/fail` work completes, it marks its parent failed. Inspect the
+  parent's `task audit` for the `fail_reported` relation and accepted report Asset
+  ID, then use `aig asset show --id <asset_id> --json`. Rejected report publication
+  can leave no report; recovery is a separate authorized task.
 - Submitted independent-policy work exposes eligible exact assertions in
   `qualification_pending_outputs` and an independent-acceptance blocker. Inspect
   reviews and request bounded revision after `changes`; do not rerun or reset a

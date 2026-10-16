@@ -7,6 +7,7 @@ import math
 import shlex
 import time
 from collections.abc import Mapping
+from datetime import datetime, timezone
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -1024,7 +1025,9 @@ def _run_target_pool(
             and not processed_after
             and not recovered
         )
-        if timed_out or idle:
+        if timed_out or (
+            idle and not _has_active_unfinished_tree_claim(store, target_task_id)
+        ):
             if status.get("silent_failure_risks"):
                 status["status"] = "stalled"
             status["timed_out"] = timed_out
@@ -1039,6 +1042,37 @@ def _run_target_pool(
         collaboration_service(store).wait(
             store.get_runtime_revision(), timeout=min(max(interval, 0.05), 0.5)
         )
+
+
+def _has_active_unfinished_tree_claim(store, target_task_id: str) -> bool:
+    """Whether this target tree has work that a live Worker claim can finish."""
+    observed = datetime.now(timezone.utc)
+    contracts = store.get_all_contracts()
+    contracts_by_id = {contract.id: contract for contract in contracts}
+    tree_ids = _contract_tree_ids(contracts, target_task_id)
+    for contract_id in sorted(tree_ids):
+        contract = contracts_by_id.get(contract_id)
+        claim = store.get_claim(contract_id)
+        if contract is None or not isinstance(claim, Mapping):
+            continue
+        if claim.get("status") != "active":
+            continue
+        lease_until = claim.get("lease_until")
+        if not isinstance(lease_until, str):
+            continue
+        try:
+            deadline = datetime.fromisoformat(lease_until)
+        except ValueError:
+            continue
+        if deadline.tzinfo is None:
+            deadline = deadline.replace(tzinfo=timezone.utc)
+        if deadline < observed:
+            continue
+        status = project_task_status(contract, store)
+        if status.get("terminal") or status.get("outputs_satisfied"):
+            continue
+        return True
+    return False
 
 
 def _claim_for_target_pool_host(
