@@ -174,6 +174,181 @@ def test_sync_is_idempotent_and_stream_contains_only_public_metadata():
     assert "must never enter Redis" not in serialized
 
 
+def test_lagging_sync_reuses_capture_and_resolves_pre_watermark_claim_parent(
+    tmp_path, monkeypatch, request
+):
+    from aigineering.agent.harness import HarnessCandidateAdapter
+    from aigineering.core.candidate_publisher import CandidatePublisher
+    from aigineering.core.domain import initialize_genesis
+    from aigineering.core.ids import hash_contract_v3
+    from aigineering.core.signing import Ed25519Signer
+    from aigineering.core.sqlite_store import SQLiteStore
+    from aigineering.core.worker_coordination import authenticate_worker_command
+    from aigineering.core.worker_routing import WorkerRegistration
+    from aigineering.protocol.candidate import ActorKey, create_genesis_manifest
+    from aigineering.protocol.effect_builders import (
+        actor_authorization_effect,
+        contract_declaration_effect,
+        worker_registration_effect,
+    )
+    from aigineering.protocol.types import Contract
+    from aigineering.runtime import claim_next_package
+
+    class MidappendClearMemoryRedis(MemoryRedis):
+        def __init__(self):
+            super().__init__()
+            self.clear_before_append_revision = None
+            self.did_clear_midappend = False
+
+        def eval(self, script, key_count, *args):
+            if (
+                self.clear_before_append_revision is not None
+                and len(args) == 9
+                and int(args[2]) == self.clear_before_append_revision
+                and not self.did_clear_midappend
+            ):
+                stream_key, metadata_key = args[:2]
+                self.streams.pop(stream_key, None)
+                self.hashes.pop(metadata_key, None)
+                self.did_clear_midappend = True
+            return super().eval(script, key_count, *args)
+
+    store = SQLiteStore(str(tmp_path / "sync-record-capture.db"))
+    request.addfinalizer(store.close)
+    admin_signer = Ed25519Signer()
+    admin = ActorKey(
+        "test:sync-record-admin",
+        "admin-key",
+        admin_signer.kind,
+        admin_signer.signer_id,
+        ("actor.authorize", "worker.register", "contract.publish"),
+    )
+    genesis = create_genesis_manifest(
+        "sync-record-capture", (admin,), "policy:sync-record-capture"
+    )
+    initialize_genesis(store, genesis)
+    publisher = CandidatePublisher(store, store, genesis, admin, admin_signer)
+    worker_signer = Ed25519Signer()
+    worker_key = ActorKey(
+        "worker:sync-record",
+        "worker-key-1",
+        worker_signer.kind,
+        worker_signer.signer_id,
+        ("worker.submit",),
+    )
+    registration = WorkerRegistration(
+        worker_key.actor_id,
+        capacity=2,
+        version="1",
+        actor_id=worker_key.actor_id,
+        key_id=worker_key.key_id,
+    )
+    registration_decision = publisher.publish(
+        (
+            actor_authorization_effect(worker_key),
+            worker_registration_effect(registration),
+        ),
+        idempotency_key="sync-record-worker-registration",
+    )
+    assert registration_decision.accepted
+
+    contract_fields = {
+        "name": "sync-record-contract",
+        "description": "Signed fixture for sync record reuse.",
+        "inputs": (),
+        "outputs": ("sync-record-output",),
+        "activation": "",
+        "budget": 3,
+        "tool_scope": (),
+        "labels": (),
+        "origin": "human",
+    }
+    contract = Contract(id=hash_contract_v3(**contract_fields), **contract_fields)
+    contract_decision = publisher.publish(
+        (contract_declaration_effect(contract),),
+        idempotency_key="sync-record-contract",
+    )
+    assert contract_decision.accepted
+
+    adapter = HarnessCandidateAdapter(genesis.id, worker_key, worker_signer)
+    claim_candidate = adapter.claim_candidate(
+        request_id="sync-record-claim",
+        contract_id=contract.id,
+        lease_seconds=60,
+    )
+    claimed = claim_next_package(
+        store,
+        worker_id=worker_key.actor_id,
+        contract_id=contract.id,
+        claim_candidate=claim_candidate,
+    )
+    assert claimed is not None
+    grant_records = store.scan_runtime_records(record_type="claim.granted")
+    assert len(grant_records) == 1
+
+    redis = MidappendClearMemoryRedis()
+    service = _service(store, redis)
+    seeded = service.sync()
+    watermark_before_renewal = seeded["watermark"]
+    assert grant_records[0][0] <= watermark_before_renewal
+
+    renewal_candidate = adapter.renewal_candidate(
+        claimed.package, request_id="sync-record-renewal", lease_seconds=90
+    )
+    command = authenticate_worker_command(
+        renewal_candidate, "worker.claim.renew", store
+    )
+    renewed = store.renew_claim(
+        claimed.package.claim_id,
+        claimed.package.claim_epoch,
+        worker_key.actor_id,
+        lease_seconds=90,
+        runtime_records=command.runtime_records,
+        claim_candidate=renewal_candidate,
+    )
+    assert renewed is not None
+    renewed_records = store.scan_runtime_records(record_type="claim.renewed")
+    assert len(renewed_records) == 1
+    assert renewed_records[0][0] > watermark_before_renewal
+
+    original_scan = store.scan_runtime_records
+    scan_calls = []
+
+    def scan_spy(*, after_revision=0, through_revision=None, record_type=None):
+        scan_calls.append((after_revision, through_revision, record_type))
+        return original_scan(
+            after_revision=after_revision,
+            through_revision=through_revision,
+            record_type=record_type,
+        )
+
+    monkeypatch.setattr(store, "scan_runtime_records", scan_spy)
+    final_revision = store.get_runtime_revision()
+    # Simulate the selected namespace being reset after one suffix append but
+    # before the next append. The first attempt must conflict and recapture.
+    redis.clear_before_append_revision = watermark_before_renewal + 2
+    result = service.sync()
+
+    assert result["synced"] is True
+    assert result["watermark"] == final_revision
+    assert redis.did_clear_midappend is True
+    assert scan_calls == [(0, final_revision, None), (0, final_revision, None)]
+    events = service.events(after_revision=watermark_before_renewal)
+    renewal_event = next(
+        event for event in events if event["record_type"] == "claim.renewed"
+    )
+    # claim.renewed has no contract_id payload; this reference comes through
+    # its pre-watermark claim.granted parent in the full-history record map.
+    assert renewal_event["contract_ids"] == (contract.id,)
+    assert renewal_event["worker_ids"] == (worker_key.actor_id,)
+
+    scan_calls.clear()
+    noop = service.sync()
+    assert noop["synced"] is True
+    assert noop["watermark"] == final_revision
+    assert scan_calls == []
+
+
 def test_task_event_references_include_budget_qualification_and_claim_renewal():
     from aigineering.protocol.runtime_record import create_runtime_record
 

@@ -138,19 +138,16 @@ class RedisCollaborationService:
                         "lag": 0,
                         "synced": True,
                     }
-                revisions = self._store.scan_runtime_records(
-                    after_revision=watermark,
-                    through_revision=authoritative,
+                source_records = self._store.scan_runtime_records(
+                    through_revision=authoritative
                 )
-                records_by_id = {
-                    record.id: record
-                    for _, record in self._store.scan_runtime_records(
-                        through_revision=authoritative
-                    )
-                }
+                records_by_id = {record.id: record for _, record in source_records}
                 expected = watermark
-                for revision, record in revisions:
-                    if int(revision) <= expected:
+                for revision, record in source_records:
+                    revision = int(revision)
+                    if revision <= watermark:
+                        continue
+                    if revision <= expected:
                         raise RedisCollaborationUnavailable(
                             "SQLite runtime revisions are inconsistent"
                         )
