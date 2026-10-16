@@ -14,6 +14,11 @@ occurs in normal application queries. `--help` remains available without Redis.
 
 ## Discover and operate work
 
+For an agent-facing overview, start with the repository [Skill](../../SKILL.md).
+This reference documents the actual task lifecycle, blockers, lineage and
+recovery commands. A submitted output may still await independent acceptance;
+inspect `task status` and its exact blockers before retrying or exporting.
+
 Initialize a workspace once, then publish explicit tasks and inputs:
 
 ```bash

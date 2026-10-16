@@ -5,6 +5,29 @@ description: Use Aigineering to turn agent or LLM work into signed, claim-bound,
 
 # Aigineering trustworthy execution
 
+## How an agent uses it
+
+A Contract is one independently claimable obligation; one Worker invocation is
+one bounded attempt on that task. Assets hold inputs and committed outputs.
+Claims reserve work, while signed Candidates submit proposed effects. A
+submission is not acceptance: the Contract's frozen policy determines whether
+outputs qualify. `aig run GOAL` publishes a root obligation; `aig run --task ID`
+continues an existing ordinary task. Tool calls, Skills, and MCP descriptors
+provide context or local capabilities; they are not task plans. Use ordinary
+child tasks when work must survive an invocation.
+
+For an existing agent harness, follow the exact loop in
+[`agent-harness-migration.md`](docs/reference/agent-harness-migration.md):
+create or select a task, claim one package, produce one signed action, submit
+that Candidate, then inspect task status and export only qualified outputs.
+If independent acceptance is required, follow the exact
+[review workflow](docs/reference/task-board.md#request-an-exact-independent-review)
+before exporting.
+When work is blocked or fails, inspect the reported blockers and exact task ID;
+select a published retry or recovery successor explicitly. Start with the
+[task operations reference](docs/reference/task-board.md) for commands and
+failure-specific next steps.
+
 Use Aigineering as the fact and task boundary around an agent harness. Keep the
 harness's model loop, tools, memory, and internal planning; replace its mutable
 shared state and self-declared completion with Aigineering packages and signed

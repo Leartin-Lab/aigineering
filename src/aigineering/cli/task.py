@@ -45,9 +45,24 @@ def task_group() -> None:
 )
 @click.option("--input", "inputs", multiple=True, help="Input asset names.")
 @click.option("--output", "outputs", multiple=True, help="Declared output names.")
-@click.option("--activation", default="", help="Activation expression.")
-@click.option("--budget", type=int, default=5, show_default=True, help="Task budget.")
-@click.option("--label", "labels", multiple=True, help="Injection labels.")
+@click.option(
+    "--activation",
+    default="",
+    help="Asset-name expression using uppercase AND/OR and parentheses; no NOT.",
+)
+@click.option(
+    "--budget",
+    type=int,
+    default=5,
+    show_default=True,
+    help="Causal task allowance for work; not a token or currency limit.",
+)
+@click.option(
+    "--label",
+    "labels",
+    multiple=True,
+    help="Select frozen label-to-Asset context; grants no capability or authority.",
+)
 @click.option("--tool", "tool_scope", multiple=True, help="Allowed tool scope.")
 @click.option(
     "--requires-capability",
@@ -99,7 +114,7 @@ def task_create(
     acceptance_policy: str | None,
     as_json: bool,
 ) -> None:
-    """Create a task through authenticated Candidate commitment."""
+    """Create one ordinary task through authenticated Candidate commitment."""
     if budget < 1:
         raise click.BadParameter("must be a positive integer", param_hint="--budget")
     if description_file is not None:

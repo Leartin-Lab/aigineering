@@ -90,11 +90,12 @@ def _worker_next_error(message: str, *, json_output: bool) -> None:
     help="Output machine-readable JSON instead of human-readable text.",
 )
 def worker_package(contract_id: str, json_output: bool) -> None:
-    """Preview package metadata without creating worker-visible disclosure.
+    """Preview operator package metadata; this is not a claimable package.
 
     A submittable WorkerPackage is only emitted by ``worker next`` after an
     atomic claim.  This command is an operator view and never exposes asset
-    content or a package identity.
+    content or a package identity. Its output cannot be submitted as Worker
+    work or used as proof of readiness.
     """
     store = _persistent_snapshot()
     try:
@@ -261,7 +262,7 @@ def worker_registrations(worker_id: str, json_output: bool) -> None:
     "--candidate",
     "candidate_json",
     default=None,
-    help="Inline signed Worker claim Candidate JSON for an externally registered Worker.",
+    help="Signed claim Candidate JSON for an externally registered Worker; pass the exact Candidate.",
 )
 @click.option(
     "--json",
@@ -277,13 +278,13 @@ def worker_next(
     candidate_json: str | None,
     json_output: bool,
 ) -> None:
-    """Derive the next ready contract and return a WorkerPackage.
+    """Claim one ready contract and return one WorkerPackage.
 
-    A contract is ready when:
-      - Its activation expression is satisfied by available assets
-      - Budget remaining > 0
-      - It is not completed (no complete trace event, outputs not all satisfied)
-      - Its projected blockers are empty
+    Readiness reflects satisfied activation, remaining allowance, nonterminal
+    status, and an empty projected blocker list.
+
+    This command claims but does not execute the package. Produce one signed
+    action for it, then submit that Candidate with ``worker submit``.
     """
     claim_candidate: CandidateProposal | None = None
     if candidate_json is not None:
@@ -543,7 +544,10 @@ def worker_register(
 
 @worker.command("submit")
 @click.option(
-    "--json", "candidate_json", required=True, help="Signed CandidateProposal JSON"
+    "--json",
+    "candidate_json",
+    required=True,
+    help="Signed claim-bound Candidate JSON produced for this package.",
 )
 @click.option(
     "--idempotency-key",
@@ -551,11 +555,12 @@ def worker_register(
     help="Idempotency key for deduplication",
 )
 def worker_submit(candidate_json: str, idempotency_key: Optional[str]) -> None:
-    """Submit a signed worker Candidate for projection and commitment.
+    """Submit one signed worker action for projection and commitment.
 
     CANDIDATE_JSON must be claim-bound and contain either one atomic
     content/definition/assertion output graph or contained ``contract.declare``
-    expansion effects. Output is always JSON.
+    expansion effects. Submission is not policy qualification; inspect task
+    status after commit. Output is always JSON.
     """
     try:
         data = json.loads(candidate_json)

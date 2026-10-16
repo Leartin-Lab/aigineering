@@ -60,6 +60,31 @@ Ed25519 signatures.
 6. POST the signed Candidate to `/worker/submissions`.
 7. Read task status and audit; never infer commitment from an HTTP send alone.
 
+One claimed package produces one signed action. If the work needs another
+invocation, publish a bounded ordinary child task through that action; keep the
+harness's internal planning, scratch state and tool loop private to the current
+invocation. Do not treat a hand-written domain DAG or harness scheduler as
+runtime task state.
+
+For a tool-bearing action, `/tool` and `/parallel_tool` follow the runtime's
+declared tool scope and continuation grammar; they do not publish business
+outputs directly. The repository [Skill](../../SKILL.md) describes the supported
+action sequence and failure boundaries. Do not assume arbitrary parallel calls,
+automatic recovery, or complete tool-continuation lineage from the action name
+alone.
+
+Current failure handling has two limits. A failed single `/tool` observation
+terminalizes its parent as `failed`; `retryable` is metadata and starts no new
+attempt. Inspect `task status` and `task audit`; to retry, publish `task retry ID`.
+A configured local Worker can run the returned successor with
+`aig run --task RETRY_ID`. An external Worker signs a new claim Candidate targeting
+`RETRY_ID`, then resumes the same claim/submit loop below. A
+`/parallel_tool` join's `AND` activation only checks that observation Assets
+exist, so an `ok: false` observation may make the join eligible. Inspect each
+exact observation before continuing; if the join is still unclaimed, hold it
+with `task block JOIN_ID --reason TEXT`. These paths do not provide unified
+automatic failure or recovery.
+
 All operational entry points use the same signed coordination boundary. SQLite
 rechecks the current enabled Worker registration, actor/key authorization,
 `worker.submit` capability and requested claim target while committing the
@@ -85,6 +110,73 @@ lease options use the signed Candidate's values; explicit options must match.
 For example, a harness that already compiled and signed each command can use
 the same Candidate JSON with `aig worker next --candidate "$CLAIM_JSON" --json`
 and submit its signed result using `aig worker submit --json "$RESULT_JSON"`.
+
+## Operator CLI loop and machine results
+
+An agent operating through the CLI can use the same one-package loop:
+
+The example initializes a new workspace and publishes its input. Redis must be
+reachable, and the registered Worker must meet the task's capability/pool needs.
+
+```bash
+aig domain init  # once per new workspace
+aig asset add --name source --content-file source.md --json
+aig task create --name report --input source --activation source --output report --json
+```
+
+For a local Worker with its matching signer, claim with:
+
+```bash
+aig worker next --worker-id WORKER_ID --json
+```
+
+An external Worker passes its signed claim Candidate as JSON text instead:
+
+```bash
+aig worker next --candidate "$CLAIM_JSON" --json
+```
+
+Build `CLAIM_JSON` with `HarnessCandidateAdapter.claim_candidate()` and
+`candidate_json()` from `aigineering.agent.harness`. Compile one action for the
+package using `result_candidate(package, raw_action)`, then use `candidate_json()`
+for `SIGNED_CANDIDATE`; this invokes the canonical Worker action compiler.
+
+```bash
+aig worker submit --json "$SIGNED_CANDIDATE"
+aig task status CONTRACT_ID --json
+aig task result CONTRACT_ID --output report --to report.md --json
+```
+
+The local-signer and external-Candidate `worker next` forms are alternatives;
+do not combine them. `result_candidate()` uses the canonical Worker action
+compiler and binds the result to the exact claimed package.
+
+The exact signing and claim binding rules above still apply. A successful
+submission only commits accepted effects; check projected status and the
+Contract's acceptance policy before exporting. `worker package` is an operator
+metadata preview (`submittable: false`), not a claim or a WorkerPackage.
+`mcp add` publishes a capability descriptor Asset; it does not connect to an
+MCP server, provide transport, or execute a tool.
+
+The CLI keeps command-specific JSON and exit behavior; there is no universal
+result envelope. These fields describe current commands, not a stable shared
+schema:
+
+| Command | Successful JSON | Non-success boundary |
+| --- | --- | --- |
+| `task create --json` | `ok`, `contract_id`, `name`, `outputs` | Click usage or publication errors can use Click's command error output. |
+| `task status ID --json` | projected task fields such as `status`, `blockers`, `outputs`, and `integrity` | Missing task or inconsistent integrity exits nonzero; inspect the emitted error or integrity details. |
+| `task result ID --json` | `ok`, `data` (`contract_id`, `status`, `outputs`, `written_path`), `revision` | Incomplete or unqualified results return an error envelope and nonzero exit; invalid output selection may exit 2. |
+| `worker next --json` | A claimed package object | No eligible task can return `null`, a capability-blocked object, or a policy-blocked object. Errors exit nonzero. |
+| `worker submit --json` | Submission result from the shared committer | Rejection or synchronization errors exit nonzero. A synchronization error can follow commit, and current output may not retain accepted IDs; restore Redis and inspect task status/audit before deciding whether to replay the exact Candidate. |
+| `worker package --json` | `view: operator_package_preview`, `submittable: false`, metadata | Missing task exits nonzero. It never returns package identity or asset bodies. |
+
+Use `task show`, `task audit`, and `task lineage` when status alone does not
+explain a blocker or successor. `task lineage` currently verifies supported
+containment, retry, recovery-from-proven-invocation-failure, handoff, and
+revision relations; it does not pair a particular failure with a recovery
+publication or include every tool-continuation relation. For the documented
+read-only views, see the [task operations reference](task-board.md).
 
 ## Preserve existing orchestration
 
