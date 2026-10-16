@@ -8,6 +8,7 @@ from pathlib import Path
 
 from click import Group
 from click.testing import CliRunner
+import pytest
 
 from aigineering.cli.task_policy_review import register_task_policy_review_commands
 from aigineering.core.candidate_publisher import publish_effect
@@ -93,7 +94,13 @@ def _install_cli_store(monkeypatch, database: Path):
     monkeypatch.setattr(cli_review, "_persistent_store", lambda: SQLiteStore(database))
 
 
-def _workspace(tmp_path: Path, monkeypatch, *, verifier_capabilities=("verify.human",)):
+def _workspace(
+    tmp_path: Path,
+    monkeypatch,
+    *,
+    verifier_capabilities=("verify.human",),
+    source_labels=(),
+):
     database = tmp_path / ".aig" / "store.db"
     database.parent.mkdir(parents=True)
     root_key_path = tmp_path / ".aig" / "identity" / "root.ed25519"
@@ -135,7 +142,7 @@ def _workspace(tmp_path: Path, monkeypatch, *, verifier_capabilities=("verify.hu
         inputs=(),
         outputs=("research_summary",),
         budget=5,
-        labels=("review_evidence", "review_rubric"),
+        labels=("review_evidence", "review_rubric", *source_labels),
         context_asset_ids=(rubric_id, evidence_id),
         acceptance_policy=policy,
     )
@@ -712,4 +719,330 @@ def test_rejected_candidate_redis_pending_is_not_reported_as_accepted(
         and contract.name.startswith("Review source-study")
         for contract in store.get_all_contracts()
     )
+    store.close()
+
+
+def test_request_review_accepts_canonical_retry_source(tmp_path, monkeypatch):
+    from aigineering.agent.worker import WorkerExecutionError
+    from aigineering import local_publication
+    from aigineering.local_identity import ensure_local_worker_host
+    from aigineering.runtime import WorkerInvocationError
+    from aigineering.task_lineage import task_lineage
+    from aigineering.task_publication import retry_local_task_result
+
+    database, root_key_path, source, _policy = _workspace(tmp_path, monkeypatch)
+    monkeypatch.setattr(local_publication, "require_redis", lambda: None)
+    monkeypatch.setattr(
+        local_publication, "sync_runtime", lambda *_args, **_kwargs: None
+    )
+    store = SQLiteStore(database)
+
+    class _FailingWorker:
+        worker_id = "worker:retry-source-failure"
+
+        def invoke(self, contract, disclosed_assets):
+            del contract, disclosed_assets
+            raise WorkerExecutionError("fixture_failure", "fixture failure")
+
+    failed_host = ensure_local_worker_host(store, _FailingWorker())
+    failed_claim = claim_next_package(
+        store, worker_id=failed_host.worker_id, contract_id=source.id
+    )
+    assert failed_claim is not None
+    try:
+        execute_claimed_package(failed_claim, failed_host, store)
+    except WorkerInvocationError:
+        pass
+    else:
+        raise AssertionError("source Worker failure did not reach runtime failure path")
+    assert len(store.scan_runtime_records(record_type="worker.invocation_failed")) == 1
+    retry_result, _revision = retry_local_task_result(store, source.id)
+    retry = store.get_contract(retry_result["retry_contract_id"])
+    assert retry is not None and retry.origin == "retry"
+    store.close()
+
+    target, producer = _create_target(database, root_key_path, retry)
+    request = _request_review(CliRunner(), retry, target.id, key="retry-review-request")
+    store = SQLiteStore.snapshot_from_path(database)
+    reviewer = store.get_contract(request["child_contract_id"])
+    assert reviewer is not None
+    assert reviewer.parent_id == retry.id
+    assert reviewer.origin == "human"
+    assert not project_task_status(retry, store)["outputs_satisfied"]
+    store.close()
+
+    report_worker = _OutputWorker(
+        "worker:retry-independent-reviewer",
+        request["report_output"],
+        "The report is bounded by the frozen evidence.",
+    )
+    assert producer.worker_id != report_worker.worker_id
+    assert (
+        _run_worker(database, root_key_path, reviewer, report_worker)["status"]
+        == "accepted"
+    )
+    store = SQLiteStore.snapshot_from_path(database)
+    report = store.get_assets_by_name(request["report_output"])[0]
+    assert not project_task_status(retry, store)["outputs_satisfied"]
+    store.close()
+    runner = CliRunner()
+    decision_args = [
+        "task",
+        "review",
+        "decide",
+        request["record_id"],
+        "--report",
+        report.id,
+        "--verdict",
+        "accept",
+        "--reason",
+        "The report supports a bounded acceptance.",
+        "--idempotency-key",
+        "retry-review-decision",
+        "--json",
+    ]
+    decision = runner.invoke(_app(), decision_args)
+    assert decision.exit_code == 0, decision.output
+    decided = json.loads(decision.output)["data"]
+    assert decided["contract_id"] == retry.id
+
+    store = SQLiteStore(database)
+    counts_before = {
+        record_type: len(store.scan_runtime_records(record_type=record_type))
+        for record_type in (
+            "task.review.requested",
+            "task.review.decided",
+            "claim.granted",
+            "output.qualified",
+            "asset.attested",
+        )
+    }
+    store.rebuild_runtime_materializations()
+    store.close()
+    replay = _request_review(runner, retry, target.id, key="retry-review-request")
+    assert replay == request
+    replayed_decision = runner.invoke(_app(), decision_args)
+    assert replayed_decision.exit_code == 0, replayed_decision.output
+    assert json.loads(replayed_decision.output)["data"] == decided
+
+    store = SQLiteStore.snapshot_from_path(database)
+    assert {
+        record_type: len(store.scan_runtime_records(record_type=record_type))
+        for record_type in counts_before
+    } == counts_before
+    lineage = task_lineage(store, retry.id)["data"]
+    assert not lineage["issues"]
+    edges = lineage["edges"]
+    assert any(
+        edge["kind"] == "retry_publication"
+        and edge["source_contract_id"] == source.id
+        and edge["target_contract_id"] == retry.id
+        for edge in edges
+    )
+    assert any(
+        edge["kind"] == "containment"
+        and edge["source_contract_id"] == retry.id
+        and edge["target_contract_id"] == reviewer.id
+        for edge in edges
+    )
+    assert not any(
+        edge["kind"] == "retry_publication"
+        and edge["source_contract_id"] == retry.id
+        and edge["target_contract_id"] == reviewer.id
+        for edge in edges
+    )
+    assert store.get_contract(retry.id).origin == "retry"
+    assert project_task_status(retry, store)["status"] == "completed"
+    store.close()
+
+
+@pytest.mark.parametrize("source_label", ("method:plan", "plugin:example.owner"))
+def test_retry_review_rejects_method_and_plugin_labeled_sources(
+    tmp_path, monkeypatch, source_label
+):
+    from dataclasses import replace
+
+    from aigineering.local_identity import ensure_local_plugin_publisher
+    from aigineering.plugins.task_review import TASK_REVIEW_EFFECTS
+    from aigineering.protocol.effect_builders import task_review_request_effect
+    from aigineering.task_publication import retry_local_task_result
+
+    database, root_key_path, source, _policy = _workspace(
+        tmp_path, monkeypatch, source_labels=(source_label,)
+    )
+    from aigineering import local_publication
+
+    monkeypatch.setattr(local_publication, "require_redis", lambda: None)
+    monkeypatch.setattr(
+        local_publication, "sync_runtime", lambda *_args, **_kwargs: None
+    )
+    store = SQLiteStore(database)
+    retry_result, _revision = retry_local_task_result(store, source.id)
+    retry = store.get_contract(retry_result["retry_contract_id"])
+    assert retry is not None and retry.origin == "retry"
+    store.close()
+    target, _producer = _create_target(database, root_key_path, retry)
+
+    runner = CliRunner()
+    app_result = runner.invoke(
+        _app(),
+        [
+            "task",
+            "request-review",
+            retry.id,
+            "--output",
+            "research_summary",
+            "--asset",
+            target.id,
+            "--reason",
+            "Reject method and plugin work.",
+            "--json",
+        ],
+    )
+    assert app_result.exit_code == 1
+    assert json.loads(app_result.output)["error"]["message"] == (
+        "task review requires an ordinary business Contract"
+    )
+    assert not _plugin_key_path(
+        root_key_path, "plugin:task.review.request.operator.v1"
+    ).exists()
+
+    store = SQLiteStore(database)
+    publisher = replace(
+        ensure_local_plugin_publisher(
+            store,
+            "task.review.request.operator.v1",
+            ("contract.publish", "task.review.request"),
+        ),
+        additional_effects=TASK_REVIEW_EFFECTS,
+    )
+    decision = publisher.publish(
+        (
+            task_review_request_effect(
+                retry.id,
+                "research_summary",
+                target.id,
+                "Reject method and plugin work.",
+            ),
+        ),
+        idempotency_key=f"plugin-negative:{source_label}",
+    )
+    assert not decision.accepted
+    rejection = next(
+        record
+        for record in decision.runtime_records
+        if record.record_type == "candidate.rejected"
+    )
+    assert (
+        "task.review.request requires an ordinary business Contract"
+        in (rejection.payload["reason"])
+    )
+    assert not store.scan_runtime_records(record_type="task.review.requested")
+    store.close()
+
+
+@pytest.mark.parametrize("origin", ("system", "recovery", "unrecognized-origin"))
+def test_task_review_rejects_nonbusiness_origins_after_signed_request_setup(
+    tmp_path, monkeypatch, origin
+):
+    from dataclasses import replace
+
+    from aigineering.core.domain import load_genesis
+    from aigineering.local_identity import (
+        ensure_local_plugin_publisher,
+        load_actor_signer,
+    )
+    from aigineering.plugins.task_review import TASK_REVIEW_EFFECTS
+    from aigineering.protocol.effect_builders import (
+        contract_declaration_effect,
+        task_review_request_effect,
+    )
+    from aigineering.protocol.identity import contract_from_fields
+
+    database, root_key_path, _business_source, policy = _workspace(
+        tmp_path, monkeypatch
+    )
+    store = SQLiteStore(database)
+    genesis = load_genesis(store)
+    root_key = genesis.root_keys[0]
+    source = contract_from_fields(
+        name=f"unsupported-origin-{origin}",
+        description="A signed source used to reach the review origin guard.",
+        inputs=(),
+        outputs=("research_summary",),
+        activation="",
+        budget=5,
+        tool_scope=(),
+        labels=(),
+        worker_capabilities=(),
+        worker_pools=(),
+        delegation_capabilities=(),
+        delegation_pools=(),
+        origin=origin,
+        minting_authority=(),
+        sensitive_input_policy=None,
+        acceptance_policy=policy,
+        context_asset_ids=(),
+    )
+    publication = publish_effect(
+        store,
+        store,
+        genesis,
+        root_key,
+        load_actor_signer(root_key_path),
+        contract_declaration_effect(source),
+        idempotency_key=f"unsupported-origin:{origin}",
+    )
+    assert publication.accepted
+
+    app_result = CliRunner().invoke(
+        _app(),
+        [
+            "task",
+            "request-review",
+            source.id,
+            "--output",
+            "research_summary",
+            "--asset",
+            "unneeded-before-origin-guard",
+            "--reason",
+            "Unsupported origins stay excluded.",
+            "--json",
+        ],
+    )
+    assert app_result.exit_code == 1
+    assert json.loads(app_result.output)["error"]["message"] == (
+        "task review requires an ordinary business Contract"
+    )
+
+    publisher = replace(
+        ensure_local_plugin_publisher(
+            store,
+            "task.review.request.operator.v1",
+            ("contract.publish", "task.review.request"),
+        ),
+        additional_effects=TASK_REVIEW_EFFECTS,
+    )
+    decision = publisher.publish(
+        (
+            task_review_request_effect(
+                source.id,
+                "research_summary",
+                "unneeded-before-origin-guard",
+                "Unsupported origins stay excluded.",
+            ),
+        ),
+        idempotency_key=f"unsupported-origin-request:{origin}",
+    )
+    assert not decision.accepted
+    rejection = next(
+        record
+        for record in decision.runtime_records
+        if record.record_type == "candidate.rejected"
+    )
+    assert (
+        "task.review.request requires an ordinary business Contract"
+        in (rejection.payload["reason"])
+    )
+    assert not store.scan_runtime_records(record_type="task.review.requested")
     store.close()

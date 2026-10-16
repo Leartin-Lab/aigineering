@@ -26,7 +26,11 @@ from aigineering.local_identity import (
     ensure_local_plugin_publisher,
     load_actor_signer,
 )
-from aigineering.plugins.task_review import TASK_REVIEW_EFFECTS, project_task_reviews
+from aigineering.plugins.task_review import (
+    TASK_REVIEW_EFFECTS,
+    is_task_review_source_eligible,
+    project_task_reviews,
+)
 from aigineering.protocol.effect_builders import (
     task_review_decision_effect,
     task_review_request_effect,
@@ -83,9 +87,7 @@ def _source_asset_scope(store, source, output_name: str, asset_id: str):
         )
     if output_name not in source.outputs:
         raise ValueError("output must be a declared source Contract output")
-    if source.origin not in {"human", "plan"} or any(
-        label.startswith(("plugin:", "method:")) for label in source.labels
-    ):
+    if not is_task_review_source_eligible(source):
         raise ValueError("task review requires an ordinary business Contract")
     if source.minting_authority:
         raise ValueError("task review does not support protected minting")

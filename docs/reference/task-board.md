@@ -1036,6 +1036,14 @@ has no tools or delegation and sees only exact original promptable target,
 rubric and evidence Assets. Same-name context is not silently added. Sealed,
 redacted, non-promptable or tombstoned review context is refused.
 
+A canonical retry of an eligible human or plan task can also request review when
+it retains the independent policy and exact eligible output. The retry stays an
+immutable retry task; its reviewer is ordinary human-origin work and is not
+another retry. Method/plugin-labeled tasks and system, recovery or unknown origins
+remain unsupported. A `changes` decision on a retry is recorded but leaves the
+output unqualified; continuing that retry through `request-changes` is not
+supported in this slice.
+
 Reviewer completion creates an ordinary report and does not qualify the source.
 Decision checks its exact ID, output name, immutable reviewer ancestry and
 producer separation, then uses the existing policy-bound attestation owner.

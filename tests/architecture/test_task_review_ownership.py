@@ -12,6 +12,8 @@ def test_review_semantics_live_in_plugin_and_delegate_canonical_acceptance():
     )
     assert '"task.review.request":' in plugin
     assert '"task.review.decide":' in plugin
+    assert "def is_task_review_source_eligible(source: Contract) -> bool:" in plugin
+    assert "if not is_task_review_source_eligible(source):" in plugin
     assert "project_asset_attestation_records(" in plugin
     assert "asset_attestation_effect(" in plugin
     assert "task.review.request" not in core
@@ -21,12 +23,16 @@ def test_review_semantics_live_in_plugin_and_delegate_canonical_acceptance():
         not in (ROOT / "src/aigineering/core/sqlite_schema.py").read_text()
     )
     assert "task.review" not in acceptance
+    policy_review = (ROOT / "src/aigineering/task_policy_review.py").read_text()
+    assert "is_task_review_source_eligible," in policy_review
+    assert "if not is_task_review_source_eligible(source):" in policy_review
 
 
 def test_review_contract_and_links_are_ordinary_immutable_runtime_facts():
     plugin = (ROOT / "src/aigineering/plugins/task_review.py").read_text()
     assert "contract_from_fields(" in plugin
     assert "context_asset_ids=context_ids" in plugin
+    assert 'origin="human" if source.origin == "retry" else source.origin' in plugin
     assert '"task.review.requested"' in plugin
     assert '"task.review.decided"' in plugin
     assert (

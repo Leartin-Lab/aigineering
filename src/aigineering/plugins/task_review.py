@@ -56,6 +56,13 @@ class _ContextContractReader:
         return self._contracts.get(contract_id)
 
 
+def is_task_review_source_eligible(source: Contract) -> bool:
+    """Return whether a business or retry Contract may request policy review."""
+    return source.origin in {"human", "plan", "retry"} and not any(
+        label.startswith(("plugin:", "method:")) for label in source.labels
+    )
+
+
 def project_task_review_request_effect(
     effect: CandidateEffect,
     candidate: CandidateProposal,
@@ -107,9 +114,7 @@ def project_task_review_request_effect(
         )
 
     source = _contract(context.contracts, source_id)
-    if source.origin not in {"human", "plan"} or any(
-        label.startswith(("plugin:", "method:")) for label in source.labels
-    ):
+    if not is_task_review_source_eligible(source):
         raise ValueError("task.review.request requires an ordinary business Contract")
     if source.minting_authority:
         raise ValueError("task.review.request does not support protected minting")
@@ -184,7 +189,7 @@ def project_task_review_request_effect(
         worker_pools=(),
         delegation_capabilities=(),
         delegation_pools=(),
-        origin=source.origin,
+        origin="human" if source.origin == "retry" else source.origin,
         minting_authority=(),
         sensitive_input_policy=None,
         acceptance_policy=None,
