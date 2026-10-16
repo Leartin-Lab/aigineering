@@ -2,11 +2,19 @@
 
 ## Next usability slice
 
-Usability is measured by the complete task lifecycle: preparation, eligibility,
-claiming, expansion, output acceptance, failure, cancellation and recovery after
-restart. Backend nodes remain ordinary tasks; presentation may group proven
-continuation relationships. A chat window, automatic conversation history and
-streaming replies are not release gates for this goal.
+The current stage delivers an agent-friendly task tool: create, claim, submit,
+request independent review and export the qualified result. It must accurately
+show blockers, failures and successors, provide necessary relation navigation
+and machine-readable results, and resolve the shared failure-lifecycle and Redis
+correctness gaps. Public Skill and command help must let an agent follow the
+supported operation chain.
+
+Backend nodes remain ordinary single-invocation tasks. Reuse signed Candidates,
+shared runtime primitives and SQLite fact/claim authority; Redis remains required
+collaboration infrastructure. Presentation groups only proven relations. Chat
+windows, deployment conveniences, scheduled notifications, PR acceptance
+adapters and complete command parity are later directions, not completion
+conditions for this stage.
 
 The immediate priority is reliable single-domain real work: execute a useful
 task, expose failed and exhausted work, preserve restart/recovery, independently
@@ -75,11 +83,13 @@ Registration reconstruction verification now includes actor/key identity;
 the [bounded correction](reports/094-registration-identity-materialization-digest-2026-10-07.md)
 has full-suite, independent review and source-external installed controls.
 
-The active goal extends this development slice toward a complete Kanban CLI
-experience. Work is staged through signed comments and human holds, review and
-change requests, assignment/priority/dependency management, bulk operations and
-task attachments/logs, multiple boards, persistent dispatch/scheduled starts,
-and configured notifications/retention/PR acceptance adapters. Signed comments
+Earlier Kanban-oriented development added signed comments and human holds,
+review and change requests, assignment/priority/dependency management, bulk
+operations, task attachments/logs, multiple boards and persistent dispatch.
+The current stage focuses on making the task operation chain reliable for
+agents. Scheduled starts, configured notifications and PR acceptance adapters
+remain later directions; necessary Redis correctness and bounded-operation
+checks remain part of current acceptance. Signed comments
 operator holds before claim acquisition and active leaf-task handoff have
 development verification;
 policy-bound review requests and exact report decisions have
