@@ -74,10 +74,14 @@ before repeating an operation. Read the
 [task operations reference](docs/reference/task-board.md).
 
 Use `task lineage ID` to navigate the selected task's verified component across
-published parent containment, recovery publications whose source Contract has a
-canonically proved Worker invocation failure, exact signed retry publications,
-and accepted leaf, expanded, or edit handoff publications, plus accepted
-review-linked task revisions. Handoff and revision edges bind
+published parent containment, recovery publications with a canonically proved
+source, exact signed retry publications, and accepted leaf, expanded, or edit
+handoff publications, plus accepted review-linked task revisions. Recovery
+sources include authenticated Worker invocation failure, claim expiration and
+admitted output rejection for supported system tool-method recovery; legacy
+generic recovery retains its existing source-proof limit. See [change 098](changes/098-executable-method-recovery.md)
+and [change 099](changes/099-tool-mcp-failure-convergence.md). Handoff and
+revision edges bind
 their exact source and successor Contract publications and the shared committed
 link, terminal, and declaration witnesses. Revision navigation proves the
 accepted relation only; it does not re-audit the historical review decision,
@@ -90,8 +94,13 @@ the canonical retry Contract; the source may have been published with other
 signed effects. The read-only view keeps each Contract's own status and blockers;
 it does not change eligibility or complete a group. It requires Redis and a
 single captured SQLite revision. Malformed effect-type containers do not prove
-published retry, recovery, handoff or revision edges. Tool continuation and
-other recovery causes remain outside the verified lineage view. See [verified task
+published retry, recovery, handoff or revision edges. Unavailable schedule
+records remain observations. Containment shows task scope and does not prove
+that a sibling task was caused by a particular tool observation; lineage does
+not claim a tool-observation-to-continuation causal edge. An agent can continue
+through the root's ordinary claim flow or configured Fleet when supported by
+the task, while explicit `/fail` remains an operator-decided terminal outcome
+with no automatic recovery. See [verified task
 lineage](changes/080-verified-task-lineage.md), [retry-publication lineage](changes/082-retry-publication-lineage.md)
 and [handoff-publication lineage](changes/083-handoff-publication-lineage.md),
 plus [revision-publication lineage](changes/085-task-revision-lineage.md).

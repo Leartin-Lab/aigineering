@@ -747,16 +747,27 @@ See [ADR-027](docs/adr/ADR-027-required-redis-collaboration.md) and the
 
 Redis query generations are built from one consistent SQLite Store snapshot.
 The snapshot binds Assets, Contracts, graph indexes and the revision in the same
-read view, then closes its temporary copy. A commit after capture can make a
-generation older than SQLite; its older revision remains visible to existing
-freshness checks rather than labeling mixed rows as current. Full generation
-rebuilds use SQLite's in-memory backup, so copy cost grows with Store size;
-ordinary current reads and incremental catch-up do not make that copy. A query
-snapshot source must provide an independently closable consistent snapshot.
-Because the Redis query schema version is unchanged, deploy this behavior and
-run `aig redis rebuild` once for Stores that may have a generation built from
-the earlier multi-read capture. Only generations rebuilt by the corrected
-code have this consistency guarantee.
+read view, then closes its temporary copy. Full rebuilds watch the active pointer,
+active metadata and target metadata through Redis `EXEC`; a newer active or target
+revision blocks an older snapshot before entity writes. Catch-up watches its
+selected generation metadata (and the active pointer when source-selected),
+requires the exact expected revision before queuing entity changes, and advances
+the watermark with those changes in the same transaction. Rebuild and catch-up
+retry up to three Redis conflicts.
+
+Each cached read watches selected-generation metadata through its multi-command
+fetch and a validating no-op `EXEC`, then rechecks the SQLite revision after the
+`EXEC` succeeds. This catches SQLite-only commits that do not mutate Redis. A changed
+source or Redis fence discards the read and retries within a bound; frozen old
+sources fail visibly when cache metadata is newer. Explicit compatibility
+fallbacks check the source revision before and after each read, and JSON view
+builds check it before caching under a revision key. Unchanged current reads do
+not capture or hash the full Store. Full rebuilds still use SQLite's in-memory
+backup, so copy cost grows with Store size; incremental catch-up scans only
+through its captured revision. These fences address same-history concurrent
+writers; revision equality alone does not prove that separate Stores contain the
+same history. Because the Redis query schema version is unchanged, rebuild
+Stores that may have generations created by the earlier multi-read capture.
 
 Task conversations use a dedicated `task.comment` capability. The collaboration
 plugin projects an exact Contract, bounded text and optional same-task reply to
@@ -912,8 +923,8 @@ while the current implementation scans runtime history. These summaries do not
 capture Worker I/O. See [change 058](changes/058-task-attempt-diagnostics.md).
 
 Task lineage inspection uses one immutable task-view snapshot to navigate the
-selected task's connected component through published containment, Worker
-invocation-failure recovery publications and canonical signed retry
+selected task's connected component through published containment, supported
+system tool-method recovery publications and canonical signed retry
 publications, and accepted leaf, expanded and edit-through-handoff successor
 publications, plus accepted review-linked task revisions. Both containment
 endpoints must match their exact published declarations. Retry edges require
@@ -926,9 +937,10 @@ terminal and successor declaration to exact accepted publications for both
 materialized endpoints; source publications may be compound. The relation view
 does not re-audit historical handoff budget, tree, hold, assignment or allowance
 decisions. Recovery edges prove the source Contract's
-accepted publication relation, while exact invocation failure and scheduling
-facts remain separate source diagnostics. Recovery diagnostics do not establish
-a one-to-one failure-to-publication mapping. Each member retains its canonical
+accepted publication relation, while invocation failure, claim expiration,
+admitted output rejection and scheduling facts remain separate source
+proofs and diagnostics. Legacy generic recovery retains its existing source-proof limit. Recovery diagnostics do not establish a one-to-one
+failure-to-publication mapping. Each member retains its canonical
 task status and blockers; unverified evidence cannot expand the component.
 Executable method recovery accepts only a canonical system successor whose
 direct predecessor has an exact authenticated claim-failure binding and whose
@@ -949,8 +961,12 @@ edge proves the exact source cancellation, successor declaration and accepted
 allowance, assignment or present-day eligibility. This guards read
 interpretation and does not change Candidate commitment.
 Redis is required. This view adds no group status, claim authority, recovery
-scheduling or output qualification. Tool request/observation/continuation and
-other recovery sources are not yet covered. See [change 080](changes/080-verified-task-lineage.md),
+scheduling or output qualification. Unavailable schedule records are only
+observations, and containment does not prove a tool-observation-to-continuation
+causal edge. Agents may continue through the root's ordinary claim flow or
+configured Fleet when supported; explicit `/fail` remains an operator-decided
+terminal result without automatic recovery. See [change 098](changes/098-executable-method-recovery.md),
+[change 099](changes/099-tool-mcp-failure-convergence.md) and [change 080](changes/080-verified-task-lineage.md),
 [change 082](changes/082-retry-publication-lineage.md),
 [change 083](changes/083-handoff-publication-lineage.md), and
 [change 085](changes/085-task-revision-lineage.md).

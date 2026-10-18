@@ -48,9 +48,13 @@ repeated persisted scans without changing lifecycle validation or promising
 linear total projection work. See [change 076](../../changes/076-task-view-query-reuse.md).
 
 `aig task lineage ID [--json]` selects the verified connected component through
-exact published parent containment, recovery publications for proven Worker
-invocation failures, canonical signed retry publications, accepted leaf,
-expanded, or edit handoff publications, and accepted review-linked revisions.
+exact published parent containment, recovery publications with proven source
+history, canonical signed retry publications, accepted leaf, expanded, or edit
+handoff publications, and accepted review-linked revisions. Supported system
+tool-method recovery sources include authenticated Worker invocation failure,
+claim expiration and admitted output rejection. Legacy generic recovery retains
+its existing source-proof limit. See [change 098](../../changes/098-executable-method-recovery.md)
+and [change 099](../../changes/099-tool-mcp-failure-convergence.md).
 A handoff or revision edge binds the typed link,
 source cancellation terminal and successor declaration to exact accepted
 publications of both materialized Contracts. Source publication can contain
@@ -65,16 +69,22 @@ declaration/receipt/head/member proof at both endpoints, and a target matching
 the complete canonical retry successor. The source declaration may be part of
 a compound signed publication; the retry target must be published with only its
 declaration effect. Each task keeps its own projected status and blockers.
-Source schedules are verified only when they match the exact Worker failure
-proof; malformed or unmatched records remain unverified observations. The
-failure grant, failure record and release must predate the recovery receipt,
-while normal recovery processing may record its schedule after publication.
+Each supported recovery schedule is verified against its exact source record,
+claim binding and accepted publication history; legacy generic recovery
+retains its existing source-proof limit. Malformed or unmatched records and
+recovery-unavailable reports remain unverified observations. Invocation-failure
+recovery also requires its grant, failure record and release before the recovery
+receipt, while normal recovery processing may record its schedule after
+publication.
 Human output includes receipt, declaration and head IDs for each verified edge
 and labels unverified schedule observations. It requires Redis and reads one
 fixed SQLite revision. The command does not group completion, readiness,
-qualification or recovery scheduling. Tool request, observation, continuation
-and other recovery source
-families remain outside the verified lineage view. Starting from either end of
+qualification or recovery scheduling. It does not prove a one-to-one failure to
+publication pairing or a causal edge from a tool observation to a continuation.
+Containment identifies sibling scope only. Agents can continue through the
+root's ordinary claim flow or configured Fleet where supported; explicit
+`/fail` remains an operator-decided terminal result without automatic recovery.
+Starting from either end of
 a verified edge returns the same component. See [change 080](../../changes/080-verified-task-lineage.md),
 [change 082](../../changes/082-retry-publication-lineage.md) and
 [change 083](../../changes/083-handoff-publication-lineage.md), plus

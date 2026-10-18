@@ -4,12 +4,17 @@ from __future__ import annotations
 
 import os
 import sqlite3
+import threading
+from uuid import uuid4
 from copy import deepcopy
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
-from aigineering.adapters.redis_query import RedisQueryProjection
+from aigineering.adapters.redis_query import (
+    QueryProjectionUnavailable,
+    RedisQueryProjection,
+)
 from aigineering.core.control_plane import (
     build_control_plane_asset,
     build_control_plane_contract,
@@ -34,16 +39,24 @@ class FakeRedisError(Exception):
     pass
 
 
+class FakeWatchError(FakeRedisError):
+    pass
+
+
 class FakeRedis:
     def __init__(self) -> None:
         self.strings: dict[str, str] = {}
         self.hashes: dict[str, dict[str, str]] = {}
         self.sets: dict[str, set[str]] = {}
         self.fail = False
+        self._versions: dict[str, int] = {}
 
     def _check(self) -> None:
         if self.fail:
             raise FakeRedisError("unavailable")
+
+    def _changed(self, key: str) -> None:
+        self._versions[key] = self._versions.get(key, 0) + 1
 
     def get(self, key: str):
         self._check()
@@ -52,6 +65,7 @@ class FakeRedis:
     def set(self, key: str, value: str):
         self._check()
         self.strings[key] = str(value)
+        self._changed(key)
         return True
 
     def hset(self, key: str, *, mapping: dict[str, str]):
@@ -59,6 +73,7 @@ class FakeRedis:
         self.hashes.setdefault(key, {}).update(
             {str(name): str(value) for name, value in mapping.items()}
         )
+        self._changed(key)
         return len(mapping)
 
     def hgetall(self, key: str):
@@ -70,6 +85,8 @@ class FakeRedis:
         target = self.sets.setdefault(key, set())
         before = len(target)
         target.update(str(value) for value in values)
+        if len(target) != before:
+            self._changed(key)
         return len(target) - before
 
     def smembers(self, key: str):
@@ -102,6 +119,7 @@ class FakeRedis:
             meta["content_count"] = str(len(self.sets.get(contents_key, set())))
             meta["definition_count"] = str(len(self.sets.get(definitions_key, set())))
             meta["assertion_count"] = str(len(self.sets.get(assertions_key, set())))
+            self._changed(key)
             return 1
         return 0
 
@@ -111,42 +129,250 @@ class FakeRedis:
         return FakePipeline(self)
 
     def flushall(self):
+        keys = set(self.strings) | set(self.hashes) | set(self.sets)
         self.strings.clear()
         self.hashes.clear()
         self.sets.clear()
+        for key in keys:
+            self._changed(key)
 
 
 class FakePipeline:
     def __init__(self, client: FakeRedis) -> None:
         self._client = client
         self._commands: list[tuple[str, tuple, dict]] = []
+        self._watched: dict[str, int] = {}
+        self._queueing = False
+
+    def watch(self, *keys: str):
+        self._client._check()
+        if self._queueing:
+            raise AssertionError("WATCH must precede MULTI")
+        for key in keys:
+            self._watched.setdefault(key, self._client._versions.get(key, 0))
+        return True
+
+    def multi(self):
+        self._queueing = True
+        return self
+
+    def reset(self):
+        self._commands.clear()
+        self._watched.clear()
+        self._queueing = False
 
     def __getattr__(self, name: str):
-        def queue(*args, **kwargs):
-            self._commands.append((name, args, kwargs))
-            return self
+        def command(*args, **kwargs):
+            if self._queueing:
+                self._commands.append((name, args, kwargs))
+                return self
+            return getattr(self._client, name)(*args, **kwargs)
 
-        return queue
+        return command
 
     def execute(self):
         self._client._check()
-        snapshot = (
-            deepcopy(self._client.strings),
-            deepcopy(self._client.hashes),
-            deepcopy(self._client.sets),
+        if any(
+            self._client._versions.get(key, 0) != version
+            for key, version in self._watched.items()
+        ):
+            raise FakeWatchError("watched key changed")
+        results = [
+            getattr(self._client, name)(*args, **kwargs)
+            for name, args, kwargs in self._commands
+        ]
+        self._commands.clear()
+        self._watched.clear()
+        self._queueing = False
+        return results
+
+
+class _NativePipelineHooks:
+    def __init__(
+        self,
+        client,
+        *,
+        pause_first_execute=False,
+        pause_first_read=False,
+        before_execute=None,
+        namespace_reader=None,
+    ):
+        self.client = client
+        self.pause_first_execute = pause_first_execute
+        self.pause_first_read = pause_first_read
+        self.before_execute = before_execute
+        self.namespace_reader = namespace_reader
+        self.entered = threading.Event()
+        self.release = threading.Event()
+        self.execute_calls = 0
+        self.watch_errors = 0
+        self.read_calls: list[str] = []
+        self.before_abort: list[object] = []
+        self.after_abort: list[object] = []
+
+    def wrap(self, pipeline):
+        hooks = self
+
+        class WrappedPipeline:
+            def __getattr__(self, name):
+                method = getattr(pipeline, name)
+                if name == "execute":
+
+                    def execute(*args, **kwargs):
+                        hooks.execute_calls += 1
+                        attempt = hooks.execute_calls
+                        if hooks.before_execute is not None:
+                            hooks.before_execute(attempt)
+                        if hooks.pause_first_execute and attempt == 1:
+                            hooks.entered.set()
+                            if not hooks.release.wait(timeout=15):
+                                raise TimeoutError("native EXEC barrier timed out")
+                        try:
+                            return method(*args, **kwargs)
+                        except Exception as exc:
+                            if any(
+                                base.__name__.endswith("WatchError")
+                                for base in type(exc).__mro__
+                            ):
+                                hooks.watch_errors += 1
+                                if hooks.namespace_reader is not None:
+                                    hooks.after_abort.append(hooks.namespace_reader())
+                            raise
+
+                    return execute
+                if name in {"get", "hgetall", "smembers", "mget"}:
+
+                    def read(*args, **kwargs):
+                        hooks.read_calls.append(name)
+                        if (
+                            name == "smembers"
+                            and hooks.pause_first_read
+                            and not hooks.entered.is_set()
+                        ):
+                            hooks.entered.set()
+                            if not hooks.release.wait(timeout=15):
+                                raise TimeoutError("native read barrier timed out")
+                        return method(*args, **kwargs)
+
+                    return read
+                return method
+
+        return WrappedPipeline()
+
+
+class _NativeHookClient:
+    def __init__(self, client, hooks: _NativePipelineHooks):
+        self._client = client
+        self._hooks = hooks
+
+    def __getattr__(self, name):
+        return getattr(self._client, name)
+
+    def pipeline(self, *, transaction: bool):
+        return self._hooks.wrap(self._client.pipeline(transaction=transaction))
+
+
+def _native_projection(store, runtime, client, *, strict=True):
+    redis = pytest.importorskip("redis")
+    return RedisQueryProjection(
+        store,
+        client,
+        domain_id=runtime.genesis.id,
+        redis_errors=(redis.RedisError,),
+        strict=strict,
+    )
+
+
+def _native_client():
+    redis_url = os.getenv("AIG_REDIS_TEST_URL")
+    if not redis_url:
+        pytest.skip("set AIG_REDIS_TEST_URL to run Redis concurrency integration")
+    redis = pytest.importorskip("redis")
+    client = redis.Redis.from_url(redis_url, decode_responses=True)
+    assert client.ping()
+    return client
+
+
+def _native_signed_store_pair(tmp_path):
+    from aigineering.core.domain import initialize_genesis
+    from aigineering.core.signing import Ed25519Signer
+    from aigineering.protocol.candidate import ActorKey, create_genesis_manifest
+
+    path = tmp_path / f"query-{uuid4().hex}.sqlite"
+    source = SQLiteStore(str(path))
+    signer = Ed25519Signer()
+    nonce = uuid4().hex
+    actor_key = ActorKey(
+        f"test:query:{nonce}",
+        f"key:{nonce}",
+        signer.kind,
+        signer.signer_id,
+        (
+            "actor.authorize",
+            "asset.publish",
+            "asset.publish.protected",
+            "asset.relate",
+            "contract.publish",
+            "contract.publish.protected",
+            "worker.register",
+        ),
+    )
+    genesis = create_genesis_manifest(
+        f"query-concurrency-{nonce}", (actor_key,), f"policy:query:{nonce}"
+    )
+    initialize_genesis(source, genesis)
+    runtime = candidate_runtime(
+        source, genesis=genesis, actor_key=actor_key, signer=signer
+    )
+    asset = runtime.accept_asset(
+        build_control_plane_asset(name="source", content="signed source evidence")
+    )
+    contract = runtime.accept_contract(
+        build_control_plane_contract(
+            name="initial",
+            description="Initial signed query fixture.",
+            inputs=("source",),
+            outputs=("output-initial",),
+            activation="source",
         )
-        try:
-            return [
-                getattr(self._client, name)(*args, **kwargs)
-                for name, args, kwargs in self._commands
-            ]
-        except FakeRedisError:
-            (
-                self._client.strings,
-                self._client.hashes,
-                self._client.sets,
-            ) = snapshot
-            raise
+    )
+    writer = SQLiteStore(str(path))
+    writer_runtime = candidate_runtime(
+        writer, genesis=genesis, actor_key=actor_key, signer=signer
+    )
+    writer_runtime._sequence = runtime._sequence
+    return path, source, runtime, asset, contract, writer, writer_runtime
+
+
+def _native_late_contracts(writer_runtime, prefix: str, count: int = 3):
+    return [
+        writer_runtime.accept_contract(
+            build_control_plane_contract(
+                name=f"{prefix}-{index}",
+                description=f"Signed graph-free query Contract {prefix}-{index}.",
+                inputs=("source",),
+                outputs=(f"output-{prefix}-{index}",),
+                activation="source",
+            )
+        )
+        for index in range(count)
+    ]
+
+
+def _native_namespace(client, projection):
+    result = {}
+    for key in sorted(client.scan_iter(match=f"{projection._root}:*")):
+        key_type = client.type(key)
+        if key_type == "string":
+            value = client.get(key)
+        elif key_type == "hash":
+            value = client.hgetall(key)
+        elif key_type == "set":
+            value = sorted(client.smembers(key))
+        else:
+            value = {"type": key_type}
+        result[key] = value
+    return result
 
 
 def _facts(store):
@@ -246,14 +472,15 @@ def test_rebuild_uses_one_closed_sqlite_snapshot_during_signed_interleave(
 
         def read_assets_then_publish():
             assets = original_get_assets()
-            accepted = writer_runtime.accept_asset(interleaved_asset)
-            captured_source_state.append(
-                (
-                    accepted,
-                    temp_sqlite_store.get_runtime_revision(),
-                    temp_sqlite_store.runtime_materialization_digest(),
+            if not captured_source_state:
+                accepted = writer_runtime.accept_asset(interleaved_asset)
+                captured_source_state.append(
+                    (
+                        accepted,
+                        temp_sqlite_store.get_runtime_revision(),
+                        temp_sqlite_store.runtime_materialization_digest(),
+                    )
                 )
-            )
             return assets
 
         def close_copy():
@@ -453,6 +680,119 @@ def test_json_views_are_memoized_only_for_one_authoritative_revision(
     assert projection.memoize_json("task.status", contract.id, build)["call"] == 2
 
 
+def test_json_view_discards_build_when_source_advances(temp_sqlite_store):
+    runtime, _, contract = _facts(temp_sqlite_store)
+    writer = SQLiteStore(temp_sqlite_store._db_path)
+    writer_runtime = candidate_runtime(
+        writer,
+        genesis=runtime.genesis,
+        actor_key=runtime.actor_key,
+        signer=runtime.signer,
+    )
+    writer_runtime._sequence = runtime._sequence
+    projection = _projection(temp_sqlite_store, runtime, FakeRedis())
+    projection.rebuild()
+    calls = 0
+
+    def build():
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            writer_runtime.accept_contract(
+                build_control_plane_contract(
+                    name="during-json-build",
+                    description="Signed concurrent build.",
+                    inputs=("source",),
+                    outputs=("json-output",),
+                    activation="source",
+                )
+            )
+        return {"call": calls}
+
+    try:
+        result = projection.memoize_json("task.status", contract.id, build)
+        assert calls == 2
+        assert result == {"call": 2}
+        current = temp_sqlite_store.get_runtime_revision()
+        assert any(f":view:{current}:" in key for key in projection._client.strings)
+        assert not any(
+            f":view:{current - 1}:" in key for key in projection._client.strings
+        )
+    finally:
+        writer.close()
+
+
+def test_compatibility_fallback_retries_source_revision_change(temp_sqlite_store):
+    runtime, _, initial = _facts(temp_sqlite_store)
+    writer = SQLiteStore(temp_sqlite_store._db_path)
+    writer_runtime = candidate_runtime(
+        writer,
+        genesis=runtime.genesis,
+        actor_key=runtime.actor_key,
+        signer=runtime.signer,
+    )
+    writer_runtime._sequence = runtime._sequence
+    client = FakeRedis()
+    degraded = []
+    projection = RedisQueryProjection(
+        temp_sqlite_store,
+        client,
+        domain_id=runtime.genesis.id,
+        redis_errors=(FakeRedisError,),
+        strict=False,
+        on_degraded=degraded.append,
+    )
+    projection.rebuild()
+    original = projection._fallback.get_all_contracts
+    calls = 0
+
+    def interleaved_fallback():
+        nonlocal calls
+        calls += 1
+        result = original()
+        if calls == 1:
+            writer_runtime.accept_contract(
+                build_control_plane_contract(
+                    name="during-fallback",
+                    description="Signed fallback interleave.",
+                    inputs=("source",),
+                    outputs=("fallback-output",),
+                    activation="source",
+                )
+            )
+        return result
+
+    projection._fallback.get_all_contracts = interleaved_fallback
+    client.fail = True
+    try:
+        result = projection.get_all_contracts()
+        assert calls == 2
+        assert {contract.name for contract in result} >= {
+            initial.name,
+            "during-fallback",
+        }
+        assert degraded
+    finally:
+        writer.close()
+
+
+def test_unchanged_current_read_avoids_snapshot_and_full_record_scan(
+    temp_sqlite_store, monkeypatch
+):
+    runtime, _, _ = _facts(temp_sqlite_store)
+    projection = _projection(temp_sqlite_store, runtime, FakeRedis())
+    projection.rebuild()
+
+    def unexpected(*_args, **_kwargs):
+        raise AssertionError("unchanged current reads must not snapshot or scan")
+
+    monkeypatch.setattr(
+        "aigineering.adapters.redis_query.build_query_snapshot", unexpected
+    )
+    monkeypatch.setattr(temp_sqlite_store, "scan_runtime_records", unexpected)
+    assert projection.get_all_contracts()
+
+
 def test_redis_graph_rebuild_and_incremental_catchup(temp_sqlite_store):
     runtime, _, _ = _facts(temp_sqlite_store)
     client = FakeRedis()
@@ -643,3 +983,330 @@ def test_real_redis_shared_readers_rebuild_convergently(tmp_path):
     assert reopened_projection.get_assets_by_name("second") == [second]
     reopened.close()
     writer.close()
+
+
+def test_native_rebuild_retries_after_active_metadata_watch_invalidation(
+    tmp_path,
+):
+    client = _native_client()
+    _, source, runtime, _, _, writer, _ = _native_signed_store_pair(tmp_path)
+    try:
+        projection = _native_projection(source, runtime, client)
+        projection.rebuild()
+        before = _native_namespace(client, projection)
+        hooks = _NativePipelineHooks(
+            client,
+            pause_first_execute=True,
+            namespace_reader=lambda: _native_namespace(client, projection),
+        )
+        projection._client = _NativeHookClient(client, hooks)
+
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(projection._rebuild)
+            assert hooks.entered.wait(timeout=10)
+            active_meta_key = (
+                f"{projection._generation_root(client.get(projection.active_key))}:meta"
+            )
+            client.hset(active_meta_key, mapping=client.hgetall(active_meta_key))
+            hooks.release.set()
+            rebuilt = future.result(timeout=15)
+
+        assert rebuilt.revision == source.get_runtime_revision()
+        assert hooks.execute_calls == 2
+        assert hooks.watch_errors == 1
+        assert hooks.after_abort == [before]
+        assert _native_namespace(client, projection) == before
+    finally:
+        source.close()
+        writer.close()
+
+
+def test_native_read_rejects_generation_advanced_after_selection(tmp_path):
+    client = _native_client()
+    _, source, runtime, _, _, writer, writer_runtime = _native_signed_store_pair(
+        tmp_path
+    )
+    try:
+        projection = _native_projection(source, runtime, client)
+        projection.rebuild()
+        initial_revision = source.get_runtime_revision()
+
+        class FrozenRevisionStore:
+            def __getattr__(self, name):
+                return getattr(source, name)
+
+            def get_runtime_revision(self):
+                return initial_revision
+
+        stale_reader = _native_projection(FrozenRevisionStore(), runtime, client)
+        hooks = _NativePipelineHooks(client, pause_first_read=True)
+        stale_reader._client = _NativeHookClient(client, hooks)
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(stale_reader.get_all_contracts)
+            assert hooks.entered.wait(timeout=10)
+            later = _native_late_contracts(writer_runtime, "read-race")
+            winner = _native_projection(writer, runtime, client)
+            winner.catch_up(
+                projection._generation_root(client.get(projection.active_key)),
+                after_revision=initial_revision,
+            )
+            winner_namespace = _native_namespace(client, projection)
+            hooks.release.set()
+            with pytest.raises(QueryProjectionUnavailable):
+                result = future.result(timeout=15)
+                assert {contract.id for contract in result}.isdisjoint(
+                    {contract.id for contract in later}
+                )
+        assert _native_namespace(client, projection) == winner_namespace
+    finally:
+        source.close()
+        writer.close()
+
+
+def test_native_catch_up_loser_preserves_winning_generation_bytes(tmp_path):
+    client = _native_client()
+    _, source, runtime, _, _, writer, writer_runtime = _native_signed_store_pair(
+        tmp_path
+    )
+    try:
+        projection = _native_projection(source, runtime, client)
+        projection.rebuild()
+        initial_revision = source.get_runtime_revision()
+        earlier = _native_late_contracts(writer_runtime, "catchup-first", count=1)
+        earlier_revision = source.get_runtime_revision()
+
+        class FrozenTargetStore:
+            def __getattr__(self, name):
+                return getattr(source, name)
+
+            def get_runtime_revision(self):
+                return earlier_revision
+
+        stale = _native_projection(FrozenTargetStore(), runtime, client)
+        hooks = _NativePipelineHooks(
+            client,
+            pause_first_execute=True,
+            namespace_reader=lambda: _native_namespace(client, projection),
+        )
+        stale._client = _NativeHookClient(client, hooks)
+        generation = projection._generation_root(client.get(projection.active_key))
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(
+                stale.catch_up, generation, after_revision=initial_revision
+            )
+            assert hooks.entered.wait(timeout=10)
+            later = _native_late_contracts(writer_runtime, "catchup-later", count=2)
+            winner = _native_projection(writer, runtime, client)
+            winner.catch_up(generation, after_revision=initial_revision)
+            winner_namespace = _native_namespace(client, projection)
+            hooks.release.set()
+            with pytest.raises(QueryProjectionUnavailable):
+                future.result(timeout=15)
+
+        assert hooks.execute_calls == 1
+        assert hooks.watch_errors == 1
+        assert hooks.after_abort == [winner_namespace]
+        assert _native_namespace(client, projection) == winner_namespace
+        active = projection._generation_root(client.get(projection.active_key))
+        assert client.hgetall(f"{active}:meta")["revision"] == str(
+            source.get_runtime_revision()
+        )
+        assert {contract.id for contract in earlier + later}.issubset(
+            client.smembers(f"{active}:contracts")
+        )
+    finally:
+        source.close()
+        writer.close()
+
+
+def test_native_live_read_discards_postfetch_result_and_retries(tmp_path):
+    client = _native_client()
+    _, source, runtime, _, _, writer, writer_runtime = _native_signed_store_pair(
+        tmp_path
+    )
+    try:
+        projection = _native_projection(source, runtime, client)
+        projection.rebuild()
+        hooks = _NativePipelineHooks(client, pause_first_execute=True)
+        projection._client = _NativeHookClient(client, hooks)
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(projection.get_all_contracts)
+            assert hooks.entered.wait(timeout=10)
+            later = _native_late_contracts(writer_runtime, "live-read-race", count=2)
+            winner = _native_projection(writer, runtime, client)
+            generation = projection._generation_root(client.get(projection.active_key))
+            earlier_revision = int(client.hgetall(f"{generation}:meta")["revision"])
+            winner.catch_up(generation, after_revision=earlier_revision)
+            hooks.release.set()
+            result = future.result(timeout=15)
+
+        assert hooks.watch_errors == 1
+        assert hooks.execute_calls >= 2
+        result_ids = {contract.id for contract in result}
+        assert {contract.id for contract in later}.issubset(result_ids)
+        assert len(result_ids) == len(result)
+        active = projection._generation_root(client.get(projection.active_key))
+        assert client.hgetall(f"{active}:meta")["revision"] == str(
+            source.get_runtime_revision()
+        )
+    finally:
+        source.close()
+        writer.close()
+
+
+def test_native_rebuild_from_frozen_source_cannot_replace_newer_winner(tmp_path):
+    client = _native_client()
+    _, source, runtime, _, _, writer, writer_runtime = _native_signed_store_pair(
+        tmp_path
+    )
+    pinned = source.snapshot()
+    try:
+        projection = _native_projection(source, runtime, client)
+        projection.rebuild()
+        initial_revision = source.get_runtime_revision()
+
+        class FrozenStore:
+            def __getattr__(self, name):
+                return getattr(pinned, name)
+
+            def snapshot(self):
+                return pinned.snapshot()
+
+        frozen = _native_projection(FrozenStore(), runtime, client)
+        hooks = _NativePipelineHooks(
+            client,
+            pause_first_execute=True,
+            namespace_reader=lambda: _native_namespace(client, projection),
+        )
+        frozen._client = _NativeHookClient(client, hooks)
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(frozen._rebuild)
+            assert hooks.entered.wait(timeout=10)
+            _native_late_contracts(writer_runtime, "rebuild-winner", count=2)
+            winner = _native_projection(writer, runtime, client)
+            winner.rebuild()
+            winner_namespace = _native_namespace(client, projection)
+            hooks.release.set()
+            with pytest.raises(QueryProjectionUnavailable):
+                future.result(timeout=15)
+
+        assert hooks.execute_calls == 1
+        assert hooks.watch_errors == 1
+        assert hooks.after_abort == [winner_namespace]
+        assert _native_namespace(client, projection) == winner_namespace
+        active = projection._generation_root(client.get(projection.active_key))
+        assert client.hgetall(f"{active}:meta")["revision"] == str(
+            source.get_runtime_revision()
+        )
+        assert source.get_runtime_revision() > initial_revision
+    finally:
+        pinned.close()
+        source.close()
+        writer.close()
+
+
+def test_native_rebuild_target_metadata_touch_aborts_before_retry(tmp_path):
+    client = _native_client()
+    _, source, runtime, _, _, writer, writer_runtime = _native_signed_store_pair(
+        tmp_path
+    )
+    try:
+        projection = _native_projection(source, runtime, client)
+        projection.rebuild()
+        old_digest = client.get(projection.active_key)
+        _native_late_contracts(writer_runtime, "target-meta", count=1)
+        projection.rebuild()
+        target_digest = client.get(projection.active_key)
+        assert target_digest != old_digest
+        client.set(projection.active_key, old_digest)
+        before = _native_namespace(client, projection)
+        target_meta_key = f"{projection._generation_root(target_digest)}:meta"
+        hooks = _NativePipelineHooks(
+            client,
+            pause_first_execute=True,
+            namespace_reader=lambda: _native_namespace(client, projection),
+        )
+        projection._client = _NativeHookClient(client, hooks)
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(projection._rebuild)
+            assert hooks.entered.wait(timeout=10)
+            client.hset(target_meta_key, mapping=client.hgetall(target_meta_key))
+            hooks.release.set()
+            rebuilt = future.result(timeout=15)
+
+        assert hooks.execute_calls == 2
+        assert hooks.watch_errors == 1
+        assert hooks.after_abort == [before]
+        assert rebuilt.digest == target_digest
+        assert _native_namespace(client, projection) != before
+        assert client.get(projection.active_key) == target_digest
+    finally:
+        source.close()
+        writer.close()
+
+
+def test_native_catch_up_exhausts_three_metadata_conflicts_without_writes(tmp_path):
+    client = _native_client()
+    _, source, runtime, _, _, writer, writer_runtime = _native_signed_store_pair(
+        tmp_path
+    )
+    try:
+        projection = _native_projection(source, runtime, client)
+        projection.rebuild()
+        initial_revision = source.get_runtime_revision()
+        _native_late_contracts(writer_runtime, "exhaustion", count=1)
+        generation = projection._generation_root(client.get(projection.active_key))
+        meta_key = f"{generation}:meta"
+        before = _native_namespace(client, projection)
+
+        def touch_meta(attempt):
+            if attempt <= 3:
+                client.hset(meta_key, mapping=client.hgetall(meta_key))
+
+        hooks = _NativePipelineHooks(
+            client,
+            before_execute=touch_meta,
+            namespace_reader=lambda: _native_namespace(client, projection),
+        )
+        projection._client = _NativeHookClient(client, hooks)
+        with pytest.raises(QueryProjectionUnavailable):
+            projection.catch_up(generation, after_revision=initial_revision)
+
+        assert hooks.execute_calls == 3
+        assert hooks.watch_errors == 3
+        assert hooks.after_abort == [before, before, before]
+        assert _native_namespace(client, projection) == before
+    finally:
+        source.close()
+        writer.close()
+
+
+def test_native_live_read_rechecks_source_after_validating_exec(tmp_path):
+    client = _native_client()
+    _, source, runtime, _, _, writer, writer_runtime = _native_signed_store_pair(
+        tmp_path
+    )
+    try:
+        projection = _native_projection(source, runtime, client)
+        projection.rebuild()
+        committed = []
+
+        def commit_before_exec(attempt):
+            if attempt == 1:
+                committed.extend(
+                    _native_late_contracts(writer_runtime, "exec-source-race")
+                )
+
+        hooks = _NativePipelineHooks(client, before_execute=commit_before_exec)
+        projection._client = _NativeHookClient(client, hooks)
+        result = projection.get_all_contracts()
+
+        assert hooks.execute_calls >= 3
+        assert hooks.watch_errors == 0
+        assert committed
+        result_ids = {contract.id for contract in result}
+        assert {contract.id for contract in committed}.issubset(result_ids)
+        assert len(result_ids) == len(result)
+    finally:
+        source.close()
+        writer.close()

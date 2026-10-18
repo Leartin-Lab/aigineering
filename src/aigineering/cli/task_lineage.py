@@ -14,21 +14,29 @@ def register_task_lineage_command(group: click.Group) -> None:
     @group.command(
         "lineage",
         help=(
-            "Show a bidirectional connected component for verified containment "
-            "Worker-failure recovery, signed retry publications and accepted "
-            "leaf, expanded, or edit handoff publications and review-linked "
-            "revision publications. Starting "
-            "from either endpoint returns the same component; other relation "
-            "families remain outside this view."
+            "Show a bidirectional component for containment, Worker-failure "
+            "recovery, supported method recovery, retries, handoffs and revisions. "
+            "Method recovery sources are authenticated invocation failures, "
+            "claim expirations and admitted output rejections; legacy generic "
+            "recovery keeps its existing source-proof limit. Unavailable "
+            "schedules are observations. The view does not pair a failure "
+            "with a publication or prove tool-observation causation. Starting "
+            "at either endpoint returns the same component. It also follows "
+            "signed retry publications, handoff publications and revision "
+            "publications. See changes 098 "
+            "and 099."
         ),
     )
     @click.argument("contract_id")
     @click.option("--json", "as_json", is_flag=True, help="Output a JSON envelope.")
     def lineage(contract_id: str, as_json: bool) -> None:
-        """Show a bidirectional component for containment, Worker-failure recovery, retry, handoff and revision publications.
+        """Show verified containment, Worker-failure and supported method recovery, retry, handoff and revision links.
 
-        Starting from either endpoint returns the same connected component.
-        Only accepted publication links in these families are traversed.
+        Method recovery sources include authenticated invocation failure, claim
+        expiration and admitted output rejection. Legacy generic recovery retains
+        its existing source-proof limit. Unavailable schedules are observations;
+        this view does not pair failures with publications or prove tool-observation
+        causation. Starting at either endpoint returns the same component.
         """
         store = None
         try:

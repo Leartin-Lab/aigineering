@@ -110,17 +110,27 @@ action sequence and failure boundaries. Do not assume arbitrary parallel calls,
 automatic recovery, or complete tool-continuation lineage from the action name
 alone.
 
-Current failure handling has two limits. A failed single `/tool` observation
-terminalizes its parent as `failed`; `retryable` is metadata and starts no new
-attempt. Inspect `task status` and `task audit`; to retry, publish `task retry ID`.
-A configured local Worker can run the returned successor with
-`aig run --task RETRY_ID`. An external Worker signs a new claim Candidate targeting
-`RETRY_ID`, then resumes the same claim/submit loop below. A
-`/parallel_tool` join's `AND` activation only checks that observation Assets
-exist, so an `ok: false` observation may make the join eligible. Inspect each
-exact observation before continuing; if the join is still unclaimed, hold it
-with `task block JOIN_ID --reason TEXT`. These paths do not provide unified
-automatic failure or recovery.
+Recovery remains bounded by its proved source. Supported system tool-method
+recovery can follow authenticated invocation failure, claim expiration or
+admitted output rejection; legacy generic recovery keeps its existing
+source-proof limit. See [change 098](../../changes/098-executable-method-recovery.md)
+and [change 099](../../changes/099-tool-mcp-failure-convergence.md). Recovery
+work is an ordinary successor: a configured Fleet or the root's ordinary
+claim flow can continue it when the task is eligible. Lineage does not pair one failure with one publication, and sibling
+containment does not prove that a particular tool observation caused a
+continuation. Unavailable schedule records are observations. Explicit `/fail`
+remains an operator-decided terminal result and does not schedule automatic
+recovery. For other failed work, inspect `task status` and `task audit`; publish
+`task retry ID` when a retry is authorized. A configured local Worker can run
+the returned successor with `aig run --task RETRY_ID`. An external Worker signs
+a new claim Candidate targeting `RETRY_ID`, then resumes the same claim/submit
+loop below. A `/parallel_tool` join's `AND` activation only checks that
+observation Assets exist. A negative business result may therefore make the
+join eligible when the observation was recorded successfully (`ok: true`) and
+its returned payload has `result.ok: false`. A ToolWorker execution exception
+raises `WorkerExecutionError` and does not create a successful observation.
+Inspect each exact observation before continuing; if the join is
+still unclaimed, hold it with `task block JOIN_ID --reason TEXT`.
 
 All operational entry points use the same signed coordination boundary. SQLite
 rechecks the current enabled Worker registration, actor/key authorization,
