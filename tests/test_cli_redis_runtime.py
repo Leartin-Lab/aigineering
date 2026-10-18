@@ -110,7 +110,7 @@ def test_redis_status_rebuild_and_workspace_isolation(live_cli, monkeypatch, tmp
     store.close()
 
 
-def test_rebuild_cli_uses_last_fresh_snapshot_for_query_and_final_status(monkeypatch):
+def test_rebuild_cli_uses_latest_routed_source_for_query_and_final_status(monkeypatch):
     from types import SimpleNamespace
 
     import aigineering.cli.redis as redis_cli
@@ -127,10 +127,12 @@ def test_rebuild_cli_uses_last_fresh_snapshot_for_query_and_final_status(monkeyp
             self.closed = True
 
     original = Snapshot(10)
-    fresh = Snapshot(11)
-    snapshots = iter((original, fresh))
+    collaboration_fresh = Snapshot(11)
+    query_fresh = Snapshot(12)
+    snapshots = iter((original, collaboration_fresh, query_fresh))
     query_stores = []
     service_stores = []
+    routed_sources = []
 
     class Service:
         def __init__(self, store):
@@ -138,7 +140,7 @@ def test_rebuild_cli_uses_last_fresh_snapshot_for_query_and_final_status(monkeyp
             service_stores.append(store)
 
         def rebuild(self, *, fresh_store_factory):
-            assert fresh_store_factory() is fresh
+            assert fresh_store_factory() is collaboration_fresh
 
         def status(self):
             return {
@@ -153,7 +155,8 @@ def test_rebuild_cli_uses_last_fresh_snapshot_for_query_and_final_status(monkeyp
         def __init__(self, store):
             query_stores.append(store)
 
-        def rebuild(self):
+        def rebuild(self, *, fresh_store_factory):
+            routed_sources.append(fresh_store_factory())
             return SimpleNamespace(digest="fresh-digest")
 
     monkeypatch.setattr(redis_cli, "require_redis", lambda: None)
@@ -167,11 +170,56 @@ def test_rebuild_cli_uses_last_fresh_snapshot_for_query_and_final_status(monkeyp
 
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
-    assert payload["authoritative_revision"] == 11
+    assert payload["authoritative_revision"] == 12
     assert payload["rebuilt_digest"] == "fresh-digest"
-    assert query_stores == [fresh]
-    assert service_stores == [original, fresh]
-    assert original.closed and fresh.closed
+    assert query_stores == [original]
+    assert service_stores == [original, query_fresh]
+    assert routed_sources == [query_fresh]
+    assert original.closed and collaboration_fresh.closed and query_fresh.closed
+
+
+def test_redis_sync_renders_query_source_conflict_as_available_noncurrent_json(
+    monkeypatch,
+):
+    import aigineering.cli.redis as redis_cli
+    from aigineering.adapters.redis_query import QueryProjectionUnavailable
+
+    class Snapshot:
+        def close(self):
+            pass
+
+    class Service:
+        def __init__(self, _store):
+            pass
+
+        def sync(self):
+            return {}
+
+    class Query:
+        def __init__(self, _store):
+            pass
+
+        def get_all_contracts(self):
+            raise QueryProjectionUnavailable(
+                "Redis query projection source changed during capture"
+            )
+
+    monkeypatch.setattr(redis_cli, "require_redis", lambda: None)
+    monkeypatch.setattr(redis_cli, "_persistent_snapshot", lambda _path: Snapshot())
+    monkeypatch.setattr(redis_cli, "collaboration_service", Service)
+    monkeypatch.setattr(redis_cli, "query_projection", Query)
+
+    result = CliRunner().invoke(cli, ["redis", "sync", "--json"])
+
+    assert result.exit_code == 1
+    assert json.loads(result.output) == {
+        "ok": False,
+        "backend": "redis",
+        "available": True,
+        "required": True,
+        "current": False,
+        "reason": "source_conflict",
+    }
 
 
 def test_redis_sync_renders_conflict_reason_as_available_noncurrent_json(monkeypatch):

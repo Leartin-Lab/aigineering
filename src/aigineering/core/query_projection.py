@@ -21,7 +21,7 @@ from aigineering.protocol.wire import (
     contract_to_dict,
 )
 
-QUERY_PROJECTION_SCHEMA = "v2"
+QUERY_PROJECTION_SCHEMA = "v3"
 
 
 class QueryProjection(Protocol):

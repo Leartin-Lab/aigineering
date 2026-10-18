@@ -100,8 +100,10 @@ def _sync(as_json: bool, *, rebuild: bool) -> None:
         service = collaboration_service(store)
         if rebuild:
             service.rebuild(fresh_store_factory=fresh_routed_snapshot)
+            snapshot = query_projection(store).rebuild(
+                fresh_store_factory=fresh_routed_snapshot
+            )
             final_store = last_probe or store
-            snapshot = query_projection(final_store).rebuild()
             service = collaboration_service(final_store)
         else:
             service.sync()
@@ -137,6 +139,30 @@ def _sync(as_json: bool, *, rebuild: bool) -> None:
                 f"reason={payload['reason']}"
             )
         raise click.exceptions.Exit(1)
+    except QueryProjectionUnavailable as exc:
+        message = str(exc)
+        if message == "Redis query projection unavailable":
+            reason = "redis_unavailable"
+        elif message == "Redis query projection publication failed":
+            reason = "projection_failed"
+        else:
+            reason = "source_conflict"
+        unavailable = reason == "redis_unavailable"
+        payload = {
+            "ok": False,
+            "backend": "redis",
+            "available": not unavailable,
+            "required": True,
+            "current": False,
+            "reason": reason,
+        }
+        if as_json:
+            _output_json(payload)
+        else:
+            click.echo(
+                f"redis: available={payload['available']} current=False reason={reason}"
+            )
+        raise click.exceptions.Exit(1)
     except LookupError as exc:
         raise click.ClickException(
             "Initialize this workspace with 'aig domain init'."
@@ -150,12 +176,12 @@ def _sync(as_json: bool, *, rebuild: bool) -> None:
 @redis_group.command("sync")
 @click.option("--json", "as_json", is_flag=True)
 def redis_sync(as_json: bool) -> None:
-    """Replay pending committed records and refresh read indexes."""
+    """Replay committed records and refresh indexes after exact source-prefix checks."""
     _sync(as_json, rebuild=False)
 
 
 @redis_group.command("rebuild")
 @click.option("--json", "as_json", is_flag=True)
 def redis_rebuild(as_json: bool) -> None:
-    """Rebuild only this domain's event feed and indexes from SQLite facts."""
+    """Explicitly rebuild this domain from a fresh routed SQLite snapshot."""
     _sync(as_json, rebuild=True)

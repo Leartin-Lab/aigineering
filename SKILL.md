@@ -49,6 +49,14 @@ checks or repairs the service; `aig cache` delegates to those same commands.
 Selected `aig --offline task status/audit` views support incident inspection.
 Execution and mutation do not have an offline fallback.
 
+If `redis sync --json` reports `source_conflict`, confirm the selected workspace
+is the intended authoritative source before running `aig redis rebuild --json`.
+Rebuild reopens that routed SQLite source; ordinary sync refuses divergent
+history. `projection_failed` means publication failed and may have left a
+non-ready query generation; repair the service fault, then explicitly rebuild.
+Neither repair resets tasks nor qualifies outputs. A nonzero result or
+`current: false` still requires inspection; do not infer successful recovery.
+
 For independent local projects, use `board create NAME`, `board list/show`,
 `board switch NAME` and `board archive NAME [--restore]`. Create never selects
 the new board. `--board NAME` routes one invocation; explicit `-C PATH` bypasses

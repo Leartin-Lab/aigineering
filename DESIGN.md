@@ -766,29 +766,45 @@ with bounded waits, and return to SQLite for every claim and submission decision
 See [ADR-027](docs/adr/ADR-027-required-redis-collaboration.md) and the
 [task operations reference](docs/reference/task-board.md).
 
-Redis query generations are built from one consistent SQLite Store snapshot.
-The snapshot binds Assets, Contracts, graph indexes and the revision in the same
-read view, then closes its temporary copy. Full rebuilds watch the active pointer,
-active metadata and target metadata through Redis `EXEC`; a newer active or target
-revision blocks an older snapshot before entity writes. Catch-up watches its
-selected generation metadata (and the active pointer when source-selected),
-requires the exact expected revision before queuing entity changes, and advances
-the watermark with those changes in the same transaction. Rebuild and catch-up
-retry up to three Redis conflicts.
+Redis query generations bind a consistent SQLite Store snapshot to an exact
+ordered RuntimeRecord prefix. The adapter hashes revision, record ID and the
+canonical effective payload in bounded 256-revision scan windows, retaining only
+a zero seed plus the latest 16 actual-row checkpoints and an append tip for the
+same open Store. If the live revision falls below the cached append tip, the
+memo resets before an out-of-range request is refused; arbitrary in-place Store
+mutation remains unsupported. A requested nonzero watermark must also be present
+as the terminal row; interior revision gaps remain valid. Snapshot
+revision, source revision and prefix certificate must agree; equal revision or
+graph digest alone does not identify same-revision histories. The cold path may
+scan the committed prefix, while repeated reads on the same Store reuse its exact
+append tip or rescan from a nearby checkpoint.
 
-Each cached read watches selected-generation metadata through its multi-command
-fetch and a validating no-op `EXEC`, then rechecks the SQLite revision after the
-`EXEC` succeeds. This catches SQLite-only commits that do not mutate Redis. A changed
-source or Redis fence discards the read and retries within a bound; frozen old
-sources fail visibly when cache metadata is newer. Explicit compatibility
-fallbacks check the source revision before and after each read, and JSON view
-builds check it before caching under a revision key. Unchanged current reads do
-not capture or hash the full Store. Full rebuilds still use SQLite's in-memory
-backup, so copy cost grows with Store size; incremental catch-up scans only
-through its captured revision. These fences address same-history concurrent
-writers; revision equality alone does not prove that separate Stores contain the
-same history. Because the Redis query schema version is unchanged, rebuild
-Stores that may have generations created by the earlier multi-read capture.
+Full rebuild watches the active pointer and active/target metadata through
+`EXEC`, and enumerates target keys while the target metadata is watched. One
+fixed Lua publication marks the target non-ready, removes enumerated old keys
+with `DEL` calls grouped to at most 128 keys, writes the replacement payload and
+metadata, marks it ready, and changes the active pointer last. Catch-up uses the same non-ready/data/ready
+publication fence. Redis scripts are atomic to concurrent commands, but a Lua
+command error does not roll back commands already run; if one occurs after the
+first metadata write, that target remains non-ready and its prior keys may be
+partially changed. Reads refuse non-ready selected metadata. Only an explicit
+rebuild supplied with a fresh routed Store may repair it, and a WATCH conflict
+consumes that repair privilege before retry. A retry must validate the current
+prefix and will refuse divergent metadata. Both publication paths retry at most
+three WATCH conflicts.
+
+Each cached read watches the selected pointer and metadata through its
+multi-command fetch and validating `EXEC`, then rechecks the exact SQLite prefix
+and revision after `EXEC`. This catches SQLite-only commits and same-revision
+forks that do not touch Redis. JSON views include the prefix certificate in their
+cache key; a cache miss writes the payload and touches watched metadata in the
+same `EXEC`, so a writer during target-key enumeration invalidates the cleanup
+attempt. The query namespace advances from v2 to v3, isolating selected keys from
+old v2 writers. Explicit compatibility fallbacks check source stability around
+each read. Full snapshot rebuilds still use SQLite's in-memory backup, so copy
+cost grows with Store size; prefix identity adds bounded-window scans on cold
+sources. This change does not reduce the known large-store rebuild memory cost.
+See [change 103](changes/103-query-source-binding-and-conditional-repair.md).
 
 Task conversations use a dedicated `task.comment` capability. The collaboration
 plugin projects an exact Contract, bounded text and optional same-task reply to

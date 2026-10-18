@@ -25,8 +25,11 @@ not a substitute for current operational acceptance.
 
 The collaboration relay now verifies the exact SQLite event prefix before
 synchronization. Explicit stream repair uses a fresh snapshot of the routed
-workspace; query-generation correctness and final scale qualification remain
-separate open work. See [change 100](changes/100-redis-collaboration-prefix-integrity.md).
+workspace. Query generations also bind exact source history, fence concurrent
+publication and refuse partial generations; explicit repair reopens the routed
+source. Final scale qualification and current-artifact real-task acceptance
+remain open. See [change 100](changes/100-redis-collaboration-prefix-integrity.md)
+and [change 103](changes/103-query-source-binding-and-conditional-repair.md).
 
 The current source version is **v0.5.13.dev0**. The earlier v0.5.12 snapshot
 completed deterministic, package, installed-artifact, long-chain and

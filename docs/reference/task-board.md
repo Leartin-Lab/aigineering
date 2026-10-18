@@ -1172,10 +1172,18 @@ that a task succeeded. Missing tasks, task-wait timeout, failed task terminal,
 and unavailable Redis return nonzero status.
 
 `redis status` checks health and relay lag without repairing it. `sync` replays
-pending immutable records and refreshes indexes. `rebuild` repairs only the current
-domain's feed and index; it does not flush other domains or alter SQLite facts.
-Workers use Redis wake events with bounded waits and return to SQLite claims;
-external publishers are discovered on the next relay pass.
+pending immutable records and refreshes indexes. Query indexes bind their selected
+Redis generation to the ordered SQLite record history, not revision equality
+alone. `rebuild` is the explicit repair path and routes a fresh Store snapshot; a
+non-ready generation is refused by reads until a successful rebuild. If a Redis
+command fails during its Lua publication, earlier script commands are not rolled
+back, so the generation stays fenced as non-ready and repair may need another
+explicit rebuild. The command reports source conflicts and Redis publication
+failures as nonzero bounded results. See [change 103](../../changes/103-query-source-binding-and-conditional-repair.md).
+It repairs only the current domain's feed
+and index; it does not flush other domains or alter SQLite facts. Workers use
+Redis wake events with bounded waits and return to SQLite claims; external
+publishers are discovered on the next relay pass.
 
 An outage after SQLite commitment can report `redis_sync_pending` and retained
 facts. Restore Redis and synchronize before interpreting or repeating the action.
