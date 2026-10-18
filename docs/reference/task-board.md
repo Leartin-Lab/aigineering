@@ -1044,7 +1044,15 @@ committed output and available allowance. Review reserves source allowance;
 the default is one unit, not token billing or a fresh root grant. The reviewer
 has no tools or delegation and sees only exact original promptable target,
 rubric and evidence Assets. Same-name context is not silently added. Sealed,
-redacted, non-promptable or tombstoned review context is refused.
+redacted, non-promptable or tombstoned review context is refused. The reviewer
+claims a separate ordinary task and package; empty tool scope or method context
+on that package says nothing about tools used by the producer. The reviewer
+compares only the frozen target, rubric and evidence disclosed to the review task;
+undisclosed history is unknown, not a contradiction to invent. An authorized
+operator may verify provenance from the original claim and facts, without adding
+business evidence or changing the frozen policy. A report recommendation does
+not decide the verdict: the operator must state the reason for `accept` or
+`changes`, and a negative recommendation is not a pass.
 
 A canonical retry of an eligible human or plan task can also request review when
 it retains the independent policy and exact eligible output. The retry stays an

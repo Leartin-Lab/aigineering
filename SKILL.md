@@ -254,6 +254,14 @@ Run the returned ordinary reviewer task with a distinct
 `task reviews SOURCE` reads immutable history. Review consumes current source
 allowance; its report does not itself qualify the source. Decision reuses canonical
 policy attestation and requires distinct producer attribution and verifier caps.
+The reviewer receives a separate ordinary task and package; empty tool scope or
+method context on that package describes the review task, not the producer's run.
+The reviewer compares only the frozen target, rubric and evidence disclosed to
+that task. Treat undisclosed history as unknown, not as a contradiction; an
+authorized operator can independently verify run provenance from original claims
+and facts without adding business evidence or changing policy. A report's
+recommendation does not decide the verdict: the operator records a reasoned
+`accept` or `changes`, and a negative recommendation must not be called a pass.
 The default supports `verify.human`; custom actor/key/file options select an
 already-authorized identity without granting capabilities. Changes records rejected
 attestation only. Then `task request-changes DECISION --reason TEXT` publishes a

@@ -16,19 +16,25 @@ windows, deployment conveniences, scheduled notifications, PR acceptance
 adapters and complete command parity are later directions, not completion
 conditions for this stage.
 
-The immediate priority is reliable single-domain real work: execute a useful
-task, expose failed and exhausted work, preserve restart/recovery, independently
-accept the exact output and verify the installed artifact. Earlier accepted
-report evidence remains tied to its original snapshot. Named boards and other
-conveniences support that workflow; copying every reference-project command is
-not a substitute for current operational acceptance.
+One current-artifact single-domain case now completes actual external-harness
+work: a read-only ToolWorker observation, ordinary continuation, Luna report,
+distinct ordinary review, explicit operator policy adjudication and exact
+qualified export. The reviewer recommended changes; the operator retained that
+report and resolved its package-scope and task-parameter findings against the
+original facts before accepting. This is operator-assisted evidence, not an
+independently agreeing reviewer, unattended operation or stable qualification.
+See the bounded snapshot and remaining work in
+[development status](docs/reference/development-status.md). Earlier reports
+remain tied to their original snapshots. Named boards and other conveniences
+support the workflow; command parity does not substitute for operational evidence.
 
 The collaboration relay now verifies the exact SQLite event prefix before
 synchronization. Explicit stream repair uses a fresh snapshot of the routed
 workspace. Query generations also bind exact source history, fence concurrent
 publication and refuse partial generations; explicit repair reopens the routed
-source. Final scale qualification and current-artifact real-task acceptance
-remain open. See [change 100](changes/100-redis-collaboration-prefix-integrity.md)
+source. One 10k and one 100k query-component sample passed fixed resource guards;
+100k has little memory margin. Long-run and general scale qualification remain
+open. See [change 100](changes/100-redis-collaboration-prefix-integrity.md)
 and [change 103](changes/103-query-source-binding-and-conditional-repair.md).
 
 The current source version is **v0.5.13.dev0**. The earlier v0.5.12 snapshot
