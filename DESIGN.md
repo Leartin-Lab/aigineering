@@ -493,6 +493,27 @@ it first; recursive recovery and failures beyond the retained capacity can remai
 unavailable. At the minimum `calls + 1` allowance, no recovery unit is retained.
 No thread, future, or in-memory join is part of task truth.
 
+For an eligible business Contract with independent acceptance, publishing a
+tool continuation retains up to one unit of the parent's ordinary allowance per
+declared output, subject to keeping at least one unit for the continuation. The
+continuation receives the remaining allowance. Non-eligible or non-independent
+parents keep their existing allocation, and a continuation-origin parent does
+not reserve the same review demand again. Parallel tool publication uses the
+same allocation owner and combines review demand with its bounded first-recovery
+demand; any remaining parent balance is shared ordinary allowance, not a
+priority or earmark. These reserves fund the existing default one-unit review
+request per output when enough allowance remains; they do not guarantee a larger
+review budget, verifier availability, or acceptance. Completion fixes a tool
+continuation's intended budget from the exact accepted declaration head of its
+source Contract, including that declaration's allowance batch. After restart, an
+already accepted child is reused only when its exact Candidate intent, receipt,
+canonical Contract, full committed batch and configured publisher actor/domain
+match; recovery does not sign it again. If no child exists, the fixed intent goes
+through the current signed publisher. A later authorized spend can make that
+intent unaffordable, in which case the writer rejects it visibly instead of
+reducing its budget. Completion does not clear an existing failed parent
+terminal or republish work beneath it.
+
 ## Causal allowance
 
 Allowance is lineage authority, not a Worker wallet or mutable counter.

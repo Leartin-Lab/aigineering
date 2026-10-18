@@ -263,34 +263,79 @@ class TaskCompletionProjector:
         self, parent: Contract, source: Contract, assets: list[Asset]
     ) -> None:
         from aigineering.plugins.base import PluginRequest
+        from aigineering.plugins.continuation_history import (
+            ContinuationHistoryCaptureUnstable,
+            capture_continuation_history,
+            inspect_continuation_history,
+        )
 
         plugin = ContinuationTaskPlugin()
-        proposal = plugin.propose(
-            PluginRequest(
-                parent=parent,
-                source=source,
-                assets=tuple(assets),
-                allowance=max(1, self._context.resolve_budget(parent.id)),
-            )
-        )
-        continuation = contract_from_dict(proposal.effects[0].payload["contract"])
+        method = str(method_payload(source).get("method", "method"))
         publisher = (
             self._publishers.get(plugin.plugin_id)
             if self._publishers is not None
             else None
         )
         if publisher is None:
+            self._reject_continuation(
+                parent, source, "continuation publisher unavailable"
+            )
+            return
+        try:
+            snapshot = capture_continuation_history(self._store, publisher)
+            proof = inspect_continuation_history(
+                snapshot, parent=parent, source=source, method=method
+            )
+        except (
+            ContinuationHistoryCaptureUnstable,
+            TypeError,
+            ValueError,
+        ) as exc:
+            self._reject_continuation(
+                parent,
+                source,
+                f"continuation history unavailable: {type(exc).__name__}",
+            )
+            return
+        if proof.status == "conflict":
+            self._reject_continuation(
+                parent, source, f"continuation history conflict: {proof.reason}"
+            )
+            return
+        if proof.status == "matched":
+            continuation = proof.contract
+            if continuation is None:
+                self._reject_continuation(
+                    parent, source, "continuation history omitted its Contract"
+                )
+                return
             self._trace.record(
                 parent.id,
-                "task_continuation_rejected",
+                "method_continuation_scheduled",
+                disclosed_assets=[asset.id for asset in assets],
                 relation_type="tool",
                 relation_target=continuation.id,
-                authority_result="rejected",
-                rejected_fragments=["[rejected] continuation publisher unavailable"],
                 budget_remaining=self._context.resolve_budget(parent.id),
             )
-            self._record_terminal(parent, "failed")
             return
+        if proof.status != "absent":
+            self._reject_continuation(
+                parent, source, "continuation history status invalid"
+            )
+            return
+
+        from aigineering.core.causal_allowance import allowance_available
+
+        available = allowance_available(parent, proof.source_prefix)
+        proposal = plugin.propose(
+            PluginRequest(
+                parent=parent,
+                source=source,
+                assets=tuple(assets),
+                allowance=max(1, available),
+            )
+        )
+        continuation = contract_from_dict(proposal.effects[0].payload["contract"])
         # A concurrent Worker can claim the Contract as soon as publication
         # commits. Persist its exact observations first; this preparation alone
         # neither declares work nor marks the parent as delegated.
@@ -307,16 +352,12 @@ class TaskCompletionProjector:
             causal_parents=(source.id,),
         )
         if not decision.accepted:
-            self._trace.record(
-                parent.id,
-                "task_continuation_rejected",
-                relation_type="tool",
+            self._reject_continuation(
+                parent,
+                source,
+                "continuation publication was rejected",
                 relation_target=continuation.id,
-                authority_result="rejected",
-                rejected_fragments=["[rejected] continuation publication was rejected"],
-                budget_remaining=self._context.resolve_budget(parent.id),
             )
-            self._record_terminal(parent, "failed")
             return
         self._trace.record(
             parent.id,
@@ -326,6 +367,25 @@ class TaskCompletionProjector:
             relation_target=continuation.id,
             budget_remaining=self._context.resolve_budget(parent.id),
         )
+
+    def _reject_continuation(
+        self,
+        parent: Contract,
+        source: Contract,
+        reason: str,
+        *,
+        relation_target: str | None = None,
+    ) -> None:
+        self._trace.record(
+            parent.id,
+            "task_continuation_rejected",
+            relation_type="tool",
+            relation_target=relation_target or source.id,
+            authority_result="rejected",
+            rejected_fragments=[f"[rejected] {reason}"],
+            budget_remaining=self._context.resolve_budget(parent.id),
+        )
+        self._record_terminal(parent, "failed")
 
     def _complete_contract(self, contract: Contract) -> None:
         self._record_terminal(contract, "complete")

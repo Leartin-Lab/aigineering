@@ -235,7 +235,12 @@ accepted pending-Redis results and synchronize before assuming an operation was
 not committed. See [the edit workflow](docs/reference/task-board.md#edit-task-instructions).
 
 Use `task request-review SOURCE --output NAME --asset ID --reason TEXT` for a live
-independent-policy output. Run the returned ordinary reviewer task with a distinct
+independent-policy output. Choose an eligible business source (`human`, `plan`, or
+`retry` with no `plugin:` or `method:` label); tool tasks and continuations are not
+review sources. Select the exact committed business-output Asset eligible under
+that source, including a permitted descendant output. Check
+`task status`, audit, and `task reviews` to confirm the source and target.
+Run the returned ordinary reviewer task with a distinct
 `run --worker-id ID`, inspect its exact report, then use
 `task review decide REQUEST --report ID --verdict accept|changes --reason TEXT`.
 `task reviews SOURCE` reads immutable history. Review consumes current source
@@ -569,7 +574,18 @@ mechanically; the independent verifier cannot override a shape mismatch.
 For a planned, retry, or recovery task with unresolved tool scope, return only
 `/tool` or `/parallel_tool`. The committed observation creates a continuation
 that publishes the business output. Never construct tool-derived evidence in
-`/exec`, including during recovery.
+`/exec`, including during recovery. For an eligible business task with
+independent acceptance, continuation publication retains up to one unit of
+ordinary parent allowance per declared output for the existing default review
+request, while leaving at least one unit for the continuation. Parallel tools
+share the retained balance with bounded first-recovery demand. The continuation
+budget is fixed from the source Contract's accepted declaration head. Restart
+reuses an already accepted child only after exact publication proof; it does not
+sign that child again or clear an existing failed parent terminal. Later legal
+spending can make the fixed budget unaffordable; the signed writer then rejects
+it instead of shrinking it. This is not a guarantee when allowance is
+insufficient or later work spends the balance; request review from the eligible
+business source through the ordinary signed workflow above.
 
 ## Preserve the boundary
 

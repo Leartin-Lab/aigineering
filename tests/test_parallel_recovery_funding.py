@@ -74,14 +74,23 @@ def _signed_parallel(env, parent: Contract, calls: list[dict], worker_id: str):
     return host, items, join
 
 
-def _parent(env, name: str, budget: int, tools: tuple[str, ...]) -> Contract:
+def _parent(
+    env,
+    name: str,
+    budget: int,
+    tools: tuple[str, ...],
+    *,
+    outputs: tuple[str, ...] | None = None,
+    acceptance_policy: dict | None = None,
+) -> Contract:
     return env.setup.accept_contract(
         Contract(
             id=f"task:parallel-recovery:{name}",
             name=name,
-            outputs=(f"{name}_report",),
+            outputs=outputs or (f"{name}_report",),
             budget=budget,
             tool_scope=tools,
+            acceptance_policy=acceptance_policy,
         )
     )
 
@@ -510,3 +519,164 @@ def test_old_full_effective_allowance_parallel_history_replays_without_identity_
     assert tuple(copied.scan_runtime_records()) == records
     copied.close()
     reopened.close()
+
+
+def test_signed_parallel_review_funding_combines_review_and_recovery_demand(
+    monkeypatch, tmp_path
+):
+    import aigineering.runtime_services as runtime_services
+
+    monkeypatch.setattr(runtime_services, "sync_runtime", lambda *args, **kwargs: None)
+    env = _environment(
+        "parallel-review-funding", store_path=tmp_path / "parallel-review.sqlite3"
+    )
+    policy = {
+        "mode": "independent",
+        "policy_version": "parallel-review-v1",
+        "required_attestations": 1,
+        "verifier_capabilities": ["verify.human"],
+        "rubric_asset_ids": [],
+        "evidence_asset_ids": [],
+    }
+    parent = _parent(
+        env,
+        "parallel-review",
+        10,
+        ("a", "b"),
+        outputs=("report-a", "report-b"),
+        acceptance_policy=policy,
+    )
+    calls = [{"id": name, "name": name, "args": {"q": name}} for name in ("a", "b")]
+    for name in ("a", "b"):
+        env.setup.accept_asset(
+            create_tool_descriptor(name, f"fixture {name}", {"type": "object"})
+        )
+
+    _, items, join = _signed_parallel(
+        env, parent, calls, "worker:parallel-review-funding"
+    )
+    records = tuple(record for _, record in env.store.scan_runtime_records())
+    assert len(items) == 2
+    assert all(item.budget == 1 for item in items)
+    # Two review units plus the existing two first-recovery slots stay on the
+    # parent; the join retains a positive budget for its ordinary continuation.
+    assert join.budget == 4
+    assert allowance_available(parent, records) == 4
+    env.store.close()
+
+
+def test_signed_parallel_review_minimum_shares_residual_with_recovery(
+    monkeypatch, tmp_path
+):
+    import aigineering.runtime_services as runtime_services
+
+    monkeypatch.setattr(runtime_services, "sync_runtime", lambda *args, **kwargs: None)
+    env = _environment(
+        "parallel-review-minimum", store_path=tmp_path / "parallel-review-min.sqlite3"
+    )
+    policy = {
+        "mode": "independent",
+        "policy_version": "parallel-review-min-v1",
+        "required_attestations": 1,
+        "verifier_capabilities": ["verify.human"],
+        "rubric_asset_ids": [],
+        "evidence_asset_ids": [],
+    }
+    parent = _parent(
+        env, "parallel-review-minimum", 4, ("a", "b"), acceptance_policy=policy
+    )
+    calls = [{"id": name, "name": name, "args": {"q": name}} for name in ("a", "b")]
+    for name in ("a", "b"):
+        env.setup.accept_asset(
+            create_tool_descriptor(name, f"fixture {name}", {"type": "object"})
+        )
+
+    _, items, join = _signed_parallel(
+        env, parent, calls, "worker:parallel-review-minimum"
+    )
+    records = tuple(record for _, record in env.store.scan_runtime_records())
+    assert len(items) == 2
+    # At this boundary one unit is the common parent balance. It can fund a
+    # default review or the existing first recovery, without an ordering claim.
+    assert join.budget == 1
+    assert allowance_available(parent, records) == 1
+    env.store.close()
+
+
+def test_signed_parallel_tool_below_call_and_join_minimum_is_rejected_without_grants(
+    monkeypatch, tmp_path
+):
+    import aigineering.runtime_services as runtime_services
+
+    monkeypatch.setattr(runtime_services, "sync_runtime", lambda *args, **kwargs: None)
+    env = _environment(
+        "parallel-review-below-minimum",
+        store_path=tmp_path / "parallel-review-below-minimum.sqlite3",
+    )
+    parent = _parent(
+        env,
+        "parallel-review-below-minimum",
+        2,
+        ("a", "b"),
+        acceptance_policy={
+            "mode": "independent",
+            "policy_version": "parallel-review-low-v1",
+            "required_attestations": 1,
+            "verifier_capabilities": ["verify.human"],
+            "rubric_asset_ids": [],
+            "evidence_asset_ids": [],
+        },
+    )
+    for name in parent.tool_scope:
+        env.setup.accept_asset(
+            create_tool_descriptor(name, f"fixture {name}", {"type": "object"})
+        )
+    worker = MockWorker(worker_id="worker:parallel-review-below-minimum")
+    worker.set_output(
+        parent.name,
+        '/parallel_tool {"calls":[{"id":"a","name":"a","args":{}},'
+        '{"id":"b","name":"b","args":{}}]}',
+    )
+    host = hosted_worker(
+        env.store,
+        worker,
+        genesis=env.genesis,
+        authority_key=env.setup.actor_key,
+        authority_signer=env.setup.signer,
+    )
+    claim = _claim(env, host, parent.id, "claim:parallel-review-below-minimum")
+    assert claim is not None
+
+    with pytest.raises(WorkerInvocationError, match="worker invocation failed"):
+        execute_claimed_package(
+            claim, host, env.store, candidate_publishers=env.publishers
+        )
+
+    assert [
+        item for item in env.store.get_all_contracts() if item.parent_id == parent.id
+    ] == []
+    records = tuple(record for _, record in env.store.scan_runtime_records())
+    grants = [
+        record
+        for record in records
+        if record.record_type == "allowance.granted"
+        and record.payload.get("contract_id") == parent.id
+    ]
+    assert len(grants) == 1
+    assert grants[0].payload["amount"] == 2
+    assert not [
+        record
+        for record in records
+        if record.record_type == "allowance.reserved"
+        and record.payload.get("parent_contract_id") == parent.id
+    ]
+    failures = [
+        record for record in records if record.record_type == "worker.invocation_failed"
+    ]
+    assert len(failures) == 1
+    assert failures[0].payload["category"] == "worker_error:task_delegation_rejected"
+    terminal = [
+        record for record in records if record.record_type == "lifecycle.terminal"
+    ]
+    assert terminal[-1].payload == {"contract_id": parent.id, "terminal": "failed"}
+    env.store.close()

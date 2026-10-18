@@ -6,6 +6,7 @@ import json
 
 from aigineering.core.ids import compute_content_hash, contract_from_fields
 from aigineering.protocol.immutability import deep_thaw
+from aigineering.plugins.continuation import allocate_continuation_budget
 from aigineering.plugins.task_semantics import method_contract
 from aigineering.protocol.actions import WorkerAction
 from aigineering.protocol.effect_builders import contract_declaration_effect
@@ -40,15 +41,27 @@ class TaskDelegationPlugin:
         if action.type == "parallel_tool":
             payload = deep_thaw(action.payload)
             calls = payload.get("calls")
-            reserve = (
-                min(len(calls), max(0, allowance - len(calls) - 1))
-                if isinstance(calls, list) and 2 <= len(calls) <= 8
-                else 0
-            )
-            # Preserve up to one bounded first-recovery slot per item, while
-            # keeping at least one unit for the join. This is ordinary parent
-            # balance, so existing signed publication checks remain decisive.
-            children = _parallel_tool_contracts(parent, action, allowance - reserve)
+            if isinstance(calls, list) and 2 <= len(calls) <= 8:
+                if allowance < len(calls) + 1:
+                    # Preserve the original builder's explicit minimum-budget
+                    # rejection before applying any retained-work allocation.
+                    child_allowance = allowance
+                else:
+                    first_recovery_demand = min(
+                        len(calls), max(0, allowance - len(calls) - 1)
+                    )
+                    join_budget, _reserve = allocate_continuation_budget(
+                        parent,
+                        max(0, allowance - len(calls)),
+                        recovery_demand=first_recovery_demand,
+                    )
+                    child_allowance = len(calls) + join_budget
+            else:
+                child_allowance = allowance
+            # Recovery and default-review capacity share ordinary parent
+            # balance; child declarations still pass through the same signed
+            # aggregate allowance reservation.
+            children = _parallel_tool_contracts(parent, action, child_allowance)
             return PluginProposal(
                 effects=tuple(contract_declaration_effect(child) for child in children)
             )
