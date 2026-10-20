@@ -72,18 +72,24 @@ def trace(
             return
     else:
         latest = _latest_session_file()
-        if latest is not None:
-            jsonl_store = JsonLTraceStore(str(latest))
-            entries = (
-                jsonl_store.get_by_contract(contract_filter)
-                if contract_filter
-                else jsonl_store.get_all()
-            )
-        else:
-            jsonl_store = None
-            entries = []
+        if latest is None:
+            # Exit 1: no session file exists at all.
+            if json_output:
+                _output_json([])
+            else:
+                click.echo("No sessions found. Use 'aig run <goal>' or 'aig demo'.")
+            return
+        jsonl_store = JsonLTraceStore(str(latest))
+        entries = (
+            jsonl_store.get_by_contract(contract_filter)
+            if contract_filter
+            else jsonl_store.get_all()
+        )
 
-    if jsonl_store is None or not entries:
+    # Exit 2: a session exists but has zero entries (the latest-session route
+    # filters by contract before this check; the explicit-session route
+    # filters after it, below).
+    if not entries:
         if json_output:
             _output_json([])
         else:
