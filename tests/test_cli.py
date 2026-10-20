@@ -299,6 +299,41 @@ def test_trace_session_manifest_missing_text_rc1():
         assert result.stderr == ""
 
 
+def _write_audit_trace_fixture() -> None:
+    """Write a readable latest-session trace with a named projection asset."""
+    activation = TraceEntry(
+        id="act_1",
+        contract_id="contract_1",
+        event_type="activation",
+        timestamp="2025-01-01T00:00:00",
+    )
+    projection = TraceEntry(
+        id="proj_1",
+        parent_id="act_1",
+        contract_id="contract_1",
+        event_type="projection",
+        accepted_fragments=["asset_abc"],
+        accepted_asset_names=["test_output"],
+        worker_id="mock_worker",
+        timestamp="2025-01-01T00:00:01",
+    )
+    _write_trace_entries(
+        Path(".aig/traces/session_test.jsonl"),
+        [activation, projection],
+    )
+
+
+def test_audit_session_missing_text_exits_1():
+    """audit --session <missing> prints the error payload then exits 1."""
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        result = runner.invoke(cli, ["audit", "--session", "missing"])
+
+        assert result.exit_code == 1
+        assert result.output == "Session 'missing' not found.\n"
+        assert result.stderr == ""
+
+
 def test_trace_session_export_missing_text_rc1():
     """aig trace --session with a manifest but no trace export exits 1 (C3)."""
     runner = CliRunner()
@@ -313,6 +348,95 @@ def test_trace_session_export_missing_text_rc1():
 
         assert result.exit_code == 1
         assert result.output == "Session 'missing' not found.\n"
+        assert result.stderr == ""
+
+
+def test_audit_session_manifest_without_export_text_exits_1():
+    """audit --session with a manifest but no matching export exits 1.
+
+    The fixture rules out both the direct export hit and the fallback
+    trace-id scan, so the miss comes from a fully exhausted search.
+    """
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        unrelated = TraceEntry(
+            id="unrelated_1",
+            contract_id="contract_other",
+            event_type="activation",
+            timestamp="2025-01-01T00:00:00",
+        )
+        _write_trace_entries(
+            Path(".aig/traces/session_other.jsonl"),
+            [unrelated],
+        )
+        SessionStore(sessions_dir=".aig/sessions").create_session(
+            Session(id="sess_ghost", trace_ids=("t_ghost",))
+        )
+
+        result = runner.invoke(cli, ["audit", "--session", "sess_ghost"])
+
+        assert result.exit_code == 1
+        assert result.output == "Session 'sess_ghost' not found.\n"
+        assert result.stderr == ""
+
+
+def test_audit_asset_id_not_found_text_exits_1():
+    """audit --asset <unknown> prints the error payload then exits 1."""
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        _write_audit_trace_fixture()
+
+        result = runner.invoke(cli, ["audit", "--asset", "nope"])
+
+        assert result.exit_code == 1
+        assert result.output == "No asset found with id or name 'nope'\n"
+        assert result.stderr == ""
+
+
+def test_audit_asset_name_not_found_text_exits_1():
+    """audit --asset-name <unknown> prints the error payload then exits 1."""
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        _write_audit_trace_fixture()
+
+        result = runner.invoke(cli, ["audit", "--asset-name", "nope"])
+
+        assert result.exit_code == 1
+        assert result.output == "No asset found with name 'nope'\n"
+        assert result.stderr == ""
+
+
+def test_audit_target_unresolved_text_exits_1(monkeypatch):
+    """Defensive target seam: unresolved target prints payload then exits 1."""
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        _write_audit_trace_fixture()
+        monkeypatch.setattr(
+            "aigineering.cli.trace._resolve_asset_by_name",
+            lambda asset_name, trace_store: ("", "ghost"),
+        )
+
+        result = runner.invoke(cli, ["audit", "--asset-name", "test_output"])
+
+        assert result.exit_code == 1
+        assert result.output == "Could not determine target asset.\n"
+        assert result.stderr == ""
+
+
+def test_audit_empty_lineage_text_seam_exits_0(monkeypatch):
+    """Seam regression: resolved asset with empty lineage stays rc=0."""
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        _write_audit_trace_fixture()
+        monkeypatch.setattr(
+            "aigineering.cli.trace._resolve_asset_by_name",
+            lambda asset_name, trace_store: ("ghost_asset", "ghost"),
+        )
+
+        result = runner.invoke(cli, ["audit", "--asset-name", "test_output"])
+
+        assert result.exit_code == 0
+        assert result.output == "ghost\n  (no lineage found)\n"
         assert result.stderr == ""
 
 

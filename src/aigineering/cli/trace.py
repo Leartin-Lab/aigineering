@@ -531,7 +531,7 @@ def audit(
                 _output_json({"error": f"Session '{session_id}' not found."})
             else:
                 click.echo(f"Session '{session_id}' not found.")
-            return
+            raise click.exceptions.Exit(1)
     else:
         latest = _latest_session_file()
         if latest is not None:
@@ -566,7 +566,7 @@ def audit(
                 _output_json({"error": msg})
             else:
                 click.echo(msg)
-            return
+            raise click.exceptions.Exit(1)
     elif asset_name_filter:
         target_id, target_name = _resolve_asset_by_name(
             asset_name_filter,
@@ -578,7 +578,7 @@ def audit(
                 _output_json({"error": msg})
             else:
                 click.echo(msg)
-            return
+            raise click.exceptions.Exit(1)
     else:
         msg = "Provide --asset <id> or --asset-name <name>"
         if json_output:
@@ -593,7 +593,7 @@ def audit(
             _output_json({"error": msg})
         else:
             click.echo(msg)
-        return
+        raise click.exceptions.Exit(1)
 
     lineage_entries = jsonl_store.get_reverse_lineage(target_id)
 

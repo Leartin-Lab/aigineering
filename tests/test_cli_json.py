@@ -1,13 +1,23 @@
 """Tests for --json flag on CLI commands."""
 
 import json
+from pathlib import Path
 
 from click.testing import CliRunner
 
 from aigineering.cli.main import cli
 from aigineering.core.session import SessionStore
 from aigineering.core.sqlite_store import SQLiteStore
-from aigineering.protocol.types import Session
+from aigineering.protocol.types import Session, TraceEntry
+from aigineering.protocol.wire import trace_entry_to_dict
+
+
+def _write_trace_entries(trace_file: Path, entries: list[TraceEntry]) -> None:
+    """Serialize a list of TraceEntry objects as JSONL to *trace_file*."""
+    trace_file.parent.mkdir(parents=True, exist_ok=True)
+    with open(trace_file, "w") as f:
+        for entry in entries:
+            f.write(json.dumps(trace_entry_to_dict(entry)) + "\n")
 
 
 def test_run_json_output():
@@ -252,7 +262,7 @@ def test_trace_json_session_export_missing_rc1():
 
 
 def test_audit_json_error_message():
-    """aig audit --json returns error dict when asset not found."""
+    """aig audit --json returns error dict with exit 1 when asset not found."""
     runner = CliRunner()
     with runner.isolated_filesystem():
         runner.invoke(cli, ["run", "test", "--worker", "mock"])
@@ -261,7 +271,7 @@ def test_audit_json_error_message():
             cli,
             ["audit", "--asset-name", "nonexistent_asset", "--json"],
         )
-        assert result.exit_code == 0
+        assert result.exit_code == 1
         data = json.loads(result.output)
         assert "error" in data
 
@@ -296,3 +306,133 @@ def test_replay_all_json():
             assert "session" in item
             assert "entries" in item
             assert "consistent" in item
+
+
+def _write_audit_trace_fixture() -> None:
+    """Write a readable latest-session trace with a named projection asset."""
+    activation = TraceEntry(
+        id="act_1",
+        contract_id="contract_1",
+        event_type="activation",
+        timestamp="2025-01-01T00:00:00",
+    )
+    projection = TraceEntry(
+        id="proj_1",
+        parent_id="act_1",
+        contract_id="contract_1",
+        event_type="projection",
+        accepted_fragments=["asset_abc"],
+        accepted_asset_names=["test_output"],
+        worker_id="mock_worker",
+        timestamp="2025-01-01T00:00:01",
+    )
+    _write_trace_entries(
+        Path(".aig/traces/session_test.jsonl"),
+        [activation, projection],
+    )
+
+
+def test_audit_session_missing_json_exits_1():
+    """audit --session <missing> --json prints the error object then exits 1."""
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        result = runner.invoke(cli, ["audit", "--session", "missing", "--json"])
+
+        assert result.exit_code == 1
+        assert json.loads(result.output) == {"error": "Session 'missing' not found."}
+        assert result.stderr == ""
+
+
+def test_audit_session_manifest_without_export_json_exits_1():
+    """audit --session --json with a manifest but no matching export exits 1.
+
+    The fixture rules out both the direct export hit and the fallback
+    trace-id scan, so the miss comes from a fully exhausted search.
+    """
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        unrelated = TraceEntry(
+            id="unrelated_1",
+            contract_id="contract_other",
+            event_type="activation",
+            timestamp="2025-01-01T00:00:00",
+        )
+        _write_trace_entries(
+            Path(".aig/traces/session_other.jsonl"),
+            [unrelated],
+        )
+        SessionStore(sessions_dir=".aig/sessions").create_session(
+            Session(id="sess_ghost", trace_ids=("t_ghost",))
+        )
+
+        result = runner.invoke(cli, ["audit", "--session", "sess_ghost", "--json"])
+
+        assert result.exit_code == 1
+        assert json.loads(result.output) == {"error": "Session 'sess_ghost' not found."}
+        assert result.stderr == ""
+
+
+def test_audit_asset_id_not_found_json_exits_1():
+    """audit --asset <unknown> --json prints the error object then exits 1."""
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        _write_audit_trace_fixture()
+
+        result = runner.invoke(cli, ["audit", "--asset", "nope", "--json"])
+
+        assert result.exit_code == 1
+        assert json.loads(result.output) == {
+            "error": "No asset found with id or name 'nope'"
+        }
+        assert result.stderr == ""
+
+
+def test_audit_asset_name_not_found_json_exits_1():
+    """audit --asset-name <unknown> --json prints the error object then exits 1."""
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        _write_audit_trace_fixture()
+
+        result = runner.invoke(cli, ["audit", "--asset-name", "nope", "--json"])
+
+        assert result.exit_code == 1
+        assert json.loads(result.output) == {"error": "No asset found with name 'nope'"}
+        assert result.stderr == ""
+
+
+def test_audit_target_unresolved_json_exits_1(monkeypatch):
+    """Defensive target seam: unresolved target prints error object then exits 1."""
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        _write_audit_trace_fixture()
+        monkeypatch.setattr(
+            "aigineering.cli.trace._resolve_asset_by_name",
+            lambda asset_name, trace_store: ("", "ghost"),
+        )
+
+        result = runner.invoke(cli, ["audit", "--asset-name", "test_output", "--json"])
+
+        assert result.exit_code == 1
+        assert json.loads(result.output) == {"error": "Could not determine target asset."}
+        assert result.stderr == ""
+
+
+def test_audit_empty_lineage_json_seam_exits_0(monkeypatch):
+    """Seam regression: resolved asset with empty lineage stays rc=0 (JSON)."""
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        _write_audit_trace_fixture()
+        monkeypatch.setattr(
+            "aigineering.cli.trace._resolve_asset_by_name",
+            lambda asset_name, trace_store: ("ghost_asset", "ghost"),
+        )
+
+        result = runner.invoke(cli, ["audit", "--asset-name", "test_output", "--json"])
+
+        assert result.exit_code == 0
+        assert json.loads(result.output) == {
+            "asset_id": "ghost_asset",
+            "asset_name": "ghost",
+            "lineage": [],
+        }
+        assert result.stderr == ""
