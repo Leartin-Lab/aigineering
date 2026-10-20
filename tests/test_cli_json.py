@@ -413,7 +413,9 @@ def test_audit_target_unresolved_json_exits_1(monkeypatch):
         result = runner.invoke(cli, ["audit", "--asset-name", "test_output", "--json"])
 
         assert result.exit_code == 1
-        assert json.loads(result.output) == {"error": "Could not determine target asset."}
+        assert json.loads(result.output) == {
+            "error": "Could not determine target asset."
+        }
         assert result.stderr == ""
 
 
