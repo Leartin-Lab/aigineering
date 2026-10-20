@@ -7,8 +7,9 @@ from click.testing import CliRunner
 
 from aigineering.cli.main import cli
 from aigineering.core.methods import retry_contract
+from aigineering.core.session import SessionStore
 from aigineering.core.sqlite_store import SQLiteStore
-from aigineering.protocol.types import Candidate, TraceEntry
+from aigineering.protocol.types import Candidate, Session, TraceEntry
 from aigineering.protocol.wire import trace_entry_to_dict
 
 
@@ -285,6 +286,34 @@ def test_trace_no_sessions_shows_error():
 
         assert result.exit_code == 0
         assert "No sessions found" in result.output
+
+
+def test_trace_session_manifest_missing_text_rc1():
+    """aig trace --session with no session manifest exits 1 (C3)."""
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        result = runner.invoke(cli, ["trace", "--session", "missing"])
+
+        assert result.exit_code == 1
+        assert result.output == "Session 'missing' not found.\n"
+        assert result.stderr == ""
+
+
+def test_trace_session_export_missing_text_rc1():
+    """aig trace --session with a manifest but no trace export exits 1 (C3)."""
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        # Manifest exists; no .aig/traces directory, so neither the direct
+        # export nor the fallback scan can produce a store.
+        SessionStore().create_session(
+            Session(id="missing", trace_ids=("trace_missing",))
+        )
+
+        result = runner.invoke(cli, ["trace", "--session", "missing"])
+
+        assert result.exit_code == 1
+        assert result.output == "Session 'missing' not found.\n"
+        assert result.stderr == ""
 
 
 def test_demo_command_exists():

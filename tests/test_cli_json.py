@@ -7,6 +7,7 @@ from click.testing import CliRunner
 from aigineering.cli.main import cli
 from aigineering.core.session import SessionStore
 from aigineering.core.sqlite_store import SQLiteStore
+from aigineering.protocol.types import Session
 
 
 def test_run_json_output():
@@ -218,6 +219,36 @@ def test_trace_json_no_sessions():
         data = json.loads(result.output)
         assert isinstance(data, list)
         assert len(data) == 0
+
+
+def test_trace_json_session_manifest_missing_rc1():
+    """aig trace --session --json with no session manifest exits 1 (C3)."""
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        result = runner.invoke(cli, ["trace", "--session", "missing", "--json"])
+
+        assert result.exit_code == 1
+        data = json.loads(result.output)
+        assert data == {"error": "Session 'missing' not found."}
+        assert result.stderr == ""
+
+
+def test_trace_json_session_export_missing_rc1():
+    """aig trace --session --json with a manifest but no export exits 1 (C3)."""
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        # Manifest exists; no .aig/traces directory, so neither the direct
+        # export nor the fallback scan can produce a store.
+        SessionStore().create_session(
+            Session(id="missing", trace_ids=("trace_missing",))
+        )
+
+        result = runner.invoke(cli, ["trace", "--session", "missing", "--json"])
+
+        assert result.exit_code == 1
+        data = json.loads(result.output)
+        assert data == {"error": "Session 'missing' not found."}
+        assert result.stderr == ""
 
 
 def test_audit_json_error_message():

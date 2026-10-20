@@ -69,7 +69,7 @@ def trace(
                 _output_json({"error": f"Session '{session_id}' not found."})
             else:
                 click.echo(f"Session '{session_id}' not found.")
-            return
+            raise click.exceptions.Exit(1)
     else:
         latest = _latest_session_file()
         if latest is None:
