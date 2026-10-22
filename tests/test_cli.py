@@ -6,11 +6,14 @@ from pathlib import Path
 from click.testing import CliRunner
 
 from aigineering.cli.main import cli
+from aigineering.core.control_plane import build_control_plane_contract
 from aigineering.core.methods import retry_contract
 from aigineering.core.session import SessionStore
 from aigineering.core.sqlite_store import SQLiteStore
+from aigineering.protocol.identity import contract_from_fields
 from aigineering.protocol.types import Candidate, Session, TraceEntry
 from aigineering.protocol.wire import trace_entry_to_dict
+from aigineering.task_publication import publish_task_contract
 
 
 def _write_trace_entries(trace_file: Path, entries: list[TraceEntry]) -> None:
@@ -545,27 +548,109 @@ def test_replay_valid_session():
 # ---------------------------------------------------------------------------
 
 
+def _publish_funded_retry_target(store, *, name: str, budget: int = 2):
+    """Publish a funded parent plus a child Contract that retries can draw from."""
+    parent = publish_task_contract(
+        store,
+        build_control_plane_contract(
+            name=f"{name}-funder",
+            description="Funded containment parent for retry conservation.",
+            outputs=(),
+            budget=5,
+        ),
+    )
+    return publish_task_contract(
+        store,
+        contract_from_fields(
+            name=name,
+            description="Funded retry target under a containment parent.",
+            inputs=(),
+            outputs=(),
+            activation="",
+            budget=budget,
+            tool_scope=(),
+            labels=(),
+            origin="human",
+            parent_id=parent.id,
+            minting_authority=(),
+        ),
+    )
+
+
+def test_retry_root_contract_rejected_without_funding_expansion():
+    """aig retry on a root Contract is rejected and mints no unfunded root grant."""
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        initialized = runner.invoke(cli, ["domain", "init"])
+        assert initialized.exit_code == 0, initialized.output
+
+        store = SQLiteStore(".aig/store.db")
+        root = publish_task_contract(
+            store,
+            build_control_plane_contract(
+                name="root retry target",
+                description="Root Contract retry must not mint fresh allowance.",
+                outputs=(),
+                budget=3,
+            ),
+        )
+        store.close()
+
+        expected_id = retry_contract(root).id
+        result = runner.invoke(cli, ["retry", "--contract", root.id, "--json"])
+        assert result.exit_code == 1, result.output
+        payload = json.loads(result.output)
+        assert payload["ok"] is False
+        assert payload["error"]["code"] == "retry_rejected"
+        assert payload["candidate_accepted"] is False
+        assert payload["facts_retained"] is True
+        assert payload["data"]["rejection_fact_id"]
+
+        store2 = SQLiteStore(".aig/store.db")
+        assert all(
+            contract.id != expected_id for contract in store2.get_all_contracts()
+        )
+        root_grants = [
+            record
+            for _, record in store2.scan_runtime_records(
+                record_type="allowance.granted"
+            )
+            if record.payload.get("contract_id") == expected_id
+        ]
+        assert root_grants == []
+        store2.close()
+
+        # A repeat attempt stays rejected: no second chance to mint allowance.
+        replay = runner.invoke(cli, ["retry", "--contract", root.id, "--json"])
+        assert replay.exit_code == 1, replay.output
+        assert json.loads(replay.output)["error"]["code"] == "retry_rejected"
+        store3 = SQLiteStore(".aig/store.db")
+        assert all(
+            contract.id != expected_id for contract in store3.get_all_contracts()
+        )
+        store3.close()
+
+
 def test_retry_creates_deterministic_contract():
     """aig retry --contract <id> creates a contract with deterministic retry ID."""
     runner = CliRunner()
     with runner.isolated_filesystem():
-        run_result = runner.invoke(cli, ["run", "test", "--worker", "mock"])
-        assert run_result.exit_code == 0
+        initialized = runner.invoke(cli, ["domain", "init"])
+        assert initialized.exit_code == 0, initialized.output
 
         store = SQLiteStore(".aig/store.db")
-        contracts = store.get_all_contracts()
-        build_report = next(c for c in contracts if c.name == "build_report")
-        original_id = build_report.id
-        expected_id = retry_contract(build_report).id
+        original = _publish_funded_retry_target(store, name="retry-determinism")
+        original_id = original.id
+        expected_id = retry_contract(original).id
         store.close()
 
         result1 = runner.invoke(cli, ["retry", "--contract", original_id])
-        assert result1.exit_code == 0
+        assert result1.exit_code == 0, result1.output
         assert "Retry contract created:" in result1.output
         retry_id_1 = result1.output.strip().split("\n")[0].split(": ")[-1].strip()
 
         result2 = runner.invoke(cli, ["retry", "--contract", original_id])
-        assert result2.exit_code == 0
+        assert result2.exit_code == 0, result2.output
         retry_id_2 = result2.output.strip().split("\n")[0].split(": ")[-1].strip()
 
         assert retry_id_1 == retry_id_2
@@ -586,6 +671,15 @@ def test_retry_creates_deterministic_contract():
         assert len(receipts) == 1
         committed = store2.get_by_event_type("candidate_committed")
         assert any(entry.relation_target == expected_id for entry in committed)
+        # Conservation: the retry grant is funded by the parent, not minted.
+        reserved = [
+            record
+            for _, record in store2.scan_runtime_records(
+                record_type="allowance.reserved"
+            )
+            if record.payload.get("child_contract_id") == expected_id
+        ]
+        assert len(reserved) == 1
         store2.close()
 
 
@@ -593,18 +687,17 @@ def test_retry_json_output():
     """aig retry --contract <id> --json returns deterministic retry ID in JSON."""
     runner = CliRunner()
     with runner.isolated_filesystem():
-        run_result = runner.invoke(cli, ["run", "test", "--worker", "mock"])
-        assert run_result.exit_code == 0
+        initialized = runner.invoke(cli, ["domain", "init"])
+        assert initialized.exit_code == 0, initialized.output
 
         store = SQLiteStore(".aig/store.db")
-        contracts = store.get_all_contracts()
-        original = next(c for c in contracts if c.name == "build_report")
+        original = _publish_funded_retry_target(store, name="retry-json")
         original_id = original.id
         expected_id = retry_contract(original).id
         store.close()
 
         result = runner.invoke(cli, ["retry", "--contract", original_id, "--json"])
-        assert result.exit_code == 0
+        assert result.exit_code == 0, result.output
         data = json.loads(result.output)
         assert data["ok"] is True
         assert data["original_contract_id"] == original_id
@@ -644,13 +737,6 @@ def test_retry_closes_store_after_signed_publication(monkeypatch):
     with runner.isolated_filesystem():
         initialized = runner.invoke(cli, ["domain", "init"])
         assert initialized.exit_code == 0, initialized.output
-        created = runner.invoke(
-            cli,
-            ["task", "create", "--name", "original", "--output", "answer", "--json"],
-        )
-        assert created.exit_code == 0, created.output
-        original_id = json.loads(created.output)["contract_id"]
-
         import importlib
 
         retry_cli = importlib.import_module("aigineering.cli.retry")
@@ -663,9 +749,12 @@ def test_retry_closes_store_after_signed_publication(monkeypatch):
             close()
 
         monkeypatch.setattr(store, "close", close_spy)
+        # P0-7: retry the funded child, not the root, so the publication is
+        # funded by a containment parent reservation.
+        child = _publish_funded_retry_target(store, name="retry-close-target")
         monkeypatch.setattr(retry_cli, "_persistent_store", lambda: store)
 
-        result = runner.invoke(cli, ["retry", "--contract", original_id, "--json"])
+        result = runner.invoke(cli, ["retry", "--contract", child.id, "--json"])
 
         assert result.exit_code == 0, result.output
         assert json.loads(result.output)["ok"] is True

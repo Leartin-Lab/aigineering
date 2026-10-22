@@ -177,6 +177,12 @@ concurrent publishers. Terminal Contracts extinguish their remaining allowance,
 and exact Candidate replay cannot reserve it twice. Allowance is task lineage
 authority, never a Worker account or mutable process counter.
 
+New root Contracts whose origin is `retry` cannot mint an unfunded grant. Both
+pure projection and commitment enforce this refusal; historical committed grants
+remain immutable and exact replay adds no new allowance. Contained retries keep
+the ordinary parent reservation rule. This does not establish a separate
+work-authorization funding domain or transfer rights from the retry source.
+
 ## 13. A signed derivation claim is not derivation proof
 
 Policies that accept a replacement claim type require a valid incoming claim

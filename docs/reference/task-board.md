@@ -120,6 +120,12 @@ Cancellation is a signed Candidate and releases a claim through the ordinary
 transaction. Retry shares the top-level `aig retry --contract ID` implementation:
 it publishes a deterministic new Contract with frozen scope, not a reset of the
 original claim. Inspect the returned retry ID and execute it explicitly.
+An unfunded root retry is rejected with `retry_rejected`; its audit is retained,
+and no successor or new allowance is committed. A contained retry keeps the
+source's budget and containment parent, which must have enough unreserved
+allowance for the new publication. It does not reclaim the source's allowance.
+Exact replay of an accepted retry uses its existing facts, including historical
+root retries. Worker `/retry` remains a child of the claimed source.
 Both retry spellings return the same JSON `data` fields, including the exact
 Candidate, declaration fact, idempotency key and observed revision. If SQLite
 commits the retry but Redis relay fails, the command exits nonzero and returns

@@ -11,6 +11,7 @@ from aigineering.cli.main import cli
 from aigineering.core.control_plane import build_control_plane_contract
 from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.core.domain import load_genesis
+from aigineering.protocol.identity import contract_from_fields
 from aigineering.protocol.immutability import deep_thaw
 from aigineering.protocol.runtime_record import create_runtime_record
 from aigineering.local_identity import ensure_local_domain
@@ -70,9 +71,24 @@ def _workspace(tmp_path: Path, monkeypatch, count: int = 3):
             pass
     store = SQLiteStore(database)
     ensure_local_domain(store)
+    # P0-7: bulk retry targets must be funded by a containment parent so the
+    # shared projection reserves their allowance instead of minting root grants.
+    parent = build_control_plane_contract(
+        name="bulk-retry-funder",
+        description="Funded containment parent for bulk retry conservation.",
+        inputs=(),
+        outputs=(),
+        # Each child publication reserves 3; a retry of each child reserves 3
+        # again, so the parent must fund twice the total child budget.
+        budget=count * 6,
+        activation="",
+        tool_scope=(),
+        labels=(),
+    )
+    publish_task_contract(store, parent)
     contracts = []
     for index in range(count):
-        contract = build_control_plane_contract(
+        contract = contract_from_fields(
             name=f"bulk-task-{index}",
             description=f"bulk task {index}",
             inputs=(),
@@ -81,6 +97,9 @@ def _workspace(tmp_path: Path, monkeypatch, count: int = 3):
             activation="",
             tool_scope=(),
             labels=(),
+            origin="human",
+            parent_id=parent.id,
+            minting_authority=(),
         )
         publish_task_contract(store, contract)
         contracts.append(contract)
@@ -451,11 +470,33 @@ def test_bulk_retry_pending_keeps_exact_successor_and_replays_same_result(
         assert current["idempotency_key"] == row["idempotency_key"]
     snapshot = SQLiteStore.snapshot_from_path(database)
     try:
-        assert len(snapshot.scan_runtime_records(record_type="contract.declared")) == 4
+        # 2 originals + 2 retry successors + 1 containment funder parent.
+        assert len(snapshot.scan_runtime_records(record_type="contract.declared")) == 5
         for original in (first, second):
             assert snapshot.get_contract(original.id).id == original.id
     finally:
         snapshot.close()
+
+
+def test_bulk_retry_retains_root_rejection_and_continues_funded_target(
+    tmp_path, monkeypatch
+):
+    database, (child,) = _workspace(tmp_path, monkeypatch, count=1)
+    result = _invoke(["task", "retry", child.parent_id, child.id, "--json"])
+    assert result.exit_code == 1, result.output
+    rows = json.loads(result.stdout)["data"]["results"]
+    assert len(rows) == 2
+    by_id = {row["contract_id"]: row for row in rows}
+    rejected = by_id[child.parent_id]
+    accepted = by_id[child.id]
+    assert rejected["candidate_accepted"] is False
+    assert rejected["facts_retained"] is True
+    assert rejected["fact_ids"] == [rejected["data"]["rejection_fact_id"]]
+    assert accepted["outcome"] == "accepted"
+    with SQLiteStore.snapshot_from_path(database) as store:
+        assert store.get_contract(accepted["data"]["retry_contract_id"]) is not None
+        assert len(store.scan_runtime_records(record_type="allowance.granted")) == 3
+        assert len(store.scan_runtime_records(record_type="allowance.reserved")) == 2
 
 
 def test_bulk_priority_accepts_exact_postcommit_pending_then_replays_same_facts(

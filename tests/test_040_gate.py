@@ -93,7 +93,7 @@ class TestSessionSealedConfig:
 class TestCLIRetryBypass:
     """G1: CLI must not directly mutate runtime state."""
 
-    def test_cli_retry_does_not_directly_mutate_store(self, tmp_path):
+    def test_cli_retry_does_not_directly_mutate_store(self, tmp_path, monkeypatch):
         """aig retry must publish a signed Candidate, not directly add a Contract.
 
         Gate: G1 (Single Runtime Ingress)
@@ -124,8 +124,11 @@ class TestCLIRetryBypass:
         )
 
         # ── Functional test: CLI retry still creates the retry contract ──
-        from aigineering.protocol.types import Contract
         from aigineering.core.methods import retry_contract
+        from aigineering.core.control_plane import build_control_plane_contract
+        from aigineering.protocol.identity import contract_from_fields
+        from aigineering.task_publication import publish_task_contract
+        from aigineering import local_publication
         from aigineering.cli import retry as retry_module
         from click.testing import CliRunner
         from unittest.mock import patch
@@ -135,27 +138,37 @@ class TestCLIRetryBypass:
 
         retry_database = str(tmp_path / "retry.db")
         store = SQLiteStore(retry_database)
-        original = Contract(
-            id="c-original",
-            parent_id=None,
-            name="test-task",
-            description="Test",
-            inputs=["input1"],
-            outputs=["output1"],
-            budget=5,
-        )
-        store.add_contract(original)
-
-        expected_id = retry_contract(original).id
-        assert store.get_contract(expected_id) is None, (
-            "Precondition: retry contract must not exist before CLI runs."
-        )
+        monkeypatch.setenv("AIG_ACTOR_KEY_FILE", str(tmp_path / "root.ed25519"))
+        monkeypatch.setattr(local_publication, "require_redis", lambda: None)
+        monkeypatch.setattr(local_publication, "sync_runtime", lambda *_a, **_kw: None)
 
         runner = CliRunner()
         with runner.isolated_filesystem():
             ensure_local_domain(store)
+            parent = publish_task_contract(
+                store, build_control_plane_contract(name="retry funder", budget=10)
+            )
+            original = publish_task_contract(
+                store,
+                contract_from_fields(
+                    parent_id=parent.id,
+                    origin="human",
+                    name="test-task",
+                    description="Test",
+                    inputs=("input1",),
+                    outputs=("output1",),
+                    budget=5,
+                    activation="",
+                    tool_scope=(),
+                    labels=(),
+                ),
+            )
+            expected_id = retry_contract(original).id
+            assert store.get_contract(expected_id) is None, (
+                "Precondition: retry contract must not exist before CLI runs."
+            )
             with patch.object(retry_module, "_persistent_store", return_value=store):
-                result = runner.invoke(retry_module.retry, ["--contract", "c-original"])
+                result = runner.invoke(retry_module.retry, ["--contract", original.id])
 
         assert result.exit_code == 0, f"G1/D-P0.1: CLI retry failed: {result.output}"
 

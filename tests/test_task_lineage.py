@@ -1619,11 +1619,30 @@ def _signed_retry_workspace(
 
     store = SQLiteStore(database)
     ensure_local_domain(store)
-    source = build_control_plane_contract(
+    # P0-7: retry successors must be funded by a containment parent. Publish a
+    # funder root and make the retry source its child; the chain of retries
+    # (source → first → second) keeps parent_id pointing at the funder.
+    funder = publish_task_contract(
+        store,
+        build_control_plane_contract(
+            name=f"{source_name} funder",
+            description="Funded containment parent for lineage retry chains.",
+            outputs=(),
+            budget=12,
+        ),
+    )
+    source = contract_from_fields(
         name=source_name,
         description="Publish exact retry successors through the signed owner.",
+        inputs=(),
         outputs=("answer",),
+        activation="",
         budget=3,
+        tool_scope=(),
+        labels=(),
+        origin="human",
+        parent_id=funder.id,
+        minting_authority=(),
     )
     if compound_source:
         import aigineering.local_publication as local_publication
@@ -1991,7 +2010,8 @@ def test_retry_publication_chain_is_bidirectional_exact_and_read_only(
             for contract in (source, first, second)
         ]
         assert all(
-            result["contract_ids"] == sorted((source.id, first.id, second.id))
+            result["contract_ids"]
+            == sorted({source.parent_id, source.id, first.id, second.id})
             for result in results
         )
         retry_edges = [
@@ -2074,7 +2094,7 @@ def test_retry_publication_chain_is_bidirectional_exact_and_read_only(
             )
             assert rendered.exit_code == 0, rendered.output
             assert json.loads(rendered.output)["data"]["contract_ids"] == sorted(
-                (source.id, first.id, second.id)
+                {source.parent_id, source.id, first.id, second.id}
             )
         human = CliRunner().invoke(task_group, ["lineage", source.id])
         assert human.exit_code == 0, human.output
@@ -2133,7 +2153,9 @@ def test_compound_published_source_can_have_an_exact_retry_successor(
             "asset.propose",
         }
         result = task_lineage(store, source.id)["data"]
-        assert result["contract_ids"] == sorted((source.id, target.id))
+        assert result["contract_ids"] == sorted(
+            {source.parent_id, source.id, target.id}
+        )
         edge = next(
             item for item in result["edges"] if item["kind"] == "retry_publication"
         )
@@ -2174,7 +2196,11 @@ def test_retry_target_with_a_compound_signed_publication_is_not_verified(
         )
         assert decision.accepted
         result = task_lineage(store, source.id)["data"]
-        assert result["contract_ids"] == [source.id]
+        # The compound target is a published child of the shared funder, so it
+        # joins the component via containment; only its retry edge is unverified.
+        assert result["contract_ids"] == sorted(
+            {source.parent_id, source.id, target.id}
+        )
         assert not any(edge["kind"] == "retry_publication" for edge in result["edges"])
         assert any(
             issue["code"] == "retry_publication_unverified"
@@ -2221,10 +2247,20 @@ def test_compound_retry_cached_as_source_cannot_bypass_target_effect_check(
         assert final_target.id < compound_target.id
 
         from_source = task_lineage(store, source.id)["data"]
-        assert from_source["contract_ids"] == [source.id]
-        assert not any(
-            edge["kind"] == "retry_publication" for edge in from_source["edges"]
+        assert from_source["contract_ids"] == sorted(
+            {
+                source.parent_id,
+                source.id,
+                compound_target.id,
+                final_target.id,
+            }
         )
+        retry_edges = [
+            edge for edge in from_source["edges"] if edge["kind"] == "retry_publication"
+        ]
+        assert len(retry_edges) == 1
+        assert retry_edges[0]["source_contract_id"] == compound_target.id
+        assert retry_edges[0]["target_contract_id"] == final_target.id
         assert any(
             issue.get("source_contract_id") == source.id
             and issue.get("target_contract_id") == compound_target.id
@@ -2234,7 +2270,12 @@ def test_compound_retry_cached_as_source_cannot_bypass_target_effect_check(
 
         from_compound_source = task_lineage(store, compound_target.id)["data"]
         assert from_compound_source["contract_ids"] == sorted(
-            (compound_target.id, final_target.id)
+            {
+                compound_target.parent_id,
+                source.id,
+                compound_target.id,
+                final_target.id,
+            }
         )
         assert [
             edge
@@ -2595,7 +2636,25 @@ def test_retry_specific_malformed_publications_are_safe_from_both_known_ends(
             assert target_issue.get("source_contract_id") == source.id
         else:
             assert "source_contract_id" not in target_issue
-            assert target.id not in json.dumps(source_view)
+            # P0-7: source and target share the containment funder, so the target
+            # may only surface in the source view through the unverified sibling
+            # issue's parent_contract_id reference — never as a component member,
+            # edge endpoint, card, or diagnostic.
+        leak_surface = json.dumps(
+            {
+                "contract_ids": source_view["contract_ids"],
+                "contracts": source_view["contracts"],
+                "edges": source_view["edges"],
+                "source_diagnostics": source_view["source_diagnostics"],
+            }
+        )
+        assert target.id not in leak_surface
+        assert all(
+            issue.get("parent_contract_id") == source.parent_id
+            and issue.get("contract_id") == target.id
+            for issue in source_view["issues"]
+            if issue.get("contract_id") == target.id
+        )
         rendered = json.dumps({"source": source_view, "target": target_view})
         assert "private-" not in rendered
         assert store.get_runtime_revision() == before_revision

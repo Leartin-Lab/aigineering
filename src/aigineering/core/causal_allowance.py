@@ -82,6 +82,14 @@ def project_contract_allowance_records(
     projected: list[RuntimeRecord] = []
     for contract in new_contracts:
         if contract.parent_id is None:
+            if contract.origin == "retry":
+                # A retry retains its source's containment parent. A root retry
+                # therefore has no debit to fund a new grant. Existing Contracts
+                # were excluded above so historical replay keeps its facts.
+                raise ValueError(
+                    "retry Contract cannot mint an unfunded root grant: "
+                    f"{contract.id!r} has no containment parent to fund it"
+                )
             projected.append(
                 create_runtime_record(
                     "allowance.granted",
@@ -287,6 +295,14 @@ def validate_allowance_commit(
         pending_by_id[record.id] = record
     new_pending = tuple(pending_by_id.values())
     validate_allowance_grants(contracts, existing_records, new_pending)
+    for record in new_pending:
+        if record.record_type != "allowance.granted":
+            continue
+        contract = by_id[record.payload["contract_id"]]
+        if contract.parent_id is None and contract.origin == "retry":
+            raise CausalAllowanceConflict(
+                "retry Contract cannot mint an unfunded root grant"
+            )
     if (
         any(record.record_type == "allowance.returned" for record in new_pending)
         and not candidate_id

@@ -525,6 +525,17 @@ Allowance is lineage authority, not a Worker wallet or mutable counter.
   terminal reason;
 - exact Candidate replay cannot reserve twice.
 
+A newly declared root Contract with `origin="retry"` cannot receive an unfunded
+root grant. Pure projection rejects it, and commit-time validation independently
+rejects a new grant of that shape after checking canonical provenance. The
+rejection retains audit facts without publishing a successor or allowance.
+Contained CLI retries retain their existing reservation from the common
+containment parent; Worker `/retry` continues to reserve from the claimed source.
+Historical accepted root retries remain readable and exactly replayable without
+new grants. This refusal does not choose a transfer, cancellation, freezing or
+work-authorization policy for retries. See
+[change 104](changes/104-retry-root-grant-conservation.md).
+
 Pure projection rejects an oversized batch. SQLite repeats the balance check in
 the commitment transaction against the complete pending Candidate and derived
 fact batch so concurrent publishers cannot overspend the same grant or cause a

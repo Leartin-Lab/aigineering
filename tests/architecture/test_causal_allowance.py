@@ -6,6 +6,8 @@ import ast
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+import pytest
+
 from aigineering.core.candidate_publisher import publish_effect, publish_effects
 from aigineering.core.ids import hash_contract_v3
 from aigineering.core.runtime_projection import (
@@ -25,6 +27,36 @@ from aigineering.protocol.candidate import (
 )
 from aigineering.protocol.effect_builders import contract_declaration_effect
 from aigineering.protocol.types import Contract
+
+
+@pytest.mark.parametrize("sqlite", [False, True])
+def test_generic_signed_publication_cannot_mint_a_root_retry_grant(sqlite):
+    from conftest import candidate_runtime
+
+    from aigineering.plugins.task_semantics import retry_contract
+    from aigineering.core.control_plane import build_control_plane_contract
+
+    store = SQLiteStore(":memory:") if sqlite else MemoryStore()
+    trace = store if sqlite else MemoryTraceStore()
+    try:
+        runtime = candidate_runtime(store, trace)
+        root = runtime.accept_contract(build_control_plane_contract(name="root"))
+        target = retry_contract(root)
+        before = tuple(store.scan_runtime_records(record_type="allowance.granted"))
+        decision = runtime.publisher.publish(
+            (contract_declaration_effect(target),),
+            idempotency_key="root-retry",
+            causal_parents=(root.id,),
+        )
+        assert not decision.accepted
+        assert store.get_contract(target.id) is None
+        assert (
+            tuple(store.scan_runtime_records(record_type="allowance.granted")) == before
+        )
+        assert len(store.scan_runtime_records(record_type="candidate.rejected")) == 1
+    finally:
+        if sqlite:
+            store.close()
 
 
 def test_terminal_event_values_have_one_dependency_neutral_owner():

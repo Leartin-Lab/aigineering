@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+from dataclasses import fields
 from pathlib import Path
 
 from click import Group
@@ -17,6 +18,7 @@ from aigineering.core.control_plane import (
     build_control_plane_contract,
 )
 from aigineering.core.ids import acceptance_policy_id
+from aigineering.protocol.identity import contract_from_fields
 from aigineering.core.signing import Ed25519Signer
 from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.local_identity import (
@@ -100,6 +102,7 @@ def _workspace(
     *,
     verifier_capabilities=("verify.human",),
     source_labels=(),
+    funded_retry=False,
 ):
     database = tmp_path / ".aig" / "store.db"
     database.parent.mkdir(parents=True)
@@ -146,6 +149,28 @@ def _workspace(
         context_asset_ids=(rubric_id, evidence_id),
         acceptance_policy=policy,
     )
+    if funded_retry:
+        funder = build_control_plane_contract(name="retry funder", budget=10)
+        funded = publish_effect(
+            store,
+            store,
+            genesis,
+            root_key,
+            root_signer,
+            contract_declaration_effect(funder),
+            idempotency_key="test-funder",
+        )
+        assert funded.accepted
+        source = contract_from_fields(
+            **{
+                **{
+                    field.name: getattr(source, field.name)
+                    for field in fields(source)
+                    if field.name != "id"
+                },
+                "parent_id": funder.id,
+            }
+        )
     decision = publish_effect(
         store,
         store,
@@ -730,7 +755,9 @@ def test_request_review_accepts_canonical_retry_source(tmp_path, monkeypatch):
     from aigineering.task_lineage import task_lineage
     from aigineering.task_publication import retry_local_task_result
 
-    database, root_key_path, source, _policy = _workspace(tmp_path, monkeypatch)
+    database, root_key_path, source, _policy = _workspace(
+        tmp_path, monkeypatch, funded_retry=True
+    )
     monkeypatch.setattr(local_publication, "require_redis", lambda: None)
     monkeypatch.setattr(
         local_publication, "sync_runtime", lambda *_args, **_kwargs: None
@@ -868,7 +895,7 @@ def test_retry_review_rejects_method_and_plugin_labeled_sources(
     from aigineering.task_publication import retry_local_task_result
 
     database, root_key_path, source, _policy = _workspace(
-        tmp_path, monkeypatch, source_labels=(source_label,)
+        tmp_path, monkeypatch, source_labels=(source_label,), funded_retry=True
     )
     from aigineering import local_publication
 

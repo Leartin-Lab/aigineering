@@ -12,6 +12,7 @@ from aigineering.cli.main import cli
 from aigineering.core.control_plane import build_control_plane_contract
 from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.local_identity import ensure_local_domain
+from aigineering.protocol.identity import contract_from_fields
 from aigineering.runtime_services import RedisSyncPending
 from aigineering.task_publication import publish_task_contract
 
@@ -57,13 +58,34 @@ def _workspace(tmp_path: Path, monkeypatch):
     database.parent.mkdir(parents=True, exist_ok=True)
     with SQLiteStore(database) as store:
         ensure_local_domain(store)
-        original = publish_task_contract(
+        # P0-7: retries must be funded by a containment parent. Publish the
+        # retry target as a child Contract so the shared projection reserves
+        # its allowance from the funded parent instead of minting a root grant.
+        parent = publish_task_contract(
             store,
             build_control_plane_contract(
+                name="retry consistency funder",
+                description="Funded containment parent for retry conservation.",
+                outputs=(),
+                # The child publication reserves child.budget; a retry of the
+                # child reserves the same amount again, so fund both.
+                budget=8,
+            ),
+        )
+        original = publish_task_contract(
+            store,
+            contract_from_fields(
                 name="retry consistency target",
                 description="Preserve this exact obligation while publishing a retry.",
+                inputs=(),
                 outputs=("answer",),
+                activation="",
                 budget=3,
+                tool_scope=(),
+                labels=(),
+                origin="human",
+                parent_id=parent.id,
+                minting_authority=(),
             ),
         )
     return database, original
@@ -81,6 +103,55 @@ def _invoke(spelling: str, contract_id: str, *, json_output: bool = True):
 
 def _snapshot(database: Path):
     return SQLiteStore.snapshot_from_path(database)
+
+
+@pytest.mark.parametrize("spelling", ["legacy", "task"])
+def test_root_retry_rejection_pending_replays_exact_audit(
+    tmp_path, monkeypatch, spelling
+):
+    import aigineering.local_publication as local_publication
+
+    database, original = _workspace(tmp_path, monkeypatch)
+    root_id = original.parent_id
+    with _snapshot(database) as store:
+        contracts_before = store.get_all_contracts()
+        allowance_before = tuple(
+            record
+            for _, record in store.scan_runtime_records()
+            if record.record_type.startswith("allowance.")
+        )
+
+    def pending_after_rejection(_store, *, accepted=None):
+        assert accepted is False
+        raise RedisSyncPending(accepted=False)
+
+    monkeypatch.setattr(local_publication, "sync_runtime", pending_after_rejection)
+    first = _invoke(spelling, root_id)
+    assert first.exit_code == 1, first.output
+    pending = json.loads(first.output)
+    assert pending["error"]["code"] == "redis_sync_pending"
+    assert pending["candidate_accepted"] is False
+    assert pending["facts_retained"] is True
+    assert pending["data"]["fact_ids"] == [pending["data"]["rejection_fact_id"]]
+
+    monkeypatch.setattr(local_publication, "sync_runtime", lambda *_a, **_kw: None)
+    with SQLiteStore(database) as store:
+        publish_task_contract(
+            store, build_control_plane_contract(name="other publication")
+        )
+    replay = _invoke(spelling, root_id)
+    assert replay.exit_code == 1, replay.output
+    result = json.loads(replay.output)
+    assert result["error"]["code"] == "retry_rejected"
+    assert result["data"] == pending["data"]
+    with _snapshot(database) as store:
+        assert len(store.scan_runtime_records(record_type="candidate.rejected")) == 1
+        assert all(store.get_contract(c.id) == c for c in contracts_before)
+        assert all(
+            record in (r for _, r in store.scan_runtime_records())
+            for record in allowance_before
+        )
+        assert len(store.get_all_contracts()) == len(contracts_before) + 1
 
 
 @pytest.mark.parametrize("spelling", ["legacy", "task"])

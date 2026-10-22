@@ -1,6 +1,6 @@
 # 开发功能状态
 
-更新日期：2026-10-18；开发版本：`0.5.13.dev0`。
+更新日期：2026-10-23；开发版本：`0.5.13.dev0`。
 
 项目定位：Zero Trust agent runtime for auditable AI-assisted engineering and research.
 
@@ -22,6 +22,7 @@
 | 结果检查与文件导出 | 已实现 | `task result` 按冻结接受政策检查输出，再导出精确内容；未接受输出不能当作完成。 |
 | 评论、阻塞、解除与提升 | 已实现 | 签名评论及 holds；解除不重置已领取任务，提升绑定完整原 hold 集。 |
 | 取消、重试、交接与文本编辑 | 已实现 | 发布新的有界后继，保留原任务、claim 与终态；不会原地重置任务。 |
+| CLI retry 资金守恒 | 部分实现 | 新的根 retry 不能无扣账授额；投影与 writer 均拒绝，保留审计，历史精确重放不补授额。非根 retry 仍按原 containment parent 预留；原工作授权域、旧资金注销/转移/冻结和跨身份恢复语义未决。见 [change 104](../../changes/104-retry-root-grant-conservation.md)。 |
 | 独立审查、接受、退回与修订 | 部分实现 | 普通 reviewer、政策决定及签名修订已实现；本次真实 reviewer 建议修改，Root 核对原始事实后另作接受裁定，未将建议记为通过。工具续接有界保留默认审查余额，重启复用精确原任务；后续合法支出仍可能使固定意图被拒绝。见 [change 102](../../changes/102-continuation-review-funding.md)。 |
 | 指派、改派、优先级与依赖 | 已实现 | 共享 SQLite claim 边界；优先级仅排序，依赖不扩大输入或权限。 |
 | 批量操作与中断恢复 | 已实现 | 多任务阻塞、解除、取消、提升、指派、改派、优先级及重试；逐任务原子结果，保留部分成功及 Redis pending。 |
