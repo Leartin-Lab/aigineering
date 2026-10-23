@@ -11,6 +11,7 @@ from aigineering.plugins.task_semantics import contracts_from_plan_asset
 from aigineering.protocol.candidate import CandidateEffect
 from aigineering.protocol.effect_builders import contract_declaration_effect
 from aigineering.protocol.types import Asset, Contract
+from aigineering.protocol.immutability import deep_freeze
 
 
 _BLOCKING_REJECTION_ACTIONS = frozenset({"rejected", "scaffold_rejected"})
@@ -19,9 +20,16 @@ _BLOCKING_REJECTION_ACTIONS = frozenset({"rejected", "scaffold_rejected"})
 class PlanningCompileError(ValueError):
     """A compile-stage blueprint cannot become contained task effects."""
 
-    def __init__(self, message: str, *, fields: tuple[str, ...] = ()) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        fields: tuple[str, ...] = (),
+        rejections: tuple[Mapping[str, object], ...] = (),
+    ) -> None:
         super().__init__(message)
         self.fields = tuple(sorted(set(fields)))
+        self.rejections = tuple(deep_freeze(item) for item in rejections)
 
 
 def is_blocking_plan_rejection(entry: dict) -> bool:
@@ -118,6 +126,7 @@ def compile_planning_blueprint(
             fields=tuple(
                 str(item.get("field", "unknown")) for item in proposal.rejections
             ),
+            rejections=proposal.rejections,
         )
     _validate_independent_verifier(contract, proposal.effects)
     return proposal.effects

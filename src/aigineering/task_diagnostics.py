@@ -14,6 +14,10 @@ from aigineering.core.domain import load_genesis
 from aigineering.core.store import require_operational_store
 from aigineering.protocol.identity import canonical_json
 from aigineering.protocol.runtime_record import RuntimeRecord, validate_runtime_record
+from aigineering.planning_diagnostics import (
+    is_compile_failure,
+    valid_compile_diagnostics,
+)
 
 _CURSOR_VERSION = 1
 _MAX_LIMIT = 100
@@ -651,6 +655,7 @@ def _invocation_failure_matches_grant(
         "raw_output",
         "diagnostic",
         "usage_metadata",
+        "compile_diagnostics",
     }
     return (
         failure.record_type == "worker.invocation_failed"
@@ -661,6 +666,13 @@ def _invocation_failure_matches_grant(
         and isinstance(failure.payload.get("category"), str)
         and type(failure.payload.get("retryable")) is bool
         and type(failure.payload.get("status_code")) is int
+        and (
+            "compile_diagnostics" not in failure.payload
+            or (
+                is_compile_failure(failure.payload.get("category"))
+                and valid_compile_diagnostics(failure.payload["compile_diagnostics"])
+            )
+        )
     )
 
 

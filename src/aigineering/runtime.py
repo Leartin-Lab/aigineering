@@ -52,6 +52,12 @@ from aigineering.protocol.wire import (
     contract_to_dict,
 )
 from aigineering.task_context import method_context_assets_for
+from aigineering.planning_diagnostics import (
+    build_compile_diagnostics,
+    is_compile_failure,
+    valid_compile_diagnostics,
+)
+from aigineering.protocol.immutability import deep_thaw
 
 
 def _capture_emit(observer, event: str, **fields) -> None:
@@ -579,6 +585,11 @@ def execute_claimed_package(
                 ),
                 diagnostic=(
                     str(exc) if isinstance(exc, WorkerExecutionError) else None
+                ),
+                compile_rejections=(
+                    exc.compile_rejections
+                    if isinstance(exc, WorkerExecutionError)
+                    else ()
                 ),
             )
             if candidate_publishers is not None:
@@ -1252,6 +1263,7 @@ def _record_worker_invocation_failure(
     raw_output: str | None = None,
     diagnostic: str | None = None,
     usage_metadata: Mapping[str, object] | None = None,
+    compile_rejections: tuple[Mapping[str, object], ...] = (),
 ) -> None:
     existing = store.get_by_contract(claimed.contract.id)
     parent_id = existing[-1].id if existing else None
@@ -1281,6 +1293,13 @@ def _record_worker_invocation_failure(
         payload["diagnostic"] = diagnostic[:1000]
     if safe_usage is not None:
         payload["usage_metadata"] = safe_usage
+    if is_compile_failure(category) and any(
+        label in {"plugin:plan.compile", "plugin:replan.compile"}
+        for label in claimed.contract.labels
+    ):
+        details = build_compile_diagnostics(compile_rejections)
+        if details is not None:
+            payload["compile_diagnostics"] = details
     failure = create_runtime_record(
         "worker.invocation_failed",
         payload,
@@ -1327,6 +1346,26 @@ def process_worker_failures(store, *, candidate_publishers=None) -> list[str]:
                 f"worker failure {failure.id!r} references missing "
                 f"Contract {contract_id!r}"
             )
+        details = failure.payload.get("compile_diagnostics")
+        if "compile_diagnostics" in failure.payload and (
+            not is_compile_failure(failure.payload.get("category"))
+            or not valid_compile_diagnostics(details)
+        ):
+            raise RuntimeError("worker failure compile diagnostics are invalid")
+        summary = {
+            "category": str(failure.payload["category"]),
+            "name": "(provider)",
+            "reject_reason": (
+                str(failure.payload["diagnostic"])
+                if "diagnostic" in failure.payload
+                else (
+                    f"status={failure.payload['status_code']} "
+                    f"retryable={failure.payload['retryable']}"
+                )
+            ),
+        }
+        if details is not None:
+            summary["compile_diagnostics"] = deep_thaw(details)
         recovery = _schedule_rejected_recovery(
             contract,
             str(
@@ -1335,20 +1374,7 @@ def process_worker_failures(store, *, candidate_publishers=None) -> list[str]:
                     "provider invocation failed before Candidate production",
                 )
             ),
-            [
-                {
-                    "category": str(failure.payload["category"]),
-                    "name": "(provider)",
-                    "reject_reason": (
-                        str(failure.payload["diagnostic"])
-                        if "diagnostic" in failure.payload
-                        else (
-                            f"status={failure.payload['status_code']} "
-                            f"retryable={failure.payload['retryable']}"
-                        )
-                    ),
-                }
-            ],
+            [summary],
             store,
             store,
             candidate_publishers=candidate_publishers,

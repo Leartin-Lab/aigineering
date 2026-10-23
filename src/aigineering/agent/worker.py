@@ -30,6 +30,7 @@ from aigineering.protocol.effect_builders import (
 from aigineering.protocol.envelope import CandidateEnvelope
 from aigineering.protocol.package import WorkerPackage
 from aigineering.protocol.types import Asset, Candidate, Contract
+from aigineering.protocol.immutability import deep_freeze
 
 
 class WorkerExecutionError(ValueError):
@@ -41,12 +42,16 @@ class WorkerExecutionError(ValueError):
         message: str | None = None,
         *,
         usage_metadata: Mapping[str, object] | None = None,
+        compile_rejections: tuple[Mapping[str, object], ...] = (),
     ) -> None:
         super().__init__(message or code)
         self.code = code
         # Adapters may attach already-normalized provider usage when failure
         # occurs after the provider returned but before a Candidate exists.
         self.usage_metadata = usage_metadata
+        self.compile_rejections = tuple(
+            deep_freeze(item) for item in compile_rejections
+        )
 
 
 @runtime_checkable
@@ -331,7 +336,9 @@ def compile_worker_envelope(
             except PlanningCompileError as exc:
                 fields = ",".join(exc.fields) or "unknown"
                 raise WorkerExecutionError(
-                    f"planning_compile_rejected:{fields}", str(exc)
+                    f"planning_compile_rejected:{fields}",
+                    str(exc),
+                    compile_rejections=exc.rejections,
                 ) from exc
         else:
             if contract is None or contract.id != envelope.contract_id:
