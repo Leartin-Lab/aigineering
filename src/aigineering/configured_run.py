@@ -8,6 +8,7 @@ from pathlib import Path
 from aigineering.core.capability_descriptors import create_tool_descriptor
 from aigineering.application import persistent_store, require_redis
 from aigineering.runtime_services import sync_runtime
+from aigineering.core.input_bindings import input_asset_bindings
 from aigineering.core.contract_admission import validate_contract_commitment
 from aigineering.core.control_plane import (
     bind_contract_label_assets,
@@ -164,6 +165,7 @@ def run_configured(
 def _publish_root(store, prepared: PreparedConfiguredRun):
     prepared_contract = prepared.contract
     assert prepared_contract is not None
+    _validate_prepared_input_assets(prepared_contract, prepared)
     ensure_local_runtime_publishers(store)
     effects = tuple(
         asset_proposal_effect(asset)
@@ -177,6 +179,24 @@ def _publish_root(store, prepared: PreparedConfiguredRun):
         )
     )
     committed_by_name = {asset.name: asset for asset in resource_decision.assets}
+    sensitive_input_policy = prepared_contract.sensitive_input_policy
+    if prepared_contract.inputs:
+        committed_input_bindings = _published_input_asset_bindings(
+            prepared_contract.inputs, resource_decision.assets
+        )
+        bindings = input_asset_bindings(sensitive_input_policy)
+        for role, asset_ids in committed_input_bindings.items():
+            if role in bindings and bindings[role] != asset_ids:
+                raise ValueError(
+                    f"sensitive_input_policy.input_asset_bindings[{role!r}] conflicts "
+                    "with the published configured input Asset"
+                )
+        bindings.update(committed_input_bindings)
+        policy = dict(sensitive_input_policy or {})
+        policy["input_asset_bindings"] = {
+            role: asset_ids for role, asset_ids in sorted(bindings.items())
+        }
+        sensitive_input_policy = policy
     policy = prepared_contract.acceptance_policy
     if prepared.acceptance_evidence_inputs:
         if policy is None:
@@ -205,7 +225,7 @@ def _publish_root(store, prepared: PreparedConfiguredRun):
         worker_pools=prepared_contract.worker_pools,
         delegation_capabilities=prepared_contract.delegation_capabilities,
         delegation_pools=prepared_contract.delegation_pools,
-        sensitive_input_policy=prepared_contract.sensitive_input_policy,
+        sensitive_input_policy=sensitive_input_policy,
         acceptance_policy=policy,
     )
     for label in contract.labels:
@@ -235,3 +255,42 @@ def _publish_root(store, prepared: PreparedConfiguredRun):
     if committed.contract is None:
         raise ValueError("root Contract publication returned no committed Contract")
     return committed.contract
+
+
+def _validate_prepared_input_assets(contract, prepared: PreparedConfiguredRun) -> None:
+    """Ensure every configured root input role has one source Asset."""
+    if not contract.inputs and contract.sensitive_input_policy is None:
+        return
+    if contract.sensitive_input_policy is not None:
+        input_asset_bindings(contract.sensitive_input_policy)
+    prepared_by_name: dict[str, list[str]] = {}
+    for asset in prepared.input_assets:
+        if asset.name in contract.inputs:
+            prepared_by_name.setdefault(asset.name, []).append(asset.id)
+
+    for role in contract.inputs:
+        asset_ids = tuple(sorted(prepared_by_name.get(role, ())))
+        if len(asset_ids) != 1:
+            raise ValueError(
+                f"configured input role {role!r} must resolve to exactly one prepared Asset"
+            )
+
+
+def _published_input_asset_bindings(roles, assets):
+    """Resolve configured input roles from this publication's exact result."""
+    by_name: dict[str, list[str]] = {}
+    role_set = set(roles)
+    for asset in assets:
+        if asset.name in role_set:
+            by_name.setdefault(asset.name, []).append(asset.id)
+
+    bindings: dict[str, tuple[str, ...]] = {}
+    for role in roles:
+        asset_ids = tuple(sorted(by_name.get(role, ())))
+        if len(asset_ids) != 1:
+            raise ValueError(
+                f"configured input role {role!r} did not resolve to exactly one "
+                "published Asset"
+            )
+        bindings[role] = asset_ids
+    return bindings
