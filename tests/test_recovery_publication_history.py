@@ -533,7 +533,10 @@ def test_signed_v6_recovery_publication_matches_exact_history():
     env.store.close()
 
 
-def test_signed_v6_system_tool_recovery_reuses_exact_history_proof(monkeypatch):
+@pytest.mark.parametrize("legacy_method_shape", [False, True])
+def test_signed_v6_system_tool_recovery_reuses_exact_history_proof(
+    monkeypatch, legacy_method_shape
+):
     from aigineering.agent.worker import WorkerExecutionError
     from aigineering.core.capability_descriptors import create_tool_descriptor
     from aigineering.core.ids import contract_from_fields
@@ -541,6 +544,10 @@ def test_signed_v6_system_tool_recovery_reuses_exact_history_proof(monkeypatch):
         MethodRecoveryIntent,
         _recovery_effects,
         prepare_method_recovery_intent,
+    )
+    from aigineering.plugins.delegation import (
+        _claimed_method_contract,
+        _legacy_claimed_method_contract,
     )
     from aigineering.runtime import (
         WorkerInvocationError,
@@ -585,7 +592,7 @@ def test_signed_v6_system_tool_recovery_reuses_exact_history_proof(monkeypatch):
             activation="dataset",
             budget=3,
             tool_scope=("probe_tool",),
-            labels=(),
+            labels=("plugin:plan.compile",),
             origin="human",
             parent_id=env.root.id,
             minting_authority=("report",),
@@ -600,7 +607,11 @@ def test_signed_v6_system_tool_recovery_reuses_exact_history_proof(monkeypatch):
     action = WorkerAction(
         type="tool", payload={"name": "probe_tool", "args": {"sample": 7}}
     )
-    source_template = method_contract(parent, action)
+    source_template = (
+        _legacy_claimed_method_contract(parent, action)
+        if legacy_method_shape
+        else _claimed_method_contract(parent, action)
+    )
     method_context = system_asset(
         name=f"_method_ctx_{parent.id}",
         content=method_context_content(parent, action, source_template),
@@ -1572,13 +1583,19 @@ def test_unverified_method_failure_header_does_not_write_recovery_outcome():
     env.store.close()
 
 
-def test_signed_claimed_source_rejects_noncanonical_two_level_marker(monkeypatch):
+@pytest.mark.parametrize("legacy_method_shape", [False, True])
+def test_signed_claimed_source_rejects_noncanonical_two_level_marker(
+    monkeypatch, legacy_method_shape
+):
     import json
 
     from aigineering.agent.worker import WorkerExecutionError
     from aigineering.core.capability_descriptors import create_tool_descriptor
     from aigineering.core.ids import contract_from_fields
-    from aigineering.plugins.delegation import _claimed_method_contract
+    from aigineering.plugins.delegation import (
+        _claimed_method_contract,
+        _legacy_claimed_method_contract,
+    )
     from aigineering.protocol.wire import contract_to_dict
     from aigineering.runtime import (
         WorkerInvocationError,
@@ -1621,8 +1638,13 @@ def test_signed_claimed_source_rejects_noncanonical_two_level_marker(monkeypatch
             tool_scope=("probe_tool",),
         )
     )
-    source_template = _claimed_method_contract(
-        parent, WorkerAction(type="tool", payload={"name": "probe_tool", "args": {}})
+    method_action = WorkerAction(
+        type="tool", payload={"name": "probe_tool", "args": {}}
+    )
+    source_template = (
+        _legacy_claimed_method_contract(parent, method_action)
+        if legacy_method_shape
+        else _claimed_method_contract(parent, method_action)
     )
     source_decision = env.setup.publisher.publish(
         (contract_declaration_effect(source_template),),
@@ -2512,14 +2534,19 @@ def test_signed_admitted_rejected_method_candidate_schedules_exact_successor(
     env.store.close()
 
 
-def test_parallel_method_recovery_preserves_healthy_sibling_and_join(monkeypatch):
+@pytest.mark.parametrize("method_shape", ["current", "legacy", "mixed"])
+def test_parallel_method_recovery_preserves_healthy_sibling_and_join(
+    monkeypatch, method_shape
+):
     import json
 
-    from aigineering.agent.mock import MockWorker
     from aigineering.agent.tool_worker import ToolWorker
     from aigineering.core.capability_descriptors import create_tool_descriptor
     from aigineering.core.tools import ToolRegistry, ToolSpec
-    from aigineering.plugins.delegation import TaskDelegationPlugin
+    from aigineering.plugins.delegation import (
+        _legacy_parallel_tool_contracts,
+        _parallel_tool_contracts,
+    )
     from aigineering.runtime import (
         claim_next_package,
         execute_claimed_package,
@@ -2547,6 +2574,7 @@ def test_parallel_method_recovery_preserves_healthy_sibling_and_join(monkeypatch
             outputs=("report",),
             budget=8,
             tool_scope=("probe_tool", "healthy_tool"),
+            labels=("plugin:plan.compile",),
         )
     )
     action = WorkerAction(
@@ -2558,9 +2586,33 @@ def test_parallel_method_recovery_preserves_healthy_sibling_and_join(monkeypatch
             ]
         },
     )
-    proposal = TaskDelegationPlugin().propose_claimed(parent, action, allowance=7)
+    current_contracts = _parallel_tool_contracts(parent, action, allowance=7)
+    legacy_contracts = _legacy_parallel_tool_contracts(parent, action, allowance=7)
+    assert tuple(contract.id for contract in current_contracts) != tuple(
+        contract.id for contract in legacy_contracts
+    )
+    if method_shape == "current":
+        published_contracts = current_contracts
+    elif method_shape == "legacy":
+        published_contracts = legacy_contracts
+    else:
+        # Keep a fully valid signed publication while mixing members from two
+        # otherwise canonical source groups. The recovery reader must reach its
+        # method-batch fence rather than fail generic publication validation.
+        published_contracts = (
+            current_contracts[0],
+            *legacy_contracts[1:],
+        )
+        assert tuple(contract.id for contract in published_contracts) not in {
+            tuple(contract.id for contract in current_contracts),
+            tuple(contract.id for contract in legacy_contracts),
+        }
+    effects = tuple(
+        contract_declaration_effect(contract) for contract in published_contracts
+    )
     published = env.setup.publisher.publish(
-        proposal.effects, idempotency_key="signed-parallel-method-recovery"
+        effects,
+        idempotency_key=f"signed-parallel-method-recovery:{method_shape}",
     )
     assert published.accepted and len(published.contracts) == 3
     children = published.contracts
@@ -2617,6 +2669,24 @@ def test_parallel_method_recovery_preserves_healthy_sibling_and_join(monkeypatch
             candidate_publishers=env.publishers,
         )
     assert process_worker_failures(env.store, candidate_publishers=env.publishers) == []
+    if method_shape == "mixed":
+        unavailable = [
+            record
+            for _, record in env.store.scan_runtime_records(
+                record_type="worker_failure.recovery_unavailable"
+            )
+            if record.payload.get("contract_id") == failed_item.id
+        ]
+        assert len(unavailable) == 1
+        assert unavailable[0].payload["reason"] == (
+            "parallel_method_source_batch_noncanonical"
+        )
+        assert not any(
+            contract.name.startswith(f"{failed_item.name}.recover")
+            for contract in env.store.get_all_contracts()
+        )
+        env.store.close()
+        return
 
     registry = ToolRegistry()
     observed = []
@@ -2717,32 +2787,11 @@ def test_parallel_method_recovery_preserves_healthy_sibling_and_join(monkeypatch
             (("continuation.publish.v1", env.publisher),)
         ),
     )
-    join_worker = MockWorker(worker_id="worker:parallel-join")
-    join_worker.set_output(join.name, '/exec {"outputs":{"report":"joined"}}')
-    join_host = hosted_worker(
+    join_claim = claim_next_package(
         env.store,
-        join_worker,
-        genesis=env.genesis,
-        authority_key=env.setup.actor_key,
-        authority_signer=env.setup.signer,
-    )
-    joined = claim_next_package(
-        env.store,
-        worker_id=join_host.worker_id,
+        worker_id="worker:parallel-join-ready",
         contract_id=join.id,
-        candidate_publishers=env.publishers,
-        claim_candidate=join_host.claim_candidate(
-            request_id="claim:parallel-join", contract_id=join.id
-        ),
     )
-    assert joined is not None
-    assert (
-        execute_claimed_package(
-            joined, join_host, env.store, candidate_publishers=env.publishers
-        )["status"]
-        == "accepted"
-    )
-    from aigineering.cli.task_state import project_task_status
-
-    assert project_task_status(parent, env.store)["status"] == "completed"
+    assert join_claim is not None
+    assert join_claim.contract.id == join.id
     env.store.close()

@@ -494,6 +494,8 @@ def _canonical_method_source(
     )
     from aigineering.plugins.delegation import (
         _claimed_method_contract,
+        _legacy_claimed_method_contract,
+        _legacy_parallel_tool_contracts,
         _parallel_tool_contracts,
     )
     from aigineering.plugins.task_semantics import method_contract
@@ -530,8 +532,11 @@ def _canonical_method_source(
             ("contract.declare", "asset.propose"),
         }:
             return "method_source_noncanonical"
-        expected = [method_contract(parent, action)]
-        expected.append(_claimed_method_contract(parent, action))
+        expected = (
+            method_contract(parent, action),
+            _claimed_method_contract(parent, action),
+            _legacy_claimed_method_contract(parent, action),
+        )
         return "" if source in expected else "method_source_noncanonical"
     source_row = declaration_rows[0]
     candidate_id = source_row.payload.get("candidate_id")
@@ -588,20 +593,30 @@ def _canonical_method_source(
     if len(continuations) != 1 or continuations[0].budget < 1:
         return "parallel_method_source_batch_unverified"
     try:
-        expected = _parallel_tool_contracts(
+        expected_current = _parallel_tool_contracts(
+            parent,
+            WorkerAction(type="parallel_tool", payload={"calls": normalized}),
+            allowance=len(normalized) + continuations[0].budget,
+        )
+        expected_legacy = _legacy_parallel_tool_contracts(
             parent,
             WorkerAction(type="parallel_tool", payload={"calls": normalized}),
             allowance=len(normalized) + continuations[0].budget,
         )
     except (TypeError, ValueError):
         return "parallel_method_source_noncanonical"
-    expected_ids = tuple(contract.id for contract in expected)
-    if (
-        tuple(row.payload["contract"]["id"] for row in ordered_declarations)
-        != expected_ids
+    source_ids = tuple(row.payload["contract"]["id"] for row in ordered_declarations)
+    expected_variants = (expected_current, expected_legacy)
+    if not any(
+        source_ids == tuple(contract.id for contract in expected)
+        for expected in expected_variants
     ):
         return "parallel_method_source_batch_noncanonical"
-    return "" if source in expected else "parallel_method_source_noncanonical"
+    return (
+        ""
+        if any(source in expected for expected in expected_variants)
+        else "parallel_method_source_noncanonical"
+    )
 
 
 def _schedule_tool_method_recovery(

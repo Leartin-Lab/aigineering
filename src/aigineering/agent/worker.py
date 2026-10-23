@@ -31,6 +31,10 @@ from aigineering.protocol.envelope import CandidateEnvelope
 from aigineering.protocol.package import WorkerPackage
 from aigineering.protocol.types import Asset, Candidate, Contract
 from aigineering.protocol.immutability import deep_freeze
+from aigineering.plugins.planning_roles import (
+    PLANNING_COMPILE_LABELS,
+    active_planning_stage,
+)
 
 
 class WorkerExecutionError(ValueError):
@@ -317,9 +321,9 @@ def compile_worker_envelope(
                     "outputs": dict(parsed.outputs),
                 },
             )
-        if contract is not None and any(
-            label in {"plugin:plan.compile", "plugin:replan.compile"}
-            for label in contract.labels
+        if (
+            contract is not None
+            and active_planning_stage(contract) in PLANNING_COMPILE_LABELS
         ):
             from aigineering.plugins.planning import (
                 PlanningCompileError,

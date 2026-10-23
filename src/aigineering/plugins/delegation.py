@@ -7,6 +7,7 @@ import json
 from aigineering.core.ids import compute_content_hash, contract_from_fields
 from aigineering.protocol.immutability import deep_thaw
 from aigineering.plugins.continuation import allocate_continuation_budget
+from aigineering.plugins.planning_roles import without_planning_stage_labels
 from aigineering.plugins.task_semantics import method_contract
 from aigineering.protocol.actions import WorkerAction
 from aigineering.protocol.effect_builders import contract_declaration_effect
@@ -76,6 +77,27 @@ class TaskDelegationPlugin:
 def _parallel_tool_contracts(
     parent: Contract, action: WorkerAction, allowance: int
 ) -> tuple[Contract, ...]:
+    return _build_parallel_tool_contracts(
+        parent, action, allowance, legacy_stage_labels=False
+    )
+
+
+def _legacy_parallel_tool_contracts(
+    parent: Contract, action: WorkerAction, allowance: int
+) -> tuple[Contract, ...]:
+    """Recreate former signed parallel-tool declarations for history proofs."""
+    return _build_parallel_tool_contracts(
+        parent, action, allowance, legacy_stage_labels=True
+    )
+
+
+def _build_parallel_tool_contracts(
+    parent: Contract,
+    action: WorkerAction,
+    allowance: int,
+    *,
+    legacy_stage_labels: bool,
+) -> tuple[Contract, ...]:
     payload = deep_thaw(action.payload)
     calls = payload.get("calls")
     if not isinstance(calls, list) or not 2 <= len(calls) <= 8:
@@ -109,7 +131,10 @@ def _parallel_tool_contracts(
         json.dumps(normalized, sort_keys=True, ensure_ascii=False)
     )[:20]
     tool_tasks = tuple(
-        _parallel_tool_item_contract(parent, call, batch_key) for call in normalized
+        _parallel_tool_item_contract(
+            parent, call, batch_key, legacy_stage_labels=legacy_stage_labels
+        )
+        for call in normalized
     )
     observations = tuple(task.outputs[0] for task in tool_tasks)
     used_tools = {str(call["name"]) for call in normalized}
@@ -147,11 +172,19 @@ def _parallel_tool_contracts(
 
 
 def _parallel_tool_item_contract(
-    parent: Contract, call: dict[str, object], batch_key: str
+    parent: Contract,
+    call: dict[str, object],
+    batch_key: str,
+    *,
+    legacy_stage_labels: bool = False,
 ) -> Contract:
-    base = _claimed_method_contract(
-        parent,
-        WorkerAction(type="tool", payload={"name": call["name"], "args": call["args"]}),
+    action = WorkerAction(
+        type="tool", payload={"name": call["name"], "args": call["args"]}
+    )
+    base = (
+        _legacy_claimed_method_contract(parent, action)
+        if legacy_stage_labels
+        else _claimed_method_contract(parent, action)
     )
     description = json.loads(base.description)
     description["method"] = "parallel_tool_item"
@@ -191,8 +224,24 @@ def _parallel_tool_item_contract(
 
 
 def _claimed_method_contract(parent: Contract, action: WorkerAction) -> Contract:
+    return _build_claimed_method_contract(parent, action, legacy_stage_labels=False)
+
+
+def _legacy_claimed_method_contract(parent: Contract, action: WorkerAction) -> Contract:
+    """Recreate the former signed shape for read-only publication proofs."""
+    return _build_claimed_method_contract(parent, action, legacy_stage_labels=True)
+
+
+def _build_claimed_method_contract(
+    parent: Contract, action: WorkerAction, *, legacy_stage_labels: bool
+) -> Contract:
     base = method_contract(parent, action)
-    labels = tuple(dict.fromkeys((*parent.labels, f"plugin:{action.type}")))
+    parent_labels = (
+        parent.labels
+        if legacy_stage_labels
+        else without_planning_stage_labels(parent.labels)
+    )
+    labels = tuple(dict.fromkeys((*parent_labels, f"plugin:{action.type}")))
     result_name = (
         f"tool_observation_{compute_content_hash(base.description)[:24]}"
         if action.type == "tool"

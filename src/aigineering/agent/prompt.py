@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 
 from aigineering.core.labels import BEHAVIOR_LABEL_PREFIX
+from aigineering.plugins.planning_roles import active_planning_stage
 from aigineering.protocol.immutability import deep_thaw
 from aigineering.protocol.types import Asset, Contract
 
@@ -260,7 +261,8 @@ def _planning_stage_instructions(contract: Contract) -> list[str]:
             "never mutate prior Contracts.",
         ),
     }
-    for label in contract.labels:
+    label = active_planning_stage(contract)
+    if label is not None:
         instruction = stages.get(label)
         if instruction is not None:
             lines = [instruction[0], f"- {instruction[1]}"]
