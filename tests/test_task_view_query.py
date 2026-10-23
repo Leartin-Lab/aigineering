@@ -13,15 +13,10 @@ from aigineering.task_view_query import (
 from test_cli_task_board import _signed_fixture
 
 
-class _Monkeypatch:
-    def setattr(self, obj, name, value):
-        setattr(obj, name, value)
-
-
 def test_query_context_preserves_real_revision_order_and_is_read_only(
-    tmp_path,
+    tmp_path, monkeypatch
 ):
-    _root, _child, _services, open_store = _signed_fixture(tmp_path, _Monkeypatch())
+    _root, _child, _services, open_store = _signed_fixture(tmp_path, monkeypatch)
     store = open_store()
     try:
         contract = store.get_all_contracts()[0]
@@ -53,9 +48,9 @@ def test_query_context_preserves_real_revision_order_and_is_read_only(
 
 
 def test_query_context_rejects_other_store_changed_revision_and_mixed_projection(
-    tmp_path,
+    tmp_path, monkeypatch
 ):
-    _root, _child, _services, open_store = _signed_fixture(tmp_path, _Monkeypatch())
+    _root, _child, _services, open_store = _signed_fixture(tmp_path, monkeypatch)
     store = open_store()
     other = open_store()
     try:
@@ -72,8 +67,8 @@ def test_query_context_rejects_other_store_changed_revision_and_mixed_projection
         store.close()
 
 
-def test_query_context_rejects_change_during_claim_history_read(tmp_path):
-    _root, _child, _services, open_store = _signed_fixture(tmp_path, _Monkeypatch())
+def test_query_context_rejects_change_during_claim_history_read(tmp_path, monkeypatch):
+    _root, _child, _services, open_store = _signed_fixture(tmp_path, monkeypatch)
     store = open_store()
     original = store.get_claim_history_contract_ids
 
