@@ -418,9 +418,28 @@ class RedisCollaborationService:
         self._require_domain()
         try:
             revision, entries = self._capture_events(self._store)
-            for _ in range(_MAX_WATCH_ATTEMPTS):
+            for attempt in range(_MAX_WATCH_ATTEMPTS):
                 try:
                     return self._sync_attempt(revision, entries)
+                except RedisCollaborationUnavailable as exc:
+                    if exc.reason != "redis_ahead":
+                        raise
+                    if attempt + 1 >= _MAX_WATCH_ATTEMPTS:
+                        raise RedisCollaborationUnavailable(
+                            "Redis collaboration sync contention",
+                            reason="sync_contention",
+                        ) from exc
+                    fresh_revision, fresh_entries = self._capture_events(self._store)
+                    if fresh_revision <= revision:
+                        raise
+                    if not self._entries_preserve_prefix(
+                        fresh_entries, entries, revision
+                    ):
+                        raise RedisCollaborationUnavailable(
+                            "SQLite runtime source prefix changed during sync",
+                            reason="source_diverged",
+                        ) from exc
+                    revision, entries = fresh_revision, fresh_entries
                 except self._redis_errors as exc:
                     if exc.__class__.__name__ != "WatchError":
                         raise
@@ -616,6 +635,11 @@ class RedisCollaborationService:
                     if response is not None:
                         break
                     self.sync()
+                except RedisCollaborationUnavailable as exc:
+                    if exc.reason != "sync_contention":
+                        raise
+                    response = None
+                    continue
                 except self._redis_errors as exc:
                     if exc.__class__.__name__ == "WatchError":
                         response = None
