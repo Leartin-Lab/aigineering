@@ -424,8 +424,11 @@ def contracts_from_plan_asset(
             )
             continue
         activation = str(raw.get("activation", ""))
-        budget = _positive_int(raw.get("budget", 1), default=1)
         tool_scope = _string_list(raw.get("tool_scope", []))
+        budget = _positive_int(
+            raw.get("budget"),
+            default=2 if "budget" not in raw and tool_scope else 1,
+        )
         labels = _string_list(raw.get("labels", []))
         capability_needs = _string_list(raw.get("capability_needs", []))
         pool_needs = _string_list(raw.get("pool_needs", []))
@@ -469,6 +472,35 @@ def contracts_from_plan_asset(
                 }
             )
             continue
+
+        if tool_scope:
+            funding_limits = []
+            if parent_budget is not None:
+                funding_limits.append(parent_budget)
+            if parent_budget_remaining is not None:
+                funding_limits.append(
+                    max(0, parent_budget_remaining - _cumulative_budget)
+                )
+            if funding_limits and min(funding_limits) < 2:
+                available = min(funding_limits)
+                rejected.append(
+                    {
+                        "child_name": name,
+                        "field": "budget",
+                        "reason": (
+                            "planned tool task requires budget >= 2 for one tool "
+                            "task and its continuation"
+                        ),
+                        "action": "rejected",
+                        "expected": "integer >= 2 when tool_scope is non-empty",
+                        "actual": str(available),
+                        "requested": budget,
+                        "effective": 0,
+                        "remaining": available,
+                        "recoverable": True,
+                    }
+                )
+                continue
 
         try:
             validate_execution_activation(activation)

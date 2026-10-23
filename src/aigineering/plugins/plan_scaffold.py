@@ -163,6 +163,11 @@ def _dict_to_scaffold(d: dict, has_final_contracts: bool) -> PlanScaffold:
         _ensure_list(d.get("final_contracts")) if has_final_contracts else []
     )
 
+    def task_budget(task: dict) -> int:
+        if "budget" in task:
+            return _positive_int(task["budget"], 1)
+        return 2 if _string_list(task.get("tool_scope")) else 1
+
     tasks = tuple(
         ScaffoldTask(
             name=str(t.get("name", "")),
@@ -170,7 +175,7 @@ def _dict_to_scaffold(d: dict, has_final_contracts: bool) -> PlanScaffold:
             consumes=tuple(_string_list(t.get("consumes"))),
             produces=tuple(_string_list(t.get("produces"))),
             activation=str(t.get("activation", "")),
-            budget=_positive_int(t.get("budget"), 1),
+            budget=task_budget(t),
             tool_scope=tuple(_string_list(t.get("tool_scope"))),
             labels=tuple(_string_list(t.get("labels"))),
             capability_needs=tuple(_string_list(t.get("capability_needs"))),

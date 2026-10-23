@@ -313,8 +313,10 @@ def _planning_stage_instructions(contract: Contract) -> list[str]:
                     [
                         "- Each contract object must contain name, description, inputs, outputs, activation, budget, tool_scope, labels, capability_needs, pool_needs, delegation_capabilities, and delegation_pools.",
                         "- name and description must be non-empty; outputs must contain at least one asset name.",
-                        f"- Sum of child budgets must be at most {contract.budget}. Treat explicit child budgets and allowance_needs in the draft/dependency analysis as requirements; use budget 1 only as a default when no requirement is stated.",
+                        f"- Sum of child budgets must be at most {contract.budget}. Treat explicit child budgets and allowance_needs in the draft/dependency analysis as requirements. When no allowance requirement is stated, default to budget 1 only for a child with empty tool_scope; a child with non-empty tool_scope needs at least budget 2.",
                         "- Preserve explicit current-stage obligations from the draft and dependency analysis: required direct child names and count, inputs, outputs, activation, budgets, and allowance_needs. Do not replace a stated value with a cheaper default.",
+                        "- Every child with non-empty tool_scope requires budget >= 2 for the tool task and its continuation.",
+                        "- A child with further tool calls or /plan or /replan stages must explicitly budget enough allowance for that work. Required allowance depends on the actual serial and fan-out work; there is no universal N+1 formula.",
                         "- A child expected to issue /plan or /replan needs at least the three allowance units for its planning stages, plus the allowance required for its declared downstream work.",
                         f"- Child inputs may use only these parent input names or outputs promised by another child: {json.dumps(_planning_allowed_inputs(contract), ensure_ascii=False)}.",
                         "- The disclosed planning draft and dependency-analysis assets inform compilation only. Never copy their names into child inputs or activation unless they appear in the allowed parent input list above.",
