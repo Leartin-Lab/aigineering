@@ -175,8 +175,13 @@ def continuation_contract(
     *,
     method: str,
     budget: int,
+    legacy_empty_inputs: bool = False,
 ) -> Contract:
-    """Create the immutable follow-up attempt after a completed method task."""
+    """Create a follow-up retaining input roles; recognize old empty-input wire.
+
+    ``legacy_empty_inputs`` is only for exact historical publication proofs.
+    Ordinary continuation proposals always retain their parent's input roles.
+    """
     effective_budget = max(1, budget)
     name = f"{parent.name or parent.id}.{method}.continue.{source_contract.id}"
     authority = tuple(
@@ -198,7 +203,7 @@ def continuation_contract(
     return contract_from_fields(
         name=name,
         description=parent.description,
-        inputs=[],
+        inputs=() if legacy_empty_inputs else parent.inputs,
         outputs=parent.outputs,
         activation="",
         budget=effective_budget,

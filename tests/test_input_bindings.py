@@ -375,7 +375,7 @@ def test_tool_continuation_carries_binding_identity_without_widening_inputs():
     assert continuation.sensitive_input_policy["input_asset_bindings"] == {
         "dataset": ("asset:chosen",)
     }
-    assert continuation.inputs == ()
+    assert continuation.inputs == parent.inputs
     validate_contract_identity(continuation)
 
 

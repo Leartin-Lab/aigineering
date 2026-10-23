@@ -61,3 +61,26 @@ def test_budget_manager_is_not_a_production_runtime_owner():
     assert not Path("src/aigineering/core/budget_manager.py").exists()
     for path in Path("src/aigineering").rglob("*.py"):
         assert "BudgetManager" not in path.read_text(), path
+
+
+def test_legacy_empty_input_construction_is_history_recognition_only():
+    root = Path("src/aigineering")
+    callers = set()
+    for path in root.rglob("*.py"):
+        tree = ast.parse(path.read_text())
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "continuation_contract"
+                and any(key.arg == "legacy_empty_inputs" for key in node.keywords)
+            ):
+                callers.add(path.relative_to(root).as_posix())
+    assert callers == {"plugins/continuation_history.py"}
+    history = ast.parse((root / "plugins/continuation_history.py").read_text())
+    assert not any(
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr in {"publish", "add_contract", "append_runtime_record"}
+        for node in ast.walk(history)
+    )

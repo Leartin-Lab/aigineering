@@ -402,7 +402,9 @@ def test_nested_continuation_does_not_repeat_ancestor_review_reserve(
     assert proposal.effects[0].payload["contract"]["budget"] == 4
 
 
-def _completed_tool_source(tmp_path, monkeypatch, *, budget=100, outputs=None):
+def _completed_tool_source(
+    tmp_path, monkeypatch, *, budget=100, outputs=None, input_names=()
+):
     database, root_key_path, template, policy = _workspace(tmp_path, monkeypatch)
     store = SQLiteStore(database)
     genesis = load_genesis(store)
@@ -411,6 +413,7 @@ def _completed_tool_source(tmp_path, monkeypatch, *, budget=100, outputs=None):
     root = build_control_plane_contract(
         name=f"restart-tool-root-{budget}",
         description="Use a tool and continue the ordinary task.",
+        inputs=input_names,
         outputs=tuple(outputs) if outputs is not None else template.outputs,
         budget=budget,
         tool_scope=("lookup",),
@@ -502,6 +505,84 @@ def _completed_tool_source(tmp_path, monkeypatch, *, budget=100, outputs=None):
         == "accepted"
     )
     return database, root_key_path, root, source, store, publishers
+
+
+def test_legacy_empty_input_continuation_is_recognized_without_replacement(
+    tmp_path, monkeypatch
+):
+    from aigineering.plugins.task_semantics import continuation_contract
+
+    database, root_key_path, root, source, store, publishers = _completed_tool_source(
+        tmp_path, monkeypatch, input_names=("review_evidence",)
+    )
+    legacy = continuation_contract(
+        root, source, method="tool", budget=99, legacy_empty_inputs=True
+    )
+    assert legacy.inputs == ()
+    assert continuation_contract(root, source, method="tool", budget=99).inputs == (
+        "review_evidence",
+    )
+    publisher = publishers.get("continuation.publish.v1")
+    original_ids = tuple(
+        asset.id
+        for asset in store.get_assets_by_contract(source.id)
+        if asset.promptable
+    )
+    TraceManager(store).record(
+        root.id,
+        "method_continuation_context_prepared",
+        disclosed_assets=list(original_ids),
+        relation_type="tool",
+        relation_target=legacy.id,
+    )
+    assert publisher.publish(
+        (contract_declaration_effect(legacy),),
+        idempotency_key=f"continuation:{source.id}:{legacy.id}",
+        causal_parents=(source.id,),
+    ).accepted
+    from aigineering.protocol.types import Asset
+
+    late_asset = Asset(
+        id="late-source-context-proposal",
+        name="late_source_context",
+        content="This was not in the original continuation package.",
+        created_by=source.id,
+    )
+    genesis = load_genesis(store)
+    root_authority = CandidatePublisher(
+        store, store, genesis, genesis.root_keys[0], load_actor_signer(root_key_path)
+    )
+    assert root_authority.publish(
+        (asset_proposal_effect(late_asset),), idempotency_key="late-source-context"
+    ).accepted
+    store.close()
+
+    reopened = SQLiteStore(database)
+    try:
+        assert process_task_completions(
+            reopened,
+            default_completion_registry(),
+            candidate_publishers=ensure_local_runtime_publishers(reopened),
+        ) == [source.id]
+        continuations = [
+            task
+            for task in reopened.get_all_contracts()
+            if task.parent_id == root.id and task.origin == "continuation"
+        ]
+        assert continuations == [legacy]
+        from aigineering.task_context import method_context_assets_for
+
+        assert (
+            tuple(asset.id for asset in method_context_assets_for(legacy, reopened))
+            == original_ids
+        )
+        assert not [
+            entry
+            for entry in reopened.get_by_contract(root.id)
+            if entry.event_type == "task_continuation_rejected"
+        ]
+    finally:
+        reopened.close()
 
 
 def test_restart_after_accepted_continuation_before_marker_reuses_one_child(
@@ -1001,7 +1082,7 @@ def test_selected_continuation_history_fails_closed_when_incomplete(
 
 
 def test_prepublication_restart_reuses_source_head_intent(tmp_path, monkeypatch):
-    database, _key_path, root, source, store, publishers = _completed_tool_source(
+    database, key_path, root, source, store, publishers = _completed_tool_source(
         tmp_path, monkeypatch, budget=100
     )
     original_publish = CandidatePublisher.publish
@@ -1032,11 +1113,29 @@ def test_prepublication_restart_reuses_source_head_intent(tmp_path, monkeypatch)
         for contract in store.get_all_contracts()
         if contract.parent_id == root.id and contract.origin == "continuation"
     ]
-    assert [
+    prepared = [
         entry
         for entry in store.get_by_contract(root.id)
         if entry.event_type == "method_continuation_context_prepared"
     ]
+    assert prepared
+    frozen_ids = tuple(prepared[0].disclosed_assets)
+    from aigineering.protocol.types import Asset
+
+    late_asset = Asset(
+        id="late-interruption-context",
+        name="late_source_observation",
+        content="Published after context preparation, before the resumed declaration.",
+        created_by=source.id,
+    )
+    genesis = load_genesis(store)
+    authority = CandidatePublisher(
+        store, store, genesis, genesis.root_keys[0], load_actor_signer(key_path)
+    )
+    assert authority.publish(
+        (asset_proposal_effect(late_asset),),
+        idempotency_key="late-prepublication-context",
+    ).accepted
     store.close()
 
     monkeypatch.setattr(CandidatePublisher, "publish", original_publish)
@@ -1054,6 +1153,12 @@ def test_prepublication_restart_reuses_source_head_intent(tmp_path, monkeypatch)
     ]
     assert len(children) == 1
     assert children[0].budget == 98
+    from aigineering.task_context import method_context_assets_for
+
+    assert (
+        tuple(asset.id for asset in method_context_assets_for(children[0], reopened))
+        == frozen_ids
+    )
     assert (
         allowance_available(
             reopened.get_contract(root.id),

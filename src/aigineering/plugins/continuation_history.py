@@ -169,11 +169,22 @@ def inspect_continuation_history(
         raw_contract = member.payload["contract"]
         candidate_id = member.payload.get("candidate_id")
         raw_budget = raw_contract.get("budget")
-        canonical = (
-            continuation_contract(parent, source, method=method, budget=raw_budget)
-            if type(raw_budget) is int and raw_budget > 0
-            else None
-        )
+        # Recognition cannot replace a committed legacy child with today's
+        # input-preserving construction. Both still require the full original
+        # receipt, Candidate intent, head/member and materialization proof.
+        canonical = None
+        if type(raw_budget) is int and raw_budget > 0:
+            for legacy in (False, True):
+                option = continuation_contract(
+                    parent,
+                    source,
+                    method=method,
+                    budget=raw_budget,
+                    legacy_empty_inputs=legacy,
+                )
+                if deep_thaw(contract_to_dict(option)) == deep_thaw(raw_contract):
+                    canonical = option
+                    break
         canonical_payload = (
             deep_thaw(contract_to_dict(canonical)) if canonical is not None else None
         )

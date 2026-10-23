@@ -309,10 +309,27 @@ class TaskCompletionProjector:
                     parent, source, "continuation history omitted its Contract"
                 )
                 return
+            selections = tuple(
+                tuple(entry.disclosed_assets)
+                for entry in self._store.get_by_relation_target(continuation.id)
+                if entry.event_type
+                in {
+                    "method_continuation_context_prepared",
+                    "method_continuation_scheduled",
+                }
+            )
+            # Recognition is not permission to expand historical disclosure.
+            # An accepted legacy child without any saved selection stays empty.
+            selected = selections[0] if selections else ()
+            if any(selection != selected for selection in selections):
+                self._reject_continuation(
+                    parent, source, "continuation historical context is inconsistent"
+                )
+                return
             self._trace.record(
                 parent.id,
                 "method_continuation_scheduled",
-                disclosed_assets=[asset.id for asset in assets],
+                disclosed_assets=list(selected),
                 relation_type="tool",
                 relation_target=continuation.id,
                 budget_remaining=self._context.resolve_budget(parent.id),
@@ -336,13 +353,43 @@ class TaskCompletionProjector:
             )
         )
         continuation = contract_from_dict(proposal.effects[0].payload["contract"])
+        from aigineering.task_context import method_context_assets_for
+
+        prepared = tuple(
+            entry
+            for entry in self._store.get_by_relation_target(continuation.id)
+            if entry.event_type == "method_continuation_context_prepared"
+        )
+        if prepared:
+            # An interrupted publication resumes the already frozen selection.
+            context_ids = tuple(prepared[0].disclosed_assets)
+            context_assets = method_context_assets_for(continuation, self._store)
+            if any(
+                tuple(entry.disclosed_assets) != context_ids for entry in prepared
+            ) or ({asset.id for asset in context_assets} != set(context_ids)):
+                self._reject_continuation(
+                    parent, source, "continuation prepared context is inconsistent"
+                )
+                return
+        else:
+            # Carry only observations this exact parent already received and
+            # this completed method's outputs, never a Store-wide ancestor scan.
+            context_ids = tuple(
+                dict.fromkeys(
+                    asset.id
+                    for asset in (
+                        *method_context_assets_for(parent, self._store),
+                        *assets,
+                    )
+                )
+            )
         # A concurrent Worker can claim the Contract as soon as publication
         # commits. Persist its exact observations first; this preparation alone
         # neither declares work nor marks the parent as delegated.
         self._trace.record(
             parent.id,
             "method_continuation_context_prepared",
-            disclosed_assets=[asset.id for asset in assets],
+            disclosed_assets=list(context_ids),
             relation_type="tool",
             relation_target=continuation.id,
         )
@@ -362,7 +409,7 @@ class TaskCompletionProjector:
         self._trace.record(
             parent.id,
             "method_continuation_scheduled",
-            disclosed_assets=[asset.id for asset in assets],
+            disclosed_assets=list(context_ids),
             relation_type="tool",
             relation_target=continuation.id,
             budget_remaining=self._context.resolve_budget(parent.id),
