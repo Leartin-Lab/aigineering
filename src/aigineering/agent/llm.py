@@ -18,6 +18,7 @@ from aigineering.agent.prompt import contract_prompt, system_prompt
 from aigineering.agent.worker import WorkerExecutionError
 from aigineering.core.worker_routing import WorkerRegistration
 from aigineering.protocol.actions import ActionParseError, action_from_dict
+from aigineering.protocol.immutability import deep_thaw
 from aigineering.protocol.types import Asset, Candidate, Contract
 from aigineering.protocol.usage import (
     TOKEN_USAGE_FIELDS,
@@ -666,7 +667,7 @@ def _normalize_json_action_wire(content: str) -> str:
             action = action_from_dict(
                 {"type": action_type, "payload": dict(wire["payload"])}
             )
-            canonical = dict(action.payload)
+            canonical = deep_thaw(action.payload)
 
         encoded = json.dumps(
             canonical,

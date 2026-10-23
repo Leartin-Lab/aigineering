@@ -1472,6 +1472,69 @@ def test_json_object_mode_maps_method_actions_through_canonical_parser(action_ty
 
 
 @pytest.mark.parametrize(
+    ("action_type", "payload"),
+    [
+        (
+            "attest",
+            {
+                "contract_id": "task:target",
+                "output_name": "report",
+                "asset_id": "asset:report",
+                "verdict": "accepted",
+                "outputs": {
+                    "receipt": "verified",
+                    "details": {"evidence_ids": ["asset:a", "asset:b"]},
+                },
+            },
+        ),
+        (
+            "tool",
+            {
+                "name": "lookup",
+                "args": {
+                    "query": {"text": "candidates", "filters": [{"kind": "paper"}]},
+                    "limit": 3,
+                },
+            },
+        ),
+        (
+            "parallel_tool",
+            {
+                "calls": [
+                    {
+                        "id": "a",
+                        "name": "lookup",
+                        "args": {"query": {"term": "first"}},
+                    },
+                    {
+                        "id": "b",
+                        "name": "lookup",
+                        "args": {"query": {"term": "second"}},
+                    },
+                ],
+                "join": "all",
+            },
+        ),
+    ],
+)
+def test_json_object_mode_roundtrips_nested_non_exec_payloads(action_type, payload):
+    wire = json.dumps({"type": action_type, "payload": payload})
+    worker = LLMWorker(
+        model="test-model",
+        response_format="json_object",
+        transport=lambda *_args: {
+            "choices": [{"message": {"content": wire}}],
+        },
+    )
+
+    candidate = worker.invoke(_min_contract(), [])
+    action = parse_action(candidate.raw_output)
+
+    assert action.type == action_type
+    assert json.loads(candidate.raw_output.partition(" ")[2]) == payload
+
+
+@pytest.mark.parametrize(
     "wire",
     [
         "[]",
