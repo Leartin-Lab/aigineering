@@ -26,6 +26,7 @@ from aigineering.protocol.effect_builders import (
     asset_proposal_effect,
     contract_declaration_effect,
 )
+from aigineering.protocol.immutability import deep_thaw
 from aigineering.protocol.types import Asset, Contract
 from aigineering.protocol.wire import asset_to_dict, contract_to_dict
 
@@ -200,8 +201,10 @@ def prove_recovery_publication(
         or contract_member.payload != expected_contract_record.payload
         or tuple(contract_member.causal_parents)
         != tuple(expected_contract_record.causal_parents)
-        or contract_member.payload
-        != {"candidate_id": candidate_id, "contract": contract_to_dict(recovery)}
+        or deep_thaw(contract_member.payload)
+        != deep_thaw(
+            {"candidate_id": candidate_id, "contract": contract_to_dict(recovery)}
+        )
         or contract_to_dict(contracts[0]) != contract_to_dict(recovery)
     ):
         return _conflict("recovery_contract_member_or_materialization_mismatch")

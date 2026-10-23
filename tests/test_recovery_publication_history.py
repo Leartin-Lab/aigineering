@@ -462,6 +462,219 @@ def test_recovery_materialization_must_match_valid_generic_history(mismatch):
     intent.env.store.close()
 
 
+def test_signed_v6_recovery_publication_matches_exact_history():
+    from aigineering.core.ids import contract_from_fields
+    from aigineering.protocol.wire import contract_to_dict
+
+    env = _environment("signed-v6-recovery-history")
+    dataset = env.setup.accept_asset(
+        system_asset("dataset", "pinned recovery input", created_by="fixture")
+    )
+    recovery = contract_from_fields(
+        name="signed-v6-recovery-history.recover",
+        description='{"method":"tool","tool_name":"probe_tool"}',
+        inputs=("dataset",),
+        outputs=("report",),
+        activation="dataset",
+        budget=1,
+        tool_scope=("probe_tool",),
+        labels=(),
+        origin="system",
+        parent_id=env.root.id,
+        minting_authority=("report",),
+        sensitive_input_policy={"input_asset_bindings": {"dataset": [dataset.id]}},
+    )
+    context_template = system_asset(
+        name="_fail_context_signed-v6-recovery-history",
+        content='{"trigger":"verified_task_failure"}',
+        created_by=env.failed.id,
+        promptable=True,
+    )
+    effects = (
+        contract_declaration_effect(recovery),
+        asset_proposal_effect(context_template),
+    )
+    key = "projection-recovery:signed-v6-recovery-history"
+    decision = env.publisher.publish(
+        effects,
+        idempotency_key=key,
+        causal_parents=(env.failed.id,),
+    )
+    assert decision.accepted
+
+    snapshot = _snapshot(env)
+    declaration = next(
+        record
+        for record in snapshot.context.runtime_records
+        if record.record_type == "contract.declared"
+        and record.payload["contract"]["id"] == recovery.id
+    )
+    frozen_binding = declaration.payload["contract"]["sensitive_input_policy"][
+        "input_asset_bindings"
+    ]["dataset"]
+    wire_binding = contract_to_dict(recovery)["sensitive_input_policy"][
+        "input_asset_bindings"
+    ]["dataset"]
+    assert isinstance(frozen_binding, tuple)
+    assert isinstance(wire_binding, list)
+    assert tuple(frozen_binding) == tuple(wire_binding)
+    proof = prove_recovery_publication(
+        snapshot,
+        recovery=recovery,
+        context_template=context_template,
+        effects=effects,
+        idempotency_key=key,
+        causal_parents=(env.failed.id,),
+    )
+
+    assert recovery.id.startswith("task:v6:")
+    assert proof.status == "matched", proof.reason
+    assert proof.contract == recovery
+    env.store.close()
+
+
+def test_signed_v6_system_tool_recovery_reuses_exact_history_proof(monkeypatch):
+    from aigineering.agent.worker import WorkerExecutionError
+    from aigineering.core.capability_descriptors import create_tool_descriptor
+    from aigineering.core.ids import contract_from_fields
+    from aigineering.plugins.recovery import (
+        MethodRecoveryIntent,
+        _recovery_effects,
+        prepare_method_recovery_intent,
+    )
+    from aigineering.runtime import (
+        WorkerInvocationError,
+        claim_next_package,
+        execute_claimed_package,
+    )
+    from aigineering.task_diagnostics import task_recovery_source_binding
+    from conftest import hosted_worker
+    import aigineering.runtime_services as runtime_services_module
+
+    monkeypatch.setattr(
+        runtime_services_module, "sync_runtime", lambda *args, **kwargs: None
+    )
+
+    class FailingToolWorker:
+        worker_id = "worker:signed-v6-recovery-history"
+
+        def registration(self):
+            from aigineering.core.worker_routing import WorkerRegistration
+
+            return WorkerRegistration(
+                self.worker_id, capabilities=("tool-execution", "tool:probe_tool")
+            )
+
+        def invoke(self, contract, disclosed_assets):
+            del contract, disclosed_assets
+            raise WorkerExecutionError("fixture_tool_failure", "safe fixture failure")
+
+    env = _environment("signed-v6-system-tool-recovery")
+    dataset = env.setup.accept_asset(
+        system_asset("dataset", "pinned tool recovery input", created_by="fixture")
+    )
+    descriptor = env.setup.accept_asset(
+        create_tool_descriptor("probe_tool", "fixture probe", {"type": "object"})
+    )
+    parent = env.setup.accept_contract(
+        contract_from_fields(
+            name="signed-v6-system-tool-parent",
+            description="Use the pinned dataset.",
+            inputs=("dataset", "_tool_capability_probe_tool"),
+            outputs=("report",),
+            activation="dataset",
+            budget=3,
+            tool_scope=("probe_tool",),
+            labels=(),
+            origin="human",
+            parent_id=env.root.id,
+            minting_authority=("report",),
+            sensitive_input_policy={
+                "input_asset_bindings": {
+                    "dataset": [dataset.id],
+                    "_tool_capability_probe_tool": [descriptor.id],
+                }
+            },
+        )
+    )
+    action = WorkerAction(
+        type="tool", payload={"name": "probe_tool", "args": {"sample": 7}}
+    )
+    source_template = method_contract(parent, action)
+    method_context = system_asset(
+        name=f"_method_ctx_{parent.id}",
+        content=method_context_content(parent, action, source_template),
+        created_by=parent.id,
+        promptable=True,
+    )
+    source_decision = env.setup.publisher.publish(
+        (
+            contract_declaration_effect(source_template),
+            asset_proposal_effect(method_context),
+        ),
+        idempotency_key="signed-v6-system-tool-source",
+    )
+    assert source_decision.accepted and source_decision.contract is not None
+    source = source_decision.contract
+    assert source.id.startswith("task:v6:")
+    host = hosted_worker(
+        env.store,
+        FailingToolWorker(),
+        genesis=env.genesis,
+        authority_key=env.setup.actor_key,
+        authority_signer=env.setup.signer,
+    )
+    claimed = claim_next_package(
+        env.store,
+        worker_id=host.worker_id,
+        contract_id=source.id,
+        candidate_publishers=env.publishers,
+        claim_candidate=host.claim_candidate(
+            request_id="claim:signed-v6-system-tool-recovery", contract_id=source.id
+        ),
+    )
+    assert claimed is not None
+    with pytest.raises(WorkerInvocationError):
+        execute_claimed_package(
+            claimed, host, env.store, candidate_publishers=env.publishers
+        )
+
+    snapshot = _snapshot(env)
+    failure = next(
+        record
+        for _, record in env.store.scan_runtime_records(
+            record_type="worker.invocation_failed"
+        )
+        if record.payload.get("contract_id") == source.id
+    )
+    binding = task_recovery_source_binding(
+        env.store,
+        source.id,
+        claimed.package.claim_id,
+        failure.id,
+        "worker.invocation_failed",
+        query_context=snapshot.query_context,
+    )
+    intent = prepare_method_recovery_intent(
+        snapshot, failed_contract=source, source_binding=binding
+    )
+    assert isinstance(intent, MethodRecoveryIntent)
+    proof = prove_recovery_publication(
+        snapshot,
+        recovery=intent.recovery,
+        context_template=intent.context_asset,
+        effects=_recovery_effects(intent.recovery, intent.context_asset),
+        idempotency_key=intent.idempotency_key,
+        causal_parents=intent.causal_parents,
+        source_record_ids=intent.source_record_ids,
+    )
+    assert intent.recovery.id.startswith("task:v6:")
+    assert proof.status == "matched", proof.reason
+    assert proof.contract == intent.recovery
+    assert proof.contract.sensitive_input_policy == source.sensitive_input_policy
+    env.store.close()
+
+
 def test_exact_context_residue_with_missing_contract_is_conflict_and_not_republished(
     monkeypatch,
 ):
