@@ -14,6 +14,7 @@ navigation, not another architecture specification.
 | How do other implementations verify the wire protocol? | [`conformance/`](../conformance/) |
 | How are release evidence and rebuild failures reproduced? | [`reference/release-evidence.md`](reference/release-evidence.md) |
 | How do contributors change the project? | [`CONTRIBUTING.md`](../CONTRIBUTING.md) |
+| How are work packages planned, independently reviewed and integrated? | [`development-workflow-adapter.md`](development-workflow-adapter.md) |
 | How does an AI coding worker use this repository? | [`SKILL.md`](../SKILL.md) |
 | How do procedures become reusable, evaluated methods? | [`methods.md`](methods.md) |
 | How are examples launched and continued through one entry? | [`reference/configured-runs.md`](reference/configured-runs.md) |

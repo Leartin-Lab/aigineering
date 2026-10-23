@@ -1,0 +1,37 @@
+[run]
+fleet = "workers.toml"
+skills = ["."]
+
+[[inputs]]
+name = "sample"
+path = "sample.json"
+
+[task]
+name = "bounded_measurement_research"
+description_file = "task-description.txt"
+inputs = ["sample"]
+activation = "sample"
+outputs = ["measurement_report"]
+budget = 32
+tool_scope = ["summarize_sample", "convert_mean"]
+labels = ["_skill_content_cli_research"]
+worker_capabilities = ["measurement.plan"]
+worker_pools = ["planning"]
+delegation_capabilities = ["measurement.research", "measurement.verify"]
+delegation_pools = ["research", "verification"]
+acceptance_evidence_inputs = ["sample"]
+
+[task.acceptance_policy]
+mode = "independent"
+policy_version = "measurement-research-v1"
+required_attestations = 1
+verifier_capabilities = ["measurement.verify"]
+
+[task.acceptance_policy.output_shapes.measurement_report]
+dataset = "nonempty_string"
+sample_asset_id = "nonempty_string"
+count = "number"
+mean_c = "number"
+mean_f = "number"
+observation_asset_ids = ["nonempty_string"]
+limitations = ["nonempty_string"]

@@ -438,6 +438,23 @@ Each stage is independently claimable and testable. Compile enforces:
 - labels contained within the parent's non-Plugin context-selection scope;
 - tool, Worker, authority, and allowance containment.
 
+An authorized compile task may use ordinary tools before returning its
+blueprint. New claim-bound method children exclude the six planning-stage
+control labels; a new nested stage carries only its current stage label. Prompt
+and Worker compilation share one pure active-stage resolver. Explicit typed
+system method roles, including their retry and recovery forms, take precedence
+over legacy inherited stage labels. Genuine compile continuations and repairs
+retain the blueprint fence, including ambiguous legacy compile metadata.
+Historical method-source proof recognizes exact old and current publications
+without changing their Contracts, scope or allowance. See
+[change 114](changes/114-isolate-planning-stage-roles-from-method-children.md).
+
+Both planning formats default an omitted child budget to two for nonempty tool
+scope and one otherwise. Explicit insufficient tool budgets remain rejected;
+containment cannot reduce a tool child below that minimum. This is a minimum
+for one tool and continuation, not a cost formula for arbitrary tool chains.
+See [change 107](changes/107-planned-tool-budget-default.md).
+
 A final reachability closure is computed from accepted producers only. A
 rejected producer, self-dependency, or ungrounded cycle cannot leave an admitted
 task permanently disabled.
@@ -449,6 +466,13 @@ facts through registered Plugins.
 A successful tool task publishes a continuation whose scope omits that exact
 tool. Repeated calls are represented as separate ordinary tasks rather than an
 unbounded same-task tool loop; other parent-authorized tools remain available.
+New continuations retain the parent's input roles and exact input policy. Their
+method context freezes the ordered, deduplicated union of the exact parent's
+previous context and the current tool observations before publication. An
+interrupted publication reuses those prepared IDs. Historical recognition
+accepts the original legacy empty-input construction but never replaces its
+Contract or refreshes its saved context; conflicting history fails closed. See
+[change 110](changes/110-continuation-input-and-observation-retention.md).
 Tool and synchronous MCP adapter preflight or invocation failures raise the
 existing `WorkerExecutionError` with a fixed safe code and message, so no
 observation Candidate is produced and the ordinary Worker failure path closes
@@ -480,6 +504,10 @@ Contract/context projections, and current materializations match. This
 read-only proof can reconcile an accepted publication after its signing key is
 revoked; any new publication still uses current Candidate authentication.
 Publication and the later recovery outcome remain separate writes.
+Recovery declaration comparisons use canonical wire containers, preserving
+exact keys, values and sequence order while normalizing frozen tuples and JSON
+lists. All receipt, head/member and materialization proofs still apply. See
+[change 111](changes/111-recovery-binding-wire-comparison.md).
 
 `/parallel_tool` compiles two to eight calls into independently claimable tool
 Contracts and one continuation activated by the boolean conjunction of their
@@ -629,6 +657,16 @@ durable failure trace and RuntimeRecord. The failure path applies an explicit
 usage allowlist and does not synthesize zero usage when the provider reports
 none.
 
+Plan and replan compile failures can additionally retain bounded, versioned
+structured rejection diagnostics. One pure application format owner validates
+both failure writes and exact claim-history reads. The generic recovery keeps
+its readable summary and includes these details in its existing failure-context
+Asset; neither diagnostic recoverability nor a published successor proves repair
+success. Legacy failures keep their original summary. Writer, reader and consumer
+deployment must stay aligned because the optional durable field changes recovery
+intent reconstruction. See
+[structured compile diagnostics](changes/105-structured-compile-failure-diagnostics.md).
+
 Usage metadata has one protocol-owned allowlist and validator. Local LLM and
 tool adapters filter unknown or malformed fields before building a signed
 CandidateEnvelope; direct envelope and harness inputs are validated strictly.
@@ -770,7 +808,11 @@ output/lineage/policy validators own eligibility; the view cannot attest or
 reset a claim. Aggregate list, board and stats share one immutable revision-bearing
 fact snapshot per read; the view context is bound to its source Store and cannot
 be reused across snapshots. This avoids repeated persisted fact scans while
-retaining full-history validation. See [change 061](changes/061-submitted-task-view.md)
+retaining full-history validation. Descendant pending-acceptance risk checks use
+that same captured effect projection; the narrow read facade never falls back
+to fresh Store fact loading. See
+[change 113](changes/113-reuse-task-view-projection-snapshot-for-descendant-risks.md),
+[change 061](changes/061-submitted-task-view.md)
 and [change 076](changes/076-task-view-query-reuse.md).
 Fleet slots claim only the selected immutable task tree, use Redis notifications
 with bounded waits, and return to SQLite for every claim and submission decision.
@@ -789,6 +831,23 @@ revision, source revision and prefix certificate must agree; equal revision or
 graph digest alone does not identify same-revision histories. The cold path may
 scan the committed prefix, while repeated reads on the same Store reuse its exact
 append tip or rescan from a nearby checkpoint.
+
+If a concurrent relay has advanced Redis beyond a sync's captured prefix, sync
+may recapture from the same configured Store only when its revision advanced
+and the entire original prefix is unchanged. It retries the full proof within
+the existing bounded attempt budget; genuine ahead history, divergence and
+exhausted contention remain visible errors. Event reads keep their own frozen
+capture and can retry sync contention only through their existing bounded
+prefix-proof loop. They cannot refresh their source or return unproven events.
+After a watched transaction raises `WatchError`, sync also recaptures that same
+Store when attempts remain. It adopts the new capture only when the revision
+strictly advanced and the complete original prefix is preserved; a fork stops
+as `source_diverged`. A non-advancing capture leaves the original snapshot in
+place. The final failed attempt does not trigger another capture, and repeated
+conflicts remain visible as `sync_contention`; sustained concurrent writes can
+still exhaust the fixed budget. See
+[change 112](changes/112-concurrent-relay-source-refresh.md) and
+[change 116](changes/116-refresh-redis-source-after-watch-conflict.md).
 
 Full rebuild watches the active pointer and active/target metadata through
 `EXEC`, and enumerates target keys while the target metadata is watched. One
@@ -999,6 +1058,14 @@ keeps its legacy outcome payload, including for ordinary JSON that happens to
 contain reserved recovery-marker names. Claim-proven unavailable outcomes may
 show their fixed reason and a reported target in read-only diagnostics; that
 observation does not verify the target or create a lineage edge.
+Operational method-recovery preparation uses one owned SQLite snapshot for
+history, exact source and ancestor binding proofs. It closes that copy before
+scheduling and retains only frozen history, without a query tied to the closed
+Store. The recovery Candidate is published through the original live runtime
+and publisher with current writer checks. A provided snapshot failure is not a
+fallback to live reads; trusted Stores without that capability retain their
+existing memory path. Generic task-view query identity and revision matching
+remain strict. See [change 117](changes/117-snapshot-recovery-source-preparation.md).
 Read-only lineage, retry, recovery and attachment readers use one pure
 effect-type sequence reader; malformed containers such as mappings cannot
 qualify retry, recovery, handoff or revision edges.
@@ -1308,6 +1375,14 @@ workspace. Resource paths are preset-relative while the Fleet database remains
 workspace-relative. Invalid resources and Contracts fail before runtime
 provisioning. Setup and execution are separate signed transactions.
 
+For new configured roots, each declared input role binds the exact Asset ID
+returned by that run's resource publication through the existing v6 input guard.
+Other sensitive-policy fields and unused bindings remain intact; conflicting
+explicit active bindings refuse root publication. Historical same-name inputs
+cannot join the frozen selection. Resume never regenerates this map. Roots with
+no inputs and no sensitive policy retain their existing identity. See
+[change 109](changes/109-configured-input-pins.md).
+
 `--resume CONTRACT_ID` (or existing `--task`) selects committed work. Configured
 resume reads only Worker profiles (directly or through a preset Fleet reference)
 and the existing Contract; it never reloads
@@ -1354,9 +1429,24 @@ input/output JSON-schema subset, version, and maximum UTF-8 result size. The
 registry validates inputs before invoking a handler and validates JSON results
 and byte limits before a successful observation is returned. The ToolWorker
 also checks that the signed descriptor matches the registered executable
-contract, failing closed on descriptor drift. Non-object tool arguments are
+contract, failing closed on descriptor drift. Matching examines only disclosed
+descriptors and requires one distinct matching Asset ID; ordering cannot select
+an old version, and multiple matching IDs fail observably. The CLI can publish
+version, output schema and byte limit, and inspect an exact committed descriptor
+ID; ambiguous names require that exact selector. See
+[change 106](changes/106-complete-tool-descriptor-cli.md) and
+[change 108](changes/108-disclosed-tool-descriptor-selection.md).
+Non-object tool arguments are
 rejected before execution. Schema constants and enums distinguish JSON booleans
 from numbers, and explicit null schema keywords are invalid except `const`.
+An adapter may explicitly require a success envelope field through its output
+schema. A schema-valid observation does not universally classify business truth.
+In strict provider JSON-action mode, the adapter recursively thaws validated
+non-exec payloads before canonical serialization. Nested tool arguments,
+parallel calls and attestation outputs retain their JSON values; duplicate keys,
+invalid constants, unsupported actions and malformed wire remain rejected.
+Plugin semantics and authority still run at the ordinary Candidate boundary.
+See [change 115](changes/115-thaw-nested-json-action-payloads.md).
 Each observation Candidate
 includes structured execution metadata for tool version, duration, result
 bytes, error type, and retryability.

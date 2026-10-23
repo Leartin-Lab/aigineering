@@ -15,6 +15,10 @@ keep import/test/assessment preparation, followed by the same configured run
 entry for their existing task IDs. Skill-only packages remain reusable resources.
 See [configured runs](../docs/reference/configured-runs.md).
 
+[`cli_research`](cli_research/README.md) provides a bounded synthetic measurement
+report with runtime planning, two chained tools, explicit envelope validation
+and a separate authorized verifier. It includes no example-owned task driver.
+
 ## New diagnostic case studies
 
 - [`report-consistency`](report-consistency/README.md) checks a corrected sales

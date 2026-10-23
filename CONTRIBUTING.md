@@ -4,6 +4,11 @@ Aigineering is an early Zero Trust Agent Runtime. The main rule is to preserve
 the runtime boundary: worker output is a candidate until authority projects it
 into a runtime fact.
 
+Use the [repository workflow adapter](docs/development-workflow-adapter.md)
+when planning and delegating work. Each work package has its own plan audit
+and implementation acceptance; parallel work follows actual dependencies and
+explicit file ownership. Record the combined result against an exact snapshot.
+
 ## Branch Flow
 
 - `main` is the protected release branch.

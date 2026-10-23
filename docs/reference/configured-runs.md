@@ -11,6 +11,12 @@ aig -C workspaces/report run --config /absolute/path/to/examples/report-consiste
 Set the provider environment variables named by the Worker profile before
 launch. The preset publishes inputs, Skill Assets and one root Contract, then
 uses the canonical local Fleet. It never supplies an answer key or a domain DAG.
+New root input roles select the exact Asset IDs from that resource publication,
+using the existing `input_asset_bindings` guard, even when the preset omitted a
+sensitive policy. Other sensitive-policy fields remain intact. Conflicting
+explicit active bindings refuse root declaration; setup resources may already
+be committed. Historical same-name inputs cannot join that selection. Resume
+continues the existing Contract and does not update its bindings.
 The result includes `contract_id`, projected `status`, `completed`, `timed_out`
 and `worker_errors`. Completion satisfies the Contract policy; it does not prove
 general semantic correctness. `--json` emits one result object, not a streaming
@@ -112,3 +118,8 @@ The complete root recipes in `examples/ai4s`, `examples/report-consistency`,
 a new entrypoint does not improve those outcomes by itself. Skill-only resource
 packages are not standalone workloads. Method packages retain explicit import,
 instantiation, test and assessment commands before ordinary task execution.
+
+The [CLI measurement research example](../../examples/cli_research/README.md)
+adds a small synthetic workload with two chained tools, explicit success-envelope
+schemas and independent report qualification. Its default profiles use the real
+provider; deterministic local Workers are test fixtures only.

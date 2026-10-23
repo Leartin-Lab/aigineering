@@ -1,0 +1,5 @@
+name = "cli_research"
+version = "1.0.0"
+description = "Plan and independently check a bounded synthetic data report."
+trust_tier = "configured"
+content_file = "SKILL.md"
