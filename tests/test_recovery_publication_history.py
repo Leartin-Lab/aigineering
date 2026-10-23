@@ -1714,6 +1714,263 @@ def test_signed_claimed_source_rejects_noncanonical_two_level_marker(
     env.store.close()
 
 
+def test_recovery_source_binding_capture_races_with_second_sqlite_writer(
+    monkeypatch, tmp_path
+):
+    """A second signed writer after capture must not stale source proof."""
+    from aigineering.agent.worker import WorkerExecutionError
+    from aigineering.core.capability_descriptors import create_tool_descriptor
+    from aigineering.runtime import (
+        WorkerInvocationError,
+        claim_next_package,
+        execute_claimed_package,
+    )
+    from conftest import hosted_worker, candidate_runtime
+    import aigineering.plugins.completion_projection as completion_module
+    import aigineering.plugins.recovery as recovery_module
+    import aigineering.task_diagnostics as diagnostics_module
+    import aigineering.runtime as runtime_module
+    import aigineering.runtime_services as runtime_services_module
+
+    monkeypatch.setattr(
+        runtime_services_module, "sync_runtime", lambda *args, **kwargs: None
+    )
+
+    class LocalFailure:
+        worker_id = "worker:recovery-capture-race"
+
+        def registration(self):
+            from aigineering.core.worker_routing import WorkerRegistration
+
+            return WorkerRegistration(
+                self.worker_id,
+                capabilities=("tool-execution", "tool:probe_tool"),
+            )
+
+        def invoke(self, contract, disclosed_assets):
+            del contract, disclosed_assets
+            raise WorkerExecutionError("local_fixture_failure", "fixture failure")
+
+    db_path = tmp_path / "recovery-capture-race.sqlite"
+    env = _environment("capture-race", store_path=str(db_path))
+    env.setup.accept_asset(
+        create_tool_descriptor("probe_tool", "fixture probe", {"type": "object"})
+    )
+    parent = env.setup.accept_contract(
+        Contract(
+            id="task:capture-race-parent",
+            name="capture-race-parent",
+            outputs=("report",),
+            budget=4,
+            tool_scope=("probe_tool",),
+        )
+    )
+    action = WorkerAction(type="tool", payload={"name": "probe_tool", "args": {}})
+    source_template = method_contract(parent, action)
+    method_context = system_asset(
+        name=f"_method_ctx_{parent.id}",
+        content=method_context_content(parent, action, source_template),
+        created_by=parent.id,
+        promptable=True,
+    )
+    source_decision = env.setup.publisher.publish(
+        (
+            contract_declaration_effect(source_template),
+            asset_proposal_effect(method_context),
+        ),
+        idempotency_key="capture-race-source",
+    )
+    assert source_decision.accepted and source_decision.contract is not None
+    source = source_decision.contract
+    host = hosted_worker(
+        env.store,
+        LocalFailure(),
+        genesis=env.genesis,
+        authority_key=env.setup.actor_key,
+        authority_signer=env.setup.signer,
+    )
+    claimed = claim_next_package(
+        env.store,
+        worker_id=host.worker_id,
+        contract_id=source.id,
+        candidate_publishers=env.publishers,
+        claim_candidate=host.claim_candidate(
+            request_id="capture-race-claim", contract_id=source.id
+        ),
+    )
+    assert claimed is not None
+
+    other_store = SQLiteStore(str(db_path))
+    other_setup = candidate_runtime(
+        other_store,
+        genesis=env.genesis,
+        actor_key=env.setup.actor_key,
+        signer=env.setup.signer,
+    )
+    original_capture = TaskCompletionContext.capture_recovery_history
+    original_store_snapshot = SQLiteStore.snapshot
+    original_source_binding = diagnostics_module.task_recovery_source_binding
+    original_ancestor_bindings = (
+        diagnostics_module.task_recovery_ancestor_source_bindings
+    )
+    original_schedule = recovery_module.schedule_projection_recovery
+    original_context_init = TaskCompletionContext.__init__
+    committed = False
+    proof_stores = []
+    proof_queries = []
+    source_store_ids = []
+    ancestor_store_ids = []
+    closed = []
+    contexts = []
+
+    def track_context_init(context, store, trace, candidate_publishers):
+        contexts.append((context, store, candidate_publishers))
+        original_context_init(context, store, trace, candidate_publishers)
+
+    def tracked_snapshot(store):
+        copy = original_store_snapshot(store)
+        proof_stores.append(copy)
+        original_close = copy.close
+
+        def tracked_close():
+            closed.append(copy)
+            original_close()
+
+        copy.close = tracked_close
+        return copy
+
+    def capture_then_second_writer(context):
+        nonlocal committed
+        snapshot = original_capture(context)
+        if snapshot is not None and snapshot.query_context is not None:
+            proof_queries.append(snapshot.query_context)
+        if not committed:
+            committed = True
+            asset = other_setup.accept_asset(
+                system_asset(
+                    "capture-race-concurrent-asset",
+                    "signed concurrent commit",
+                    created_by="capture-race-test",
+                )
+            )
+            assert asset.name == "capture-race-concurrent-asset"
+            assert other_store.get_runtime_revision() > snapshot.revision
+        return snapshot
+
+    def source_binding(*args, **kwargs):
+        if kwargs.get("query_context") is not None:
+            source_store_ids.append((args[0], kwargs["query_context"]))
+        return original_source_binding(*args, **kwargs)
+
+    def ancestor_bindings(*args, **kwargs):
+        ancestor_store_ids.append((args[0], kwargs.get("query_context")))
+        return original_ancestor_bindings(*args, **kwargs)
+
+    def schedule(runtime, **kwargs):
+        assert isinstance(runtime, TaskCompletionContext)
+        assert contexts[0] == (runtime, env.store, env.publishers)
+        assert kwargs["recovery_snapshot"].query_context is None
+        assert closed == proof_stores
+        return original_schedule(runtime, **kwargs)
+
+    monkeypatch.setattr(SQLiteStore, "snapshot", tracked_snapshot)
+    monkeypatch.setattr(TaskCompletionContext, "__init__", track_context_init)
+    monkeypatch.setattr(
+        completion_module.TaskCompletionContext,
+        "capture_recovery_history",
+        capture_then_second_writer,
+    )
+    monkeypatch.setattr(
+        diagnostics_module, "task_recovery_source_binding", source_binding
+    )
+    monkeypatch.setattr(
+        diagnostics_module,
+        "task_recovery_ancestor_source_bindings",
+        ancestor_bindings,
+    )
+    monkeypatch.setattr(recovery_module, "schedule_projection_recovery", schedule)
+    try:
+        with pytest.raises(WorkerInvocationError):
+            execute_claimed_package(
+                claimed, host, env.store, candidate_publishers=env.publishers
+            )
+        assert committed
+        assert len(proof_stores) == len(proof_queries) == 1
+        assert closed == proof_stores
+        assert len(source_store_ids) == len(ancestor_store_ids) == 1
+        assert source_store_ids[0] == (proof_stores[0], proof_queries[0])
+        assert ancestor_store_ids[0] == (proof_stores[0], proof_queries[0])
+        assert proof_queries[0].source_store is proof_stores[0]
+        assert proof_queries[0].revision < env.store.get_runtime_revision()
+
+        failure = next(
+            record
+            for _, record in env.store.scan_runtime_records(
+                record_type="worker.invocation_failed"
+            )
+            if record.payload.get("contract_id") == source.id
+        )
+        outcomes = [
+            record
+            for _, record in env.store.scan_runtime_records(
+                record_type="worker_failure.recovery_scheduled"
+            )
+            if record.payload.get("contract_id") == source.id
+        ]
+        assert len(outcomes) == 1
+        assert outcomes[0].payload.get("contract_id") == source.id
+        assert outcomes[0].payload.get("failure_id") == failure.id
+        recovery_contracts = [
+            contract
+            for contract in env.store.get_all_contracts()
+            if method_payload(contract).get("recovery_source_contract_id") == source.id
+        ]
+        assert len(recovery_contracts) == 1
+        assert env.store.get_contract(recovery_contracts[0].id) == recovery_contracts[0]
+        valid_binding = runtime_module._recovery_source_binding(
+            env.store, source, failure
+        )
+        mismatched_binding = dict(
+            valid_binding, grant_record_id="receipt:wrong-binding"
+        )
+        before_mismatch = tuple(env.store.scan_runtime_records())
+        with pytest.raises(diagnostics_module.TaskDiagnosticError) as mismatch_error:
+            runtime_module._schedule_rejected_recovery(
+                source,
+                "fixture failure",
+                [{"category": "fixture", "name": "(provider)", "reject_reason": "bad"}],
+                env.store,
+                env.store,
+                candidate_publishers=env.publishers,
+                source_binding=mismatched_binding,
+            )
+        assert mismatch_error.value.code == "recovery_source_snapshot_mismatch"
+        assert len(proof_stores) == len(proof_queries) == 2
+        assert closed == proof_stores
+        assert tuple(env.store.scan_runtime_records()) == before_mismatch
+
+        def failed_snapshot(_store):
+            raise RuntimeError("fixture snapshot failure")
+
+        monkeypatch.setattr(SQLiteStore, "snapshot", failed_snapshot)
+        before_snapshot_failure = tuple(env.store.scan_runtime_records())
+        with pytest.raises(RuntimeError, match="fixture snapshot failure"):
+            runtime_module._schedule_rejected_recovery(
+                source,
+                "fixture failure",
+                [{"category": "fixture", "name": "(provider)", "reject_reason": "bad"}],
+                env.store,
+                env.store,
+                candidate_publishers=env.publishers,
+                source_binding=valid_binding,
+            )
+        assert len(proof_queries) == 2
+        assert tuple(env.store.scan_runtime_records()) == before_snapshot_failure
+    finally:
+        other_store.close()
+        env.store.close()
+
+
 @pytest.mark.parametrize("claim_ids", [(), ("claim:a", "claim:b")])
 def test_projection_recovery_missing_or_ambiguous_claim_is_observable_no_write(
     claim_ids,

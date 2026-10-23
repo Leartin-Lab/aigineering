@@ -765,16 +765,11 @@ def _schedule_rejected_recovery(
     if source_binding is not None:
         from aigineering.task_diagnostics import TaskDiagnosticError
 
-        snapshot = runtime.capture_recovery_history()
-        recovery_snapshot = snapshot
-        if snapshot is None or snapshot.query_context is None:
-            raise TaskDiagnosticError("recovery_source_snapshot_unavailable")
         from aigineering.task_diagnostics import (
             task_recovery_ancestor_source_bindings,
             task_recovery_source_binding,
         )
 
-        query = snapshot.query_context
         source_record_id = source_binding.get("source_record_id")
         claim_id = source_binding.get("claim_id")
         source_kind = source_binding.get("kind")
@@ -785,37 +780,55 @@ def _schedule_rejected_recovery(
             from aigineering.task_diagnostics import TaskDiagnosticError
 
             raise TaskDiagnosticError("recovery_source_integrity_error")
-        proven_binding = task_recovery_source_binding(
-            store,
-            contract.id,
-            claim_id,
-            source_record_id,
-            source_kind,
-            query_context=query,
-        )
-        for key in (
-            "kind",
-            "contract_id",
-            "claim_id",
-            "grant_record_id",
-            "failure_record_id",
-            "release_record_id",
-            "source_record_id",
-            "witness_record_ids",
-        ):
-            if source_binding.get(key) != proven_binding.get(key):
-                from aigineering.task_diagnostics import TaskDiagnosticError
-
-                raise TaskDiagnosticError("recovery_source_snapshot_mismatch")
-        source_binding = proven_binding
-        try:
-            ancestor_source_bindings = task_recovery_ancestor_source_bindings(
-                store, contract.id, query_context=query
+        snapshot_factory = getattr(store, "snapshot", None)
+        proof_store = snapshot_factory() if callable(snapshot_factory) else store
+        proof_runtime = (
+            runtime
+            if proof_store is store
+            else TaskCompletionContext(
+                proof_store, TraceManager(proof_store), candidate_publishers
             )
-        except TaskDiagnosticError:
-            # The current failure is authenticated, so malformed prior history
-            # is an unsupported method disposition; it cannot authorize work.
-            ancestor_source_bindings = {}
+        )
+        try:
+            snapshot = proof_runtime.capture_recovery_history()
+            if snapshot is None or snapshot.query_context is None:
+                raise TaskDiagnosticError("recovery_source_snapshot_unavailable")
+            query = snapshot.query_context
+            proven_binding = task_recovery_source_binding(
+                proof_store,
+                contract.id,
+                claim_id,
+                source_record_id,
+                source_kind,
+                query_context=query,
+            )
+            for key in (
+                "kind",
+                "contract_id",
+                "claim_id",
+                "grant_record_id",
+                "failure_record_id",
+                "release_record_id",
+                "source_record_id",
+                "witness_record_ids",
+            ):
+                if source_binding.get(key) != proven_binding.get(key):
+                    raise TaskDiagnosticError("recovery_source_snapshot_mismatch")
+            source_binding = proven_binding
+            try:
+                ancestor_source_bindings = task_recovery_ancestor_source_bindings(
+                    proof_store, contract.id, query_context=query
+                )
+            except TaskDiagnosticError:
+                # The current failure is authenticated, so malformed prior history
+                # is an unsupported method disposition; it cannot authorize work.
+                ancestor_source_bindings = {}
+            # The immutable projection is sufficient for publication planning;
+            # do not retain a query context that points at a closed snapshot Store.
+            recovery_snapshot = replace(snapshot, query_context=None)
+        finally:
+            if proof_store is not store:
+                proof_store.close()
     recovery = schedule_projection_recovery(
         runtime,
         failed_contract=contract,

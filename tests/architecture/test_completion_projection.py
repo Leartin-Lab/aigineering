@@ -84,3 +84,78 @@ def test_legacy_empty_input_construction_is_history_recognition_only():
         and node.func.attr in {"publish", "add_contract", "append_runtime_record"}
         for node in ast.walk(history)
     )
+
+
+def test_recovery_source_proof_stays_read_only_and_publishes_through_runtime():
+    runtime_tree = ast.parse(Path("src/aigineering/runtime.py").read_text())
+    runtime_function = next(
+        node
+        for node in runtime_tree.body
+        if isinstance(node, ast.FunctionDef)
+        and node.name == "_schedule_rejected_recovery"
+    )
+    calls = [node for node in ast.walk(runtime_function) if isinstance(node, ast.Call)]
+    called_names = {node.func.id for node in calls if isinstance(node.func, ast.Name)}
+    assert "task_recovery_source_binding" in called_names
+    assert "task_recovery_ancestor_source_bindings" in called_names
+    schedule_call = next(
+        node
+        for node in calls
+        if isinstance(node.func, ast.Name)
+        and node.func.id == "schedule_projection_recovery"
+    )
+    assert schedule_call.args and isinstance(schedule_call.args[0], ast.Name)
+    assert schedule_call.args[0].id == "runtime"
+    assert not any(
+        isinstance(node.func, ast.Attribute)
+        and node.func.attr
+        in {
+            "publish",
+            "publish_task_effects",
+            "append_runtime_record",
+            "commit_candidate",
+        }
+        for node in calls
+    )
+
+    query_tree = ast.parse(Path("src/aigineering/task_view_query.py").read_text())
+    query_context = next(
+        node
+        for node in query_tree.body
+        if isinstance(node, ast.ClassDef) and node.name == "TaskViewQueryContext"
+    )
+    require_match = next(
+        node
+        for node in query_context.body
+        if isinstance(node, ast.FunctionDef) and node.name == "require_match"
+    )
+    comparisons = [
+        node for node in ast.walk(require_match) if isinstance(node, ast.Compare)
+    ]
+    assert any(
+        isinstance(node.left, ast.Name)
+        and node.left.id == "store"
+        and any(
+            isinstance(comparator, ast.Attribute) and comparator.attr == "source_store"
+            for comparator in node.comparators
+        )
+        for node in comparisons
+    )
+    assert any(
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "get_runtime_revision"
+        for node in ast.walk(require_match)
+    )
+
+    recovery_tree = ast.parse(Path("src/aigineering/plugins/recovery.py").read_text())
+    recovery_calls = [
+        node for node in ast.walk(recovery_tree) if isinstance(node, ast.Call)
+    ]
+    assert any(
+        isinstance(node.func, ast.Attribute)
+        and node.func.attr == "publish_task_effects"
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "runtime"
+        for node in recovery_calls
+    )
