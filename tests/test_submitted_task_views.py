@@ -384,6 +384,52 @@ def test_descendant_business_outputs_remain_exact_qualification_references(
     store.close()
 
 
+def test_aggregate_parent_view_reuses_snapshot_for_submitted_child_risk(
+    tmp_path, monkeypatch
+):
+    store = SQLiteStore(db_path=str(tmp_path / "submitted-child-view.sqlite"))
+    publisher = candidate_runtime(store)
+    policy, _context_ids = _independent_policy(publisher)
+    parent = _publish_task(
+        store,
+        publisher,
+        name="submitted-child-parent",
+        outputs=("parent-result",),
+    )
+    child = _publish_task(
+        store,
+        publisher,
+        name="submitted-child",
+        outputs=("summary", "appendix"),
+        policy=policy,
+        parent_id=parent.id,
+    )
+    result = _run(
+        store,
+        publisher,
+        _OutputWorker(
+            "worker:submitted-child",
+            {"summary": "A child summary.", "appendix": "A child appendix."},
+        ),
+        child,
+        monkeypatch,
+    )
+    assert result["status"] == "accepted"
+
+    query_context = load_task_view_query_context(store)
+    status = project_task_status(
+        parent,
+        store,
+        projection_context=query_context.effect_projection,
+        query_context=query_context,
+    )
+
+    assert "descendant_submitted_without_recovery" not in {
+        risk["code"] for risk in status["silent_failure_risks"]
+    }
+    store.close()
+
+
 def test_legacy_orphan_projection_keeps_risk_and_state_precedence():
     store = SQLiteStore(":memory:")
     publisher = candidate_runtime(store)

@@ -103,3 +103,12 @@ def test_aggregate_task_views_reuse_one_explicit_read_snapshot():
         "query_context.require_match"
     )
     assert "check_store_integrity(original_store)" in status
+    assert (
+        "_descendant_failure_risks(contract, store, projection_context=projection_context)"
+        in status
+    )
+    descendant_risks = ast.unparse(_function(views_tree, "_descendant_failure_risks"))
+    assert (
+        "_submitted_independent_output_assets(child, store, projection_context)"
+        in descendant_risks
+    )

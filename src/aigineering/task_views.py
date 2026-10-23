@@ -182,7 +182,11 @@ def project_task_status(
         qualification_pending=qualification_pending,
     )
     if status not in {"completed", "failed", "cancelled", "unreachable"}:
-        risks.extend(_descendant_failure_risks(contract, store))
+        risks.extend(
+            _descendant_failure_risks(
+                contract, store, projection_context=projection_context
+            )
+        )
     result = {
         "contract_id": contract.id,
         "name": contract.name,
@@ -574,7 +578,9 @@ def _has_active_recovery(contract: Contract, store) -> bool:
     return bool(recovery_successor_ids(contract, store))
 
 
-def _descendant_failure_risks(contract: Contract, store) -> list[dict[str, str]]:
+def _descendant_failure_risks(
+    contract: Contract, store, *, projection_context=None
+) -> list[dict[str, str]]:
     contracts = store.get_all_contracts()
     children: dict[str, list[Contract]] = {}
     recovery_map = recovery_successor_map(store, contracts)
@@ -622,7 +628,11 @@ def _descendant_failure_risks(contract: Contract, store) -> list[dict[str, str]]
                 view=view,
                 qualification_pending=(
                     view.claim_status == "submitted"
-                    and bool(_submitted_independent_output_assets(child, store))
+                    and bool(
+                        _submitted_independent_output_assets(
+                            child, store, projection_context
+                        )
+                    )
                 ),
             )
             for risk in child_risks:
