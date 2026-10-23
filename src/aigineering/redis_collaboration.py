@@ -429,20 +429,18 @@ class RedisCollaborationService:
                             "Redis collaboration sync contention",
                             reason="sync_contention",
                         ) from exc
-                    fresh_revision, fresh_entries = self._capture_events(self._store)
-                    if fresh_revision <= revision:
+                    refreshed = self._refresh_capture_if_advanced(revision, entries)
+                    if refreshed is None:
                         raise
-                    if not self._entries_preserve_prefix(
-                        fresh_entries, entries, revision
-                    ):
-                        raise RedisCollaborationUnavailable(
-                            "SQLite runtime source prefix changed during sync",
-                            reason="source_diverged",
-                        ) from exc
-                    revision, entries = fresh_revision, fresh_entries
+                    revision, entries = refreshed
                 except self._redis_errors as exc:
                     if exc.__class__.__name__ != "WatchError":
                         raise
+                    if attempt + 1 >= _MAX_WATCH_ATTEMPTS:
+                        continue
+                    refreshed = self._refresh_capture_if_advanced(revision, entries)
+                    if refreshed is not None:
+                        revision, entries = refreshed
             raise RedisCollaborationUnavailable(
                 "Redis collaboration sync contention", reason="sync_contention"
             )
@@ -450,6 +448,18 @@ class RedisCollaborationService:
             raise RedisCollaborationUnavailable(
                 "Redis collaboration service unavailable"
             ) from exc
+
+    def _refresh_capture_if_advanced(self, revision, entries):
+        """Use a fresh same-Store capture only when it extends the full prefix."""
+        fresh_revision, fresh_entries = self._capture_events(self._store)
+        if fresh_revision <= revision:
+            return None
+        if not self._entries_preserve_prefix(fresh_entries, entries, revision):
+            raise RedisCollaborationUnavailable(
+                "SQLite runtime source prefix changed during sync",
+                reason="source_diverged",
+            )
+        return fresh_revision, fresh_entries
 
     def _sync_attempt(self, revision, entries):
         with self._client.pipeline() as pipe:
