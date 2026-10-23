@@ -1,6 +1,7 @@
 """Tests for ToolExecutor (v0.3.6 — split tool execution from lifecycle, renamed per ADR-006)."""
 
 import json
+from dataclasses import replace
 import pytest
 
 from aigineering.agent.tool_executor import ToolExecutor
@@ -10,6 +11,15 @@ from aigineering.core.capability_descriptors import create_tool_descriptor
 from aigineering.core.store import MemoryStore
 from aigineering.core.tools import ToolRegistry
 from aigineering.protocol.types import Asset, Candidate, Contract, ToolSpec
+
+
+def _tool_contract(name: str = "lookup") -> Contract:
+    return Contract(
+        id="contract_1",
+        description=json.dumps({"payload": {"name": name, "args": {}}}),
+        outputs=("_tool_obs_contract_1",),
+        tool_scope=(name,),
+    )
 
 
 # ── ToolExecutor unit tests ─────────────────────────────────────────────
@@ -128,7 +138,84 @@ def test_tool_worker_rejects_descriptor_contract_drift_before_handler():
         ToolWorker(registry).invoke(contract, [descriptor])
     assert error.value.code == "tool_descriptor_mismatch"
     assert called is False
-    assert called is False
+
+
+def test_tool_worker_selects_unique_matching_descriptor_independent_of_order():
+    calls = []
+    registry = ToolRegistry()
+    registry.register(
+        ToolSpec(name="lookup", version="2"), lambda _args: calls.append(1) or "ok"
+    )
+    old = create_tool_descriptor("lookup", "old", {}, version="1")
+    current = create_tool_descriptor("lookup", "current", {}, version="2")
+    worker = ToolWorker(registry)
+
+    for disclosed in ([old, current], [current, old]):
+        candidate = worker.invoke(_tool_contract(), disclosed)
+        wrapped = json.loads(candidate.raw_output)
+        observation = json.loads(wrapped["outputs"]["_tool_obs_contract_1"])
+        assert observation["ok"] is True
+
+    assert len(calls) == 2
+
+
+def test_tool_worker_rejects_older_descriptor_when_it_is_the_only_disclosed_match():
+    registry = ToolRegistry()
+    registry.register(ToolSpec(name="lookup", version="2"), lambda _args: "ok")
+    old = create_tool_descriptor("lookup", "old", {}, version="1")
+
+    with pytest.raises(WorkerExecutionError) as error:
+        ToolWorker(registry).invoke(_tool_contract(), [old])
+
+    assert error.value.code == "tool_descriptor_mismatch"
+
+
+def test_tool_worker_rejects_multiple_distinct_matching_descriptors():
+    calls = []
+    registry = ToolRegistry()
+    registry.register(
+        ToolSpec(name="lookup", version="2"), lambda _args: calls.append(1) or "ok"
+    )
+    first = create_tool_descriptor("lookup", "first description", {}, version="2")
+    second = create_tool_descriptor("lookup", "second description", {}, version="2")
+
+    assert first.id != second.id
+    with pytest.raises(WorkerExecutionError) as error:
+        ToolWorker(registry).invoke(_tool_contract(), [first, second])
+
+    assert error.value.code == "tool_descriptor_ambiguous"
+    assert (
+        str(error.value)
+        == "More than one disclosed tool descriptor matches the registered tool contract."
+    )
+    assert calls == []
+
+
+def test_tool_worker_treats_repeated_descriptor_id_as_one_match():
+    registry = ToolRegistry()
+    registry.register(ToolSpec(name="lookup", version="2"), lambda _args: "ok")
+    descriptor = create_tool_descriptor("lookup", "current", {}, version="2")
+
+    candidate = ToolWorker(registry).invoke(_tool_contract(), [descriptor, descriptor])
+
+    wrapped = json.loads(candidate.raw_output)
+    observation = json.loads(wrapped["outputs"]["_tool_obs_contract_1"])
+    assert observation["ok"] is True
+
+
+@pytest.mark.parametrize("disclosed_kind", ["missing", "tampered"])
+def test_tool_worker_keeps_invalid_error_when_no_valid_named_descriptor(disclosed_kind):
+    registry = ToolRegistry()
+    registry.register(ToolSpec(name="lookup"), lambda _args: "ok")
+    assets = []
+    if disclosed_kind == "tampered":
+        valid = create_tool_descriptor("lookup", "lookup", {})
+        assets = [replace(valid, content='{"tampered":true}')]
+
+    with pytest.raises(WorkerExecutionError) as error:
+        ToolWorker(registry).invoke(_tool_contract(), assets)
+
+    assert error.value.code == "tool_descriptor_invalid"
 
 
 def test_worker_parity_with_direct_registry():
