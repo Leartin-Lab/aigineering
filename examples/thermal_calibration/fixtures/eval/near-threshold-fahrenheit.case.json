@@ -1,0 +1,21 @@
+{
+  "schema": "thermal-calibration-case-v1",
+  "case_id": "near-threshold-fahrenheit",
+  "sensor_id": "sensor-eval-01",
+  "samples": [
+    {
+      "sample_id": "n-000",
+      "time_utc": "2026-04-01T00:00:00Z",
+      "reference_C": "20.000000",
+      "reading": "68.000000",
+      "unit": "F"
+    },
+    {
+      "sample_id": "n-060",
+      "time_utc": "2026-04-01T01:00:00Z",
+      "reference_C": "20.000000",
+      "reading": "68.360002",
+      "unit": "F"
+    }
+  ]
+}

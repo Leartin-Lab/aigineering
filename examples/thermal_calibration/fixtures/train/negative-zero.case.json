@@ -1,0 +1,21 @@
+{
+  "schema": "thermal-calibration-case-v1",
+  "case_id": "negative-zero",
+  "sensor_id": "sensor-synthetic-03",
+  "samples": [
+    {
+      "sample_id": "z-000",
+      "time_utc": "2026-03-01T00:00:00Z",
+      "reference_C": "0.000000",
+      "reading": "-0.000000",
+      "unit": "C"
+    },
+    {
+      "sample_id": "z-060",
+      "time_utc": "2026-03-01T01:00:00Z",
+      "reference_C": "0.000000",
+      "reading": "-0.100000",
+      "unit": "C"
+    }
+  ]
+}

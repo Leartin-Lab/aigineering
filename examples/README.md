@@ -41,6 +41,10 @@ benchmark.
 
 ## Deterministic validation methods
 
+- [`thermal_calibration`](thermal_calibration/README.md) provides versioned
+  synthetic sensor data, bounded normalization/analysis tools and an independent
+  exact-rational report oracle. This first development slice has deterministic
+  validation; its CLI recipe and Harness comparison are still pending.
 - [`claim-validation`](claim-validation/README.md) packages exact original-text
   and explicit evidence-binding checks with local Workers and a blocking gate.
   These checks do not validate free-text semantic support.
