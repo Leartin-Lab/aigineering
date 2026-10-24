@@ -1,6 +1,6 @@
 # 持续工程分析交付与运行成本计划
 
-状态：A/B/C0 与 F1a 开发增量独立集成验收通过；C1/C2 单包及组合开发增量独立验收通过；F1b/F1c 单包及组合开发增量独立验收通过；C3a 隔离验收中。阶段未完成。日期：2026-10-24。
+状态：A/B/C0 与 F1a 开发增量独立集成验收通过；C1/C2 单包及组合开发增量独立验收通过；F1b/F1c 单包及组合开发增量独立验收通过；C3a 隔离单包通过、C3b Ready 隔离实施中；G0a 离线计量单包及组合开发增量独立验收通过。阶段未完成。日期：2026-10-24。
 
 ## 目标与用户行为
 
@@ -12,7 +12,7 @@ Runtime 臂须经 CLI 发布冻结输入、普通动态规划、工具观察与�
 
 ## 范围、基线与适配
 
-基线 `dev` / `e1ead6e980d510d485753a3041058cb5ed86a1eb`。遵循[仓库工作流适配](../development-workflow-adapter.md)、[DESIGN](../../DESIGN.md)、[边界不变量](../boundary-invariants.md)及[贡献指南](../../CONTRIBUTING.md)。上游 development-workflow 版本 `c626e75`，模板来源经适配记录，不依赖仓库外相对链接。
+基线 `dev` / `e1ead6e980d510d485753a3041058cb5ed86a1eb`。遵循[仓库工作流适配](../development-workflow-adapter.md)、[DESIGN](../../DESIGN.md)、[边界不变量](../boundary-invariants.md)及[贡献指南](../../CONTRIBUTING.md)。上游 development-workflow 提交基线 `c626e75` 加2026-10-24本地未提交更新，准确内容摘要与按需澄清适配见该记录，模板来源经适配记录，不依赖仓库外相对链接。
 
 保持签名事实唯一权威、纯语义 owners、writer 内重验和原子写入、双 Engine 竞争安全、严格重建一致性、Redis 默认必需。数据库可替换性是语义 Store 接口和适配边界约束；不在本阶段实现多个数据库后端或分布式平台。不预设新缓存表，不增加第二调度器、手写业务 DAG 或 mutable task state。ADR 记录实际作出的持久决定，change 记录完成变化，均不替代本计划。
 
@@ -28,11 +28,11 @@ Runtime 臂须经 CLI 发布冻结输入、普通动态规划、工具观察与�
 | B 签名发布性能基线 | Luna recheck_planning；`scripts/benchmark_planning_queries.py`、`tests/test_benchmark_planning_queries.py`。 | 计划依赖：下述 B 矩阵；开工：独立审计 Ready；集成：C 使用结果冻结优化门槛。 | batch、逐项同父和 chain 全部经过公开编译及签名发布；H 已闭合且测量不含冷构建；脚本、计数、SQL 计划和失败可追溯。 |
 | C0 提交去重精确索引 | root；`core/sqlite_schema.py`、`tests/test_sqlite_candidate_lookup.py`。 | 计划依赖：既有精确查询与下述 C0 方案；开工：非作者独立审计；可与 A/B 并行，无接口依赖。 | Candidate ID 查询使用精确索引，签名成功/拒绝/跨连接重放语义不变。仅关闭一个 SQL 热点，不宣称 C 已完成。 |
 | C 声明与 allowance 局部化 | 待细化；projection context、causal allowance、SQLite/query owners 及对应测试。 | 计划依赖 B 红灯及具体语义接口；开工前独立审计算法、writer/rebuild/兼容方案和增长阈值；集成需竞争、重放和严格重建通过。 | 固定载荷/引用的 P 个平级或嵌套声明不因重复历史查询退化 P²；预算不双花，拒绝和事实身份保持。 |
-| D Asset 传播与精确输入局部化 | 待细化；`core/fact_reducer.py`、披露/context owners 及对应测试。 | 先测真实热点；仅依赖实际需要的窄 Store 接口。共享 SQLite 文件由协调者串行集成，不强制依赖 C allowance 内部算法。 | Asset 先于任务/任务先于 Asset、同批 overlay、完成/取消级联和外层独立验收分支不变；无关历史不反复物化；必要级联成本单列。 |
+| D Asset 传播与精确输入局部化 | [D0 测量计划](asset-publication-locality-baseline.md)独立 Ready、隔离实现中；`core/fact_reducer.py`、披露/context owners 及对应测试。 | 先测真实热点；仅依赖实际需要的窄 Store 接口。共享 SQLite 文件由协调者串行集成，不强制依赖 C allowance 内部算法。 | Asset 先于任务/任务先于 Asset、同批 overlay、完成/取消级联和外层独立验收分支不变；无关历史不反复物化；必要级联成本单列。 |
 | E 发现、claim 与维护局部化 | 待细化；`runtime.py`、runtime services、task query 和原 claim owners。 | 先测 pull/expiry/failure/rejection/completion 热点；具体查询接口审计后开工，共享文件有单一集成人。 | 候选集、排序与 blocker 保持；submitted 独立接受、待恢复义务和到期 claim 不漏；SQLite writer 裁决，Redis/view 不授予权利。 |
 | F1 业务 CLI 与直接 Harness 对照可运行性 | 待细化；配置、Skill、普通 Worker 夹具、CLI/对照脚本。 | 只依赖 A 和公平对照协议审计，可与 C/D/E 并行；不等待性能修复。 | 普通 CLI 动态规划与两工具续接、不同身份精确接受、导出/重开；正常、畸形输出、缺证据、故障、额度耗尽和实际恢复均可观察。两臂共同 oracle，不以预制 DAG 伪造动态计划。 |
 | F2 固定候选制品的长期组合评测 | 待细化；源树外安装和隔离运行 evidence。 | A/B/C/D/E/F1 的实际组合冻结，独立协议及各包验收通过。 | 同一 P/A 下改变 H，完整 signed 生命周期持续累积；重开/竞争/重建语义一致；固定制品的质量、恢复、全成本与热路径增长曲线可复核。 |
-| G 真实 provider 成对评测 | 待细化；固定模型、工具、输入、预算、故障日程与外部判分。 | F1 与公平协议通过后可先做 baseline；冻结请求/token/时间预算并核对现有会话授权范围，超出范围才补授权。最终候选另行冻结并重测，不重标签旧证据。 | 保留每次失败及实际 usage，区分 fixture、真实模型和安装制品；没有证据不宣称质量优势或稳定资格。 |
+| G 真实 provider 成对评测 | [G0a离线计量接口](provider-request-meter.md)单包及组合开发增量独立验收通过；固定模型、工具、输入、预算、故障日程与外部判分。 | F1 与公平协议通过后可先做 baseline；冻结请求/token/时间预算并核对现有会话授权范围，超出范围才补授权。最终候选另行冻结并重测，不重标签旧证据。 | 保留每次失败及实际 usage，区分 fixture、真实模型和安装制品；没有证据不宣称质量优势或稳定资格。 |
 
 A/B 可并行。C/D/E/F1 尚无具体方案，不能因目标已同意而跳过各包 Ready；它们的规划、基线和开发可按真实依赖交错推进。开发增量独立验收及适用检查通过后可进入 dev；main、标签和发布另行处理。
 
@@ -84,9 +84,9 @@ C1 不关闭同父逐项 allowance 历史增长、writer 全量校验或 publica
 
 ## C3 的后续检查点基础
 
-[C3a 计划](allowance-checkpoint.md)已独立 Ready，隔离实现同 Store 可重建 raw allowance 检查点、索引尾刷新及写事务维护。真实消费 C3b 和组合收益通过前不单独交付增加运行写成本的版本。它不提供第二事实源或 Redis 裁决，不改变当前余额语义。
+[C3a 计划](allowance-checkpoint.md)的同 Store 可重建 raw allowance 检查点、索引尾刷新及写事务维护已隔离单包独立验收通过。真实消费 C3b 和组合收益通过前不单独交付增加运行写成本的版本。它不提供第二事实源或 Redis 裁决，不改变当前余额语义。
 
-[C3b 细化](scoped-declaration-allowance.md)仍为 Proposed：独立反例确认 writer 的全域竞争 head/opaque 证明不能被余额摘要替代，需精确 publication 关系索引与完整原证明消费。具体 API、状态和支持 batch 集合未冻结，不得开工或声称历史局部化已完成。
+[C3b 细化](scoped-declaration-allowance.md)已独立 Ready，并按冻结接口隔离实施：独立反例确认 writer 的全域竞争 head/opaque 证明不能被余额摘要替代，需精确 publication 关系索引与完整原证明消费。实现及组合收益尚未验收，不声称历史局部化已完成。
 
 ## C2 的单次 allowance 证明索引方案
 
@@ -118,9 +118,9 @@ F1a 不含直接 Harness 臂、真实 provider、成本或质量优势测量，�
 
 ## F1b 的直接 Harness 离线协议
 
-详见[工作包计划](thermal-calibration-direct-harness.md)，单包已独立通过，正与 F1c 组合收尾。只新增独立原生工具循环、明确的 scripted fixture CLI 和协议/故障证据；共享冻结 A 工具与外部 oracle，绕开 runtime 调度和 commitment。不实现真实 provider client，不改 A/F1a，不作公平同预算、质量或成本结论。
+详见[工作包计划](thermal-calibration-direct-harness.md)，单包及 F1c 组合开发增量已独立验收，并交付 `dev` 的 `ec5f122`。只新增独立原生工具循环、明确的 scripted fixture CLI 和协议/故障证据；共享冻结 A 工具与外部 oracle，绕开 runtime 调度和 commitment。不实现真实 provider client，不改 A/F1a，不作公平同预算、质量或成本结论。
 
-[F1c 失败边界计划](calibration-cli-failure-boundaries.md)单包已独立通过，组合收尾中：已用 CLI 探针并经非作者只读复核确认畸形 raw Candidate、缺 copied business observation、child allowance 真正耗尽三项当前行为；正式仅新增测试/fixture，不将 scheduled recovery 当完成，不把 child blocker 写成 root terminal，也不冒充 provider 测试。
+[F1c 失败边界计划](calibration-cli-failure-boundaries.md)单包及组合开发增量已独立验收并交付：已用 CLI 探针并经非作者只读复核确认畸形 raw Candidate、缺 copied business observation、child allowance 真正耗尽三项当前行为；正式仅新增测试/fixture，不将 scheduled recovery 当完成，不把 child blocker 写成 root terminal，也不冒充 provider 测试。
 
 ## 规划—审计记录
 
@@ -149,6 +149,10 @@ F1a 单包及独立组合验收 Passed，新增9文件清单 `84ff6ab3701d9a88ed
 C1/C2 单包分别独立通过；C1 修复原参数分块与 Memory 畸形历史红灯，独立 H0/16/64 窄读取计数恒定、VM102/860；C2 独立27向量语义差分一致，P8/16/32/64 共享完整 head/receipt 校验各一次。首次完整整合3,129 passed/3 failed（旧测试 loader 注入入口迁移），只适配两文件的注入点并独立确认三 race 到原 SQLite writer fence后，新671文件代码/夹具清单 `97e5f44e6b5fcc6c5570b380aeec63df261523a619b7691c607a36b1619f60bc` 源码3,132项、Ruff/557文件格式、树外安装224项通过；最终文档链接/隐私检查、664成员源码包逐字节校验和非作者组合独立验收通过。见[局部性能验证](../../reports/110-local-projection-development-2026-10-24.md)及[机器证据](../../reports/data/110-local-projection-verification.json)。Memory/custom fallback、writer 和跨次余额历史成本不据此关闭。
 
 首批准确代码/夹具快照660文件摘要 `a02df296e2d31d887d258f0fbfa00185a7ac956fea31bda22b9d69e9e2664263`：源码3,089项通过、Ruff与552文件格式通过；默认隔离构建的代理依赖下载失败保留，已有依赖构建成功。wheel `ef8d92d66ced152dcebe216e5b6c01238fb2c7c7f8e26e4c568e4e75a87ec4fe` 的235模块与源码及树外安装一致，安装组合142项与6-cell installed smoke通过。最终文档治理49项通过；非作者 integration_review 最终集成验收通过，绑定964文件公开清单 `bbaa02b77527b3b94d0d0ba7e428b333f7828da2f1e112bd16e7971c681823b8` 与上述代码快照。不以首批通过替代全阶段通过。见[首批验证](../../reports/108-sustained-engineering-foundation-2026-10-24.md)及[机器证据](../../reports/data/108-sustained-delivery-baseline.json)。
+
+F1b/F1c 组合快照源码3,208项、树外安装300项及最终治理49项通过；非作者最终组合验收 Passed，见[开发验证](../../reports/111-direct-harness-protocol-development-2026-10-24.md)及[机器证据](../../reports/data/111-direct-harness-protocol-verification.json)。脚本夹具与真实 provider 分开，未据此关闭公平对照或业务成本目标。
+
+G0a 两文件离线计量模块由 Luna 编写，root 非作者隔离复核49项及并发、未知 usage、原子失败补充探针通过，准确源摘要与职责见[G0a计划](provider-request-meter.md)。root 集成源码3,257项、Ruff/566文件格式及树外49项通过，非作者对准确9文件与1000文件公开集合独立总体验收 Passed，另验98项及树外49项；尚未接入任一真实 transport。
 
 ## 当前未决项
 

@@ -1,6 +1,6 @@
 # C3b：声明余额与完整 publication 证明的局部读取
 
-状态：Proposed，待独立计划审计，未开工。基线为 `2d8d4b626d4640ce948c7790a08c3e349f480d3b` 加经独立验收的 [C3a](allowance-checkpoint.md)；后者是开工依赖，不以在制代码作为已验收基线。
+状态：Ready，隔离实施中，未集成。integration_review 对实施契约快照 `d6c7b5eb7dde26bdbd4325e982edc05cf4eac8dbef11f8a505d4c7fcf51912d4` 独立审计通过，C3a最终8文件 `e424a1cb32d80584260cdeefdd6ee042be7c94733ee0310137c200f57259c7ff` 已独立 Passed，开工依赖满足。基线为 `2d8d4b626d4640ce948c7790a08c3e349f480d3b` 加该精确 [C3a](allowance-checkpoint.md)，不以其他在制代码替代。
 
 本包遵循[工作流适配](../development-workflow-adapter.md)，属于[阶段计划](sustained-engineering-delivery.md)的 C。root 负责方案与集成，Luna 执行固定实现，integration_review 非作者独立计划审计与验收。它只优化实际同质内置 `contract.declare` 的投影与 writer allowance 输入，不关闭 Asset、claim/maintenance、return/extinguishment 的其余热路径。
 
@@ -42,7 +42,7 @@ C1 的 selected inputs / EffectProjectionContext 可增加上述可选字段；M
 
 ## 文件、依赖与交付
 
-预计 owner：`core/causal_allowance.py`、`projection_context.py`、`effect_projection.py`、可选 `store_capabilities.py`、`allowance_returns.py` 的共享纯索引谓词适配、一个窄的纯 publication-index helper、`sqlite_store.py`/`sqlite_schema.py`，对应新行为/架构测试。不得修改 A/F1a/F1b、Redis、provider、依赖或 task wire。最终精确文件名单与 helper/typed request 契约由独立 Ready 冻结后交给 Luna；现在不授权实施。
+预计 owner：`core/causal_allowance.py`、`projection_context.py`、`effect_projection.py`、可选 `store_capabilities.py`、`allowance_returns.py` 的共享纯索引谓词适配、一个窄的纯 publication-index helper、`sqlite_store.py`/`sqlite_schema.py`，对应新行为/架构测试。不得修改 A/F1a/F1b、Redis、provider、依赖或 task wire。最终精确文件名单与 helper/typed request 契约见下节已独立 Ready 的实施契约；由 Luna recheck_tools 按其限定隔离实施。
 
 一个新 ADR 只记录可重建 publication 关系索引这一持久决策及替代方案；一个 change 只记录完成行为。C3a 余额 foundation 与本 consumer/proof index 分别验收，在同一候选快照验证收益后组合提交 dev，不先推送没有消费者的写成本。root 负责计划、状态、报告和最终制品；作者自测不作独立结论。
 
@@ -58,21 +58,21 @@ C1 的 selected inputs / EffectProjectionContext 可增加上述可选字段；M
 
 正常 warm、固定引用/载荷/控制历史 W 下，同一 P 的 projection/writer/cache/tail 物化量在不同无关 H 中必须精确相同；不调用全量 get_all_contracts/get_all_assets 或无类型全 runtime scan。必要 actor/control W 单列。每条 source 的 raw 输入读取上界为投影一次+两次 writer，共3U（U为实际 source 请求次数）；维护按新事实影响的账户数另计。warm 后折叠的旧相关 prefix 必须为零，新 tail 总 fold 数严格等于新 balance facts 按受影响账户计数。完整 head 成员 M、验证字节 V、Asset refs S 及 cold build/audit/replay/opaque/legacy fallback 单列，不能承诺与合法证明载荷大小无关。结构证明应给出这些显式集合与循环边界，不以有限计时点拟合复杂度。R/source-tail 门槛沿用 C3a，head tail 另需 type+revision 范围 SEARCH 与固定新 tail 不随旧 head R 线性增长。
 
-## 当前未决项
+## 契约冻结与后续变更
 
-这是方案细化，尚未 Ready。实现前还须冻结共享纯 helper、typed staged requests、原 overlay 的关系修正、精确 batch allowlist、publication 索引状态/audit/rebuild schema 和头尾 VM 量化门槛。存在这些未决项时不能声称已经关闭 writer 历史增长。
+下节已冻结共享纯 helper、typed staged requests、原 overlay 的关系修正、精确 batch allowlist、publication 索引状态/audit/rebuild schema 和头尾 VM 门槛。实现发现必须改变这些边界时，只重审受影响范围；Ready 不预判实现或 writer 历史增长已关闭。
 
-## 待独立审计的实施契约
+## 已独立审计的实施契约
 
-以下将未决项收敛为候选固定契约，仍须独立审计，不因写入本节自动 Ready。
+以下固定契约已通过非作者独立计划审计，准确审计快照见开头；后续状态文字更新不改变该契约。
 
-生产文件限定为 `core/allowance_publication_index.py`（新）、`core/allowance_returns.py`、`core/causal_allowance.py`、`core/projection_context.py`、`core/effect_projection.py`、`core/sqlite_store.py`、`core/sqlite_schema.py`。新行为文件为 `tests/test_allowance_publication_selection.py`、`tests/test_allowance_projection_selection.py`，架构为 `tests/architecture/test_allowance_publication_index_ownership.py`；作者另交 `docs/adr/ADR-048-rebuildable-publication-relations.md` 和 `changes/122-local-allowance-publication-selection.md`。root 独占计划/状态/报告。没有额外 mandatory StoreProtocol 或 backend；C1 可选 reader 的旧返回对象用默认 None 保持兼容。
+生产文件限定为 `core/allowance_publication_index.py`（新）、`core/allowance_returns.py`、`core/causal_allowance.py`、`core/projection_context.py`、`core/effect_projection.py`、`core/sqlite_store.py`、`core/sqlite_schema.py`。新行为文件为 `tests/test_allowance_publication_selection.py`、`tests/test_allowance_projection_selection.py`；允许窄维护既有 `tests/test_contract_declaration_projection_context.py`，仅适配新 optional balance 表示、保留 C1 reference 路径原关系索引门槛并验证当前 SQLite 参数限制，不放宽语义或以新路径开销降低旧索引阈值。架构为 `tests/architecture/test_allowance_publication_index_ownership.py`；作者另交 `docs/adr/ADR-048-rebuildable-publication-relations.md` 和 `changes/122-local-allowance-publication-selection.md`。root 独占计划/状态/报告。没有额外 mandatory StoreProtocol 或 backend；C1 可选 reader 的旧返回对象用默认 None 保持兼容。
 
 纯新模块提供 `safe_committed_head_relations(record)`：对非 head 返回 None，head 的安全形状完全沿用 C2，返回 members/parents 两个 frozenset，不验证 envelope、hash、唯一性或签名。C2 只以此替代原 shape/set 构造，其他规则不改。模块中的 frozen request/result 类型只含 IDs、Contract/RuntimeRecord、tuple/frozenset，避免运行时循环导入；不依赖 Store、SQL 或 callbacks。
 
 余额输入为 frozen `AllowanceBalanceInput(contract_id, totals, reference_records)`，totals 为 C3a RawAllowanceTotals 或 None。若 totals 非空，reference_records 不参与该 source 的余额计算；若为空，reference_records 是该 source 的完整原事实，由原 owner 求值。整个可选字段 None 表示旧路径；tuple 缺被请求 source 是 adapter integrity/programming failure，不能补零。最终算式抽到一个原 allowance owner 内的纯 helper，reference 与 totals 路径共用，不复制一套业务规则。
 
-私有表为 `publication_head_members(head_record_id TEXT, member_id TEXT, PRIMARY KEY(head_record_id,member_id))`，另有非唯一 `(member_id,head_record_id)` B-tree；`publication_index_state` 恰一行，保存 format_version、through_revision、basis_record_id、has_opaque_heads。无 Contract 外键，不增加 schema reader floor。状态缺失不信任残留关系；reader 完整 fallback，下一新 head 的原写事务可 cold-rebuild。已知格式/cursor/basis 损坏的现有状态不在读侧或局部追加中悄悄修复，只 fallback，显式 rebuild 恢复；未知 I/O 仍传播。opaque flag 保留，tail opaque 当次 full fallback。使用 C3a 的显式 reference mode 一并旁路 allowance proof 加速，显式完整 audit 不受旁路影响。
+私有表为 `publication_head_members(head_record_id TEXT, member_id TEXT, PRIMARY KEY(head_record_id,member_id))`，另有非唯一 `(member_id,head_record_id)` B-tree；`publication_index_state` 恰一行，保存 format_version、through_revision、basis_record_id、has_opaque_heads。无 Contract 外键，不增加 schema reader floor。状态缺失不信任残留关系；reader 完整 fallback，下一新 head 的原写事务可 cold-rebuild。已知格式/cursor/basis 损坏的现有状态不在读侧或局部追加中悄悄修复，只 fallback，显式 rebuild 恢复；未知 I/O 仍传播。opaque flag 保留，tail opaque 当次 full fallback。使用 C3a 的显式 reference mode 一并旁路 allowance proof 加速；C3b projection consumer 也须返回原 C1 精确 runtime_records 与 balances=None，由原 allowance_available 计算。C3a raw reference helper 作为诊断仍可返回 totals，不据此替换 consumer 的原参考路径。显式完整 audit 不受旁路影响。
 
 任一必要 cache 表缺失时，read 与 head hook 均旁路，不隐式 DDL；只有正常 writable schema initialization 建表。上述 cold-build 仅指两表已存在而 state 行缺失。完整 audit 在 cache 表齐全时核有效状态的断言；无表/空索引是性能缺失，state 缺失而残留非空关系报告安全完整性错误，operational 读取仍只用 reference。
 
@@ -89,3 +89,7 @@ typed stages 固定为：`PublicationHeadsRequest(member_ids)` 查询 funding fa
 原两次 writer 校验分别 fresh 构造这些 inputs；`_validate_allowance_records` 只在 commit_ingress 的实际 Candidate 参数齐备时尝试 hint，failure/expiry/recordless 等调用保留默认 reference。所有 pending records 仍原样交给原 validator，选集只缩 existing facts；不得省略原 grant/receipt/head/terminal/整批余额规则。
 
 头尾压力冻结 R0/16/64/256、tail1/2：head tail SEARCH 需同时 type equality 与 revision 两界；member lookup 需 member equality，declaration lookup 需两个 text expression 等值。固定 tail/完整证明载荷时，每 R 的 VM callbacks 不超过同 tail R0 的2倍+64；returned/decode 与真实 selected heads/members/pairs 严格一致。opaque/缺 cache/cold 情况另列。SQL row-factory 的真实返回数、RuntimeRecord decode 和 fold wrappers 分别记录，不能用 typed result 自报计数自证。上述 head-tail 门槛与余额 R 门槛并列，不以正常数据省略全域反例。
+
+## 预审与窄兼容维护
+
+在制 preview 独立检查发现语义/错误顺序差异、Python 平方增长、head hook 范围及低 SQLite 参数上限问题，未通过；作者按本契约修复，不将该 preview 记作验收。旧 C1 六项测试失败另保留原始证据；仅上述一个旧测试文件的表示/参数适配纳入所有权，最终非作者复核其是否保留旧边界与新默认路径，两者不混用。没有新增生产文件、authority 或公开效果。

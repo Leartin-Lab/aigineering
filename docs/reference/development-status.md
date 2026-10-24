@@ -108,3 +108,5 @@ report107 已证明一条经普通 CLI、真实 provider、双工具续接和不
 研究报告闭环。复杂任务管理、一般研究可靠性、持续运行及其他稳定发布门禁仍开放。
 总体路线见 [ROADMAP](../../ROADMAP.md)，发布证据规则见
 [release evidence](release-evidence.md)。
+
+离线请求计量切片已完成隔离实现复核，源码3,257项和树外49项集成检查通过，非作者对准确集成范围、源码包与树外来源复核通过，独立98项及树外49项通过，待开发分支交付。它在单进程内提供并发请求许可、保守输出容量预留、cooperative deadline 和未知 usage 汇总；尚未接入 direct/Runtime transport，不能作为真实请求预算、持久重启预算或成本优势证据。详见[工作包计划](../plans/provider-request-meter.md)。

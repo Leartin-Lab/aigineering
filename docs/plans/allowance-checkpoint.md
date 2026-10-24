@@ -1,6 +1,6 @@
 # C3a：SQLite 同 Store raw allowance checkpoint
 
-状态：**独立计划审计 Ready，隔离实现中**。本包是可重建的原始 allowance 汇总基础设施。基线冻结为 `2d8d4b626d4640ce948c7790a08c3e349f480d3b`。C1/C2 单包和组合开发增量独立通过。公开阶段总目标 C 仍 OPEN。
+状态：**隔离基础包单项独立验收 Passed，未集成**。本包是可重建的原始 allowance 汇总基础设施。基线冻结为 `2d8d4b626d4640ce948c7790a08c3e349f480d3b`。C1/C2 单包和组合开发增量独立通过。公开阶段总目标 C 仍 OPEN。
 
 本包遵循[工作流适配](../development-workflow-adapter.md)，属于[阶段计划](sustained-engineering-delivery.md)。作者 Luna recheck_planning，root 集成，非作者 integration_review 审计与验收。
 
@@ -8,7 +8,7 @@
 
 C1 将声明 projection context 限定到明确引用和相关 allowance 历史；C2 在单次调用中索引声明的完整证明输入。两者均未消除同一 funding source 的旧 reservation 在后续发布中重复折叠，也没有为 writer 的余额检查提供历史局部化。
 
-C3a 只建立 SQLite 内的**可重建 raw checkpoint**，以及同一 SQLiteStore 对 checkpoint 后追加事实的 indexed tail refresh。它提供一个可独立比对的纯 fold、原子写维护、重建和只读审计边界，供随后 C3b 消费。它不更改 `allowance_available` 的调用路径，不向 projection 或 writer 提供余额，也不改变任何发布/拒绝决定。因此 C3a 单独没有端到端性能收益；其独立价值仅是先证明 C3b 将要信任的可恢复缓存生命周期和旧 writer tail 兼容性。如果工作流不接受这种必要基础设施切片作为独立交付，应将 C3a 与 C3b 合并后实施，而不应把 C3a 标成性能修复。
+C3a 只建立 SQLite 内的**可重建 raw checkpoint**，以及同一 SQLiteStore 对 checkpoint 后追加事实的 indexed tail refresh。它提供一个可独立比对的纯 fold、原子写维护、重建和只读审计边界，供随后 C3b 消费。它不更改 `allowance_available` 的调用路径，不向 projection 或 writer 提供余额，也不改变任何发布/拒绝决定。因此 C3a 单独没有端到端性能收益；其独立价值仅是先证明 C3b 将要信任的可恢复缓存生命周期和旧 writer tail 兼容性。因此按独立可审计的必要基础设施切片验收，开发交付仍与 C3b consumer 合并，不把 C3a 单独标成性能修复。
 
 不做：改变 Causal Allowance 语义、授权/认证顺序、writer balance validation、projection dispatch、reservation/head proof、Contract budget、Redis、Claim/Asset 状态；改变 schema reader floor；用缓存取代签名事实；引入 Redis 或进程级余额 authority；同时声称关闭 D/E 或 C 总体 P²。
 
@@ -113,10 +113,12 @@ C3a 是加一个物化 projection；它的创建、commit与tail读取本身有�
 - DDL table create不升schema version是否满足本项目旧读者/备份规则；`snapshot_from_path`临时 Store 在backup前后对可选表的具体SQLite行为要先有行为测试。
 - `basis_record_id`是否足以识别普通损坏，不防协同改写全表；安全文案需限于cache audit与正常immutable DB，不宣称攻击者防护。
 - 重建期间并发writer的快照/锁定需要代码owner通过两连接实验定稿；不能由“runtime log append-only”自动推出无竞态。
-- C3a虽然作为必要缓存foundation可审计，但没有余额consumer就没有产品速度/决策行为收益。若其单独实现维护成本与C3b结合更高，应由Ready审计决定合并包；本作者不预设C3a独立Ready。
+- C3a虽然作为必要缓存foundation可审计，但没有余额consumer就没有产品速度/决策行为收益。本包可单独检验正确性，但仅与C3b consumer验证实际收益后组合交付，不能独立增加运行写成本。
 
 ## 规划—审计与开发—验收记录
 
-integration_review 对计划 SHA-256 `05dc060385c8a8e555e756555f1ca3d61da9c7f8d373f5c2c432c2a989567c84` 独立审计 Ready，并在实施前冻结上述 R/tail 量化门槛。Luna 作者在隔离副本实施，root 不提前集成无消费者的运行成本。C3b 尚未 Ready，整体 C 继续开放。
+integration_review 对计划 SHA-256 `05dc060385c8a8e555e756555f1ca3d61da9c7f8d373f5c2c432c2a989567c84` 独立审计 Ready，并在实施前冻结上述 R/tail 量化门槛。Luna 作者在隔离副本实施，root 不提前集成无消费者的运行成本。当时 C3b 尚未 Ready；其当前开工状态见[C3b计划](scoped-declaration-allowance.md)，整体 C 继续开放。
 
-首轮独立组合发现新增 pure-fold 测试与既有 architecture 文件同 basename，标准 pytest collection 失败。仅将新文件更名为 `tests/test_raw_allowance_totals.py`；不更改全局 import mode，首轮失败保留。实现仍待独立验收。
+首轮独立组合发现新增 pure-fold 测试与既有 architecture 文件同 basename，标准 pytest collection 失败。仅将新文件更名为 `tests/test_raw_allowance_totals.py`；不更改全局 import mode，首轮失败保留；该首轮未通过，后续结论见下文。
+
+修订后由 integration_review 非作者独立验收：95项行为/资金/架构与37项SQLite测试通过；另有2,500个纯差分向量、120格真实SQL返回/解码/折叠及VM门槛、4300位整数原红向量、已打开旧写者追加与只读snapshot严格重建检查通过。最终8文件摘要为 `e424a1cb32d80584260cdeefdd6ee042be7c94733ee0310137c200f57259c7ff`；最后只修change121陈旧的作者证据文字，代码/测试不变。单项 Passed 不代替全套与安装验证，也不证明端到端收益；与C3b consumer同快照验证后才组合交付。
