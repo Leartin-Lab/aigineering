@@ -244,6 +244,7 @@ DDL_INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_declared_outputs_name ON contract_declared_outputs(output_name)",
     "CREATE INDEX IF NOT EXISTS idx_worker_registrations_enabled ON worker_registrations(enabled)",
     "CREATE INDEX IF NOT EXISTS idx_runtime_records_type_revision ON runtime_records(record_type, revision)",
+    "CREATE INDEX IF NOT EXISTS idx_runtime_records_committed_candidate ON runtime_records(json_extract(payload_json, '$.candidate_id')) WHERE record_type = 'candidate.committed'",
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_runtime_records_one_genesis ON runtime_records(record_type) WHERE record_type = 'domain.genesis'",
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_runtime_records_one_terminal_per_contract ON runtime_records(json_extract(payload_json, '$.contract_id')) WHERE record_type = 'lifecycle.terminal'",
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_runtime_records_one_actor_key ON runtime_records(json_extract(payload_json, '$.actor_id'), json_extract(payload_json, '$.key_id')) WHERE record_type = 'actor.authorized'",
