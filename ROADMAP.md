@@ -1,8 +1,35 @@
 # Aigineering Roadmap
 
-## Next usability slice
+## Current stage: sustained useful engineering delivery
 
-The current stage delivers an agent-friendly task tool: create, claim, submit,
+The next development goal is repeatable engineering analysis from frozen inputs,
+with independently checkable calculations, evidence and qualified export. Compare
+the same tasks against a direct Harness using a common external acceptance oracle,
+and measure delivered quality, recovery, human intervention, latency and total
+cost. Missing usage remains unknown. Run both fresh workspaces and repeated work
+in one accumulating workspace; fixture success is separate from real provider
+evidence. See the [stage plan](docs/plans/sustained-engineering-delivery.md).
+
+Confirmed repeated historical scans during task publication are defects to fix
+in this stage. Normal operations should read their explicit references and affected
+work rather than unrelated historical tasks, Assets and facts. Cold reconstruction
+and genuinely required proof or cascade traversal retain their separate costs.
+Performance evidence must measure work as well as elapsed time, including sibling
+and nested publication, Asset propagation, discovery and maintenance.
+
+Preserve signed facts as the authority, pure semantic owners and transactional
+revalidation. Rebuildable indexes and Redis cannot independently grant readiness,
+allowance or acceptance. SQLite remains the implemented local Store and Redis
+remains required by default. Keep database mechanics behind semantic Store
+contracts so later deployment changes have bounded cost; implementing multiple
+database backends or a distributed platform is not a gate for this stage.
+
+The stage is in development. It has no new live-provider or scale qualification
+yet; earlier evidence below retains its original snapshot and scope.
+
+## Previous usability slice
+
+The preceding stage delivered an agent-friendly task tool: create, claim, submit,
 request independent review and export the qualified result. It must accurately
 show blockers, failures and successors, provide necessary relation navigation
 and machine-readable results, and resolve the shared failure-lifecycle and Redis
@@ -14,7 +41,7 @@ shared runtime primitives and SQLite fact/claim authority; Redis remains require
 collaboration infrastructure. Presentation groups only proven relations. Chat
 windows, deployment conveniences, scheduled notifications, PR acceptance
 adapters and complete command parity are later directions, not completion
-conditions for this stage.
+conditions for that stage.
 
 One current-artifact single-domain case now completes actual external-harness
 work: a read-only ToolWorker observation, ordinary continuation, Luna report,
