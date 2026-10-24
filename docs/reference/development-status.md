@@ -17,7 +17,7 @@
 
 | 功能 | 状态 | 当前可用范围与剩余工作 |
 | --- | --- | --- |
-| 可复算的工程分析验收器 | 部分实现 | [合成校准工具与 oracle](../../examples/thermal_calibration/README.md)已有固定数据、精确计算与逐样本证据检查；[CLI 配置](../../examples/thermal_calibration/CLI.md)的普通规划、双工具续接、不同 actor 确定性接受、实际恢复及原根续跑已通过协议夹具独立复验。源码3,095项与树外安装106项通过；真实模型、直接 Harness 对照和业务收益仍待验证。见[本批记录](../../reports/109-calibration-cli-development-2026-10-24.md)。 |
+| 可复算的工程分析验收器 | 部分实现 | [合成校准工具与 oracle](../../examples/thermal_calibration/README.md)已有固定数据、精确计算与逐样本证据检查；[CLI 配置](../../examples/thermal_calibration/CLI.md)的普通规划、双工具续接、不同 actor 确定性接受、实际恢复及原根续跑已通过协议夹具独立复验。源码3,095项与树外安装106项通过；真实模型与业务收益仍待验证。另有[离线直接循环和CLI失败组合](../../reports/111-direct-harness-protocol-development-2026-10-24.md)单包及组合独立验收通过，源码3,208项、零跳过与树外300项通过；前者共享工具/oracle，后者覆盖raw Candidate错误、缺观察及child额度耗尽，不构成公平模型对照。见[F1a记录](../../reports/109-calibration-cli-development-2026-10-24.md)。 |
 | 长期工作区的局部查询成本 | 部分实现 | 已有签名发布基准与 change118 精确去重索引；change120 将纯内置声明的 SQLite projection context 选为局部，固定引用下 H0/16/64 读取计数恒定；change119 将同批共享 head/receipt 完整证明降至各一次。源码组合3,132项通过；Memory/custom fallback、writer、跨次额度、Asset传播与 maintenance 仍待局部化，整体 n² 未关闭。见[局部性能记录](../../reports/110-local-projection-development-2026-10-24.md)。 |
 | 任务创建、状态、列表、看板、统计 | 已实现 | `task create/status/list/board/stats/show`；状态来自已提交事实，Redis 默认必需。 |
 | 文件输入、Skill 与上下文选择 | 已实现 | 冻结输入、角色绑定、按 Contract 披露；`task context` 默认只展示元数据。 |
