@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -24,6 +25,113 @@ class EffectProjectionContext:
     actor_keys: tuple[ActorKey, ...] = ()
     registrations: tuple[WorkerRegistration, ...] = ()
     claim_history_contract_ids: frozenset[str] = frozenset()
+
+
+@dataclass(frozen=True)
+class ContractDeclarationProjectionRequest:
+    """Exact immutable read selection for built-in Contract declarations."""
+
+    incoming_contract_ids: tuple[str, ...]
+    parent_contract_ids: tuple[str, ...]
+    allowance_source_contract_ids: tuple[str, ...]
+    asset_ids: tuple[str, ...]
+    candidate_id: str
+    include_candidate_replay: bool
+
+
+@dataclass(frozen=True)
+class ContractDeclarationProjectionInputs:
+    """Selected existing facts returned by an optional Store reader."""
+
+    contracts: tuple[Contract, ...] = ()
+    assets: tuple[Asset, ...] = ()
+    runtime_records: tuple[RuntimeRecord, ...] = ()
+
+
+_KNOWN_TASK_ID_VERSIONS = frozenset({"3", "4", "5", "6"})
+_VERSIONED_TASK_ID = re.compile(r"^task:v([0-9]+):")
+
+
+def build_contract_declaration_projection_request(
+    candidate,
+) -> ContractDeclarationProjectionRequest | None:
+    """Build a read hint for supported, homogeneous declaration Candidates.
+
+    Parser-domain failures intentionally mean "no narrow request". The caller
+    must then load the original full context and let ``reduce_candidate`` retain
+    authentication and rejection ownership.
+    """
+    if not candidate.effects or any(
+        effect.effect_type != "contract.declare" for effect in candidate.effects
+    ):
+        return None
+
+    from aigineering.core.effect_projectors import _contract_from_payload
+    from aigineering.core.input_bindings import input_asset_bindings
+
+    incoming_contract_ids: list[str] = []
+    parent_contract_ids: list[str] = []
+    allowance_source_contract_ids: list[str] = []
+    asset_ids: list[str] = []
+    for effect in candidate.effects:
+        contract = _contract_from_payload(effect.payload)
+        version = _VERSIONED_TASK_ID.match(contract.id)
+        if version is not None and version.group(1) not in _KNOWN_TASK_ID_VERSIONS:
+            return None
+        incoming_contract_ids.append(contract.id)
+        if contract.parent_id is not None:
+            parent_contract_ids.append(contract.parent_id)
+            allowance_source_contract_ids.append(contract.parent_id)
+
+        bindings = input_asset_bindings(contract.sensitive_input_policy)
+        input_roles = set(contract.inputs)
+        for role, bound_ids in bindings.items():
+            if role in input_roles:
+                asset_ids.extend(bound_ids)
+        if contract.id.startswith(("task:v4:", "task:v5:", "task:v6:")):
+            asset_ids.extend(contract.context_asset_ids)
+
+    if candidate.claim_binding is not None:
+        parent_contract_ids.append(candidate.claim_binding.contract_id)
+
+    def unique(values: list[str]) -> tuple[str, ...]:
+        return tuple(dict.fromkeys(values))
+
+    parents = unique(parent_contract_ids)
+    return ContractDeclarationProjectionRequest(
+        incoming_contract_ids=unique(incoming_contract_ids),
+        parent_contract_ids=parents,
+        allowance_source_contract_ids=unique(allowance_source_contract_ids),
+        asset_ids=unique(asset_ids),
+        candidate_id=candidate.id,
+        include_candidate_replay=len(candidate.effects) == 1,
+    )
+
+
+def load_contract_declaration_projection_context(
+    store: StoreProtocol,
+    candidate,
+    *,
+    actor_keys: tuple[ActorKey, ...] = (),
+) -> EffectProjectionContext:
+    """Use an optional narrow Store reader for pure declaration Candidates."""
+    try:
+        request = build_contract_declaration_projection_request(candidate)
+    except (KeyError, TypeError, ValueError):
+        request = None
+    if request is None:
+        return load_effect_projection_context(store, actor_keys=actor_keys)
+
+    reader = getattr(store, "read_contract_declaration_projection_inputs", None)
+    if not callable(reader):
+        return load_effect_projection_context(store, actor_keys=actor_keys)
+    selected = reader(request)
+    return EffectProjectionContext(
+        contracts=selected.contracts,
+        assets=selected.assets,
+        runtime_records=selected.runtime_records,
+        actor_keys=actor_keys,
+    )
 
 
 def load_effect_projection_context(

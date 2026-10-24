@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
+from types import MappingProxyType
 
 from aigineering.core.ids import canonical_json, compute_content_hash
 from aigineering.protocol.runtime_record import (
@@ -18,6 +19,174 @@ from aigineering.protocol.wire import contract_from_dict
 
 class CausalAllowanceConflict(ValueError):
     """A projected reservation no longer fits the committed causal balance."""
+
+
+class _IndexedCommittedHead:
+    __slots__ = ("record", "members", "causal_parents")
+
+    def __init__(
+        self,
+        record: RuntimeRecord,
+        members: frozenset[str],
+        causal_parents: frozenset[str],
+    ) -> None:
+        self.record = record
+        self.members = members
+        self.causal_parents = causal_parents
+
+
+class _AllowanceGrantProofContext:
+    """Call-scoped relation index and memoized immutable-record proofs."""
+
+    __slots__ = (
+        "records_by_id",
+        "heads_by_member",
+        "heads_by_id",
+        "declarations_by_candidate_contract",
+        "new_reservations_by_edge",
+        "existing_grant_contract_ids",
+        "has_opaque_heads",
+        "_validated_heads",
+        "_validated_receipts",
+    )
+
+    def __init__(
+        self,
+        records_by_id: dict[str, RuntimeRecord],
+        new_reservations: Sequence[RuntimeRecord],
+        existing_records: Sequence[RuntimeRecord],
+    ) -> None:
+        heads_by_member: dict[str, list[_IndexedCommittedHead]] = defaultdict(list)
+        heads_by_id: dict[str, _IndexedCommittedHead] = {}
+        declarations: dict[tuple[str, str], list[RuntimeRecord]] = defaultdict(list)
+        has_opaque_heads = False
+
+        for record in records_by_id.values():
+            if record.record_type == "candidate.committed":
+                members = record.payload.get("committed_record_ids", ())
+                parents = record.causal_parents
+                if (
+                    not isinstance(members, (list, tuple))
+                    or not all(isinstance(item, str) and item for item in members)
+                    or not isinstance(parents, tuple)
+                    or not all(isinstance(item, str) and item for item in parents)
+                ):
+                    has_opaque_heads = True
+                    continue
+                # The historical predicate treated a repeated member within
+                # one head as one matching head; _validate_candidate_head
+                # separately rejects duplicate members after selection.
+                indexed_head = _IndexedCommittedHead(
+                    record, frozenset(members), frozenset(parents)
+                )
+                heads_by_id[record.id] = indexed_head
+                for member_id in indexed_head.members:
+                    heads_by_member[member_id].append(indexed_head)
+            elif record.record_type == "contract.declared":
+                candidate_id = record.payload.get("candidate_id")
+                contract = record.payload.get("contract")
+                if (
+                    isinstance(candidate_id, str)
+                    and candidate_id
+                    and isinstance(contract, Mapping)
+                    and isinstance(contract.get("id"), str)
+                    and contract.get("id")
+                ):
+                    declarations[(candidate_id, contract["id"])].append(record)
+
+        reservations: dict[tuple[str, str, str], list[RuntimeRecord]] = defaultdict(
+            list
+        )
+        for record in new_reservations:
+            child_id = record.payload.get("child_contract_id")
+            source_id = record.payload.get("source_contract_id")
+            reservation_id = record.payload.get("reservation_id")
+            if all(
+                isinstance(value, str) and value
+                for value in (child_id, source_id, reservation_id)
+            ):
+                # Preserve repeated facts and repeated IDs.  The caller owns
+                # the exact-one check; an index must not collapse ambiguity.
+                reservations[(child_id, source_id, reservation_id)].append(record)
+
+        self.records_by_id = MappingProxyType(records_by_id)
+        self.heads_by_member = MappingProxyType(
+            {key: tuple(value) for key, value in heads_by_member.items()}
+        )
+        self.heads_by_id = MappingProxyType(heads_by_id)
+        self.declarations_by_candidate_contract = MappingProxyType(
+            {key: tuple(value) for key, value in declarations.items()}
+        )
+        self.new_reservations_by_edge = MappingProxyType(
+            {key: tuple(value) for key, value in reservations.items()}
+        )
+        self.existing_grant_contract_ids = frozenset(
+            record.payload.get("contract_id")
+            for record in existing_records
+            if record.record_type == "allowance.granted"
+            and isinstance(record.payload.get("contract_id"), str)
+            and record.payload.get("contract_id")
+        )
+        self.has_opaque_heads = has_opaque_heads
+        self._validated_heads: dict[str, RuntimeRecord] = {}
+        self._validated_receipts: set[str] = set()
+
+    def matching_heads(self, fact_id: str) -> tuple[RuntimeRecord, ...]:
+        if self.has_opaque_heads:
+            # Preserve the exact historical predicate and its failure timing
+            # whenever an opaque head could make indexed selection lossy.
+            return tuple(
+                head
+                for head in self.records_by_id.values()
+                if head.record_type == "candidate.committed"
+                and fact_id in head.payload.get("committed_record_ids", ())
+                and fact_id in head.causal_parents
+            )
+        return tuple(
+            indexed_head.record
+            for indexed_head in self.heads_by_member.get(fact_id, ())
+            if fact_id in indexed_head.causal_parents
+        )
+
+    def head_contains_member(self, head: RuntimeRecord, member_id: str) -> bool:
+        indexed_head = self.heads_by_id.get(head.id)
+        if indexed_head is not None and not self.has_opaque_heads:
+            return member_id in indexed_head.members
+        return member_id in head.payload.get("committed_record_ids", ())
+
+    def head_contains_parent(self, head: RuntimeRecord, parent_id: str) -> bool:
+        indexed_head = self.heads_by_id.get(head.id)
+        if indexed_head is not None and not self.has_opaque_heads:
+            return parent_id in indexed_head.causal_parents
+        return parent_id in head.causal_parents
+
+    def declarations_for(
+        self, candidate_id: str, contract_id: str
+    ) -> tuple[RuntimeRecord, ...]:
+        return self.declarations_by_candidate_contract.get(
+            (candidate_id, contract_id), ()
+        )
+
+    def reservations_for(
+        self, child_id: str, source_id: str, reservation_id: str
+    ) -> tuple[RuntimeRecord, ...]:
+        return self.new_reservations_by_edge.get(
+            (child_id, source_id, reservation_id), ()
+        )
+
+    def validate_receipt(self, receipt: RuntimeRecord) -> None:
+        if receipt.id not in self._validated_receipts:
+            validate_runtime_record(receipt)
+            self._validated_receipts.add(receipt.id)
+
+    def validate_head(
+        self, head: RuntimeRecord, records_by_id: dict[str, RuntimeRecord]
+    ) -> RuntimeRecord:
+        if head.id not in self._validated_heads:
+            validate_runtime_record(head)
+            receipt = _validate_candidate_head(head, records_by_id, proof_context=self)
+            self._validated_heads[head.id] = receipt
+        return self._validated_heads[head.id]
 
 
 def project_causal_allowance_returns(
@@ -318,6 +487,11 @@ def validate_allowance_grants(
     if not new_grants and not new_reservations:
         return
 
+    proof_context = _AllowanceGrantProofContext(
+        all_by_id,
+        new_reservations,
+        existing_records,
+    )
     validated_reservations: set[str] = set()
     seen_grants: set[str] = set()
     for grant in new_grants:
@@ -342,11 +516,7 @@ def validate_allowance_grants(
         if contract.id in seen_grants:
             raise CausalAllowanceConflict("Contract has duplicate allowance grants")
         seen_grants.add(contract.id)
-        if any(
-            record.record_type == "allowance.granted"
-            and record.payload.get("contract_id") == contract.id
-            for record in existing_records
-        ):
+        if contract.id in proof_context.existing_grant_contract_ids:
             raise CausalAllowanceConflict("Contract already has an allowance grant")
 
         if contract.parent_id is None:
@@ -363,12 +533,22 @@ def validate_allowance_grants(
                 or grant.payload.get("source_contract_id") != ""
             ):
                 raise CausalAllowanceConflict("root allowance grant is not canonical")
-            _validate_committed_fact_bundle((grant,), all_by_id)
-            receipt = _committed_fact_receipt(grant, all_by_id)
-            declaration = _matching_contract_declaration(
-                contract, grant, receipt, all_by_id
+            _validate_committed_fact_bundle(
+                (grant,), all_by_id, proof_context=proof_context
             )
-            _validate_committed_fact_bundle((declaration, grant), all_by_id)
+            receipt = _committed_fact_receipt(
+                grant, all_by_id, proof_context=proof_context
+            )
+            declaration = _matching_contract_declaration(
+                contract,
+                grant,
+                receipt,
+                all_by_id,
+                proof_context=proof_context,
+            )
+            _validate_committed_fact_bundle(
+                (declaration, grant), all_by_id, proof_context=proof_context
+            )
             continue
 
         parent = by_contract.get(contract.parent_id)
@@ -392,24 +572,37 @@ def validate_allowance_grants(
             or grant.payload.get("reservation_id") != reservation_id
         ):
             raise CausalAllowanceConflict("child allowance grant is not canonical")
-        reservations = tuple(
-            record
-            for record in new_reservations
-            if record.payload.get("child_contract_id") == contract.id
-            and record.payload.get("source_contract_id") == parent.id
-            and record.payload.get("reservation_id") == reservation_id
+        reservations = proof_context.reservations_for(
+            contract.id, parent.id, reservation_id
         )
         if len(reservations) != 1:
             raise CausalAllowanceConflict(
                 "child allowance grant lacks its new committed reservation"
             )
         reservation = reservations[0]
-        _validate_funding_edge(parent, contract, reservation, grant, all_by_id)
-        receipt = _committed_fact_receipt(reservation, all_by_id)
-        declaration = _matching_contract_declaration(
-            contract, grant, receipt, all_by_id
+        _validate_funding_edge(
+            parent,
+            contract,
+            reservation,
+            grant,
+            all_by_id,
+            proof_context=proof_context,
         )
-        _validate_committed_fact_bundle((declaration, reservation, grant), all_by_id)
+        receipt = _committed_fact_receipt(
+            reservation, all_by_id, proof_context=proof_context
+        )
+        declaration = _matching_contract_declaration(
+            contract,
+            grant,
+            receipt,
+            all_by_id,
+            proof_context=proof_context,
+        )
+        _validate_committed_fact_bundle(
+            (declaration, reservation, grant),
+            all_by_id,
+            proof_context=proof_context,
+        )
         validated_reservations.add(reservation.id)
 
     if {record.id for record in new_reservations} != validated_reservations:
@@ -423,25 +616,35 @@ def _matching_contract_declaration(
     grant: RuntimeRecord,
     receipt: RuntimeRecord,
     records_by_id: dict[str, RuntimeRecord],
+    *,
+    proof_context: _AllowanceGrantProofContext | None = None,
 ) -> RuntimeRecord:
-    heads = [
-        head
-        for head in records_by_id.values()
-        if head.record_type == "candidate.committed"
-        and grant.id in head.payload.get("committed_record_ids", ())
-        and grant.id in head.causal_parents
-    ]
+    heads = (
+        proof_context.matching_heads(grant.id)
+        if proof_context is not None
+        else tuple(
+            head
+            for head in records_by_id.values()
+            if head.record_type == "candidate.committed"
+            and grant.id in head.payload.get("committed_record_ids", ())
+            and grant.id in head.causal_parents
+        )
+    )
     if len(heads) != 1:
         raise CausalAllowanceConflict("allowance grant lacks one Candidate head")
     candidate_id = heads[0].payload.get("candidate_id")
-    declarations = [
-        record
-        for record in records_by_id.values()
-        if record.record_type == "contract.declared"
-        and record.payload.get("candidate_id") == candidate_id
-        and isinstance(record.payload.get("contract"), Mapping)
-        and record.payload["contract"].get("id") == contract.id
-    ]
+    declarations = (
+        proof_context.declarations_for(candidate_id, contract.id)
+        if proof_context is not None and isinstance(candidate_id, str)
+        else tuple(
+            record
+            for record in records_by_id.values()
+            if record.record_type == "contract.declared"
+            and record.payload.get("candidate_id") == candidate_id
+            and isinstance(record.payload.get("contract"), Mapping)
+            and record.payload["contract"].get("id") == contract.id
+        )
+    )
     if len(declarations) != 1:
         raise CausalAllowanceConflict(
             "allowance grant lacks its exact committed Contract declaration"
@@ -457,8 +660,16 @@ def _matching_contract_declaration(
     if (
         declared_contract != contract
         or declaration.causal_parents != (receipt.id,)
-        or declaration.id not in heads[0].payload.get("committed_record_ids", ())
-        or declaration.id not in heads[0].causal_parents
+        or (
+            declaration.id not in heads[0].payload.get("committed_record_ids", ())
+            if proof_context is None or proof_context.has_opaque_heads
+            else not proof_context.head_contains_member(heads[0], declaration.id)
+        )
+        or (
+            declaration.id not in heads[0].causal_parents
+            if proof_context is None or proof_context.has_opaque_heads
+            else not proof_context.head_contains_parent(heads[0], declaration.id)
+        )
     ):
         raise CausalAllowanceConflict(
             "allowance grant Contract declaration provenance differs"
@@ -642,6 +853,8 @@ def _validate_funding_edge(
     reservation: RuntimeRecord,
     grant: RuntimeRecord,
     records_by_id: dict[str, RuntimeRecord],
+    *,
+    proof_context: _AllowanceGrantProofContext | None = None,
 ) -> None:
     from aigineering.core.causal_allowance import (
         allowance_purpose,
@@ -694,44 +907,71 @@ def _validate_funding_edge(
         or grant.causal_parents != (reservation.id,)
     ):
         raise ValueError("allowance funding edge is malformed")
-    _validate_committed_fact_bundle((reservation, grant), records_by_id)
+    _validate_committed_fact_bundle(
+        (reservation, grant), records_by_id, proof_context=proof_context
+    )
 
 
 def _validate_committed_fact_bundle(
-    facts: Sequence[RuntimeRecord], records_by_id: dict[str, RuntimeRecord]
+    facts: Sequence[RuntimeRecord],
+    records_by_id: dict[str, RuntimeRecord],
+    *,
+    proof_context: _AllowanceGrantProofContext | None = None,
 ) -> None:
     head_candidates: set[str] | None = None
     for fact in facts:
         validate_runtime_record(fact)
-        heads = [
-            head
-            for head in records_by_id.values()
-            if head.record_type == "candidate.committed"
-            and fact.id in head.payload.get("committed_record_ids", ())
-            and fact.id in head.causal_parents
-        ]
+        heads = (
+            proof_context.matching_heads(fact.id)
+            if proof_context is not None
+            else tuple(
+                head
+                for head in records_by_id.values()
+                if head.record_type == "candidate.committed"
+                and fact.id in head.payload.get("committed_record_ids", ())
+                and fact.id in head.causal_parents
+            )
+        )
         if len(heads) != 1:
             raise ValueError("allowance funding fact lacks one committed head")
         head = heads[0]
-        validate_runtime_record(head)
-        _validate_candidate_head(head, records_by_id)
-        candidate_id = head.payload.get("candidate_id")
-        receipt_ids = [
-            parent_id
-            for parent_id in head.causal_parents
-            if parent_id in records_by_id
-            and records_by_id[parent_id].record_type == "candidate.received"
-            and records_by_id[parent_id].payload.get("candidate_id") == candidate_id
-        ]
-        if (
-            not isinstance(candidate_id, str)
-            or not candidate_id
-            or len(receipt_ids) != 1
-        ):
-            raise ValueError("allowance funding head lacks its authenticated receipt")
-        receipt = records_by_id[receipt_ids[0]]
-        validate_runtime_record(receipt)
-        if fact.id not in head.causal_parents or receipt.id not in head.causal_parents:
+        if proof_context is None:
+            validate_runtime_record(head)
+            _validate_candidate_head(head, records_by_id)
+            candidate_id = head.payload.get("candidate_id")
+            receipt_ids = [
+                parent_id
+                for parent_id in head.causal_parents
+                if parent_id in records_by_id
+                and records_by_id[parent_id].record_type == "candidate.received"
+                and records_by_id[parent_id].payload.get("candidate_id") == candidate_id
+            ]
+            if (
+                not isinstance(candidate_id, str)
+                or not candidate_id
+                or len(receipt_ids) != 1
+            ):
+                raise ValueError(
+                    "allowance funding head lacks its authenticated receipt"
+                )
+            receipt = records_by_id[receipt_ids[0]]
+            validate_runtime_record(receipt)
+        else:
+            receipt = proof_context.validate_head(head, records_by_id)
+            candidate_id = head.payload.get("candidate_id")
+            if not isinstance(candidate_id, str) or not candidate_id:
+                raise ValueError(
+                    "allowance funding head lacks its authenticated receipt"
+                )
+        if proof_context is None or proof_context.has_opaque_heads:
+            fact_is_causal_parent = fact.id in head.causal_parents
+            receipt_is_causal_parent = receipt.id in head.causal_parents
+        else:
+            fact_is_causal_parent = proof_context.head_contains_parent(head, fact.id)
+            receipt_is_causal_parent = proof_context.head_contains_parent(
+                head, receipt.id
+            )
+        if not fact_is_causal_parent or not receipt_is_causal_parent:
             raise ValueError("allowance funding head causal closure is incomplete")
         if head_candidates is None:
             head_candidates = {head.id}
@@ -742,7 +982,10 @@ def _validate_committed_fact_bundle(
 
 
 def _committed_fact_receipt(
-    fact: RuntimeRecord, records_by_id: dict[str, RuntimeRecord]
+    fact: RuntimeRecord,
+    records_by_id: dict[str, RuntimeRecord],
+    *,
+    proof_context: _AllowanceGrantProofContext | None = None,
 ) -> RuntimeRecord:
     receipts = [
         records_by_id[parent_id]
@@ -753,12 +996,18 @@ def _committed_fact_receipt(
     if len(receipts) != 1:
         raise ValueError("allowance fact lacks its direct Candidate receipt")
     receipt = receipts[0]
-    validate_runtime_record(receipt)
+    if proof_context is None:
+        validate_runtime_record(receipt)
+    else:
+        proof_context.validate_receipt(receipt)
     return receipt
 
 
 def _validate_candidate_head(
-    head: RuntimeRecord, records_by_id: dict[str, RuntimeRecord]
+    head: RuntimeRecord,
+    records_by_id: dict[str, RuntimeRecord],
+    *,
+    proof_context: _AllowanceGrantProofContext | None = None,
 ) -> RuntimeRecord:
     if set(head.payload) != {"candidate_id", "committed_record_ids"}:
         raise ValueError("Candidate committed head fields are invalid")
@@ -786,7 +1035,10 @@ def _validate_candidate_head(
     ):
         raise ValueError("Candidate committed head causal closure is malformed")
     receipt = records_by_id[receipt_ids[0]]
-    validate_runtime_record(receipt)
+    if proof_context is None:
+        validate_runtime_record(receipt)
+    else:
+        proof_context.validate_receipt(receipt)
     if receipt.payload.get("candidate_id") != candidate_id:
         raise ValueError("Candidate committed head receipt is mismatched")
     return receipt

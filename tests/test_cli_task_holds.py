@@ -537,7 +537,7 @@ def test_claim_wins_after_frozen_projection_relays_durable_rejection(
     # the handoff tests and core snapshot tests.
     monkeypatch.setattr(
         commitment,
-        "load_effect_projection_context",
+        "load_contract_declaration_projection_context",
         lambda *_args, **_kwargs: stale_context,
     )
     monkeypatch.setattr(

@@ -1,6 +1,6 @@
 # 持续工程分析交付与运行成本计划
 
-状态：A/B/C0 与 F1a 开发增量独立集成验收通过；C1/C2 隔离开发中，其余包待细化。阶段未完成。日期：2026-10-24。
+状态：A/B/C0 与 F1a 开发增量独立集成验收通过；C1/C2 单包及组合开发增量独立验收通过；其余包待细化。阶段未完成。日期：2026-10-24。
 
 ## 目标与用户行为
 
@@ -133,6 +133,8 @@ B 独立审查发现提交次数与任务数混用、VM 代理误作上下界及
 C0 的非作者96项复验通过，独立64个真实签名 heads 的缺失键 VM 工作量减少96%，另验旧连接写入、回滚、只读缺索引及 writable reopen。只关闭精确去重查询热点；原投影和 allowance 重扫未关闭。作者原红灯和独立证据分别保留。
 
 F1a 单包及独立组合验收 Passed，新增9文件清单 `84ff6ab3701d9a88ed75eee08da4f20e2d0f361d3da26d398a73dbd5d628bac0`；独立6项及11种 adapter 对抗检查通过。三条运行另核真实 receipt/head/claim、精确恢复观察归属、v6 frozen inputs/政策、qualification、导出和副本重建，原 Store 字节不变。组合代码/夹具669文件 `b01c8e9a5d451e93d6f457ff504c5f0f50df0ef24ce7be0c20fe9c8baddd0571`：源码3,095项、Ruff/555文件格式、树外安装106项通过；非作者另核975文件公开清单、660成员源码包、wheel和实际安装字节、最终治理49项及46相对链接。闭合仅更新验收元数据，重建最终源码包再核成员。原失败、错误断言、实际 publication 拒绝与 pytest 退出码未知的中断轮次分别保留。见[本批验证](../../reports/109-calibration-cli-development-2026-10-24.md)及[机器证据](../../reports/data/109-calibration-cli-verification.json)。不关闭 F1/F2/G 或 C 总目标。
+
+C1/C2 单包分别独立通过；C1 修复原参数分块与 Memory 畸形历史红灯，独立 H0/16/64 窄读取计数恒定、VM102/860；C2 独立27向量语义差分一致，P8/16/32/64 共享完整 head/receipt 校验各一次。首次完整整合3,129 passed/3 failed（旧测试 loader 注入入口迁移），只适配两文件的注入点并独立确认三 race 到原 SQLite writer fence后，新671文件代码/夹具清单 `97e5f44e6b5fcc6c5570b380aeec63df261523a619b7691c607a36b1619f60bc` 源码3,132项、Ruff/557文件格式、树外安装224项通过；最终文档链接/隐私检查、664成员源码包逐字节校验和非作者组合独立验收通过。见[局部性能验证](../../reports/110-local-projection-development-2026-10-24.md)及[机器证据](../../reports/data/110-local-projection-verification.json)。Memory/custom fallback、writer 和跨次余额历史成本不据此关闭。
 
 首批准确代码/夹具快照660文件摘要 `a02df296e2d31d887d258f0fbfa00185a7ac956fea31bda22b9d69e9e2664263`：源码3,089项通过、Ruff与552文件格式通过；默认隔离构建的代理依赖下载失败保留，已有依赖构建成功。wheel `ef8d92d66ced152dcebe216e5b6c01238fb2c7c7f8e26e4c568e4e75a87ec4fe` 的235模块与源码及树外安装一致，安装组合142项与6-cell installed smoke通过。最终文档治理49项通过；非作者 integration_review 最终集成验收通过，绑定964文件公开清单 `bbaa02b77527b3b94d0d0ba7e428b333f7828da2f1e112bd16e7971c681823b8` 与上述代码快照。不以首批通过替代全阶段通过。见[首批验证](../../reports/108-sustained-engineering-foundation-2026-10-24.md)及[机器证据](../../reports/data/108-sustained-delivery-baseline.json)。
 

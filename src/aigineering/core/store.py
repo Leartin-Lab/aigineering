@@ -317,6 +317,92 @@ class MemoryStore(_ProjectionIndexMixin):
     def get_runtime_revision(self) -> int:
         return self._runtime_revision
 
+    def read_contract_declaration_projection_inputs(self, request):
+        """Read only exact declaration inputs and relevant runtime facts."""
+        from aigineering.core.projection_context import (
+            ContractDeclarationProjectionInputs,
+        )
+
+        contract_ids = tuple(
+            dict.fromkeys(
+                (*request.incoming_contract_ids, *request.parent_contract_ids)
+            )
+        )
+        contracts = tuple(
+            contract
+            for contract_id in contract_ids
+            if (contract := self.get_contract(contract_id)) is not None
+        )
+        assets = tuple(
+            asset
+            for asset_id in request.asset_ids
+            if (asset := self.get_asset(asset_id)) is not None
+        )
+
+        source_ids = set(request.allowance_source_contract_ids)
+        selected: dict[str, tuple[int, RuntimeRecord]] = {}
+        heads: list[RuntimeRecord] = []
+
+        def source_matches(payload, field: str) -> bool:
+            value = payload.get(field)
+            return isinstance(value, str) and value in source_ids
+
+        for revision, record in self._runtime_records.values():
+            payload = record.payload
+            matched = record.record_type == "allowance.granted" and (
+                source_matches(payload, "contract_id")
+            )
+            matched = (
+                matched
+                or record.record_type == "allowance.reserved"
+                and source_matches(payload, "source_contract_id")
+            )
+            matched = (
+                matched
+                or record.record_type == "allowance.returned"
+                and (
+                    source_matches(payload, "source_contract_id")
+                    or source_matches(payload, "from_contract_id")
+                )
+            )
+            matched = (
+                matched
+                or record.record_type == "allowance.extinguished"
+                and source_matches(payload, "contract_id")
+            )
+            replay_match = (
+                request.include_candidate_replay
+                and record.record_type in {"candidate.received", "candidate.committed"}
+                and payload.get("candidate_id") == request.candidate_id
+            )
+            if matched or replay_match:
+                selected[record.id] = (revision, record)
+                if record.record_type == "candidate.committed":
+                    heads.append(record)
+
+        member_ids = {
+            member_id
+            for head in heads
+            if isinstance(
+                (member_ids_value := head.payload.get("committed_record_ids")),
+                (list, tuple),
+            )
+            for member_id in member_ids_value
+            if isinstance(member_id, str)
+        }
+        for member_id in member_ids:
+            found = self._runtime_records.get(member_id)
+            if found is not None:
+                selected[member_id] = found
+        runtime_records = tuple(
+            record for _, record in sorted(selected.values(), key=lambda item: item[0])
+        )
+        return ContractDeclarationProjectionInputs(
+            contracts=contracts,
+            assets=assets,
+            runtime_records=runtime_records,
+        )
+
     def _graph_payloads(self, position: int) -> list[dict]:
         from aigineering.core.asset_graph_facts import graph_rows_from_record
 

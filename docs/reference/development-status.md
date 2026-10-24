@@ -18,7 +18,7 @@
 | 功能 | 状态 | 当前可用范围与剩余工作 |
 | --- | --- | --- |
 | 可复算的工程分析验收器 | 部分实现 | [合成校准工具与 oracle](../../examples/thermal_calibration/README.md)已有固定数据、精确计算与逐样本证据检查；[CLI 配置](../../examples/thermal_calibration/CLI.md)的普通规划、双工具续接、不同 actor 确定性接受、实际恢复及原根续跑已通过协议夹具独立复验。源码3,095项与树外安装106项通过；真实模型、直接 Harness 对照和业务收益仍待验证。见[本批记录](../../reports/109-calibration-cli-development-2026-10-24.md)。 |
-| 长期工作区的局部查询成本 | 部分实现 | 已建立签名任务/闭合历史的性能基准。change118 为已有提交去重增加精确索引，独立验证数据库查询工作量减少；完整声明投影、额度、Asset 传播与 maintenance 历史重扫仍待修复，不能据此宣称整体 n² 已关闭。 |
+| 长期工作区的局部查询成本 | 部分实现 | 已有签名发布基准与 change118 精确去重索引；change120 将纯内置声明的 SQLite projection context 选为局部，固定引用下 H0/16/64 读取计数恒定；change119 将同批共享 head/receipt 完整证明降至各一次。源码组合3,132项通过；Memory/custom fallback、writer、跨次额度、Asset传播与 maintenance 仍待局部化，整体 n² 未关闭。见[局部性能记录](../../reports/110-local-projection-development-2026-10-24.md)。 |
 | 任务创建、状态、列表、看板、统计 | 已实现 | `task create/status/list/board/stats/show`；状态来自已提交事实，Redis 默认必需。 |
 | 文件输入、Skill 与上下文选择 | 已实现 | 冻结输入、角色绑定、按 Contract 披露；`task context` 默认只展示元数据。 |
 | 模型 Worker 与配置入口 | 已实现 | `run --config`、显式任务恢复和兼容模型 Worker；report107 的普通 CLI live08 使用 deepseek-flash 完成有界真实任务，provider 证据见 [开发记录](../../reports/107-cli-dynamic-research-development-2026-10-23.md)。 |

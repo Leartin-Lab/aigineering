@@ -52,7 +52,7 @@ from aigineering.core.effect_projectors import EffectProjector
 from aigineering.core.effect_projection import EffectHandler
 from aigineering.core.projection_context import (
     EffectProjectionContext,
-    load_effect_projection_context,
+    load_contract_declaration_projection_context,
 )
 from aigineering.core.record_conflict import (
     ClaimBindingConflict,
@@ -211,8 +211,8 @@ class CandidateCommitter:
             genesis,
             verifier_factory=verifier_factory,
             actor_keys=actor_keys,
-            projection_context=load_effect_projection_context(
-                self._store, actor_keys=actor_keys
+            projection_context=load_contract_declaration_projection_context(
+                self._store, candidate, actor_keys=actor_keys
             ),
             additional_effects=self._additional_effects,
         )

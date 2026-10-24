@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import sqlite3
+from dataclasses import replace
+from types import MappingProxyType
 
 import pytest
 
@@ -18,7 +20,7 @@ from aigineering.core.causal_allowance import (
     validate_causal_allowance_returns,
 )
 from aigineering.core.effect_projection import EffectHandler, EffectProjection
-from aigineering.core.ids import hash_contract_v3
+from aigineering.core.ids import canonical_json, hash_contract_v3
 from aigineering.core.lifecycle_facts import create_terminal_record
 from aigineering.core.signing import Ed25519Signer
 from aigineering.core.sqlite_store import SQLiteStore
@@ -34,10 +36,14 @@ from aigineering.protocol.effect_builders import (
     contract_cancellation_effect,
     contract_declaration_effect,
 )
-from aigineering.protocol.runtime_record import create_runtime_record
+from aigineering.protocol.runtime_record import (
+    create_runtime_record,
+    runtime_record_effective_payload,
+)
 from aigineering.protocol.types import Asset, Contract
 from aigineering.protocol.wire import contract_to_dict
 from aigineering.core.candidate_publisher import publish_effect, publish_effects
+import aigineering.core.allowance_returns as allowance_returns
 
 
 def _contract(name: str, *, budget: int, parent_id: str | None = None) -> Contract:
@@ -854,13 +860,188 @@ def test_sqlite_schema19_refuses_legacy_credit_only_returns_and_direct_append(
         assert persisted == '{"amount": 3, "source_contract_id": "task:source"}'
     finally:
         inspection.close()
-
     raw = SQLiteStore(":memory:")
     try:
         with pytest.raises(ValueError, match="Candidate ingress"):
             raw.append_runtime_record(legacy)
     finally:
         raw.close()
+
+
+@pytest.mark.parametrize("child_count", (8, 16, 32, 64))
+def test_signed_one_batch_child_grants_validate_shared_proofs_once(
+    monkeypatch, child_count
+):
+    signer, actor, genesis, store, trace = _world()
+    parent = _contract("proof-index-parent", budget=child_count + 1)
+    _publish(store, trace, genesis, actor, signer, parent, "proof-index-parent")
+    prior_records = tuple(record for _, record in store.scan_runtime_records())
+    prior_contracts = tuple(store.get_all_contracts())
+    children = tuple(
+        _contract(f"proof-index-child-{index}", budget=1, parent_id=parent.id)
+        for index in range(child_count)
+    )
+
+    decision = publish_effects(
+        store,
+        trace,
+        genesis,
+        actor,
+        signer,
+        tuple(contract_declaration_effect(child) for child in children),
+        idempotency_key=f"proof-index-one-batch-{child_count}",
+    )
+    assert decision.accepted, decision
+    new_heads = tuple(
+        record
+        for record in decision.runtime_records
+        if record.record_type == "candidate.committed"
+    )
+    new_receipts = tuple(
+        record
+        for record in decision.runtime_records
+        if record.record_type == "candidate.received"
+    )
+    assert len(new_heads) == len(new_receipts) == 1
+    head_id = new_heads[0].id
+    receipt_id = new_receipts[0].id
+
+    membership_work = {"iterated": 0, "contains": 0}
+
+    class CountedTuple(tuple):
+        def __new__(cls, values):
+            return super().__new__(cls, values)
+
+        def __iter__(self):
+            membership_work["iterated"] += len(self)
+            return super().__iter__()
+
+        def __contains__(self, item):
+            membership_work["contains"] += len(self)
+            return super().__contains__(item)
+
+    counted_head = replace(new_heads[0])
+    object.__setattr__(
+        counted_head,
+        "payload",
+        MappingProxyType(
+            {
+                **dict(counted_head.payload),
+                "committed_record_ids": CountedTuple(
+                    counted_head.payload["committed_record_ids"]
+                ),
+            }
+        ),
+    )
+    object.__setattr__(
+        counted_head, "causal_parents", CountedTuple(counted_head.causal_parents)
+    )
+    pending_records = tuple(
+        counted_head if record.id == head_id else record
+        for record in decision.runtime_records
+    )
+
+    original_validate_record = allowance_returns.validate_runtime_record
+    original_validate_head = allowance_returns._validate_candidate_head
+    envelope_counts = {}
+    envelope_bytes = {}
+    head_structure_counts = {}
+
+    def count_record_validation(record):
+        if record.id in {head_id, receipt_id}:
+            envelope_counts[record.id] = envelope_counts.get(record.id, 0) + 1
+            envelope_bytes[record.id] = envelope_bytes.get(record.id, 0) + len(
+                canonical_json(runtime_record_effective_payload(record))
+            )
+        return original_validate_record(record)
+
+    def count_head_validation(head, records_by_id, *, proof_context=None):
+        if head.id == head_id:
+            head_structure_counts[head.id] = head_structure_counts.get(head.id, 0) + 1
+        return original_validate_head(head, records_by_id, proof_context=proof_context)
+
+    monkeypatch.setattr(
+        allowance_returns, "validate_runtime_record", count_record_validation
+    )
+    monkeypatch.setattr(
+        allowance_returns, "_validate_candidate_head", count_head_validation
+    )
+    allowance_returns.validate_allowance_grants(
+        (*prior_contracts, *decision.contracts),
+        prior_records,
+        pending_records,
+    )
+
+    assert envelope_counts.get(head_id) == 1
+    assert envelope_counts.get(receipt_id) == 1
+    assert head_structure_counts.get(head_id) == 1
+    assert envelope_bytes[head_id] > 0
+    assert envelope_bytes[receipt_id] > 0
+    member_count = len(counted_head.payload["committed_record_ids"])
+    parent_count = len(counted_head.causal_parents)
+    assert membership_work["iterated"] + membership_work["contains"] <= 12 * (
+        member_count + parent_count
+    )
+
+
+def test_allowance_proof_index_preserves_duplicate_and_opaque_history_predicates():
+    duplicate_member = create_runtime_record(
+        "candidate.committed",
+        {
+            "candidate_id": "duplicate-member",
+            "committed_record_ids": ["member:x", "member:x"],
+        },
+        causal_parents=("member:x",),
+    )
+    duplicate_context = allowance_returns._AllowanceGrantProofContext(
+        {duplicate_member.id: duplicate_member}, (), ()
+    )
+    assert duplicate_context.matching_heads("member:x") == (duplicate_member,)
+    with pytest.raises(ValueError, match="duplicate record IDs"):
+        allowance_returns._validate_candidate_head(
+            duplicate_member, {duplicate_member.id: duplicate_member}
+        )
+
+    duplicate_reservation = create_runtime_record(
+        "allowance.reserved",
+        {
+            "child_contract_id": "task:child",
+            "reservation_id": "reservation:duplicate",
+            "source_contract_id": "task:parent",
+        },
+    )
+    reservation_context = allowance_returns._AllowanceGrantProofContext(
+        {}, (duplicate_reservation, duplicate_reservation), ()
+    )
+    assert reservation_context.reservations_for(
+        "task:child", "task:parent", "reservation:duplicate"
+    ) == (duplicate_reservation, duplicate_reservation)
+
+    for members, expected_count in (
+        ({"member:x": True}, 1),
+        ("prefix-member:x-suffix", 1),
+    ):
+        opaque_head = create_runtime_record(
+            "candidate.committed",
+            {"candidate_id": "opaque", "committed_record_ids": members},
+            causal_parents=("member:x",),
+        )
+        context = allowance_returns._AllowanceGrantProofContext(
+            {opaque_head.id: opaque_head}, (), ()
+        )
+        assert context.has_opaque_heads
+        assert len(context.matching_heads("member:x")) == expected_count
+
+    none_head = create_runtime_record(
+        "candidate.committed",
+        {"candidate_id": "opaque-none", "committed_record_ids": None},
+        causal_parents=("member:x",),
+    )
+    none_context = allowance_returns._AllowanceGrantProofContext(
+        {none_head.id: none_head}, (), ()
+    )
+    with pytest.raises(TypeError):
+        none_context.matching_heads("member:x")
 
 
 def test_sqlite_writer_allowance_gate_checks_return_receipt_and_head(tmp_path):

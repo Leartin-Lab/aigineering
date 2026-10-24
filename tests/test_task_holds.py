@@ -537,7 +537,7 @@ def test_claim_that_wins_after_plugin_snapshot_rejects_block_transaction(
 
     monkeypatch.setattr(
         commitment,
-        "load_effect_projection_context",
+        "load_contract_declaration_projection_context",
         lambda *_args, **_kwargs: stale_context,
     )
     monkeypatch.setattr(

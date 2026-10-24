@@ -82,6 +82,7 @@ from aigineering.protocol.wire import (
 
 _logger = logging.getLogger(__name__)
 _ASSET_ID_QUERY_CHUNK_SIZE = 900
+_PROJECTION_ID_QUERY_RELATION_COUNT = 5
 
 
 class WorkerBindingConflict(ValueError):
@@ -525,6 +526,124 @@ class SQLiteStore:
         return [
             (int(row["revision"]), self._row_to_runtime_record(row)) for row in rows
         ]
+
+    def read_contract_declaration_projection_inputs(self, request):
+        """Read exact declaration inputs and relevant runtime facts by index."""
+        from aigineering.core.projection_context import (
+            ContractDeclarationProjectionInputs,
+        )
+
+        contract_ids = tuple(
+            dict.fromkeys(
+                (*request.incoming_contract_ids, *request.parent_contract_ids)
+            )
+        )
+        contracts = tuple(
+            contract
+            for contract_id in contract_ids
+            if (contract := self.get_contract(contract_id)) is not None
+        )
+        assets = tuple(self.get_assets_by_ids(request.asset_ids))
+        selected: dict[str, tuple[int, RuntimeRecord]] = {}
+        heads: list[RuntimeRecord] = []
+
+        if request.allowance_source_contract_ids:
+            parameter_limit = self._conn.getlimit(sqlite3.SQLITE_LIMIT_VARIABLE_NUMBER)
+            relation_count = _PROJECTION_ID_QUERY_RELATION_COUNT
+            if parameter_limit <= relation_count:
+                raise sqlite3.OperationalError(
+                    "SQLite variable limit does not permit projection relation lookup"
+                )
+            chunk_size = min(
+                _ASSET_ID_QUERY_CHUNK_SIZE,
+                (parameter_limit - relation_count) // relation_count,
+            )
+            if chunk_size < 1:
+                raise sqlite3.OperationalError(
+                    "SQLite variable limit does not permit projection relation lookup"
+                )
+            source_ids = tuple(dict.fromkeys(request.allowance_source_contract_ids))
+            for start in range(0, len(source_ids), chunk_size):
+                chunk = source_ids[start : start + chunk_size]
+                placeholders = ", ".join("?" for _ in chunk)
+                clauses = (
+                    ("allowance.granted", "contract_id"),
+                    ("allowance.reserved", "source_contract_id"),
+                    ("allowance.returned", "source_contract_id"),
+                    ("allowance.returned", "from_contract_id"),
+                    ("allowance.extinguished", "contract_id"),
+                )
+                where = " OR ".join(
+                    "(record_type = ? AND json_extract(payload_json, '$.%s') IN (%s))"
+                    % (payload_field, placeholders)
+                    for _record_type, payload_field in clauses
+                )
+                values = tuple(
+                    value
+                    for record_type, _payload_field in clauses
+                    for value in (record_type, *chunk)
+                )
+                rows = self._conn.execute(
+                    "SELECT * FROM runtime_records WHERE " + where,
+                    values,
+                ).fetchall()
+                for row in rows:
+                    record = self._row_to_runtime_record(row)
+                    selected[record.id] = (int(row["revision"]), record)
+
+        if request.include_candidate_replay:
+            for record_type in ("candidate.received", "candidate.committed"):
+                rows = self._conn.execute(
+                    "SELECT * FROM runtime_records WHERE record_type = ? AND "
+                    "json_extract(payload_json, '$.candidate_id') = ? ORDER BY revision",
+                    (record_type, request.candidate_id),
+                ).fetchall()
+                for row in rows:
+                    record = self._row_to_runtime_record(row)
+                    selected[record.id] = (int(row["revision"]), record)
+                    if record.record_type == "candidate.committed":
+                        heads.append(record)
+
+        member_ids = tuple(
+            dict.fromkeys(
+                member_id
+                for head in heads
+                if isinstance(
+                    (member_ids_value := head.payload.get("committed_record_ids")),
+                    (list, tuple),
+                )
+                for member_id in member_ids_value
+                if isinstance(member_id, str)
+            )
+        )
+        if member_ids:
+            parameter_limit = self._conn.getlimit(sqlite3.SQLITE_LIMIT_VARIABLE_NUMBER)
+            chunk_size = min(_ASSET_ID_QUERY_CHUNK_SIZE, parameter_limit)
+            if chunk_size < 1:
+                raise sqlite3.OperationalError(
+                    "SQLite variable limit does not permit replay-member lookup"
+                )
+            for start in range(0, len(member_ids), chunk_size):
+                chunk = member_ids[start : start + chunk_size]
+                placeholders = ", ".join("?" for _ in chunk)
+                rows = self._conn.execute(
+                    "SELECT * FROM runtime_records WHERE record_id IN ("
+                    + placeholders
+                    + ")",
+                    chunk,
+                ).fetchall()
+                for row in rows:
+                    record = self._row_to_runtime_record(row)
+                    selected[record.id] = (int(row["revision"]), record)
+
+        runtime_records = tuple(
+            record for _, record in sorted(selected.values(), key=lambda item: item[0])
+        )
+        return ContractDeclarationProjectionInputs(
+            contracts=contracts,
+            assets=assets,
+            runtime_records=runtime_records,
+        )
 
     def get_runtime_revision(self) -> int:
         row = self._conn.execute(
