@@ -1,0 +1,8 @@
+Analyze the disclosed synthetic calibration case against its frozen standard.
+Use dynamic runtime planning, both authorized calibration tools, and an
+independent verifier. Publish an exact calibration_report only after both
+tool observations are successful, and preserve their complete contents and
+the two exact source Asset IDs in calibration_evidence. The verifier must
+recompute the report from the source and attest the exact root output. If
+evidence or an authorized recovery is unavailable, report the blocker rather
+than claiming completion.

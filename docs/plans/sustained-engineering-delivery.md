@@ -1,6 +1,6 @@
 # 持续工程分析交付与运行成本计划
 
-状态：A/B/C0 首批独立集成验收通过；F1a Ready待开工，其余包待细化。阶段未完成。日期：2026-10-24。
+状态：A/B/C0 与 F1a 开发增量独立集成验收通过；C1/C2 隔离开发中，其余包待细化。阶段未完成。日期：2026-10-24。
 
 ## 目标与用户行为
 
@@ -64,6 +64,40 @@ A/B 可并行。C/D/E/F1 尚无具体方案，不能因目标已同意而跳过�
 
 SQLite 自动随原事务维护索引，回滚不能留下额外权威；旧写者也由 SQLite 更新索引。现行 writable schema 初始化负责为旧 Store 建立缺失索引，冷建索引的全历史扫描及排序、构建成本单列，不要求新 reader floor；只读旧 Store 不自动建索引。验证先用真实签名积累至少64个 heads，比较无索引与新增索引的缺失键 VM 工作量及 EXPLAIN（VM 是工作量代理）；精确索引查找应至少减少四分之三 VM 指令，不以整体发布耗时声称此局部修复效果。验证已提交、未提交/被拒、空 ID、跨连接 exact replay、移除索引后重开重建索引且事实 ID 集不变。适用既有 authentication rejection、commitment、SQLite reopen 与 governance 检查，加全套门禁。仅机制优化，没有新的边界规则；原边界 architecture 约束继续适用。
 
+## C1 的声明投影上下文局部化方案
+
+本切片只优化实际 effects 全为内置 `contract.declare` 的纯投影输入选择，不修改 writer allowance 校验。作者 Luna recheck_planning，root 集成；独立审计和验收 integration_review。只依赖 B 的已确认重扫，不依赖 F1a；共享文件无其他在制作者。预计文件为 `core/projection_context.py`、最小的 `core/commitment.py` 调用适配、Store port/内存实现、SQLite Store/index，以及定向测试；不修改 effect projectors 的规则、writer allowance owners 或 F1a 文件。
+
+Core 根据现有 canonical parser 构造不可变 typed selection request：incoming Contract IDs、direct parent IDs、claim-bound parent ID、实际被输入校验使用的 Asset IDs、allowance source IDs、Candidate ID 与是否需单 effect replay 选择。可选的语义 Store reader 只返回精确既存 Contracts、Assets 和相关 runtime records；SQL 不解析 Contract 或重写规则。内存 Store 提供等价 reader；缺此能力的旧/custom Store 保留 full-context 路径，不增加强制协议门槛。仅其他实际 effect、未知版本或无法安全构造请求时走原路径；注册但本次未执行的 injected handler 不应使纯声明退回全量。
+
+窄预解析只是 read hint，不能提前认证或形成新的 rejection。加载 context 先于 `reduce_candidate`：已知 canonical parser 域错误须明确返回无请求、加载原 full context，再由原 reducer 形成同一认证、拒绝与 audit/trace。只捕获已确定的 parser 域异常，未知编程错误传播。引用不存在由原 projector 拒绝，不能把部分读取当完整；不因未知错误静默扩大查询。
+
+选择范围为：所有 incoming IDs 的既存 Contract（保持 replay 不重复 grant）、直接父项和 claim-bound 父项；不能把未提交声明提前放进 `existing_contracts`。原投影再合并全部 pending declarations，保持父子顺序无关。Asset 仅选 `input_asset_bindings` 中 role 属于 `inputs` 的 IDs，以及 task:v4/v5/v6 的 `context_asset_ids`；未使用 role 不新增语义。原 owner 继续核 ID/name/tombstone/label。
+
+Allowance 输入仍为相关 source 的完整 `granted.contract_id`、`reserved.source_contract_id`、`returned.source_contract_id`、`returned.from_contract_id`、`extinguished.contract_id` 记录。精确 replay 读取全部匹配 receipt/committed heads，并按每个 head 的完整成员列表取回成员；保留重复匹配以供原 uniqueness 校验拒绝，不能只取声明或 grant。纯声明没有 Asset graph assertions；混合或 injected effects 保持原完整 context。SQLite 增加相应关系的 partial expression indexes，既有 record ID/Candidate committed 索引继续复用；无新表、余额摘要或缓存权威。
+
+先保留旧实现红灯，再对 root/child、同批逆序父子、siblings/chain、exact inputs/context、缺失/改名/tombstone、parent bounds、replay 完整/缺失/重复/错序/改成员、mixed/injected/custom Store fallback、malformed/forged Candidate 的 audit 与 claim 不变性作 full-context differential。接受/拒绝及事实身份保持，writer 内原子余额/claim/key 重验不变；reopen/strict rebuild 摘要一致。新增架构约束保证 projectors 不读取 Store、SQL 留在适配器、窄路径不绕过原认证。
+
+增长门槛预先固定：保持显式 references、相关 allowance facts 和 replay 成员数不变，在真实签名闭合 H=0/16/64 下，窄 context 返回及物化对象总数与各关系数必须精确不变。查询应使用索引；H=64 的缺失键选择 VM 工作量相对无索引至少减少四分之三。VM 为独立工作量代理，不是精确扫描行；分别报告 API/SQL 次数、返回行与 VM，不以局部计数声称端到端线性。
+
+C1 不关闭同父逐项 allowance 历史增长、writer 全量校验或 publication proof 的 P²；这些仍是 C 的后续必修缺陷。冷索引构建、真正引用历史及完整 replay proof 成本单列。实现后先定向行为/架构复验和非作者审查，再跑适用完整门禁；Ready 前不开工。
+
+## C2 的单次 allowance 证明索引方案
+
+本方案已独立 Ready，独立于 C1 开工。作者 Luna recheck_tools，root 集成，独立审计/验收 integration_review；生产文件仅 `core/allowance_returns.py`，测试沿用 causal allowance returns/funding conservation owners，必要时补既有 architecture ownership 约束。不修改 C1 的 context/commitment/Store/SQLite 文件，C1 不是开工依赖。依赖 B 已证实的单 Candidate 批量 P² 与以下明确门槛。
+
+当前每个 child grant 都重新扫描全部 records、reservations、声明和头成员；共享大 head 与 receipt 的完整 hash/结构也可能被 P 次重验。拟在 `validate_allowance_grants` 单次调用内构造一个不可变、多值关系索引：按成员找全部 committed heads，按 Candidate/Contract 找全部 declarations，按 child/source/reservation ID 找全部新增 reservations，以及既存 grant 的 Contract 集合。匹配须保留真实多项歧义，不能选首项或最后覆盖。查询重叠只去掉同一个原事实的重复匹配，不改变既有 existing/pending overlay。
+
+复用同一语义 owner/helper，允许传入私有、仅本次调用存活的 proof context；不复制第二套规则。每事实仍核唯一 head、共同 head、精确值/完整 Contract、direct receipt parent 和声明成员关系。每唯一 head 的完整 `validate_runtime_record` envelope/hash、结构及 receipt 证明成功后只验一次；每唯一 receipt 的完整 envelope/hash亦只验一次（effect_types 也可长达 P）。每 head 一次构建安全成员/causal-parent membership sets，后续原 membership 谓词不再逐 child 扫大 tuple/list。仅缓存该不可变输入内已完成的证明，不跨调用缓存、不引入表、持久摘要或新的权威。
+
+索引构造不能丢弃畸形但可匹配的 head/declaration/reservation。安全容器之外的 opaque 历史保留原匹配/拒绝路径，匹配后的 schema/值/receipt/head 闭包仍由原 helper 裁决；域异常类型与稳定错误归属保持，不吞未知错误。返回/资金 ancestry 的既有无 context 调用保持同一规则。Writer 事务、认证、事实身份、幂等和 rebuild 均不改变。
+
+先从真实签名 one-batch 声明构造 P=8/16/32/64 的完整 receipt/head/declaration/reservation/grant 向量并保留旧计数红灯。对缺配对、重复 reservation/declaration/head、金额或 source/purpose/ID 错误、缺/错/重复 receipt、错 Contract、跨 head 分裂、重复 member/closure 错误及 malformed 容器做原行为差分；feature 测试须保持 generic proof 有效且证明到达目标 fence。既有 returns、root retry conservation、writer 竞争、replay 和重建组合继续通过。
+
+量化门槛：每次关系索引只扫描传入记录集合常数次；每 head 原成员和父 tuple/list只作常数次完整遍历；选中唯一 head 的 envelope/hash 和完整结构、每唯一共享 receipt 的 envelope/hash至多各一次。每 child 查询自身多值候选，不重扫全 reservation/record 集。以 test-side 包装计数器和可计数容器核实际成员访问、canonical validation 次数及候选数量，静态复核循环；不能只看 `_validate_candidate_head` 名称调用数而遗漏其前后 hash 或 membership 的 P²。分开记录必要 M（全部输入 head 成员数）、P 和实际验证字节数 V（包含 receipt raw_output 等），证明固定载荷下 O(H+M+P)、一般情况下另计 V 的循环结构，再用上述向量核对；计时/profile辅助，不把有限点拟合当证明，不添加参与裁决的生产 observer。
+
+C2 仍会在每次 publication 建立临时索引；它不消除 H 全量输入、同父逐项余额历史或 writer 每次重扫的累计 P²。C 总目标继续开放。无需新 ADR；作者交付准确变更/验证说明，由独立验收决定性能证据是否足够公开，root 不把局部通过写成整体线性。
+
 ## F1 的首个可运行切片 F1a
 
 F1a 只依赖 A，先接普通 CLI，再做直接 Harness 对照和额外故障测量；不等待性能修复。作者 Luna recheck_tools；独立计划审计/实现验收 integration_review。只新增 `examples/thermal_calibration/{CLI.md,SKILL.md,skill.toml,run.toml,workers.toml,task-description.txt,workers.py}`、`tests/fixtures/thermal_calibration_workers.py`、`tests/test_thermal_calibration_cli.py`；不修改 A 已冻结的工具、oracle、输入、README 或 runtime owners。root 负责导航和集成。
@@ -84,6 +118,10 @@ A/B：integration_review 对计划 SHA-256 `b2fb7b65e6ec60b868eba6d9813062adfdc5
 
 F1a：integration_review 对计划 `7072de22b8b6b821ebb52ba02b02d2873c8c12e8eaecac409805514e59a2f62d` 独立审计 Ready；为隔离首批交付快照，在 A/B/C0 交付后开工。不包含直接 Harness 和真实 provider。采纳字段大小写笔误修正，不改变 A 接口。
 
+C1：integration_review 对公开计划 `0ab88392e9d22818e9de9e447cdf0fddf41164f57efe717860f18751650687e7` 独立审计 Ready。关系选择需去除查询重叠并保持原 revision 顺序，不能吞掉实际重复 receipt/head；大请求分块。VM 对照的被测关系须实际含足够候选历史，空关系不冒充索引收益。使用独立源副本开发，集成时重新核对与 F1a 的组合快照。
+
+C2：integration_review 对公开计划 `5fc74736aa305d349e6bdf251a9e3d765790f584173c980a1667610538b3f56a` 独立审计 Ready。实现须传播同一 proof context 至 `_committed_fact_receipt`；head 内重复成员不可变成两个同 head 命中而改变 fence，真实重复新增 reservation 不被去重。opaque 畸形容器按原谓词及时点处理。采纳一般载荷另计实际验证字节 V 的澄清，保持单调用范围。
+
 C0：integration_review 对计划 `c9be19f3da3288c9f8526bbd75f0c7895fb500239a1dbb4a24d18fe71a685e4b` 独立审计 Ready；采纳其冷建索引成本表述修正，不将扫描行数等同总 CPU 成本。
 
 ## 开发—验收及集成记录
@@ -93,6 +131,8 @@ A 的独立复核发现华氏循环小数差分的精确舍入中点错误，作
 B 独立审查发现提交次数与任务数混用、VM 代理误作上下界及 revision 来源混淆；已修订并通过非作者2项测试、12-cell小矩阵和注入失败保留复核。最终脚本 `8969545a6c0f927e082d2a286557ea29f54a8d5d305141d863bdfcedd34ae486`；测试 `52784f944c0f734b1ee934e60cb29cf781ace7e2d4fcbae2dfb4413bf9e2a7cc`。正式旧版本基线36 cells、216个隔离 pass全部通过，非作者逐项核对包hash、拓扑与计数；报告 SHA-256 `4c1aa572b48773f4bf42c53fc9638213ae40cfb80526c7390bdf14d7a62b097a`。旧统计口径和中断轮次另存，不以新字段补填旧结果。
 
 C0 的非作者96项复验通过，独立64个真实签名 heads 的缺失键 VM 工作量减少96%，另验旧连接写入、回滚、只读缺索引及 writable reopen。只关闭精确去重查询热点；原投影和 allowance 重扫未关闭。作者原红灯和独立证据分别保留。
+
+F1a 单包及独立组合验收 Passed，新增9文件清单 `84ff6ab3701d9a88ed75eee08da4f20e2d0f361d3da26d398a73dbd5d628bac0`；独立6项及11种 adapter 对抗检查通过。三条运行另核真实 receipt/head/claim、精确恢复观察归属、v6 frozen inputs/政策、qualification、导出和副本重建，原 Store 字节不变。组合代码/夹具669文件 `b01c8e9a5d451e93d6f457ff504c5f0f50df0ef24ce7be0c20fe9c8baddd0571`：源码3,095项、Ruff/555文件格式、树外安装106项通过；非作者另核975文件公开清单、660成员源码包、wheel和实际安装字节、最终治理49项及46相对链接。闭合仅更新验收元数据，重建最终源码包再核成员。原失败、错误断言、实际 publication 拒绝与 pytest 退出码未知的中断轮次分别保留。见[本批验证](../../reports/109-calibration-cli-development-2026-10-24.md)及[机器证据](../../reports/data/109-calibration-cli-verification.json)。不关闭 F1/F2/G 或 C 总目标。
 
 首批准确代码/夹具快照660文件摘要 `a02df296e2d31d887d258f0fbfa00185a7ac956fea31bda22b9d69e9e2664263`：源码3,089项通过、Ruff与552文件格式通过；默认隔离构建的代理依赖下载失败保留，已有依赖构建成功。wheel `ef8d92d66ced152dcebe216e5b6c01238fb2c7c7f8e26e4c568e4e75a87ec4fe` 的235模块与源码及树外安装一致，安装组合142项与6-cell installed smoke通过。最终文档治理49项通过；非作者 integration_review 最终集成验收通过，绑定964文件公开清单 `bbaa02b77527b3b94d0d0ba7e428b333f7828da2f1e112bd16e7971c681823b8` 与上述代码快照。不以首批通过替代全阶段通过。见[首批验证](../../reports/108-sustained-engineering-foundation-2026-10-24.md)及[机器证据](../../reports/data/108-sustained-delivery-baseline.json)。
 

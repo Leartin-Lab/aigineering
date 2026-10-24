@@ -17,7 +17,7 @@
 
 | 功能 | 状态 | 当前可用范围与剩余工作 |
 | --- | --- | --- |
-| 可复算的工程分析验收器 | 部分实现 | [合成校准工具与 oracle](../../examples/thermal_calibration/README.md)已有固定数据、精确单位/漂移计算、阈值与逐样本证据检查；46 项确定性测试及独立边界复核通过。CLI 业务接入、直接 Harness 对照和真实任务收益仍待验证。 |
+| 可复算的工程分析验收器 | 部分实现 | [合成校准工具与 oracle](../../examples/thermal_calibration/README.md)已有固定数据、精确计算与逐样本证据检查；[CLI 配置](../../examples/thermal_calibration/CLI.md)的普通规划、双工具续接、不同 actor 确定性接受、实际恢复及原根续跑已通过协议夹具独立复验。源码3,095项与树外安装106项通过；真实模型、直接 Harness 对照和业务收益仍待验证。见[本批记录](../../reports/109-calibration-cli-development-2026-10-24.md)。 |
 | 长期工作区的局部查询成本 | 部分实现 | 已建立签名任务/闭合历史的性能基准。change118 为已有提交去重增加精确索引，独立验证数据库查询工作量减少；完整声明投影、额度、Asset 传播与 maintenance 历史重扫仍待修复，不能据此宣称整体 n² 已关闭。 |
 | 任务创建、状态、列表、看板、统计 | 已实现 | `task create/status/list/board/stats/show`；状态来自已提交事实，Redis 默认必需。 |
 | 文件输入、Skill 与上下文选择 | 已实现 | 冻结输入、角色绑定、按 Contract 披露；`task context` 默认只展示元数据。 |

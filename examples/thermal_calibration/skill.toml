@@ -1,0 +1,5 @@
+name = "thermal_calibration"
+version = "1.0.0"
+description = "Plan and independently verify a synthetic calibration drift report."
+trust_tier = "configured"
+content_file = "SKILL.md"
