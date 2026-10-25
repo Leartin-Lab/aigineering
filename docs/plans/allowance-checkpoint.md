@@ -1,6 +1,6 @@
 # C3a：SQLite 同 Store raw allowance checkpoint
 
-状态：**隔离基础包单项独立验收 Passed，未集成**。本包是可重建的原始 allowance 汇总基础设施。基线冻结为 `2d8d4b626d4640ce948c7790a08c3e349f480d3b`。C1/C2 单包和组合开发增量独立通过。公开阶段总目标 C 仍 OPEN。
+状态：**隔离基础包单项独立验收 Passed，与 C3b consumer 的 root 源码、安装与构建检查通过，非作者组合终验 Passed**。本包是可重建的原始 allowance 汇总基础设施。基线冻结为 `2d8d4b626d4640ce948c7790a08c3e349f480d3b`。C1/C2 单包和组合开发增量独立通过。公开阶段总目标 C 仍 OPEN。
 
 本包遵循[工作流适配](../development-workflow-adapter.md)，属于[阶段计划](sustained-engineering-delivery.md)。作者 Luna recheck_planning，root 集成，非作者 integration_review 审计与验收。
 
@@ -122,3 +122,5 @@ integration_review 对计划 SHA-256 `05dc060385c8a8e555e756555f1ca3d61da9c7f8d3
 首轮独立组合发现新增 pure-fold 测试与既有 architecture 文件同 basename，标准 pytest collection 失败。仅将新文件更名为 `tests/test_raw_allowance_totals.py`；不更改全局 import mode，首轮失败保留；该首轮未通过，后续结论见下文。
 
 修订后由 integration_review 非作者独立验收：95项行为/资金/架构与37项SQLite测试通过；另有2,500个纯差分向量、120格真实SQL返回/解码/折叠及VM门槛、4300位整数原红向量、已打开旧写者追加与只读snapshot严格重建检查通过。最终8文件摘要为 `e424a1cb32d80584260cdeefdd6ee042be7c94733ee0310137c200f57259c7ff`；最后只修change121陈旧的作者证据文字，代码/测试不变。单项 Passed 不代替全套与安装验证，也不证明端到端收益；与C3b consumer同快照验证后才组合交付。
+
+C3a 与精确 C3b consumer 已在同一711文件代码/夹具快照通过root源码3,342项、树外444项、B完整矩阵与安装smoke。无消费者的foundation未单独进入开发分支；最终非作者组合验收 Passed，开发交付最后按文档/包轻闭合流程处理，见[开发验证](../../reports/112-local-allowance-development-2026-10-25.md)。

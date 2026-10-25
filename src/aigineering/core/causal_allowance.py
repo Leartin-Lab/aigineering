@@ -6,8 +6,10 @@ represented by append-only allowance records and never credited to a Worker.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from collections import defaultdict
 from collections.abc import Iterable, Sequence
+from decimal import Decimal
 from typing import TYPE_CHECKING
 
 from aigineering.core.ids import canonical_json, compute_content_hash
@@ -26,10 +28,13 @@ from aigineering.core.allowance_returns import (
     validate_causal_allowance_returns,
 )
 from aigineering.core.terminal_types import TERMINAL_EVENTS
+from aigineering.core.allowance_publication_index import AllowanceBalanceInput
 
 __all__ = [
     "CausalAllowanceConflict",
     "allowance_available",
+    "RawAllowanceTotals",
+    "fold_raw_allowance_records",
     "allowance_is_recorded",
     "allowance_purpose",
     "allowance_reservation_id",
@@ -44,6 +49,58 @@ __all__ = [
     "validate_causal_allowance_returns",
 ]
 
+
+@dataclass(frozen=True)
+class RawAllowanceTotals:
+    grant_count: int
+    granted_total: int
+    reserved_total: int
+    returned_in_total: int
+    returned_out_total: int
+    extinguished_total: int
+
+
+def _raw_integer_text(value: int) -> str:
+    """Encode arbitrary-size Python integers without sys' decimal digit cap."""
+    return format(Decimal(value), "f")
+
+
+def fold_raw_allowance_records(
+    contract_id: str, records: Iterable[RuntimeRecord]
+) -> RawAllowanceTotals | None:
+    """Fold raw allowance components, or return None when history is opaque."""
+    by_id = {record.id: record for record in records}
+    totals = {
+        "grant_count": 0,
+        "granted_total": 0,
+        "reserved_total": 0,
+        "returned_in_total": 0,
+        "returned_out_total": 0,
+        "extinguished_total": 0,
+    }
+    try:
+        groups = (
+            ("allowance.granted", "contract_id", "grant_count", "granted_total"),
+            ("allowance.reserved", "source_contract_id", None, "reserved_total"),
+            ("allowance.returned", "source_contract_id", None, "returned_in_total"),
+            ("allowance.returned", "from_contract_id", None, "returned_out_total"),
+            ("allowance.extinguished", "contract_id", None, "extinguished_total"),
+        )
+        for record_type, field, count_field, amount_field in groups:
+            for record in by_id.values():
+                if (
+                    record.record_type != record_type
+                    or record.payload.get(field) != contract_id
+                ):
+                    continue
+                if count_field is not None:
+                    totals[count_field] += 1
+                totals[amount_field] += int(record.payload.get("amount", 0))
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return RawAllowanceTotals(**totals)
+
+
 if TYPE_CHECKING:
     from aigineering.core.store import StoreProtocol
 
@@ -54,6 +111,7 @@ def project_contract_allowance_records(
     records: Sequence[RuntimeRecord],
     *,
     causal_parent: str,
+    balance_inputs: tuple[AllowanceBalanceInput, ...] | None = None,
 ) -> tuple[RuntimeRecord, ...]:
     """Grant roots and atomically reserve contained child publication."""
     if not contracts:
@@ -71,8 +129,21 @@ def project_contract_allowance_records(
                     "child allowance references an unknown parent Contract"
                 )
             requested[contract.parent_id] += contract.budget
+    indexed_balances = _index_allowance_balance_inputs(balance_inputs)
     for source_id, amount in requested.items():
-        available = allowance_available(known[source_id], records)
+        balance = (
+            indexed_balances.get(source_id) if indexed_balances is not None else None
+        )
+        if balance_inputs is not None and balance is None:
+            raise RuntimeError("allowance balance input is missing a requested source")
+        available = (
+            allowance_available_from_totals(known[source_id], balance.totals)
+            if balance is not None and balance.totals is not None
+            else allowance_available(
+                known[source_id],
+                balance.reference_records if balance is not None else records,
+            )
+        )
         if amount > available:
             raise ValueError(
                 f"causal allowance exceeded for {source_id!r}: "
@@ -143,7 +214,6 @@ def allowance_available(contract: Contract, records: Iterable[RuntimeRecord]) ->
         if record.record_type == "allowance.granted"
         and record.payload.get("contract_id") == contract.id
     ]
-    granted = sum(grants) if grants else contract.budget
     reserved = sum(
         int(record.payload.get("amount", 0))
         for record in relevant
@@ -168,7 +238,63 @@ def allowance_available(contract: Contract, records: Iterable[RuntimeRecord]) ->
         if record.record_type == "allowance.extinguished"
         and record.payload.get("contract_id") == contract.id
     )
-    return max(0, granted - reserved + returned - returned_out - extinguished)
+    return _allowance_available_from_components(
+        contract,
+        len(grants),
+        sum(grants),
+        reserved,
+        returned,
+        returned_out,
+        extinguished,
+    )
+
+
+def _allowance_available_from_components(
+    contract: Contract,
+    grant_count: int,
+    granted_total: int,
+    reserved_total: int,
+    returned_in_total: int,
+    returned_out_total: int,
+    extinguished_total: int,
+) -> int:
+    granted = granted_total if grant_count else contract.budget
+    return max(
+        0,
+        granted
+        - reserved_total
+        + returned_in_total
+        - returned_out_total
+        - extinguished_total,
+    )
+
+
+def _index_allowance_balance_inputs(
+    balance_inputs: tuple[AllowanceBalanceInput, ...] | None,
+) -> dict[str, AllowanceBalanceInput] | None:
+    if balance_inputs is None:
+        return None
+    indexed: dict[str, AllowanceBalanceInput] = {}
+    for item in balance_inputs:
+        if item.contract_id in indexed:
+            raise RuntimeError("allowance balance input contains duplicate sources")
+        indexed[item.contract_id] = item
+    return indexed
+
+
+def allowance_available_from_totals(
+    contract: Contract, totals: RawAllowanceTotals
+) -> int:
+    """Apply the original allowance formula to exact indexed raw totals."""
+    return _allowance_available_from_components(
+        contract,
+        totals.grant_count,
+        totals.granted_total,
+        totals.reserved_total,
+        totals.returned_in_total,
+        totals.returned_out_total,
+        totals.extinguished_total,
+    )
 
 
 def allowance_purpose(contract: Contract) -> str:
@@ -270,6 +396,7 @@ def validate_allowance_commit(
     pending_records: Sequence[RuntimeRecord],
     *,
     candidate_id: str | None = None,
+    balance_inputs: tuple[AllowanceBalanceInput, ...] | None = None,
 ) -> None:
     """Recheck allowance consequences against the commit-time fact snapshot."""
     by_id = {contract.id: contract for contract in contracts}
@@ -330,6 +457,7 @@ def validate_allowance_commit(
             continue
         source_id = str(record.payload.get("source_contract_id", ""))
         requested[source_id] += int(record.payload.get("amount", 0))
+    indexed_balances = _index_allowance_balance_inputs(balance_inputs)
     for source_id, amount in requested.items():
         source = by_id.get(source_id)
         if source is None:
@@ -338,7 +466,23 @@ def validate_allowance_commit(
             raise CausalAllowanceConflict(
                 "cannot reserve allowance from a terminal Contract"
             )
-        available = allowance_available(source, records_with_returns)
+        balance = (
+            indexed_balances.get(source_id) if indexed_balances is not None else None
+        )
+        if balance_inputs is not None and balance is None:
+            raise RuntimeError("allowance balance input is missing a requested source")
+        available = (
+            allowance_available_from_totals(source, balance.totals)
+            if balance is not None and balance.totals is not None
+            else allowance_available(
+                source,
+                (
+                    (*balance.reference_records, *validated_returns)
+                    if balance is not None
+                    else records_with_returns
+                ),
+            )
+        )
         if amount > available:
             raise CausalAllowanceConflict(
                 f"causal allowance changed before commit for {source_id!r}: "

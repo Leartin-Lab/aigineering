@@ -353,6 +353,19 @@ Assets, then commits only newly visible consequences. Two concurrent Candidates
 that satisfy different outputs therefore converge on exactly one terminal fact
 instead of leaving an output-complete Contract unterminated.
 
+SQLite can select a bounded immutable context for homogeneous built-in Contract
+declarations. For supported canonical task identities, the allowance owner consumes
+raw per-source totals while the original commitment transaction still performs
+two fresh validations. Optional SQLite allowance checkpoints and publication
+head-member relations are rebuildable projections, maintained with their source
+facts in the same transaction. Old-writer tails are read within the selected
+snapshot; readers and audits never advance cache state. Missing or known-invalid
+cache data uses the original reference validation path; unknown storage failures
+propagate. No task, budget, proof or acceptance authority moves into the indexes.
+Cold build, complete audit, rebuild and unsupported history remain explicit costs;
+Asset and claim paths are separate. See [ADR-047](docs/adr/ADR-047-rebuildable-allowance-checkpoints.md)
+and [ADR-048](docs/adr/ADR-048-rebuildable-publication-relations.md).
+
 ## Disclosure
 
 A Worker receives a frozen package containing the exact disclosed Asset IDs and

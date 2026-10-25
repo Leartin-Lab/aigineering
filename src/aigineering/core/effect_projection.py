@@ -371,6 +371,7 @@ def project_effect_batch(
         effective_context.contracts,
         effective_context.runtime_records + return_records,
         causal_parent=receipt_id,
+        balance_inputs=effective_context.allowance_balance_inputs,
     )
     targets = tuple(
         (effect.effect_type, projection.relation_target)

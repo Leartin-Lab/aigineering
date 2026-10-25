@@ -7,6 +7,7 @@ from collections.abc import Mapping, Sequence
 from types import MappingProxyType
 
 from aigineering.core.ids import canonical_json, compute_content_hash
+from aigineering.core.allowance_publication_index import safe_committed_head_relations
 from aigineering.protocol.runtime_record import (
     RuntimeRecord,
     create_runtime_record,
@@ -63,22 +64,14 @@ class _AllowanceGrantProofContext:
 
         for record in records_by_id.values():
             if record.record_type == "candidate.committed":
-                members = record.payload.get("committed_record_ids", ())
-                parents = record.causal_parents
-                if (
-                    not isinstance(members, (list, tuple))
-                    or not all(isinstance(item, str) and item for item in members)
-                    or not isinstance(parents, tuple)
-                    or not all(isinstance(item, str) and item for item in parents)
-                ):
+                relations = safe_committed_head_relations(record)
+                if relations is None:
                     has_opaque_heads = True
                     continue
                 # The historical predicate treated a repeated member within
                 # one head as one matching head; _validate_candidate_head
                 # separately rejects duplicate members after selection.
-                indexed_head = _IndexedCommittedHead(
-                    record, frozenset(members), frozenset(parents)
-                )
+                indexed_head = _IndexedCommittedHead(record, *relations)
                 heads_by_id[record.id] = indexed_head
                 for member_id in indexed_head.members:
                     heads_by_member[member_id].append(indexed_head)

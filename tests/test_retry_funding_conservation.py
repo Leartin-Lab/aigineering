@@ -385,7 +385,17 @@ def _pre_fix_root_retry_decision(store, root, monkeypatch):
         causal_parents=(root.id,),
     )
 
-    def old_projection(contracts, existing_contracts, records, *, causal_parent):
+    def old_projection(
+        contracts,
+        existing_contracts,
+        records,
+        *,
+        causal_parent,
+        balance_inputs=None,
+    ):
+        # This legacy root-retry fixture intentionally exercises the full
+        # reference path rather than supplying checkpoint-derived balances.
+        assert balance_inputs is None
         assert tuple(c.id for c in contracts) == (successor.id,)
         return (
             create_runtime_record(

@@ -135,6 +135,12 @@ materializations are projections of immutable runtime records. Deleting and
 rebuilding those views must preserve the semantic digest. Process snapshots and
 runtime heartbeat rows are not execution authority.
 
+Optional allowance checkpoints and publication relation indexes are rebuildable
+Store projections, never additional facts or authority. Their maintained changes
+share the fact transaction; reference validation preserves decisions when the
+acceleration is unavailable. Read-only tail selection and integrity checks cannot
+repair or publish facts.
+
 Registration actor/key binding is part of the verified semantics. Display
 timestamps alone are not identity or lifecycle authority.
 

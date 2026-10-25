@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from aigineering.protocol.runtime_record import RuntimeRecord
+from aigineering.core.allowance_publication_index import AllowanceBalanceInput
 from aigineering.protocol.candidate import ActorKey
 from aigineering.protocol.types import Asset, Contract
 from aigineering.core.worker_routing import WorkerRegistration
@@ -25,6 +26,7 @@ class EffectProjectionContext:
     actor_keys: tuple[ActorKey, ...] = ()
     registrations: tuple[WorkerRegistration, ...] = ()
     claim_history_contract_ids: frozenset[str] = frozenset()
+    allowance_balance_inputs: tuple[AllowanceBalanceInput, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -46,6 +48,7 @@ class ContractDeclarationProjectionInputs:
     contracts: tuple[Contract, ...] = ()
     assets: tuple[Asset, ...] = ()
     runtime_records: tuple[RuntimeRecord, ...] = ()
+    allowance_balance_inputs: tuple[AllowanceBalanceInput, ...] | None = None
 
 
 _KNOWN_TASK_ID_VERSIONS = frozenset({"3", "4", "5", "6"})
@@ -131,6 +134,7 @@ def load_contract_declaration_projection_context(
         assets=selected.assets,
         runtime_records=selected.runtime_records,
         actor_keys=actor_keys,
+        allowance_balance_inputs=getattr(selected, "allowance_balance_inputs", None),
     )
 
 

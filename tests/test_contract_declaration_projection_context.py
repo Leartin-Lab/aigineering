@@ -412,7 +412,10 @@ def test_closed_signed_history_does_not_expand_context_and_index_bounds_vm(
     measurements_by_history = {}
     relation_counts_by_history = {}
     for history in (0, 16, 64):
-        store = SQLiteStore(str(tmp_path / f"history-{history}.sqlite"))
+        store = SQLiteStore(
+            str(tmp_path / f"history-{history}.sqlite"),
+            allowance_checkpoint_mode="reference",
+        )
         runtime, parent, child, candidate, used, context, unused = (
             _fixed_projection_candidate(store)
         )
@@ -489,7 +492,7 @@ def test_closed_signed_history_does_not_expand_context_and_index_bounds_vm(
     history_ids = tuple(record.id for _, record in store.scan_runtime_records())
     db_path = tmp_path / "history-64.sqlite"
     store.close()
-    reopened = SQLiteStore(str(db_path))
+    reopened = SQLiteStore(str(db_path), allowance_checkpoint_mode="reference")
     index_names = {
         row[0]
         for row in reopened._conn.execute(
@@ -1327,7 +1330,10 @@ def test_signed_malformed_domain_candidate_keeps_reducer_rejection_and_claim_sta
 def test_reader_returns_exact_source_allowance_facts_in_revision_order(tmp_path):
     from aigineering.core.sqlite_store import SQLiteStore
 
-    store = SQLiteStore(str(tmp_path / "source-relations.sqlite"))
+    store = SQLiteStore(
+        str(tmp_path / "source-relations.sqlite"),
+        allowance_checkpoint_mode="reference",
+    )
     runtime = candidate_runtime(store)
     parent = build_control_plane_contract(
         name="allowance-parent", inputs=(), outputs=(), activation="", budget=5
@@ -1413,7 +1419,10 @@ def test_reader_refuses_relation_query_when_fixed_parameters_exceed_limit(
 ):
     from aigineering.core.sqlite_store import SQLiteStore
 
-    store = SQLiteStore(str(tmp_path / f"relation-limit-{variable_limit}.sqlite"))
+    store = SQLiteStore(
+        str(tmp_path / f"relation-limit-{variable_limit}.sqlite"),
+        allowance_checkpoint_mode="reference",
+    )
     store._conn.setlimit(sqlite3.SQLITE_LIMIT_VARIABLE_NUMBER, variable_limit)
     request = ContractDeclarationProjectionRequest(
         incoming_contract_ids=(),
@@ -1435,7 +1444,10 @@ def test_actual_declaration_reader_selects_many_distinct_parent_relations(
     from aigineering.core.ids import contract_from_fields
     from aigineering.core.sqlite_store import SQLiteStore
 
-    store = SQLiteStore(str(tmp_path / "many-parent-relations.sqlite"))
+    store = SQLiteStore(
+        str(tmp_path / "many-parent-relations.sqlite"),
+        allowance_checkpoint_mode="reference",
+    )
     runtime = candidate_runtime(store)
     parents = tuple(
         runtime.accept_contract(

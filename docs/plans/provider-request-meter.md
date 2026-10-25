@@ -2,7 +2,7 @@
 
 遵循[工作流适配](../development-workflow-adapter.md)与[阶段计划](sustained-engineering-delivery.md)。
 
-状态：隔离实现已独立通过，root 集成适用门禁及非作者总体验收通过，待 dev 交付；integration_review 审计快照 `0bec6a765d4cf0951cd339a553e76db2bbde435d1276b0336bb7db1c67034232` 通过。本包只定义一个可离线验证的 run-scoped meter，不接入 provider 或 Runtime。依据：工作流适配器 SHA-256 `ea61aa8a83b30a88ae08b799033c3a2248bc9f7323486382d506c263baf187a6`；阶段计划 SHA-256 `4667512fb400ed5f530358393e22a240631ef9a24b5354b4135be072851b628f`；只读 G0 接入盘点 SHA-256 `0299194b320ea27316a5ce788a1169c9726e1beda34f79ede7be094cc04ea50c`。盘点所据源快照为 `2d8d4b626d4640ce948c7790a08c3e349f480d3b`；实施前须重新冻结依赖代码和计划版本。
+状态：隔离实现已独立通过，root 集成适用门禁及非作者总体验收通过，已交付 dev 的 b9a87cd；integration_review 审计快照 `0bec6a765d4cf0951cd339a553e76db2bbde435d1276b0336bb7db1c67034232` 通过。本包只定义一个可离线验证的 run-scoped meter，不接入 provider 或 Runtime。依据：工作流适配器 SHA-256 `ea61aa8a83b30a88ae08b799033c3a2248bc9f7323486382d506c263baf187a6`；阶段计划 SHA-256 `4667512fb400ed5f530358393e22a240631ef9a24b5354b4135be072851b628f`；只读 G0 接入盘点 SHA-256 `0299194b320ea27316a5ce788a1169c9726e1beda34f79ede7be094cc04ea50c`。盘点所据源快照为 `2d8d4b626d4640ce948c7790a08c3e349f480d3b`；实施前须重新冻结依赖代码和计划版本。
 
 ## 目标和限制
 

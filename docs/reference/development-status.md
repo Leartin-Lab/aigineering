@@ -109,4 +109,8 @@ report107 已证明一条经普通 CLI、真实 provider、双工具续接和不
 总体路线见 [ROADMAP](../../ROADMAP.md)，发布证据规则见
 [release evidence](release-evidence.md)。
 
-离线请求计量切片已完成隔离实现复核，源码3,257项和树外49项集成检查通过，非作者对准确集成范围、源码包与树外来源复核通过，独立98项及树外49项通过，待开发分支交付。它在单进程内提供并发请求许可、保守输出容量预留、cooperative deadline 和未知 usage 汇总；尚未接入 direct/Runtime transport，不能作为真实请求预算、持久重启预算或成本优势证据。详见[工作包计划](../plans/provider-request-meter.md)。
+离线请求计量切片已完成隔离实现复核，源码3,257项和树外49项集成检查通过，非作者对准确集成范围、源码包与树外来源复核通过，独立98项及树外49项通过，已交付开发分支 `dev` 的 `b9a87cd`。它在单进程内提供并发请求许可、保守输出容量预留、cooperative deadline 和未知 usage 汇总；尚未接入 direct/Runtime transport，不能作为真实请求预算、持久重启预算或成本优势证据。详见[工作包计划](../plans/provider-request-meter.md)。
+
+受支持的 pure declaration/allowance 局部读取已通过隔离独立验收和原36组/216次 B 矩阵，已与 D0 Asset 测量包通过 root 组合源码3,342项、树外444项、构建与安装smoke。派生索引与签名事实同事务维护，双连接旧投影由 fresh writer 重验；最终非作者组合验收 Passed，稳定资格仍开放。D0 确认 Asset 路径仍有历史相关读取，claim 与其他消费者也继续开放。详见[声明局部读取](../plans/scoped-declaration-allowance.md)与[Asset 基线](../plans/asset-publication-locality-baseline.md)。
+
+本批准确源、矩阵、失败保留和安装来源见[开发验证](../../reports/112-local-allowance-development-2026-10-25.md)与[机器证据](../../reports/data/112-local-allowance-verification.json)。

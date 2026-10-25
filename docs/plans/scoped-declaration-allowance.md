@@ -1,6 +1,6 @@
 # C3b：声明余额与完整 publication 证明的局部读取
 
-状态：Ready，隔离实施中，未集成。integration_review 对实施契约快照 `d6c7b5eb7dde26bdbd4325e982edc05cf4eac8dbef11f8a505d4c7fcf51912d4` 独立审计通过，C3a最终8文件 `e424a1cb32d80584260cdeefdd6ee042be7c94733ee0310137c200f57259c7ff` 已独立 Passed，开工依赖满足。基线为 `2d8d4b626d4640ce948c7790a08c3e349f480d3b` 加该精确 [C3a](allowance-checkpoint.md)，不以其他在制代码替代。
+状态：隔离实现与原 B 完整矩阵已独立 Passed，root 源码、树外与构建检查通过，非作者组合终验 Passed。integration_review 对实施契约快照 `d6c7b5eb7dde26bdbd4325e982edc05cf4eac8dbef11f8a505d4c7fcf51912d4` 独立审计通过，C3a最终8文件 `e424a1cb32d80584260cdeefdd6ee042be7c94733ee0310137c200f57259c7ff` 已独立 Passed，开工依赖满足。基线为 `2d8d4b626d4640ce948c7790a08c3e349f480d3b` 加该精确 [C3a](allowance-checkpoint.md)，不以其他在制代码替代。
 
 本包遵循[工作流适配](../development-workflow-adapter.md)，属于[阶段计划](sustained-engineering-delivery.md)的 C。root 负责方案与集成，Luna 执行固定实现，integration_review 非作者独立计划审计与验收。它只优化实际同质内置 `contract.declare` 的投影与 writer allowance 输入，不关闭 Asset、claim/maintenance、return/extinguishment 的其余热路径。
 
@@ -66,7 +66,7 @@ C1 的 selected inputs / EffectProjectionContext 可增加上述可选字段；M
 
 以下固定契约已通过非作者独立计划审计，准确审计快照见开头；后续状态文字更新不改变该契约。
 
-生产文件限定为 `core/allowance_publication_index.py`（新）、`core/allowance_returns.py`、`core/causal_allowance.py`、`core/projection_context.py`、`core/effect_projection.py`、`core/sqlite_store.py`、`core/sqlite_schema.py`。新行为文件为 `tests/test_allowance_publication_selection.py`、`tests/test_allowance_projection_selection.py`；允许窄维护既有 `tests/test_contract_declaration_projection_context.py`，仅适配新 optional balance 表示、保留 C1 reference 路径原关系索引门槛并验证当前 SQLite 参数限制，不放宽语义或以新路径开销降低旧索引阈值。架构为 `tests/architecture/test_allowance_publication_index_ownership.py`；作者另交 `docs/adr/ADR-048-rebuildable-publication-relations.md` 和 `changes/122-local-allowance-publication-selection.md`。root 独占计划/状态/报告。没有额外 mandatory StoreProtocol 或 backend；C1 可选 reader 的旧返回对象用默认 None 保持兼容。
+生产文件限定为 `core/allowance_publication_index.py`（新）、`core/allowance_returns.py`、`core/causal_allowance.py`、`core/projection_context.py`、`core/effect_projection.py`、`core/sqlite_store.py`、`core/sqlite_schema.py`。新行为文件为 `tests/test_allowance_publication_selection.py`、`tests/test_allowance_projection_selection.py`；允许窄维护既有 `tests/test_contract_declaration_projection_context.py`，仅适配新 optional balance 表示、保留 C1 reference 路径原关系索引门槛并验证当前 SQLite 参数限制，不放宽语义或以新路径开销降低旧索引阈值。另允许 `tests/test_retry_funding_conservation.py` 的历史 unsafe-grant fixture 仅接受新的 optional `balance_inputs=None` 关键字并断言 None，保留 full/reference 上下文、原 generic provenance、writer 拒绝和历史 replay 全部断言；这项窄接口维护已由非作者独立审计通过。架构为 `tests/architecture/test_allowance_publication_index_ownership.py`；作者另交 `docs/adr/ADR-048-rebuildable-publication-relations.md` 和 `changes/122-local-allowance-publication-selection.md`。root 独占计划/状态/报告。没有额外 mandatory StoreProtocol 或 backend；C1 可选 reader 的旧返回对象用默认 None 保持兼容。
 
 纯新模块提供 `safe_committed_head_relations(record)`：对非 head 返回 None，head 的安全形状完全沿用 C2，返回 members/parents 两个 frozenset，不验证 envelope、hash、唯一性或签名。C2 只以此替代原 shape/set 构造，其他规则不改。模块中的 frozen request/result 类型只含 IDs、Contract/RuntimeRecord、tuple/frozenset，避免运行时循环导入；不依赖 Store、SQL 或 callbacks。
 
@@ -93,3 +93,17 @@ typed stages 固定为：`PublicationHeadsRequest(member_ids)` 查询 funding fa
 ## 预审与窄兼容维护
 
 在制 preview 独立检查发现语义/错误顺序差异、Python 平方增长、head hook 范围及低 SQLite 参数上限问题，未通过；作者按本契约修复，不将该 preview 记作验收。旧 C1 六项测试失败另保留原始证据；仅上述一个旧测试文件的表示/参数适配纳入所有权，最终非作者复核其是否保留旧边界与新默认路径，两者不混用。没有新增生产文件、authority 或公开效果。
+
+第二次旧冻结实现仍有 writer 参数分块、尾部成员预处理及 Candidate 点读隐藏历史工作问题，独立未通过；作者在最终14文件候选修复并补足真实 closed-H 分阶段读取、精确 fold 次数、缓存失效和旧 binary 尾部证据。该新快照随后通过下述独立单包与 B 矩阵验收；作者定向通过未被记作终验。
+
+## 最终隔离验收与完整矩阵
+
+最终14文件清单文件 SHA-256 为 `4bf3ee120ae05ea63d60669c51084a8f2290bd19a7593f6a07905bd27e4e7992`。非作者 integration_review 按准确快照独立验收179项不同定向检查（不是一次完整 suite），包括真实旧 binary 尾部、缓存生命周期、完整 provenance 差分，以及两连接先获得相同旧投影后再由 fresh writer 拒绝超支/终态来源。原默认 Redis 环境与探针身份配置失败保留；不当作产品成功或业务缺陷。最终测试增补只改授权测试，7个生产文件与已测量候选不变。
+
+原 B driver 不变：36组、108次 timing 和108次 instrumentation，全部成功。实际导入236模块摘要 `b048dd0563a01f6e9c815edd318c5284db317654b4b2f1fdc44a3847f6dc78e9`，与旧 binary 补证的新源逐字节相同；raw imported revision 保持 null，另以 git baseline 加准确 overlay 绑定。完整报告 SHA-256 `b3be52788260d8e3c13e1b44125b9beb67f4658d5e9d295b21836ff5c84601d3` 已独立逐cell审计。
+
+P64 sequential 在 H0/16/64 的公方法 runtime rows 返回数从 C1/C2 的25,920/71,360/206,528变成64/64/64；全量 Contract/Asset 公方法调用均为0。所有模式和样本按固定 P 的相应公方法计数一致；这些计数不覆盖全部内部 SQL 或物理扫描，另有真实 SQL row-factory/decoder/fold 和 VM 补证。时间只作描述性记录，不计算未经控制对照的速度倍率。root 组合源码3,342项、树外444项与构建检查通过；最终治理49项及非作者总体验收 Passed，整体 C/D/E 持续规模目标未关闭。
+
+root 首轮组合完整测试3,341项通过、1项失败：历史 v5 迁移夹具从当前 Store 删除事实并降 schema，却残留本轮新增的三张缓存表及旧 prefix 断言。非作者独立确认真实 v5 没有这些表，原模拟故障稳定复现；仅在 fixture 降级准备时删除现代缓存表后，原迁移事实、digest/rebuild、claim、幂等与 replacement 全部断言保持通过。root 作为集成人另窄维护 `tests/test_runtime_reconstruction.py` 这一处准备步骤；没有改变生产迁移或 audit，没有放宽已知坏缓存的拒绝。此额外文件与作者14文件分开绑定，完整组合重验3,342项及树外444项通过；非作者总体验收 Passed。
+
+当前候选 wheel 与 B/旧 binary 新源的236模块逐字节一致；实际安装来源的 B 6-cell smoke、D0 3-pair/9微例 smoke 通过。最终交付边界与全部失败分类见[开发验证](../../reports/112-local-allowance-development-2026-10-25.md)及[机器证据](../../reports/data/112-local-allowance-verification.json)。

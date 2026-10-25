@@ -1,6 +1,6 @@
 # 持续工程分析交付与运行成本计划
 
-状态：A/B/C0 与 F1a 开发增量独立集成验收通过；C1/C2 单包及组合开发增量独立验收通过；F1b/F1c 单包及组合开发增量独立验收通过；C3a 隔离单包通过、C3b Ready 隔离实施中；G0a 离线计量单包及组合开发增量独立验收通过。阶段未完成。日期：2026-10-24。
+状态：A/B/C0 与 F1a 开发增量独立集成验收通过；C1/C2 单包及组合开发增量独立验收通过；F1b/F1c 单包及组合开发增量独立验收通过；C3a/C3b 隔离单包及原B完整矩阵通过，root源码、安装、构建及非作者组合终验通过；G0a 离线计量单包及组合开发增量独立验收通过。阶段未完成。日期：2026-10-25。
 
 ## 目标与用户行为
 
@@ -28,13 +28,13 @@ Runtime 臂须经 CLI 发布冻结输入、普通动态规划、工具观察与�
 | B 签名发布性能基线 | Luna recheck_planning；`scripts/benchmark_planning_queries.py`、`tests/test_benchmark_planning_queries.py`。 | 计划依赖：下述 B 矩阵；开工：独立审计 Ready；集成：C 使用结果冻结优化门槛。 | batch、逐项同父和 chain 全部经过公开编译及签名发布；H 已闭合且测量不含冷构建；脚本、计数、SQL 计划和失败可追溯。 |
 | C0 提交去重精确索引 | root；`core/sqlite_schema.py`、`tests/test_sqlite_candidate_lookup.py`。 | 计划依赖：既有精确查询与下述 C0 方案；开工：非作者独立审计；可与 A/B 并行，无接口依赖。 | Candidate ID 查询使用精确索引，签名成功/拒绝/跨连接重放语义不变。仅关闭一个 SQL 热点，不宣称 C 已完成。 |
 | C 声明与 allowance 局部化 | 待细化；projection context、causal allowance、SQLite/query owners 及对应测试。 | 计划依赖 B 红灯及具体语义接口；开工前独立审计算法、writer/rebuild/兼容方案和增长阈值；集成需竞争、重放和严格重建通过。 | 固定载荷/引用的 P 个平级或嵌套声明不因重复历史查询退化 P²；预算不双花，拒绝和事实身份保持。 |
-| D Asset 传播与精确输入局部化 | [D0 测量计划](asset-publication-locality-baseline.md)独立 Ready、隔离实现中；`core/fact_reducer.py`、披露/context owners 及对应测试。 | 先测真实热点；仅依赖实际需要的窄 Store 接口。共享 SQLite 文件由协调者串行集成，不强制依赖 C allowance 内部算法。 | Asset 先于任务/任务先于 Asset、同批 overlay、完成/取消级联和外层独立验收分支不变；无关历史不反复物化；必要级联成本单列。 |
+| D Asset 传播与精确输入局部化 | [D0 测量计划](asset-publication-locality-baseline.md)单包及78组完整配对基线独立通过，root源码、安装、构建及非作者组合终验通过；`core/fact_reducer.py`、披露/context owners 及对应测试。 | 先测真实热点；仅依赖实际需要的窄 Store 接口。共享 SQLite 文件由协调者串行集成，不强制依赖 C allowance 内部算法。 | Asset 先于任务/任务先于 Asset、同批 overlay、完成/取消级联和外层独立验收分支不变；无关历史不反复物化；必要级联成本单列。 |
 | E 发现、claim 与维护局部化 | 待细化；`runtime.py`、runtime services、task query 和原 claim owners。 | 先测 pull/expiry/failure/rejection/completion 热点；具体查询接口审计后开工，共享文件有单一集成人。 | 候选集、排序与 blocker 保持；submitted 独立接受、待恢复义务和到期 claim 不漏；SQLite writer 裁决，Redis/view 不授予权利。 |
 | F1 业务 CLI 与直接 Harness 对照可运行性 | 待细化；配置、Skill、普通 Worker 夹具、CLI/对照脚本。 | 只依赖 A 和公平对照协议审计，可与 C/D/E 并行；不等待性能修复。 | 普通 CLI 动态规划与两工具续接、不同身份精确接受、导出/重开；正常、畸形输出、缺证据、故障、额度耗尽和实际恢复均可观察。两臂共同 oracle，不以预制 DAG 伪造动态计划。 |
 | F2 固定候选制品的长期组合评测 | 待细化；源树外安装和隔离运行 evidence。 | A/B/C/D/E/F1 的实际组合冻结，独立协议及各包验收通过。 | 同一 P/A 下改变 H，完整 signed 生命周期持续累积；重开/竞争/重建语义一致；固定制品的质量、恢复、全成本与热路径增长曲线可复核。 |
 | G 真实 provider 成对评测 | [G0a离线计量接口](provider-request-meter.md)单包及组合开发增量独立验收通过；固定模型、工具、输入、预算、故障日程与外部判分。 | F1 与公平协议通过后可先做 baseline；冻结请求/token/时间预算并核对现有会话授权范围，超出范围才补授权。最终候选另行冻结并重测，不重标签旧证据。 | 保留每次失败及实际 usage，区分 fixture、真实模型和安装制品；没有证据不宣称质量优势或稳定资格。 |
 
-A/B 可并行。C/D/E/F1 尚无具体方案，不能因目标已同意而跳过各包 Ready；它们的规划、基线和开发可按真实依赖交错推进。开发增量独立验收及适用检查通过后可进入 dev；main、标签和发布另行处理。
+A/B 可并行。剩余未细化工作包不能因目标已同意而跳过各包 Ready；它们的规划、基线和开发可按真实依赖交错推进。开发增量独立验收及适用检查通过后可进入 dev；main、标签和发布另行处理。
 
 ## A 的开工契约
 
@@ -157,3 +157,9 @@ G0a 两文件离线计量模块由 Luna 编写，root 非作者隔离复核49项
 ## 当前未决项
 
 C/D/E 后续局部化方案与 F1/G 公平对照协议仍须逐包审计；已完成切片见上文。真实 provider 执行须绑定冻结协议、有界预算及现有会话授权范围；历史 report107 不能替代新候选的运行证据。多后端、云部署平台和一般自主研究可靠性不在本次实现承诺内。
+
+D0 测量包已独立通过原78组 timing/instrumentation 配对与精确源绑定，root 集成检查待完成；它确认 Asset 路径仍随无关闭合历史增长，不声称修复。G0a 离线计量增量已交付 `dev` 的 `b9a87cd`；该交付没有真实 provider 接线或成本比较。
+
+C3a/C3b 的准确隔离组合及原36组/216次 B 矩阵已独立通过，已与通过的 D0 测量包完成root源码3,342项、树外444项和构建检查，非作者组合终验 Passed。该局部化只覆盖受支持的 pure declaration 投影和两次 allowance writer 校验；Asset、claim、其它消费者和 legacy/opaque/replay 慢路径仍明确开放。
+
+本批准确711文件代码/夹具快照、两份矩阵、安装来源及保留失败见[开发验证](../../reports/112-local-allowance-development-2026-10-25.md)与[机器证据](../../reports/data/112-local-allowance-verification.json)。后续 D1a 仅计划投影上下文局部化；真实 provider 臂接线、公平协议及持续业务质量/成本仍开放。
