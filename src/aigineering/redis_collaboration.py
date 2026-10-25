@@ -10,6 +10,8 @@ from typing import Any
 
 from aigineering.core.ids import compute_content_hash
 from aigineering.core.session import (
+    RuntimeRecordReferenceContext,
+    build_runtime_record_reference_context,
     runtime_record_contract_references,
     runtime_record_worker_references,
 )
@@ -125,6 +127,8 @@ def _record_contract_ids(record, records_by_id=None) -> tuple[str, ...]:
 
 def _record_worker_ids(record, records_by_id=None) -> tuple[str, ...]:
     """Return only typed Worker references from the shared fact reader."""
+    if isinstance(records_by_id, RuntimeRecordReferenceContext):
+        records_by_id = records_by_id.records_by_id
     return tuple(sorted(runtime_record_worker_references(record, records_by_id)))
 
 
@@ -218,8 +222,12 @@ class RedisCollaborationService:
         function. Callers retain only (revision, sanitized fields) entries.
         """
         revision, rows, records_by_id = self._records(store, through=through)
+        reference_context = build_runtime_record_reference_context(records_by_id)
         entries = [
-            (row_revision, self._event_fields(row_revision, record, records_by_id))
+            (
+                row_revision,
+                self._event_fields(row_revision, record, reference_context),
+            )
             for row_revision, record in rows
         ]
         return revision, entries

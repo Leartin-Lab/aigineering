@@ -158,6 +158,11 @@ process evidence. Transport entry does not prove provider receipt, unknown usage
 is not zero, and a new process epoch does not restore an old budget. These events
 cannot change claims, qualify output or publish completion.
 
+Typed capture-reference indices are local read aids over the exact effective
+record mapping. They preserve every matching head, original global order, lazy
+malformed-history errors and the same member/visited proof. They do not authorize
+records, change Redis prefix proof or become a second persistent fact source.
+
 Registration actor/key binding is part of the verified semantics. Display
 timestamps alone are not identity or lifecycle authority.
 

@@ -725,7 +725,7 @@ def _parse_provider_response(
     calls: list[ProviderToolCall] = []
     if calls_value:
         call = calls_value[0]
-        if not isinstance(call, dict) or set(call) != {"id", "type", "function"}:
+        if not isinstance(call, dict) or not {"id", "type", "function"} <= call.keys():
             raise SafeProviderError(
                 code="invalid_response", phase="validate", status_code=status_code
             )
@@ -735,7 +735,7 @@ def _parse_provider_response(
             or not call["id"]
             or call["type"] != "function"
             or not isinstance(function, dict)
-            or set(function) != {"name", "arguments"}
+            or not {"name", "arguments"} <= function.keys()
             or not isinstance(function["name"], str)
             or not function["name"]
             or not isinstance(function["arguments"], str)
@@ -758,7 +758,7 @@ def _parse_provider_response(
                 code="invalid_response", phase="validate", status_code=status_code
             )
     elif finish_reason == "tool_calls":
-        if len(calls) != 1 or message["content"] is not None:
+        if len(calls) != 1 or message["content"] not in {None, ""}:
             raise SafeProviderError(
                 code="invalid_response", phase="validate", status_code=status_code
             )
@@ -777,7 +777,11 @@ def _parse_provider_response(
     return DirectProviderResponse(
         message=ProviderAssistantMessage(
             role="assistant",
-            content=message["content"],
+            content=(
+                None
+                if finish_reason == "tool_calls" and message["content"] == ""
+                else message["content"]
+            ),
             tool_calls=tuple(calls),
             reasoning_content=reasoning,
         ),

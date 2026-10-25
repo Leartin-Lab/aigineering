@@ -1411,3 +1411,56 @@ def test_single_canonical_capture_preserves_revision_gaps_across_proof_paths(
     calls.clear()
     assert service.rebuild(fresh_store_factory=lambda: store)["watermark"] == 3
     assert calls == [1, 3, 1, 3]
+
+
+def test_capture_builds_one_reference_context_and_preserves_event_bytes(monkeypatch):
+    import aigineering.redis_collaboration as redis_module
+    from aigineering.core.trace import create_entry, trace_record_from_entry
+    from aigineering.protocol.runtime_record import create_runtime_record
+
+    declaration = create_runtime_record(
+        "contract.declared",
+        {"contract": {"id": "task:v1:root", "parent_id": None}},
+    )
+    committed = create_runtime_record(
+        "candidate.committed",
+        {"candidate_id": "candidate-1", "committed_record_ids": [declaration.id]},
+    )
+    trace = trace_record_from_entry(
+        create_entry(
+            "commitment",
+            "candidate_committed",
+            accepted_fragments=[json.dumps({"candidate_id": "candidate-1"})],
+        )
+    )
+    store = MemoryStore([(1, declaration), (3, committed), (4, trace)])
+    service = _service(store, MemoryRedis())
+    calls = []
+    original_builder = redis_module.build_runtime_record_reference_context
+
+    def observe_builder(records_by_id):
+        context = original_builder(records_by_id)
+        calls.append((records_by_id, context))
+        return context
+
+    monkeypatch.setattr(
+        redis_module, "build_runtime_record_reference_context", observe_builder
+    )
+
+    revision, entries = service._capture_events(store)
+    _same_revision, rows, records_by_id = service._records(store)
+    legacy_entries = [
+        (row_revision, service._event_fields(row_revision, record, records_by_id))
+        for row_revision, record in rows
+    ]
+
+    assert revision == 4
+    assert len(calls) == 1
+    assert calls[0][0] is calls[0][1].records_by_id
+    assert entries == legacy_entries
+    assert all(
+        list(fields)
+        == ["revision", "record_id", "record_type", "contract_ids", "worker_ids"]
+        for _row_revision, fields in entries
+    )
+    assert json.loads(entries[-1][1]["contract_ids"]) == ["task:v1:root"]

@@ -1,0 +1,212 @@
+{
+  "artifacts": {
+    "exit_code": 0,
+    "phase": "candidate",
+    "private_and_tests_excluded": true,
+    "public_files": 1048,
+    "public_manifest_sha256": "b755e13c5973c66a745d9319634bb83543c7c79440a21750d67bb53674456de8",
+    "reviewed_preoverall_sdist_sha256": "f9a377f6c464d56aac7d280e0d59d6da01972a0bacdefcc4a631af408c6c871a",
+    "runtime_modules": 236,
+    "scope": "initial candidate archive before final evidence metadata; runtime and example bytes unchanged",
+    "sdist_payload_exact": true,
+    "sdist_payload_files": 713,
+    "sdist_sha256": "314f66db2fd80517f19ea8d4f059f441569c68323fb9e1ff60dc32f6903ca532",
+    "wheel_sha256": "8619116fd014a6d3ce9347821c3ddd9f95413fb585d1ba2c72488963589ff92d"
+  },
+  "base_commit": "dc0cb4fd2fa32a1ee1718ba2420ae1d1667fa721",
+  "code": {
+    "files": 724,
+    "sha256": "ecad12f5ef8cdaebc1e9fe73039a44eef42ef6ed3cc03d655f83821b60b72795"
+  },
+  "date": "2026-10-26",
+  "e1": {
+    "N": [
+      16,
+      416,
+      1616
+    ],
+    "T": [
+      3,
+      19,
+      67
+    ],
+    "actual_legacy_event_fields_equal": true,
+    "candidate_bucket_lookups_and_head_views": [
+      3,
+      19,
+      67
+    ],
+    "contract_member_gets": [
+      12,
+      204,
+      780
+    ],
+    "full_prefix_still_materialized": true,
+    "independent_native_redis_skipped_not_run": 8,
+    "independent_passed": 49,
+    "independent_signed_capture_samples": 6,
+    "legacy_values_visits": [
+      48,
+      7904,
+      108272
+    ],
+    "new_builder_values_visits": [
+      16,
+      416,
+      1616
+    ],
+    "review_sha256": "20fb71d2715ef87205f68c76dd0e0fab0120682b471a9ee3ad031b9ea7c05e0c",
+    "sequential_H": [
+      0,
+      16,
+      64
+    ],
+    "source_files": 1043,
+    "source_map_sha256": "234172e78829ecd593b9316ff9f0aa85542e70e6cdd818862d2b530a5c0b16c3",
+    "two_captures_per_sample": true,
+    "whole_capture_or_warm_sync_linear_claim": false,
+    "worker_closure_gets": [
+      27,
+      1179,
+      4635
+    ]
+  },
+  "g0b1": {
+    "canonical_dto_and_offline_unchanged": true,
+    "independent_tests_passed": 230,
+    "native_only": true,
+    "no_live_compatibility_claim": true,
+    "review_sha256": "51e89f0f460525f56af8fa7d6c0e8dea42ea5ea49af48643cc20862df2a99455",
+    "source_files": 1044,
+    "source_map_sha256": "3b6afacc39e70449db2297260ee99651d0706f83cef4ecd7401217d2d6e888e1"
+  },
+  "independent_overall": {
+    "actual_installed_capture_samples": 6,
+    "captures": 12,
+    "evidence_map_file_sha256": "66193556bae0c6300eed5f8ff8673c5d85ec62b3e7656b9cdb86e9364ec97e9c",
+    "fake_permits_with_exact_four_events": 36,
+    "governance_included": 49,
+    "legacy_complete_event_fields_equal": true,
+    "native_redis_not_run": 8,
+    "new_recoveries_claimed_submitted_completed_and_accepted": 4,
+    "offline_passed": 328,
+    "offline_seconds": 0.91,
+    "pytest_configuration_warnings": 1,
+    "real_provider_execution": false,
+    "review_sha256": "c1e71b293eab0bfb86e599a86b9bb890f535ce06ee857a72ac4611c1aabfee22",
+    "reviewed_changed_compact_map_sha256": "df75132e4831473f3224ef3c61ba046428944440cde23a12aa350ee1cb7c0cea",
+    "reviewed_changed_files": 16,
+    "reviewed_public_compact_map_sha256": "829cfb343e244bbd417afa79b2391e8075de8fd1ed3645b8108f6917a5a560fa",
+    "reviewed_public_files": 1048,
+    "runtime_files_verified": 236,
+    "runtime_modules_loaded_by_independent_capture": 100,
+    "stage_or_stable_acceptance": false,
+    "status": "passed_for_exact_bounded_dev_increment_with_open_incident",
+    "successful_fake_cli_stores_audited": 5,
+    "terminal_tasks": 54
+  },
+  "installed": {
+    "child_src_bytes_from_actual_wheel": true,
+    "diagnostic_observer_limits": {
+      "original_failure_claimed_fixed": false,
+      "return_and_exception_identity_verified_with_healthy_sink": true,
+      "sink_failure_may_replace_original_exception": true,
+      "sink_failure_or_slot_exception_observed_in_actual_diagnostics": false,
+      "timing_overhead": true
+    },
+    "examples_from_actual_sdist": true,
+    "failure_claimed_fixed": false,
+    "fixed_old_new_comparison": {
+      "B3_passed": 2,
+      "B4_passed": 2,
+      "failed": 0,
+      "replacement_runs": false,
+      "slot_exceptions_observed": 0
+    },
+    "initial_run": {
+      "exit_code": 1,
+      "failed": 1,
+      "failure": "missing-verifier same-root continuation returned worker_error instead of timed_out",
+      "passed": 816,
+      "seconds": 98.68
+    },
+    "installed_e1_probe": {
+      "binding_sha256": "b29a8f74f33684c5924d7c54739bd82e2c9bbdd3a604d5063743ca990a6dad56",
+      "captures": 12,
+      "digest_revision_stable": true,
+      "legacy_full_event_fields_equal": true,
+      "native_redis_used": false,
+      "overall_acceptance": false,
+      "report_sha256": "f2a3e93dfda64acdca3078cea6b98139cfff0003e4dc61c6b7dad43f286bb1ef",
+      "runtime_imports_verified": 236,
+      "samples": 6
+    },
+    "intermittent_failure_root_cause": "unknown",
+    "main_imports_from_actual_installed_target": true,
+    "modules": 42,
+    "one_observed_full_selection_rerun": {
+      "failed": 0,
+      "passed": 817,
+      "seconds": 104.67,
+      "skipped": 0,
+      "slot_exceptions_observed": 0
+    },
+    "original_failure_facts": {
+      "attestations": 0,
+      "current_indexed_legacy_capture_equal": true,
+      "exact_claim_captures_returned": 5,
+      "historical_redis_state_or_slot_cause_proven": false,
+      "merely_waiting_for_acceptance": false,
+      "original_store_continued_by_audit": false,
+      "qualifications": 0,
+      "ready_work_remaining": true,
+      "report_assets": 0,
+      "root_claim_state": "submitted",
+      "root_status": "expanded",
+      "root_terminal": false,
+      "source_db_wal_logs_unchanged": true,
+      "strict_copy_rebuild_matches": true,
+      "worker_invocation_failures": 0
+    },
+    "original_failure_retained": true,
+    "runtime_modules": 236,
+    "single_case_observed_diagnostic": {
+      "failed": 0,
+      "passed": 1,
+      "same_root_resumed": true,
+      "seconds": 7.607,
+      "slot_exceptions_observed": 0
+    },
+    "wheel_sha256": "8619116fd014a6d3ce9347821c3ddd9f95413fb585d1ba2c72488963589ff92d"
+  },
+  "new_real_provider_requests_in_this_batch": 0,
+  "predeclared_components": [
+    "G0b1 native adapter",
+    "E1 capture-local typed Candidate-head index"
+  ],
+  "previous_real_failures": {
+    "evidence_retained": true,
+    "failed": 2,
+    "physical_requests": 2,
+    "reclassified_as_new_candidate_success": false,
+    "source_commit": "183d9c8ccfc0bf55ceecd830f8000091dd42c8e9",
+    "specific_arbitrary_metadata_keys_known": false
+  },
+  "runtime": {
+    "modules": 236,
+    "repository_compact_map_sha256": "99502251c197fb2ae86dc3e1da98c8eaf9b402442318792b1976d473404b478b"
+  },
+  "schema": "aigineering-development-verification-v1",
+  "source_full": {
+    "eight_native_redis_cases_executed": true,
+    "existing_warnings": 6,
+    "failed": 0,
+    "format_python_files": 585,
+    "passed": 3635,
+    "ruff_passed": true,
+    "seconds": 233.04,
+    "skipped": 0
+  },
+  "stage_goal_complete": false,
+  "status": "bounded_development_increment_independently_accepted_reliability_incident_open"
+}

@@ -1162,6 +1162,19 @@ provider receipt or proves billing. A new process starts a new budget epoch.
 The current fixed profile and exact schemas are described in
 [change127](changes/127-local-runtime-provider-meter.md).
 
+The explicit direct example projects native provider call/function envelopes
+onto required validated fields and discards unused metadata. Literal empty
+tool-call content becomes canonical null without changing the original input;
+the strict offline envelope and action/authority owners remain unchanged. See
+[change128](changes/128-native-tool-response-compatibility.md).
+
+Redis event capture builds a local typed Candidate-head context from its exact
+effective record map. All matching heads retain global source order and resolve
+through the original exact-member reader. Malformed Candidate IDs keep the
+legacy lazy fallback. No context crosses a capture or source refresh; full
+prefix proof remains unchanged. See
+[change129](changes/129-capture-trace-reference-index.md).
+
 Task dependencies use one signed `task.dependency.link` or
 `task.dependency.unlink` effect with explicit `task.dependency.manage` authority.
 The plugin projects generic `claim.constraint.placed/released` facts; the

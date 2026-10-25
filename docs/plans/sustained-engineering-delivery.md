@@ -172,10 +172,18 @@ C3a/C3b 的准确隔离组合及原36组/216次 B 矩阵已独立通过，已与
 
 四切片加三测试hook维护的35文件组合已通过源码3,532项、树外656项、Ruff/581文件格式、构建和实际安装三驱动检查。受测717文件摘要e87654c18b07100d555247e2e15989ffaa28c598e8e602d43158f1c2ee9da9ca；非作者对准确35文件组合独立总体验收Passed；最终元数据/源码包按相同717文件代码快照轻闭合。阶段仍开放，G0c/后续CPU及H局部化不混入本候选。
 
-## G0c / D1b1 / D1b2 开发组合
+## G0c / D1b1 / D1b2 已交付组合（dc0cb4f）
 
 [Runtime共享计量](runtime-provider-meter.md)、[FIFO与批内分派](asset-batch-dispatch.md)分别独立接受；Root在dev183d9c8上组合9+3个代码/测试/示例文件，queue2作为dispatch的已接受前置保留。724文件摘要 `b5de9ab45a66175667fedd8a6488e609acf615a64416e10e9ac9d0bf53149366` 已通过源码3,602项、0skip、6既有warning、Ruff与585文件格式。树外739项、构建与实际安装Asset/context驱动亦通过；非作者对准确组合独立整体Passed；最终验收元数据/源码包按同一724文件代码快照轻闭合，见[本批证据](../../reports/114-runtime-meter-dispatch-development-2026-10-26.md)。
 
 单批局部分派减少P×C，并不关闭H、输出helper、ancestor及claim/maintenance热点。新只读E0库存确认无变化capture仍全量读取；正常签名逐任务历史的commitment trace关联有T×N Python访问，H0/16/64为48/7,904/108,272，属于已确认待修成本，不冒称整体Redis warm测量或已修复。E1单独规划，不进入当前组合。
 
 G0d旧183d9c8制品的两次有界真实请求均HTTP200，但native解析失败、无工具或业务完成；第一次保留generic失败，第二次私有observer定位tool-call对象严格结构fence并观察到空content。未知实际键和值未保留，不猜测旧原因；两请求共已知prompt3,720/completion512/total4,232，计费未知。新兼容修复与后续真实CLI验证单列，不把fake恢复或这两失败算稳定交付。
+
+## G0b1 / E1 开发组合
+
+[Native响应适配](../../changes/128-native-tool-response-compatibility.md)与[捕获关联索引](typed-trace-reference-index.md)分别非作者接受，Root在devdc0cb4f上预声明组合八个组件文件。724文件代码摘要 `ecad12f5ef8cdaebc1e9fe73039a44eef42ef6ed3cc03d655f83821b60b72795`：源码3,635项、0skip、6既有warning、Ruff与585文件format通过；此前E1八个native Redis NotRun在本次专用Redis完整门禁中实际执行。构建与非作者整体已通过，安装原失败及观察复跑分别保留，见[本批证据](../../reports/115-native-capture-development-2026-10-26.md)。
+
+Native仅把必要工具成员投影到原DTO、丢弃未消费metadata，literal empty content变None；不猜旧请求的实际键，也不把本次fake绿当新真实成功。E1只消除capture中T×N头选择，仍读取完整前缀；worker/递归/排序、claim/maintenance和同Store可用性继续开放。E2a基线与Runtime-only三次freshStore真实验证各自按精确候选/协议推进，不混入本源码通过或相互替代。
+
+本批actual wheel/sdist及准确16文件组合获非作者整体接受；独立328通过/8native NotRun与十二次安装capture等价单列。首次树外816通过/1失败，有限诊断后一次完整观察复跑817通过；原业务无报告且留有ready工具工作，未归因的slot错误保持开放。观察器有健康sink条件与时序开销。最终只对验收元数据/源码包按同一724文件代码轻闭合，详情见[本批验证](../../reports/115-native-capture-development-2026-10-26.md)。

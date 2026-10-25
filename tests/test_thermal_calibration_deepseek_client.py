@@ -14,6 +14,8 @@ from examples.thermal_calibration.deepseek_client import (
     SafeProviderError,
     TransportReply,
     _NoRedirectHandler,
+    _decode_root,
+    _parse_provider_response,
     _stdlib_https_transport,
 )
 from examples.thermal_calibration.provider_meter import RunBudget, RunMeter
@@ -334,13 +336,18 @@ def test_invalid_choice_keeps_decoded_usage_and_unknown_finish_is_terminal():
 def test_thinking_reasoning_is_preserved_in_next_native_request():
     first_message = {
         "role": "assistant",
-        "content": None,
+        "content": "",
         "reasoning_content": "opaque continuation marker",
         "tool_calls": [
             {
                 "id": "call-1",
                 "type": "function",
-                "function": {"name": "tool", "arguments": "{}"},
+                "provider_call_metadata": "CALL_METADATA_SECRET_SENTINEL",
+                "function": {
+                    "name": "tool",
+                    "arguments": '{"case":{},"standard":{}}',
+                    "provider_function_metadata": "FUNCTION_METADATA_SECRET_SENTINEL",
+                },
             }
         ],
     }
@@ -354,6 +361,10 @@ def test_thinking_reasoning_is_preserved_in_next_native_request():
     )
     client, _, _, _ = _client(transport, mode="enabled")
     response = client.complete(messages=[], tools=[], timeout_seconds=3.0)
+    assert response.message.content is None
+    assert response.message.tool_calls[0].id == "call-1"
+    assert response.message.tool_calls[0].name == "tool"
+    assert response.message.tool_calls[0].arguments == '{"case":{},"standard":{}}'
     next_messages = [
         {
             "role": "assistant",
@@ -363,7 +374,10 @@ def test_thinking_reasoning_is_preserved_in_next_native_request():
                 {
                     "id": "call-1",
                     "type": "function",
-                    "function": {"name": "tool", "arguments": "{}"},
+                    "function": {
+                        "name": "tool",
+                        "arguments": '{"case":{},"standard":{}}',
+                    },
                 }
             ],
         },
@@ -372,6 +386,169 @@ def test_thinking_reasoning_is_preserved_in_next_native_request():
     client.complete(messages=next_messages, tools=[], timeout_seconds=3.0)
     sent = json.loads(transport.calls[1]["body"])["messages"]
     assert sent[0]["reasoning_content"] == "opaque continuation marker"
+    assert sent[0]["tool_calls"][0]["id"] == "call-1"
+    assert sent[0]["tool_calls"][0]["function"]["arguments"] == (
+        '{"case":{},"standard":{}}'
+    )
+    assert "CALL_METADATA_SECRET_SENTINEL" not in repr(sent)
+    assert "FUNCTION_METADATA_SECRET_SENTINEL" not in repr(sent)
+    assert len(transport.calls) == 2
+
+
+def test_empty_native_tool_content_normalizes_without_mutating_parsed_wire_object():
+    raw = _body(
+        usage=None,
+        finish_reason="tool_calls",
+        message={
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call-exact",
+                    "type": "function",
+                    "unconsumed_call_metadata": "CALL_SENTINEL",
+                    "function": {
+                        "name": "tool",
+                        "arguments": "{}",
+                        "unconsumed_function_metadata": "FUNCTION_SENTINEL",
+                    },
+                }
+            ],
+        },
+    )
+    root, error = _decode_root(raw)
+    assert error is None
+    assert root is not None
+    response = _parse_provider_response(root, thinking_mode="disabled", status_code=200)
+    assert root["choices"][0]["message"]["content"] == ""
+    assert (
+        root["choices"][0]["message"]["tool_calls"][0]["unconsumed_call_metadata"]
+        == "CALL_SENTINEL"
+    )
+    assert response.message.content is None
+    assert response.message.tool_calls[0].id == "call-exact"
+    assert "CALL_SENTINEL" not in repr(response)
+    assert "FUNCTION_SENTINEL" not in repr(response)
+
+
+@pytest.mark.parametrize("content", [" ", "nonempty", [], 1, True])
+def test_native_tool_content_rejects_nonempty_or_wrong_types(content):
+    raw = _body(
+        usage={"prompt_tokens": 3},
+        finish_reason="tool_calls",
+        message={
+            "role": "assistant",
+            "content": content,
+            "tool_calls": [
+                {
+                    "id": "call-exact",
+                    "type": "function",
+                    "function": {"name": "tool", "arguments": "{}"},
+                }
+            ],
+        },
+    )
+    transport = QueueTransport(TransportReply(status=200, body=raw))
+    limits = _limits(max_http_retries=0)
+    client, meter, _, events = _client(transport, limits=limits)
+    with pytest.raises(SafeProviderError) as error:
+        client.complete(messages=[], tools=[], timeout_seconds=3.0)
+    assert error.value.code == "invalid_response"
+    assert len(transport.calls) == 1
+    assert len(meter.snapshot().attempts) == 1
+    assert meter.snapshot().attempts[0].outcome == "response"
+    assert meter.snapshot().attempts[0].prompt_tokens.value == 3
+    assert [event.event_type for event in events].count("transport_entered") == 1
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        None,
+        [],
+        {"type": "function", "function": {"name": "tool", "arguments": "{}"}},
+        {"id": "", "type": "function", "function": {"name": "tool", "arguments": "{}"}},
+        {"id": 1, "type": "function", "function": {"name": "tool", "arguments": "{}"}},
+        {"id": "call-1", "function": {"name": "tool", "arguments": "{}"}},
+        {"id": "call-1", "type": 1, "function": {"name": "tool", "arguments": "{}"}},
+        {
+            "id": "call-1",
+            "type": "other",
+            "function": {"name": "tool", "arguments": "{}"},
+        },
+        {"id": "call-1", "type": "function", "function": None},
+        {"id": "call-1", "type": "function", "function": {"arguments": "{}"}},
+        {"id": "call-1", "type": "function", "function": {"name": "tool"}},
+        {
+            "id": "call-1",
+            "type": "function",
+            "function": {"name": "", "arguments": "{}"},
+        },
+        {
+            "id": "call-1",
+            "type": "function",
+            "function": {"name": "tool", "arguments": 1},
+        },
+    ],
+)
+def test_native_tool_call_required_members_and_types_remain_strict(call):
+    message = {"role": "assistant", "content": None, "tool_calls": [call]}
+    raw = _body(usage=None, finish_reason="tool_calls", message=message)
+    transport = QueueTransport(TransportReply(status=200, body=raw))
+    client, meter, _, _ = _client(transport, limits=_limits(max_http_retries=0))
+    with pytest.raises(SafeProviderError) as error:
+        client.complete(messages=[], tools=[], timeout_seconds=3.0)
+    assert error.value.code == "invalid_response"
+    assert len(transport.calls) == 1
+    assert len(meter.snapshot().attempts) == 1
+
+
+@pytest.mark.parametrize(
+    "finish_reason,message",
+    [
+        (
+            "tool_calls",
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "call-1",
+                        "type": "function",
+                        "function": {"name": "tool", "arguments": "{}"},
+                    },
+                    {
+                        "id": "call-2",
+                        "type": "function",
+                        "function": {"name": "tool", "arguments": "{}"},
+                    },
+                ],
+            },
+        ),
+        (
+            "stop",
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [],
+            },
+        ),
+    ],
+)
+def test_native_tool_count_and_final_content_rules_remain_strict(
+    finish_reason, message
+):
+    transport = QueueTransport(
+        TransportReply(
+            status=200,
+            body=_body(usage=None, finish_reason=finish_reason, message=message),
+        )
+    )
+    client, meter, _, _ = _client(transport, limits=_limits(max_http_retries=0))
+    with pytest.raises(SafeProviderError):
+        client.complete(messages=[], tools=[], timeout_seconds=3.0)
+    assert len(transport.calls) == 1
+    assert len(meter.snapshot().attempts) == 1
 
 
 @pytest.mark.parametrize("status", [200, 400, 429, 500, 503])
