@@ -360,6 +360,13 @@ qualification rules still apply to completion and descendant fences. Existing
 terminal facts remain immutable; see
 [change125](changes/125-pending-asset-output-policy.md).
 
+Nonempty Asset reduction builds an immutable invocation-local multivalue dispatch
+index for exact method creators, raw activation tokens and output names. Candidate
+buckets preserve original order while descendant traversal retains the full
+Contract overlay. A deque preserves FIFO cancellation without front-list shifts.
+This does not remove full-history capture, output-policy or ancestor work; see
+[change126](changes/126-batch-asset-dispatch.md).
+
 SQLite can select a bounded immutable context for homogeneous built-in Contract
 declarations. For supported canonical task identities, the allowance owner consumes
 raw per-source totals while the original commitment transaction still performs
@@ -1146,6 +1153,14 @@ mutation, not authentication. Invocation finish precedes envelope/sign/submit,
 and EOF is not task completion. See
 [change 063](changes/063-local-worker-operational-logs.md) and
 [ADR-044](docs/adr/ADR-044-local-worker-operational-logs.md).
+
+An opt-in local provider profile shares one process-scoped request meter across
+its ordinary Planner and Researcher transports. Four typed auxiliary events
+separate permits, transport entry, bounded reply observation and finalization;
+usage unknowns remain unknown. No event grants task authority, establishes
+provider receipt or proves billing. A new process starts a new budget epoch.
+The current fixed profile and exact schemas are described in
+[change127](changes/127-local-runtime-provider-meter.md).
 
 Task dependencies use one signed `task.dependency.link` or
 `task.dependency.unlink` effect with explicit `task.dependency.manage` authority.

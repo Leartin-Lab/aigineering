@@ -148,6 +148,16 @@ Unsupported shapes retain full context, while storage and unknown failures
 remain observable. Selection cannot bypass writer-time authentication, claims
 or Asset consequences.
 
+Invocation-local Asset dispatch maps and FIFO queues are pure selection and
+traversal aids. They preserve full related graphs, same-name values, pending
+output policy, event order and fresh writer revalidation; they are not facts
+or an active-task authority.
+
+Local provider permits, reply observations and usage fields are auxiliary
+process evidence. Transport entry does not prove provider receipt, unknown usage
+is not zero, and a new process epoch does not restore an old budget. These events
+cannot change claims, qualify output or publish completion.
+
 Registration actor/key binding is part of the verified semantics. Display
 timestamps alone are not identity or lifecycle authority.
 

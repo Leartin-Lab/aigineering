@@ -1,0 +1,36 @@
+[fleet]
+db_path = ".aig/store.db"
+poll_interval = 0.05
+
+[[workers]]
+id = "calibration-planner"
+kind = "local"
+worker_factory = "examples.thermal_calibration.runtime_workers:create_metered_planner"
+capabilities = ["calibration.plan"]
+pools = ["planning"]
+profile_id = "openai-compatible-v1"
+capacity = 1
+version = "1"
+
+[[workers]]
+id = "calibration-researcher"
+kind = "local"
+worker_factory = "examples.thermal_calibration.runtime_workers:create_metered_researcher"
+capabilities = ["calibration.research"]
+pools = ["research"]
+profile_id = "openai-compatible-v1"
+capacity = 1
+version = "1"
+
+[[workers]]
+id = "calibration-tools"
+kind = "tool"
+tool_registry = "examples.thermal_calibration.tools:build_registry"
+
+[[workers]]
+id = "calibration-verifier"
+kind = "local"
+worker_factory = "examples.thermal_calibration.workers:build_verifier_worker"
+capabilities = ["calibration.verify"]
+pools = ["verification"]
+effect_capabilities = ["asset.attest", "calibration.verify"]

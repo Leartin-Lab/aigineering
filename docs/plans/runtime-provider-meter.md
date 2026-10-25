@@ -1,0 +1,29 @@
+# G0c: Runtime provider request meter
+
+**Status:** G0c’s exact nine-file component is independently accepted. Root full, installed-artifact and build gates passed on the newer combination; separate independent overall review Passed; final metadata/source-package light closure retains the same724-file code snapshot. This source-checkout profile does not establish real-provider quality, cost, billing, or durable budget enforcement.
+
+G0c connects the existing offline [provider request meter](provider-request-meter.md) to two ordinary thermal-calibration `LLMWorker`s. The [source-checkout CLI profile](../../examples/thermal_calibration/CLI-g0c.md) is opt-in. Runtime continues to own planning, ordinary claims, action compilation, tools, verification, output commitment, independent acceptance and recovery. The meter neither schedules work nor writes task facts.
+
+## Ready, source and review binding
+
+The v3 primary plan SHA-256 is `90f78c8e19a197044d3d34c111004333aa3ddc7c9d3e14d2dcfcb8c6c3f92522`; its controlling closure SHA-256 is `0e0f0775bb40e357fff8ae18f1c12f3d46b838f1e60ad705644d98cad6e9a8a1`. Their joint plan digest is `b6612602a17286750e1711041ec3314c8bc18e049075fa843ee6a99232a01172`, independently Ready as report `77b09daba0fb9f059b31c6ac66f6a89e833892871d03aa222b382ac8e01e4f9d`.
+
+Implementation acceptance applies to the frozen G0c candidate, not to the newer Root tree. Its 1,028-file canonical source map is `04b38d2bb79aad7d2f927be002f06c826739c22ce34d04a54d4876e682ce7712` (map-file SHA-256 `a5a9a3d41bde6036b0cd57f4453084d666734292bb54e21a6cad38e791f65f11`); the nine-owner canonical map is `ca6c9a237572c4e6550759adc2b28605ba31fe104bb8500eaa41d158442d3218`. Non-author implementation review `c8de818135572eb94b6b31e58e20e0a33becd2f75ceea10fb7bdff5517672d4b` passed this exact package.
+
+Root’s later 724-file composite source-map digest is `b5de9ab45a66175667fedd8a6488e609acf615a64416e10e9ac9d0bf53149366` and binds a different combination. It must not be conflated with the historical 1,028-file G0c candidate map above. Root’s full/installed/build gates for that new combination passed; independent overall Passed; final metadata/source-package light closure retains the same724-file code snapshot.
+
+## Profile and boundaries
+
+Planner and Researcher use ordinary `LLMWorker` instances and share one process-local `RunMeter` epoch. The meter issues one permit before each transport attempt; `max_retries=0` prevents hidden `LLMWorker` retries. The existing `AIGINEERING_G0C_MAX_ATTEMPTS`, `AIGINEERING_G0C_OUTPUT_RESERVATION_CEILING`, and `AIGINEERING_G0C_RUN_DEADLINE_SECONDS` inputs are required, have no defaults, and are strictly parsed: the first two are exact nonnegative integers and the deadline is finite and positive. A changed or invalid profile is rejected without resetting the meter. Each request has an 8,192-token output cap and a timeout no greater than 60 seconds. Equality at the run deadline denies a permit. A new process gets a new epoch; it does not restore or continue a prior budget.
+
+The profile reads only the `AIGINEERING_API_KEY` environment variable after nonsecret configuration validation. The credential value is not written to logs, events, errors or output. Factories are the fixed `examples.thermal_calibration.runtime_workers:create_metered_planner` and `examples.thermal_calibration.runtime_workers:create_metered_researcher` entry points selected by `workers-g0c.toml`; the ordinary `aig run` uses `examples/thermal_calibration/run-g0c.toml` with the checkout root on `PYTHONPATH`. Existing F1a configuration and default behavior are unchanged. Redis remains required for ordinary Runtime discovery, wakeups and event relay.
+
+The bounded G0c HTTP profile uses an 8,192-token output cap, timeout `<=60` seconds and a 4 MiB + 1 byte response-size sentinel. These limits describe this configured profile and its decoder; they are not a model-general provider protocol.
+
+## Auxiliary observation and evidence
+
+Four typed auxiliary event names are added: `provider.permit_admitted`, `provider.transport_entered`, `provider.response_observed`, and `provider.attempt_finalized`. The existing event envelope stays unchanged. Writer allowlists and strict reader validation use the same exact closed field schemas; unknown or missing fields reject. Events contain bounded status, byte/decode state, usage-member state and meter outcomes, never bodies or raw usage mappings. A permit event records local admission; a transport event records crossing the local call boundary, not provider receipt. Response observation represents a returned bounded reply or the explicit overflow sentinel; it does not by itself prove a complete HTTP body; attempt finalization appears only after G0a `finish` succeeds. Absent, null or invalid usage remains unknown rather than zero.
+
+The non-author component check passed 51 unit, 13 boundary and 13 CLI cases, plus Ruff and format: 77 tests total. Five fake-transport Stores contained 54 tasks and 36 physical fake requests, each with the four expected events. Four failure workflows completed four new, normally claimed and independently verified recovery tasks through the ordinary Runtime path; the original failed tasks and terminal facts remained unchanged. This is fake-provider Runtime evidence, not a real model run.
+
+Earlier G0c candidate1 and candidate2 implementation reviews remain **NotPassed** on their own snapshots. Candidate3 is the independently passed exact package; earlier evidence is not rewritten as candidate3 evidence. The process meter does not persist across restarts, and the completed fake recovery cases do not prove a persistent budget or real-provider recovery. Root integration gates passed; independent overall Passed; final metadata/source-package light closure retains the same724-file code snapshot. See the [stage plan](sustained-engineering-delivery.md) and [Change 127](../../changes/127-local-runtime-provider-meter.md).

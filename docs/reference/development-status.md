@@ -1,6 +1,6 @@
 # 开发功能状态
 
-更新日期：2026-10-25；开发版本：`0.5.13.dev0`。
+更新日期：2026-10-26；开发版本：`0.5.13.dev0`。
 
 项目定位：Zero Trust agent runtime for auditable AI-assisted engineering and research.
 
@@ -18,7 +18,7 @@
 | 功能 | 状态 | 当前可用范围与剩余工作 |
 | --- | --- | --- |
 | 可复算的工程分析验收器 | 部分实现 | [合成校准工具与 oracle](../../examples/thermal_calibration/README.md)已有固定数据、精确计算与逐样本证据检查；[CLI 配置](../../examples/thermal_calibration/CLI.md)的普通规划、双工具续接、不同 actor 确定性接受、实际恢复及原根续跑已通过协议夹具独立复验。源码3,095项与树外安装106项通过；真实模型与业务收益仍待验证。另有[离线直接循环和CLI失败组合](../../reports/111-direct-harness-protocol-development-2026-10-24.md)单包及组合独立验收通过，源码3,208项、零跳过与树外300项通过；前者共享工具/oracle，后者覆盖raw Candidate错误、缺观察及child额度耗尽，不构成公平模型对照。见[F1a记录](../../reports/109-calibration-cli-development-2026-10-24.md)。 |
-| 长期工作区的局部查询成本 | 部分实现 | change118–122已覆盖精确去重、同批证明、支持的纯声明上下文与两次writer额度校验，C3已随3d2e815开发交付。change123收窄纯Asset effect-projection上下文，D0c校正真实入口测量；35文件组合源码3,532项、树外656项通过，独立总体验收Passed，最终元数据/源码包按相同717文件代码快照轻闭合。FactReducer传播、claim/maintenance、legacy fallback及整体n²仍开放。见[最新验证](../../reports/113-asset-context-direct-transport-development-2026-10-25.md)。 |
+| 长期工作区的局部查询成本 | 部分实现 | change118–122已覆盖精确去重、同批证明、支持的纯声明上下文与两次writer额度校验，C3已随3d2e815开发交付。change123收窄纯Asset effect-projection上下文，D0c校正真实入口测量；35文件组合源码3,532项、树外656项通过，独立总体验收Passed，最终元数据/源码包按相同717文件代码快照轻闭合。FactReducer传播、claim/maintenance、legacy fallback及整体n²仍开放。见[前批验证](../../reports/113-asset-context-direct-transport-development-2026-10-25.md)。 |
 | 任务创建、状态、列表、看板、统计 | 已实现 | `task create/status/list/board/stats/show`；状态来自已提交事实，Redis 默认必需。 |
 | 文件输入、Skill 与上下文选择 | 已实现 | 冻结输入、角色绑定、按 Contract 披露；`task context` 默认只展示元数据。 |
 | 模型 Worker 与配置入口 | 已实现 | `run --config`、显式任务恢复和兼容模型 Worker；report107 的普通 CLI live08 使用 deepseek-flash 完成有界真实任务，provider 证据见 [开发记录](../../reports/107-cli-dynamic-research-development-2026-10-23.md)。 |
@@ -115,8 +115,12 @@ report107 已证明一条经普通 CLI、真实 provider、双工具续接和不
 
 本批准确源、矩阵、失败保留和安装来源见[开发验证](../../reports/112-local-allowance-development-2026-10-25.md)与[机器证据](../../reports/data/112-local-allowance-verification.json)。
 
-D1a 的精确 Asset 投影上下文、G0b 的显式 direct provider adapter、D0c观察器及D1b0输出判定已通过单包及35文件组合开发门禁与独立总体验收；[组合报告](../../reports/113-asset-context-direct-transport-development-2026-10-25.md)单列状态。D0c已测真实generic入口并分别绑定旧/新Runtime源。当前没有新增真实provider证据、Runtime计量或整体规模/成本资格。
+D1a 的精确 Asset 投影上下文、G0b 的显式 direct provider adapter、D0c观察器及D1b0输出判定已通过单包及35文件组合开发门禁与独立总体验收；[组合报告](../../reports/113-asset-context-direct-transport-development-2026-10-25.md)单列状态。D0c已测真实generic入口并分别绑定旧/新Runtime源。该183d9c8历史增量没有新增真实provider执行或Runtime计量；新进展见下文。
 
 新增输出判定切片已独立接受：FactReducer按实际pending Asset检查业务/creator/independent政策，防止同批工具观察按名称触发错误complete或绕开子任务取消。历史terminal保持；[D1b0计划](../plans/pending-asset-output-policy.md)与[change125](../../changes/125-pending-asset-output-policy.md)限定证据。它与D1a/G0b/D0c已通过本次root组合门禁及独立总体验收；Runtime共享计量仍独立在制。
 
-当前35文件组合的源码3,532项、树外656项、Ruff/581文件格式、构建和实际安装驱动检查通过；独立整体Passed；最终验收元数据/源码包按同一717文件代码快照轻闭合。direct原生transport是显式可选入口，Runtime计量尚未合入；本批无真实provider/key调用，不宣称公平成本优势或阶段目标完成。
+已交dev183d9c8的35文件组合源码3,532项、树外656项、Ruff/581文件格式、构建和实际安装驱动检查通过；独立整体Passed；最终验收元数据/源码包按同一717文件代码快照轻闭合。direct原生transport是显式可选入口，Runtime计量尚未合入；本批无真实provider/key调用，不宣称公平成本优势或阶段目标完成。
+
+2026-10-26新组合：G0c普通Runtime共享请求计量与D1b1/D1b2批内分派单包独立接受，724文件源码3,602项、Ruff/585格式通过；树外739项、构建与实际安装驱动通过，非作者对准确组合独立整体Passed；最终验收元数据/源码包按同一724文件代码快照轻闭合。辅助usage、epoch及恢复证据不构成持久预算或账单。E0另确认事件捕获仍有全历史读取及T×N关联成本，E1未合入。见[当前验证](../../reports/114-runtime-meter-dispatch-development-2026-10-26.md)。
+
+真实测试另绑定旧183d9c8/旧wheel：两次严格有界请求均HTTP200后native parser拒绝，无工具执行或交付；原失败完整保留，第二次仅以安全类型桶/固定源码fence定位，未保存正文或敏感字段。共已知4,232 tokens，不等于已知费用；不能据此宣称兼容通过、一般质量/成本优势或阶段完成。

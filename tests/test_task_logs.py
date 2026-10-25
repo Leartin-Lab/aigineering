@@ -453,3 +453,102 @@ def test_cli_json_errors_exit_nonzero_and_missing_follow_is_not_success(
         "type": "end",
         "status": "error",
     }
+
+
+def test_provider_meter_events_accept_exact_schema_and_coupled_values():
+    epoch = "a" * 32
+    admitted = {
+        "meter_epoch_id": epoch,
+        "permit_id": 1,
+        "output_cap": 8192,
+        "reserved_output_tokens": 8192,
+        "timeout_seconds": 60.0,
+    }
+    entered = {"meter_epoch_id": epoch, "permit_id": 1}
+    observed = {
+        "meter_epoch_id": epoch,
+        "permit_id": 1,
+        "status_code": 200,
+        "response_bytes": 32,
+        "decode_status": "root_object",
+        "usage_member_state": "value",
+    }
+    finalized = {
+        "meter_epoch_id": epoch,
+        "permit_id": 1,
+        "outcome": "response",
+        "status_code": 200,
+        "error_code": None,
+        "duration_seconds": 0.25,
+        "late": False,
+        "result_eligible": True,
+        "prompt_tokens": 10,
+        "prompt_status": "reported",
+        "completion_tokens": 5,
+        "completion_status": "reported",
+        "total_tokens": 15,
+        "total_status": "reported",
+        "inconsistent_total": False,
+        "output_cap_violation": False,
+        "cached_reasoning_status": "unsupported",
+    }
+    for name, fields in (
+        ("provider.permit_admitted", admitted),
+        ("provider.transport_entered", entered),
+        ("provider.response_observed", observed),
+        ("provider.attempt_finalized", finalized),
+    ):
+        task_logs_module._validate_event(name, fields)
+
+
+@pytest.mark.parametrize(
+    ("event", "fields"),
+    [
+        (
+            "provider.permit_admitted",
+            {
+                "meter_epoch_id": "a" * 32,
+                "permit_id": True,
+                "output_cap": 8192,
+                "reserved_output_tokens": 8192,
+                "timeout_seconds": 60,
+            },
+        ),
+        (
+            "provider.response_observed",
+            {
+                "meter_epoch_id": "a" * 32,
+                "permit_id": 1,
+                "status_code": 200,
+                "response_bytes": 10,
+                "decode_status": "invalid_json",
+                "usage_member_state": "value",
+            },
+        ),
+        (
+            "provider.attempt_finalized",
+            {
+                "meter_epoch_id": "a" * 32,
+                "permit_id": 1,
+                "outcome": "response",
+                "status_code": 503,
+                "error_code": "http_status",
+                "duration_seconds": 0.0,
+                "late": False,
+                "result_eligible": True,
+                "prompt_tokens": 0,
+                "prompt_status": "reported",
+                "completion_tokens": None,
+                "completion_status": "missing",
+                "total_tokens": None,
+                "total_status": "missing",
+                "inconsistent_total": False,
+                "output_cap_violation": None,
+                "cached_reasoning_status": "unsupported",
+            },
+        ),
+    ],
+)
+def test_provider_meter_event_schema_rejects_bad_coupling(event, fields):
+    with pytest.raises(ValueError):
+        task_logs_module._validate_event(event, fields)

@@ -13,6 +13,8 @@ caller materializes those events as atomic runtime facts.
 
 from __future__ import annotations
 
+from collections import deque
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import TYPE_CHECKING
@@ -95,6 +97,72 @@ class FactReducerEvent:
 _is_business_output = is_business_output
 
 
+@dataclass(frozen=True, slots=True)
+class _AssetDispatchIndex:
+    """Invocation-local immutable lookup view for an Asset batch."""
+
+    contract_by_id: Mapping[str, Contract]
+    activation_by_raw_token: Mapping[str, tuple[tuple[int, Contract], ...]]
+    outputs_by_name: Mapping[str, tuple[Contract, ...]]
+    activation_fallback: tuple[tuple[int, Contract], ...]
+
+    def activation_candidates(self, name: str) -> tuple[Contract, ...]:
+        indexed = self.activation_by_raw_token.get(name, ())
+        fallback = self.activation_fallback
+        merged: list[Contract] = []
+        left = right = 0
+        while left < len(indexed) and right < len(fallback):
+            if indexed[left][0] < fallback[right][0]:
+                merged.append(indexed[left][1])
+                left += 1
+            elif fallback[right][0] < indexed[left][0]:
+                merged.append(fallback[right][1])
+                right += 1
+            else:
+                merged.append(indexed[left][1])
+                left += 1
+                right += 1
+        merged.extend(contract for _, contract in indexed[left:])
+        merged.extend(contract for _, contract in fallback[right:])
+        return tuple(merged)
+
+
+def _build_asset_dispatch_index(
+    contracts: Iterable[Contract], assets: tuple[Asset, ...]
+) -> _AssetDispatchIndex:
+    """Build one local, multi-value dispatch view in Contract order."""
+    del assets  # Batch contents do not alter the immutable Contract relations.
+    contract_by_id: dict[str, Contract] = {}
+    activation_by_raw_token: dict[str, list[tuple[int, Contract]]] = {}
+    outputs_by_name: dict[str, list[Contract]] = {}
+    activation_fallback: list[tuple[int, Contract]] = []
+
+    for position, contract in enumerate(contracts):
+        contract_by_id[contract.id] = contract
+        activation = contract.activation
+        if activation:
+            if isinstance(activation, str):
+                for token in set(activation.split()):
+                    activation_by_raw_token.setdefault(token, []).append(
+                        (position, contract)
+                    )
+            else:
+                activation_fallback.append((position, contract))
+        for output_name in dict.fromkeys(contract.outputs):
+            outputs_by_name.setdefault(output_name, []).append(contract)
+
+    return _AssetDispatchIndex(
+        contract_by_id=MappingProxyType(contract_by_id),
+        activation_by_raw_token=MappingProxyType(
+            {token: tuple(owners) for token, owners in activation_by_raw_token.items()}
+        ),
+        outputs_by_name=MappingProxyType(
+            {name: tuple(owners) for name, owners in outputs_by_name.items()}
+        ),
+        activation_fallback=tuple(activation_fallback),
+    )
+
+
 class FactReducer:
     """Deterministic projection of asset facts into structured events.
 
@@ -139,10 +207,23 @@ class FactReducer:
                 record_type="lifecycle.terminal"
             )
         }
+        dispatch_index = (
+            _build_asset_dispatch_index(contracts, assets) if assets else None
+        )
 
         # 1. Method result detection
         for asset in assets:
-            events.extend(self._detect_method_result(asset, contracts))
+            events.extend(
+                self._detect_method_result(
+                    asset,
+                    contracts,
+                    contract_by_id=(
+                        dispatch_index.contract_by_id
+                        if dispatch_index is not None
+                        else None
+                    ),
+                )
+            )
 
         # 2. Activation satisfaction
         available_names = (
@@ -150,8 +231,16 @@ class FactReducer:
         )
         available_names.update(pending_names)
         activated: set[str] = set()
+        activation_results: dict[str, bool] = {}
         for asset in assets:
-            for event in self._detect_activation(asset, available_names, contracts):
+            assert dispatch_index is not None
+            for event in self._detect_activation(
+                asset,
+                available_names,
+                contracts,
+                candidate_contracts=dispatch_index.activation_candidates(asset.name),
+                activation_results=activation_results,
+            ):
                 if event.contract_id not in activated:
                     events.append(event)
                     activated.add(event.contract_id)
@@ -161,7 +250,16 @@ class FactReducer:
         for asset in assets:
             events.extend(
                 self._detect_output_satisfaction(
-                    asset, assets, completed, terminal_contract_ids, contracts
+                    asset,
+                    assets,
+                    completed,
+                    terminal_contract_ids,
+                    contracts,
+                    candidate_contracts=(
+                        dispatch_index.outputs_by_name.get(asset.name, ())
+                        if dispatch_index is not None
+                        else None
+                    ),
                 )
             )
 
@@ -190,18 +288,26 @@ class FactReducer:
     # -- Method result detection --------------------------------------------
 
     def _detect_method_result(
-        self, asset: Asset, contracts: tuple[Contract, ...]
+        self,
+        asset: Asset,
+        contracts: tuple[Contract, ...],
+        *,
+        contract_by_id: Mapping[str, Contract] | None = None,
     ) -> list[FactReducerEvent]:
         """If *asset* name starts with a method-result prefix, emit an event."""
         for prefix in METHOD_RESULT_PREFIXES:
             if asset.name.startswith(prefix):
-                source = next(
-                    (
-                        contract
-                        for contract in contracts
-                        if contract.id == asset.created_by
-                    ),
-                    None,
+                source = (
+                    contract_by_id.get(asset.created_by)
+                    if contract_by_id is not None
+                    else next(
+                        (
+                            contract
+                            for contract in contracts
+                            if contract.id == asset.created_by
+                        ),
+                        None,
+                    )
                 )
                 if source is None or asset.name not in source.outputs:
                     return []
@@ -224,28 +330,40 @@ class FactReducer:
         asset: Asset,
         available_names: set[str],
         contracts: tuple[Contract, ...],
+        *,
+        candidate_contracts: tuple[Contract, ...] | None = None,
+        activation_results: dict[str, bool] | None = None,
     ) -> list[FactReducerEvent]:
         """Find contracts whose activation expression references *asset.name*
         and is now satisfied."""
         events: list[FactReducerEvent] = []
 
         # The caller supplies committed names plus the atomic pending batch.
-        for contract in contracts:
+        for contract in (
+            contracts if candidate_contracts is None else candidate_contracts
+        ):
             if not contract.activation or not contract.activation.strip():
                 continue
-            # Only report activation if the expression references this asset.
-            if _activation_references(contract.activation, asset.name):
-                if check_activation(contract.activation, available_names):
-                    events.append(
-                        FactReducerEvent(
-                            type="activation_active",
-                            contract_id=contract.id,
-                            asset_name=asset.name,
-                            details=MappingProxyType(
-                                {"activation": contract.activation}
-                            ),
-                        )
+            if candidate_contracts is None and not _activation_references(
+                contract.activation, asset.name
+            ):
+                continue
+            if activation_results is None:
+                active = check_activation(contract.activation, available_names)
+            elif contract.id not in activation_results:
+                active = check_activation(contract.activation, available_names)
+                activation_results[contract.id] = active
+            else:
+                active = activation_results[contract.id]
+            if active:
+                events.append(
+                    FactReducerEvent(
+                        type="activation_active",
+                        contract_id=contract.id,
+                        asset_name=asset.name,
+                        details=MappingProxyType({"activation": contract.activation}),
                     )
+                )
         return events
 
     # -- Output satisfaction ------------------------------------------------
@@ -257,12 +375,16 @@ class FactReducer:
         completed: set[str],
         terminal_contract_ids: set[str],
         contracts: tuple[Contract, ...],
+        *,
+        candidate_contracts: tuple[Contract, ...] | None = None,
     ) -> list[FactReducerEvent]:
         """Find contracts that declare *asset.name* as an output and are
         now fully satisfied."""
         events: list[FactReducerEvent] = []
 
-        for contract in contracts:
+        for contract in (
+            contracts if candidate_contracts is None else candidate_contracts
+        ):
             if contract.id in terminal_contract_ids:
                 continue
             if asset.name not in contract.outputs:
@@ -331,11 +453,11 @@ class FactReducer:
         for children in children_by_parent.values():
             children.sort(key=lambda item: item.id)
 
-        queue = [completed_contract]
+        queue = deque([completed_contract])
         visited = {completed_contract.id}
         known_terminals = set(terminal_contract_ids)
         while queue:
-            parent = queue.pop(0)
+            parent = queue.popleft()
             for child in children_by_parent.get(parent.id, ()):
                 if child.id in visited:
                     continue

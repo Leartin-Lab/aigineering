@@ -40,6 +40,41 @@ _EVENT_FIELDS = {
     "provider.retry": {"status_code", "attempt", "max_retries", "backoff_seconds"},
     "provider.failed": {"status_code", "retryable"},
     "capture.truncated": {"reason"},
+    "provider.permit_admitted": {
+        "meter_epoch_id",
+        "permit_id",
+        "output_cap",
+        "reserved_output_tokens",
+        "timeout_seconds",
+    },
+    "provider.transport_entered": {"meter_epoch_id", "permit_id"},
+    "provider.response_observed": {
+        "meter_epoch_id",
+        "permit_id",
+        "status_code",
+        "response_bytes",
+        "decode_status",
+        "usage_member_state",
+    },
+    "provider.attempt_finalized": {
+        "meter_epoch_id",
+        "permit_id",
+        "outcome",
+        "status_code",
+        "error_code",
+        "duration_seconds",
+        "late",
+        "result_eligible",
+        "prompt_tokens",
+        "prompt_status",
+        "completion_tokens",
+        "completion_status",
+        "total_tokens",
+        "total_status",
+        "inconsistent_total",
+        "output_cap_violation",
+        "cached_reasoning_status",
+    },
 }
 _OBSERVER: ContextVar["CaptureWriter | None"] = ContextVar(
     "aig_worker_log_observer", default=None
@@ -117,14 +152,29 @@ def _validate_event(event: Any, fields: Any) -> None:
         raise ValueError
     int_fields = {"status_code", "attempt", "max_retries", "duration_ms"}
     for key, value in fields.items():
-        if key in int_fields and (type(value) is not int or value < 0):
+        nullable_provider_status = (
+            event == "provider.attempt_finalized"
+            and key == "status_code"
+            and value is None
+        )
+        if (
+            key in int_fields
+            and not nullable_provider_status
+            and (type(value) is not int or value < 0)
+        ):
             raise ValueError
         if key == "retryable" and type(value) is not bool:
             raise ValueError
         if key == "category" and value not in _FAILURE_CATEGORIES:
             raise ValueError
-        if key == "outcome" and value not in {"returned", "failed", "error"}:
-            raise ValueError
+        if key == "outcome":
+            allowed_outcomes = (
+                {"response", "failed", "timeout"}
+                if event == "provider.attempt_finalized"
+                else {"returned", "failed", "error"}
+            )
+            if value not in allowed_outcomes:
+                raise ValueError
         if key == "reason" and value not in {"byte_limit", "event_limit"}:
             raise ValueError
         if key == "backoff_seconds" and (
@@ -134,6 +184,144 @@ def _validate_event(event: Any, fields: Any) -> None:
             or value > 3600
         ):
             raise ValueError
+    if event in {
+        "provider.permit_admitted",
+        "provider.transport_entered",
+        "provider.response_observed",
+        "provider.attempt_finalized",
+    }:
+        _validate_provider_event(event, fields)
+
+
+def _validate_provider_event(event: str, fields: dict[str, Any]) -> None:
+    epoch = fields.get("meter_epoch_id")
+    permit_id = fields.get("permit_id")
+    if not isinstance(epoch, str) or re.fullmatch(r"[0-9a-f]{32}", epoch) is None:
+        raise ValueError
+    if type(permit_id) is not int or permit_id <= 0:
+        raise ValueError
+    if event in {"provider.permit_admitted", "provider.transport_entered"}:
+        if event == "provider.permit_admitted":
+            if (
+                type(fields["output_cap"]) is not int
+                or fields["output_cap"] != 8192
+                or type(fields["reserved_output_tokens"]) is not int
+                or fields["reserved_output_tokens"] != 8192
+                or type(fields["timeout_seconds"]) not in (int, float)
+                or not math.isfinite(fields["timeout_seconds"])
+                or not 0 < fields["timeout_seconds"] <= 60
+            ):
+                raise ValueError
+        return
+    if event == "provider.response_observed":
+        status = fields["status_code"]
+        byte_count = fields["response_bytes"]
+        decode = fields["decode_status"]
+        usage_state = fields["usage_member_state"]
+        if type(status) is not int or not 100 <= status <= 599:
+            raise ValueError
+        if type(byte_count) is not int or not 0 <= byte_count <= 4 * 1024 * 1024 + 1:
+            raise ValueError
+        if decode not in {
+            "root_object",
+            "invalid_json",
+            "invalid_response",
+            "not_attempted",
+        }:
+            raise ValueError
+        if usage_state not in {"value", "null", "absent", "not_observed"}:
+            raise ValueError
+        if decode == "not_attempted":
+            if byte_count != 4 * 1024 * 1024 + 1 or usage_state != "not_observed":
+                raise ValueError
+        elif decode == "root_object":
+            if usage_state not in {"value", "null", "absent"}:
+                raise ValueError
+        elif usage_state != "not_observed":
+            raise ValueError
+        return
+
+    outcome = fields["outcome"]
+    status = fields["status_code"]
+    error_code = fields["error_code"]
+    duration = fields["duration_seconds"]
+    late = fields["late"]
+    eligible = fields["result_eligible"]
+    if outcome not in {"response", "failed", "timeout"}:
+        raise ValueError
+    if status is not None and (type(status) is not int or not 100 <= status <= 599):
+        raise ValueError
+    if (
+        type(duration) not in (int, float)
+        or not math.isfinite(duration)
+        or duration < 0
+    ):
+        raise ValueError
+    if type(late) is not bool or type(eligible) is not bool:
+        raise ValueError
+    if eligible != (outcome == "response" and not late):
+        raise ValueError
+    if outcome == "response":
+        if status is None or not 200 <= status < 300:
+            raise ValueError
+        if error_code not in {
+            None,
+            "response_too_large",
+            "invalid_json",
+            "invalid_response",
+            "deadline_exceeded",
+            "internal_error",
+        }:
+            raise ValueError
+    elif outcome == "timeout":
+        if status is not None or error_code != "transport_timeout":
+            raise ValueError
+    else:
+        if status is None:
+            if error_code not in {"transport_error", "internal_error"}:
+                raise ValueError
+        elif 200 <= status < 300 or error_code not in {
+            "http_status",
+            "response_too_large",
+        }:
+            raise ValueError
+
+    component_pairs = (
+        ("prompt_tokens", "prompt_status"),
+        ("completion_tokens", "completion_status"),
+        ("total_tokens", "total_status"),
+    )
+    for value_key, status_key in component_pairs:
+        value = fields[value_key]
+        component_status = fields[status_key]
+        if component_status not in {"reported", "not_returned", "missing", "invalid"}:
+            raise ValueError
+        if component_status == "reported":
+            if type(value) is not int or value < 0:
+                raise ValueError
+        elif value is not None:
+            raise ValueError
+    reported_all = all(fields[key] == "reported" for _, key in component_pairs)
+    inconsistent = fields["inconsistent_total"]
+    if reported_all:
+        expected = (
+            fields["total_tokens"]
+            != fields["prompt_tokens"] + fields["completion_tokens"]
+        )
+        if type(inconsistent) is not bool or inconsistent != expected:
+            raise ValueError
+    elif inconsistent is not None:
+        raise ValueError
+    completion_reported = fields["completion_status"] == "reported"
+    cap_violation = fields["output_cap_violation"]
+    if completion_reported:
+        expected = fields["completion_tokens"] > 8192
+        if type(cap_violation) is not bool or cap_violation != expected:
+            raise ValueError
+    elif cap_violation is not None:
+        raise ValueError
+    if fields["cached_reasoning_status"] != "unsupported":
+        raise ValueError
 
 
 def _open_quota_lock(root: Path) -> int:

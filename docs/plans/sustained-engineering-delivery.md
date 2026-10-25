@@ -1,6 +1,6 @@
 # 持续工程分析交付与运行成本计划
 
-状态：A/B/C0 与 F1a 开发增量独立集成验收通过；C1/C2 单包及组合开发增量独立验收通过；F1b/F1c 单包及组合开发增量独立验收通过；C3a/C3b 隔离单包及原B完整矩阵通过，root源码、安装、构建及非作者组合终验通过；G0a 离线计量单包及组合开发增量独立验收通过。阶段未完成。日期：2026-10-25。
+状态：A/B/C0 与 F1a 开发增量独立集成验收通过；C1/C2 单包及组合开发增量独立验收通过；F1b/F1c 单包及组合开发增量独立验收通过；C3a/C3b 隔离单包及原B完整矩阵通过，root源码、安装、构建及非作者组合终验通过；G0a 离线计量单包及组合开发增量独立验收通过。G0c/D1b1/D1b2单包独立通过，新组合源码/安装/制品与非作者整体通过，最终元数据/源码包轻闭合。阶段未完成。日期：2026-10-26。
 
 ## 目标与用户行为
 
@@ -164,10 +164,18 @@ C3a/C3b 的准确隔离组合及原36组/216次 B 矩阵已独立通过，已与
 
 本批准确711文件代码/夹具快照、两份矩阵、安装来源及保留失败见[开发验证](../../reports/112-local-allowance-development-2026-10-25.md)与[机器证据](../../reports/data/112-local-allowance-verification.json)。D1a投影上下文局部化和direct transport后续单包状态见下文；Runtime provider计量、公平协议及持续业务质量/成本仍开放。
 
-## D1a / G0b 后续增量
+## D1a / G0b 已交付增量（183d9c8历史快照）
 
 [D1a](asset-proposal-projection-context.md)与[G0b](direct-deepseek-transport.md)隔离单包均已非作者验收Passed；[D0c观察器兼容](asset-projection-benchmark-compatibility.md)实施及非作者验收亦已Passed，与D1b0及三个测试hook维护进入35文件组合并通过root门禁和独立总体验收。D1a只收窄纯Asset effect-projection上下文，reducer热路径仍开放；G0b只接direct原生transport，尚无本轮真实provider、Runtime共享计量或公平成本结论。新组合证据见[开发报告](../../reports/113-asset-context-direct-transport-development-2026-10-25.md)。
 
 本次组合在全套验证前扩为四个已独立接受的切片：corrected D1a、G0b、D0c、[D1b0输出判定](pending-asset-output-policy.md)。D1b0修复既有同批工具观察被名称快捷路径计入业务完成的问题，保留activation与历史事实；它不是性能优化。G0c Runtime计量及后续队列/传播局部化在隔离目录并行，不进入此组合快照。
 
 四切片加三测试hook维护的35文件组合已通过源码3,532项、树外656项、Ruff/581文件格式、构建和实际安装三驱动检查。受测717文件摘要e87654c18b07100d555247e2e15989ffaa28c598e8e602d43158f1c2ee9da9ca；非作者对准确35文件组合独立总体验收Passed；最终元数据/源码包按相同717文件代码快照轻闭合。阶段仍开放，G0c/后续CPU及H局部化不混入本候选。
+
+## G0c / D1b1 / D1b2 开发组合
+
+[Runtime共享计量](runtime-provider-meter.md)、[FIFO与批内分派](asset-batch-dispatch.md)分别独立接受；Root在dev183d9c8上组合9+3个代码/测试/示例文件，queue2作为dispatch的已接受前置保留。724文件摘要 `b5de9ab45a66175667fedd8a6488e609acf615a64416e10e9ac9d0bf53149366` 已通过源码3,602项、0skip、6既有warning、Ruff与585文件格式。树外739项、构建与实际安装Asset/context驱动亦通过；非作者对准确组合独立整体Passed；最终验收元数据/源码包按同一724文件代码快照轻闭合，见[本批证据](../../reports/114-runtime-meter-dispatch-development-2026-10-26.md)。
+
+单批局部分派减少P×C，并不关闭H、输出helper、ancestor及claim/maintenance热点。新只读E0库存确认无变化capture仍全量读取；正常签名逐任务历史的commitment trace关联有T×N Python访问，H0/16/64为48/7,904/108,272，属于已确认待修成本，不冒称整体Redis warm测量或已修复。E1单独规划，不进入当前组合。
+
+G0d旧183d9c8制品的两次有界真实请求均HTTP200，但native解析失败、无工具或业务完成；第一次保留generic失败，第二次私有observer定位tool-call对象严格结构fence并观察到空content。未知实际键和值未保留，不猜测旧原因；两请求共已知prompt3,720/completion512/total4,232，计费未知。新兼容修复与后续真实CLI验证单列，不把fake恢复或这两失败算稳定交付。
