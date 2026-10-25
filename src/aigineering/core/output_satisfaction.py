@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from aigineering.core.store import StoreProtocol
-    from aigineering.protocol.types import Contract
+    from aigineering.protocol.types import Asset, Contract
 
 
 # Origins that indicate context/observation assets, not business outputs.
@@ -51,6 +51,7 @@ def all_outputs_satisfied(
     store: StoreProtocol,
     *,
     extra_output_names: set[str] | None = None,
+    pending_assets: tuple[Asset, ...] = (),
     require_outputs: bool = False,
     extra_qualified_asset_ids: Mapping[tuple[str, str], set[str]] | None = None,
 ) -> bool:
@@ -58,6 +59,8 @@ def all_outputs_satisfied(
 
     ``extra_output_names`` treats just-projected output names as already
     available for callers that compute completion before committing a batch.
+    ``pending_assets`` applies the normal output policy to actual Assets that
+    have been projected in the current batch but are not yet stored.
     ``require_outputs`` prevents output-less contracts from becoming terminal
     through the asset-satisfaction projection.
     """
@@ -93,7 +96,10 @@ def all_outputs_satisfied(
             continue
         if output_name in extra_output_names:
             continue
-        matching = store.get_assets_by_name(output_name)
+        matching = (
+            *store.get_assets_by_name(output_name),
+            *(asset for asset in pending_assets if asset.name == output_name),
+        )
         if not matching:
             return False
         if contract.origin in {"system", "recovery"}:

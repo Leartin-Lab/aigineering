@@ -161,7 +161,7 @@ class FactReducer:
         for asset in assets:
             events.extend(
                 self._detect_output_satisfaction(
-                    asset, pending_names, completed, terminal_contract_ids, contracts
+                    asset, assets, completed, terminal_contract_ids, contracts
                 )
             )
 
@@ -184,7 +184,7 @@ class FactReducer:
         verifier receipt cannot be cancelled while it completes atomically.
         """
         return self._detect_unfinished_children(
-            contract, set(), terminal_contract_ids, self._contracts_with(())
+            contract, (), terminal_contract_ids, self._contracts_with(())
         )
 
     # -- Method result detection --------------------------------------------
@@ -253,7 +253,7 @@ class FactReducer:
     def _detect_output_satisfaction(
         self,
         asset: Asset,
-        pending_names: set[str],
+        pending_assets: tuple[Asset, ...],
         completed: set[str],
         terminal_contract_ids: set[str],
         contracts: tuple[Contract, ...],
@@ -284,7 +284,7 @@ class FactReducer:
             # Check full output satisfaction.
             if (
                 all_outputs_satisfied(
-                    contract, self._store, extra_output_names=pending_names
+                    contract, self._store, pending_assets=pending_assets
                 )
                 and contract.id not in completed
             ):
@@ -301,7 +301,7 @@ class FactReducer:
                 events.extend(
                     self._detect_unfinished_children(
                         contract,
-                        pending_names,
+                        pending_assets,
                         terminal_contract_ids | completed,
                         contracts,
                     )
@@ -312,7 +312,7 @@ class FactReducer:
     def _detect_unfinished_children(
         self,
         completed_contract: Contract,
-        pending_names: set[str],
+        pending_assets: tuple[Asset, ...],
         terminal_contract_ids: set[str],
         contracts: tuple[Contract, ...],
     ) -> list[FactReducerEvent]:
@@ -349,7 +349,7 @@ class FactReducer:
                 # Keep existing terminal facts immutable, but continue through
                 # their branch so any still-live descendants can be fenced.
                 if already_terminal or self._all_outputs_satisfied(
-                    child, pending_names
+                    child, pending_assets
                 ):
                     queue.append(child)
                     continue
@@ -399,7 +399,7 @@ class FactReducer:
     # -- Helpers ------------------------------------------------------------
 
     def _all_outputs_satisfied(
-        self, contract: Contract, pending_names: set[str] | None = None
+        self, contract: Contract, pending_assets: tuple[Asset, ...] = ()
     ) -> bool:
         """Return True when all declared outputs of *contract* exist in
         the store AND are business outputs (not tool/MCP observations).
@@ -411,7 +411,7 @@ class FactReducer:
         return all_outputs_satisfied(
             contract,
             self._store,
-            extra_output_names=pending_names or set(),
+            pending_assets=pending_assets,
         )
 
 

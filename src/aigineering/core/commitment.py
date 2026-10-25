@@ -50,10 +50,7 @@ from aigineering.core.effect_projection import (
 )
 from aigineering.core.effect_projectors import EffectProjector
 from aigineering.core.effect_projection import EffectHandler
-from aigineering.core.projection_context import (
-    EffectProjectionContext,
-    load_contract_declaration_projection_context,
-)
+from aigineering.core import projection_context as context_inputs
 from aigineering.core.record_conflict import (
     ClaimBindingConflict,
     ImmutableRecordConflict,
@@ -86,14 +83,14 @@ def reduce_candidate(
     *,
     verifier_factory: VerifierFactory,
     actor_keys: tuple[ActorKey, ...] | None = None,
-    projection_context: EffectProjectionContext | None = None,
+    projection_context: context_inputs.EffectProjectionContext | None = None,
     additional_effects: Mapping[str, tuple[str, EffectProjector] | EffectHandler]
     | None = None,
 ) -> CommitmentDecision:
     """Authenticate and purely decide one Candidate's complete effect batch."""
     validate_genesis_manifest(genesis)
     effective_actor_keys = actor_keys or genesis.root_keys
-    effective_context = projection_context or EffectProjectionContext()
+    effective_context = projection_context or context_inputs.EffectProjectionContext()
     if not effective_context.actor_keys:
         effective_context = replace(effective_context, actor_keys=effective_actor_keys)
     try:
@@ -206,14 +203,15 @@ class CandidateCommitter:
 
             genesis = load_genesis(self._store)
         actor_keys = load_effective_actor_keys(self._store, genesis)
+        projection_context = context_inputs.load_candidate_projection_context(
+            self._store, candidate, actor_keys=actor_keys
+        )
         decision = reduce_candidate(
             candidate,
             genesis,
             verifier_factory=verifier_factory,
             actor_keys=actor_keys,
-            projection_context=load_contract_declaration_projection_context(
-                self._store, candidate, actor_keys=actor_keys
-            ),
+            projection_context=projection_context,
             additional_effects=self._additional_effects,
         )
         rejected = record_unreceipted_authentication_rejection(

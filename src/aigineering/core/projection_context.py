@@ -8,7 +8,12 @@ from typing import TYPE_CHECKING
 
 from aigineering.protocol.runtime_record import RuntimeRecord
 from aigineering.core.allowance_publication_index import AllowanceBalanceInput
-from aigineering.protocol.candidate import ActorKey
+from aigineering.protocol.candidate import (
+    ActorKey,
+    CandidateClaimBinding,
+    CandidateEffect,
+    CandidateProposal,
+)
 from aigineering.protocol.types import Asset, Contract
 from aigineering.core.worker_routing import WorkerRegistration
 
@@ -49,6 +54,23 @@ class ContractDeclarationProjectionInputs:
     assets: tuple[Asset, ...] = ()
     runtime_records: tuple[RuntimeRecord, ...] = ()
     allowance_balance_inputs: tuple[AllowanceBalanceInput, ...] | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class AssetProposalProjectionRequest:
+    """Exact immutable read selection for built-in Asset proposals."""
+
+    candidate_id: str
+    claim_bound_contract_id: str | None
+    include_candidate_replay: bool
+
+
+@dataclass(frozen=True, slots=True)
+class AssetProposalProjectionInputs:
+    """Selected existing facts returned by an optional Store reader."""
+
+    contracts: tuple[Contract, ...] = ()
+    runtime_records: tuple[RuntimeRecord, ...] = ()
 
 
 _KNOWN_TASK_ID_VERSIONS = frozenset({"3", "4", "5", "6"})
@@ -135,6 +157,103 @@ def load_contract_declaration_projection_context(
         runtime_records=selected.runtime_records,
         actor_keys=actor_keys,
         allowance_balance_inputs=getattr(selected, "allowance_balance_inputs", None),
+    )
+
+
+def build_asset_proposal_projection_request(
+    candidate: CandidateProposal,
+) -> AssetProposalProjectionRequest | None:
+    """Build a conservative read hint for a homogeneous proposal Candidate."""
+    if type(candidate) is not CandidateProposal:
+        return None
+    effects = candidate.effects
+    if (
+        type(effects) is not tuple
+        or not effects
+        or any(
+            type(effect) is not CandidateEffect
+            or type(effect.effect_type) is not str
+            or effect.effect_type != "asset.propose"
+            for effect in effects
+        )
+    ):
+        return None
+    if type(candidate.id) is not str or not candidate.id:
+        return None
+
+    binding = candidate.claim_binding
+    if binding is None:
+        parent_id = None
+    elif (
+        type(binding) is CandidateClaimBinding
+        and type(binding.contract_id) is str
+        and binding.contract_id
+    ):
+        parent_id = binding.contract_id
+    else:
+        return None
+
+    return AssetProposalProjectionRequest(
+        candidate_id=candidate.id,
+        claim_bound_contract_id=parent_id,
+        include_candidate_replay=len(effects) == 1,
+    )
+
+
+def load_asset_proposal_projection_context(
+    store: StoreProtocol,
+    candidate: CandidateProposal,
+    *,
+    actor_keys: tuple[ActorKey, ...] = (),
+) -> EffectProjectionContext:
+    """Use an optional narrow Store reader for pure Asset proposal Candidates."""
+    try:
+        request = build_asset_proposal_projection_request(candidate)
+    except (KeyError, TypeError, ValueError):
+        request = None
+    if request is None:
+        return load_effect_projection_context(store, actor_keys=actor_keys)
+
+    return _load_asset_proposal_projection_context_from_request(
+        store, request, actor_keys=actor_keys
+    )
+
+
+def _load_asset_proposal_projection_context_from_request(
+    store: StoreProtocol,
+    request: AssetProposalProjectionRequest,
+    *,
+    actor_keys: tuple[ActorKey, ...] = (),
+) -> EffectProjectionContext:
+    """Load selected Asset inputs without rebuilding the read hint."""
+    reader = getattr(store, "read_asset_proposal_projection_inputs", None)
+    if not callable(reader):
+        return load_effect_projection_context(store, actor_keys=actor_keys)
+    selected = reader(request)
+    return EffectProjectionContext(
+        contracts=selected.contracts,
+        runtime_records=selected.runtime_records,
+        actor_keys=actor_keys,
+    )
+
+
+def load_candidate_projection_context(
+    store: StoreProtocol,
+    candidate: CandidateProposal,
+    *,
+    actor_keys: tuple[ActorKey, ...] = (),
+) -> EffectProjectionContext:
+    """Choose the narrow Asset reader or the existing declaration path."""
+    try:
+        request = build_asset_proposal_projection_request(candidate)
+    except (KeyError, TypeError, ValueError):
+        request = None
+    if request is None:
+        return load_contract_declaration_projection_context(
+            store, candidate, actor_keys=actor_keys
+        )
+    return _load_asset_proposal_projection_context_from_request(
+        store, request, actor_keys=actor_keys
     )
 
 

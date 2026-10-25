@@ -8,7 +8,7 @@ from dataclasses import dataclass
 import json
 import math
 import time
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 from aigineering.core.tool_schema import (
     ToolOutputLimitError,
@@ -55,7 +55,35 @@ class ModelClient(Protocol):
         messages: list[dict[str, Any]],
         tools: list[dict[str, object]],
         timeout_seconds: float,
-    ) -> str: ...
+    ) -> str | DirectProviderResponse: ...
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderToolCall:
+    id: str
+    name: str
+    arguments: str
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderAssistantMessage:
+    role: Literal["assistant"]
+    content: str | None
+    tool_calls: tuple[ProviderToolCall, ...]
+    reasoning_content: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class DirectProviderResponse:
+    message: ProviderAssistantMessage
+    finish_reason: Literal[
+        "stop",
+        "tool_calls",
+        "length",
+        "content_filter",
+        "insufficient_system_resource",
+        "aborted",
+    ]
 
 
 @dataclass(frozen=True)
@@ -77,6 +105,7 @@ def run_direct(
     limits: Mapping[str, Any],
     event_sink: Callable[[dict[str, Any]], None],
     monotonic: Callable[[], float] = time.monotonic,
+    response_protocol: Literal["offline-v1", "deepseek-chat-v1"] = "offline-v1",
 ) -> DirectRunResult:
     """Run one direct tool-call conversation and check its final report."""
     checked_limits = _validate_limits(limits)
@@ -86,6 +115,8 @@ def run_direct(
         raise TypeError("registry must be a ToolRegistry")
     if not callable(event_sink):
         raise TypeError("event_sink must be callable")
+    if response_protocol not in {"offline-v1", "deepseek-chat-v1"}:
+        raise ValueError("unsupported direct response protocol")
 
     start = monotonic()
     deadline = start + checked_limits["deadline_seconds"]
@@ -144,7 +175,10 @@ def run_direct(
                 raise DirectHarnessError(
                     "deadline_exceeded", "cooperative deadline expired"
                 )
-            response = _parse_response(raw, checked_limits["max_response_bytes"])
+            if response_protocol == "offline-v1":
+                response = _parse_response(raw, checked_limits["max_response_bytes"])
+            else:
+                response = _provider_response(raw)
             message = response["message"]
             tool_calls = message["tool_calls"]
             _event(
@@ -335,6 +369,10 @@ def _remaining(deadline: float, now: float) -> float:
 
 
 def _parse_response(raw: Any, byte_limit: int) -> dict[str, Any]:
+    if isinstance(raw, DirectProviderResponse):
+        raise DirectHarnessError(
+            "protocol", "provider response requires explicit deepseek-chat-v1 opt-in"
+        )
     if not isinstance(raw, str):
         raise DirectHarnessError("protocol", "client response must be JSON text")
     if len(raw.encode("utf-8")) > byte_limit:
@@ -378,6 +416,81 @@ def _parse_response(raw: Any, byte_limit: int) -> dict[str, Any]:
     if not isinstance(function["arguments"], str):
         raise DirectHarnessError("protocol", "tool arguments must be JSON text")
     return envelope
+
+
+def _provider_response(raw: Any) -> dict[str, Any]:
+    if not isinstance(raw, DirectProviderResponse):
+        raise DirectHarnessError(
+            "protocol", "deepseek-chat-v1 requires a typed provider response"
+        )
+    if type(raw.finish_reason) is not str or raw.finish_reason not in {
+        "stop",
+        "tool_calls",
+        "length",
+        "content_filter",
+        "insufficient_system_resource",
+        "aborted",
+    }:
+        raise DirectHarnessError(
+            "unsupported_finish_reason", "unsupported finish reason"
+        )
+    if raw.finish_reason not in {"stop", "tool_calls"}:
+        raise DirectHarnessError(
+            "unsupported_finish_reason", "provider finish reason is terminal"
+        )
+    message = raw.message
+    if not isinstance(message, ProviderAssistantMessage) or message.role != "assistant":
+        raise DirectHarnessError("protocol", "provider assistant message is invalid")
+    if message.content is not None and not isinstance(message.content, str):
+        raise DirectHarnessError("protocol", "provider content must be text or null")
+    if not isinstance(message.tool_calls, tuple) or len(message.tool_calls) > 1:
+        raise DirectHarnessError("protocol", "provider supports at most one tool call")
+    if message.reasoning_content is not None and not isinstance(
+        message.reasoning_content, str
+    ):
+        raise DirectHarnessError("protocol", "provider reasoning content is invalid")
+    if raw.finish_reason == "stop":
+        if message.tool_calls:
+            raise DirectHarnessError(
+                "protocol", "stop finish reason cannot include tool calls"
+            )
+        if not isinstance(message.content, str) or not message.content.strip():
+            raise DirectHarnessError("protocol", "final content must be nonempty text")
+    else:
+        if len(message.tool_calls) != 1 or message.content is not None:
+            raise DirectHarnessError(
+                "protocol",
+                "tool_calls finish reason requires one call and null content",
+            )
+    for call in message.tool_calls:
+        if (
+            not isinstance(call, ProviderToolCall)
+            or not isinstance(call.id, str)
+            or not call.id
+            or not isinstance(call.name, str)
+            or not call.name
+            or not isinstance(call.arguments, str)
+        ):
+            raise DirectHarnessError("protocol", "provider tool call is invalid")
+    return {
+        "message": {
+            "role": message.role,
+            "content": message.content,
+            "tool_calls": [
+                {
+                    "id": call.id,
+                    "type": "function",
+                    "function": {"name": call.name, "arguments": call.arguments},
+                }
+                for call in message.tool_calls
+            ],
+            **(
+                {"reasoning_content": message.reasoning_content}
+                if message.reasoning_content is not None
+                else {}
+            ),
+        }
+    }
 
 
 def _parse_object(raw: str, *, phase: str) -> dict[str, Any]:

@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from collections.abc import Callable
 from pathlib import Path
 from types import MappingProxyType
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from aigineering.core.authority import (
     ReservedNamespaceError,
@@ -86,6 +86,12 @@ from aigineering.protocol.wire import (
     trace_entry_from_dict,
     trace_entry_to_dict,
 )
+
+if TYPE_CHECKING:
+    from aigineering.core.projection_context import (
+        AssetProposalProjectionInputs,
+        AssetProposalProjectionRequest,
+    )
 
 _logger = logging.getLogger(__name__)
 _ASSET_ID_QUERY_CHUNK_SIZE = 900
@@ -1439,6 +1445,83 @@ class SQLiteStore:
         finally:
             if owns_snapshot:
                 self._conn.execute("ROLLBACK")
+
+    def read_asset_proposal_projection_inputs(
+        self, request: AssetProposalProjectionRequest
+    ) -> AssetProposalProjectionInputs:
+        """Read the exact parent and replay witnesses for Asset proposals."""
+        owns_snapshot = not self._conn.in_transaction
+        if owns_snapshot:
+            self._conn.execute("BEGIN")
+        try:
+            return self._read_asset_proposal_projection_inputs(request)
+        finally:
+            if owns_snapshot:
+                self._conn.execute("ROLLBACK")
+
+    def _read_asset_proposal_projection_inputs(
+        self, request: AssetProposalProjectionRequest
+    ) -> AssetProposalProjectionInputs:
+        from aigineering.core.projection_context import AssetProposalProjectionInputs
+
+        contracts = ()
+        if request.claim_bound_contract_id is not None:
+            parent = self.get_contract(request.claim_bound_contract_id)
+            if parent is not None:
+                contracts = (parent,)
+
+        selected: dict[int, RuntimeRecord] = {}
+        heads: list[RuntimeRecord] = []
+        if request.include_candidate_replay:
+            for record_type in ("candidate.received", "candidate.committed"):
+                rows = self._conn.execute(
+                    "SELECT * FROM runtime_records WHERE record_type = ? AND "
+                    "json_extract(payload_json, '$.candidate_id') = ? ORDER BY revision",
+                    (record_type, request.candidate_id),
+                ).fetchall()
+                for row in rows:
+                    record = self._row_to_runtime_record(row)
+                    revision = int(row["revision"])
+                    selected[revision] = record
+                    if record.record_type == "candidate.committed":
+                        heads.append(record)
+
+        # De-duplicate only the physical lookup keys. The complete original head
+        # remains present for exact_single_effect_head_replay's shape/uniqueness checks.
+        member_ids = tuple(
+            dict.fromkeys(
+                member_id
+                for head in heads
+                if isinstance(
+                    (members := head.payload.get("committed_record_ids")), (list, tuple)
+                )
+                for member_id in members
+                if isinstance(member_id, str)
+            )
+        )
+        if member_ids:
+            parameter_limit = self._conn.getlimit(sqlite3.SQLITE_LIMIT_VARIABLE_NUMBER)
+            chunk_size = min(_ASSET_ID_QUERY_CHUNK_SIZE, parameter_limit)
+            if chunk_size < 1:
+                raise sqlite3.OperationalError(
+                    "SQLite variable limit does not permit replay-member lookup"
+                )
+            for start in range(0, len(member_ids), chunk_size):
+                chunk = member_ids[start : start + chunk_size]
+                placeholders = ", ".join("?" for _ in chunk)
+                rows = self._conn.execute(
+                    "SELECT * FROM runtime_records WHERE record_id IN ("
+                    + placeholders
+                    + ")",
+                    chunk,
+                ).fetchall()
+                for row in rows:
+                    selected[int(row["revision"])] = self._row_to_runtime_record(row)
+
+        return AssetProposalProjectionInputs(
+            contracts=contracts,
+            runtime_records=tuple(selected[key] for key in sorted(selected)),
+        )
 
     def _read_contract_declaration_projection_inputs(self, request):
         from aigineering.core.projection_context import (

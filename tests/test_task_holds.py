@@ -535,11 +535,30 @@ def test_claim_that_wins_after_plugin_snapshot_rejects_block_transaction(
     import aigineering.core.commitment as commitment
     import aigineering.core.commit_snapshot as commit_snapshot
 
+    projection_context_module = commitment.context_inputs
+    original_loader = projection_context_module.load_candidate_projection_context
+    loader_calls = []
+
+    def frozen_context_loader(_store, candidate, **kwargs):
+        if candidate.id != proposal.id:
+            return original_loader(_store, candidate, **kwargs)
+        loader_calls.append((candidate.id, stale_context))
+        return stale_context
+
     monkeypatch.setattr(
-        commitment,
-        "load_contract_declaration_projection_context",
-        lambda *_args, **_kwargs: stale_context,
+        projection_context_module,
+        "load_candidate_projection_context",
+        frozen_context_loader,
     )
+    original_reduce = commitment.reduce_candidate
+    preprojection_decisions = []
+
+    def observe_reduce(candidate, *args, **kwargs):
+        decision = original_reduce(candidate, *args, **kwargs)
+        preprojection_decisions.append((candidate.id, decision.accepted))
+        return decision
+
+    monkeypatch.setattr(commitment, "reduce_candidate", observe_reduce)
     monkeypatch.setattr(
         commit_snapshot,
         "load_effect_projection_context",
@@ -551,11 +570,24 @@ def test_claim_that_wins_after_plugin_snapshot_rejects_block_transaction(
     with pytest.raises(CandidateCommitRejected):
         _commit(store, genesis, proposal)
 
+    assert loader_calls == [(proposal.id, stale_context)]
+    assert preprojection_decisions[0] == (proposal.id, True)
+    assert all(
+        observed_id == proposal.id and accepted
+        for observed_id, accepted in preprojection_decisions
+    )
+    assert (
+        projection_context_module.load_candidate_projection_context
+        is not original_loader
+    )
     assert store.get_claim(contract.id) == claim
     assert store.scan_runtime_records(record_type="claim.hold.placed") == []
+    rejected = store.scan_runtime_records(record_type="candidate.rejected")
     assert any(
         record.payload.get("candidate_id") == proposal.id
-        for _, record in store.scan_runtime_records(record_type="candidate.rejected")
+        and "cannot place a hold on a Contract with claim history"
+        in record.payload["reason"]
+        for _, record in rejected
     )
 
 

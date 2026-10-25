@@ -15,6 +15,7 @@ import statistics
 import sys
 import tempfile
 import time
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -1263,6 +1264,41 @@ def _store_result_classification(method: str, result, classification) -> dict[st
     return counts
 
 
+def _context_loader_capabilities(imports):
+    """Return the actual entry API and its selected module path."""
+    commitment = imports["commitment"]
+    projection_context = imports["projection_context"]
+    capabilities = {
+        "projection_context.load_candidate_projection_context": callable(
+            getattr(projection_context, "load_candidate_projection_context", None)
+        ),
+        "projection_context.load_asset_proposal_projection_context": callable(
+            getattr(projection_context, "load_asset_proposal_projection_context", None)
+        ),
+        "projection_context.load_contract_declaration_projection_context": callable(
+            getattr(
+                projection_context,
+                "load_contract_declaration_projection_context",
+                None,
+            )
+        ),
+        "commitment.load_contract_declaration_projection_context": callable(
+            getattr(commitment, "load_contract_declaration_projection_context", None)
+        ),
+    }
+    if capabilities["projection_context.load_candidate_projection_context"]:
+        if getattr(commitment, "context_inputs", None) is not projection_context:
+            raise RuntimeError(
+                "CandidateCommitter context_inputs is not the selected projection_context module"
+            )
+        active_entry_path = "candidate_facade"
+    elif capabilities["commitment.load_contract_declaration_projection_context"]:
+        active_entry_path = "contract_declaration"
+    else:
+        raise RuntimeError("required Candidate context entry loader is absent")
+    return capabilities, active_entry_path
+
+
 def _instrument(store, imports, classification=None):
     classification = classification or {}
     counts: dict[str, Any] = {
@@ -1298,6 +1334,13 @@ def _instrument(store, imports, classification=None):
             "registrations": 0,
             "claim_history_contract_ids": 0,
         },
+        "context_loader_api_capabilities": {},
+        "context_loader_entry_path": None,
+        "context_loader_path_calls": {
+            "candidate_facade": 0,
+            "contract_declaration": 0,
+        },
+        "context_loader_result_summaries": [],
         "pre_commit_reducer_calls": 0,
         "writer_reducer_calls": 0,
         "sql_selects": 0,
@@ -1361,20 +1404,57 @@ def _instrument(store, imports, classification=None):
 
         setattr(store, name, wrapped)
         restores.append((store, name, original))
-    modules = (
+    commitment = imports["commitment"]
+    projection_context = imports["projection_context"]
+    capabilities, active_entry_path = _context_loader_capabilities(imports)
+    counts["context_loader_api_capabilities"] = capabilities
+    counts["context_loader_entry_path"] = active_entry_path
+    modules = []
+    if active_entry_path == "candidate_facade":
+        modules.append(
+            (
+                projection_context,
+                "load_candidate_projection_context",
+                "context",
+                "candidate_facade",
+            )
+        )
+    else:
+        modules.append(
+            (
+                commitment,
+                "load_contract_declaration_projection_context",
+                "context",
+                "contract_declaration",
+            )
+        )
+    modules.extend(
         (
-            imports["commitment"],
-            "load_contract_declaration_projection_context",
-            "context",
-        ),
-        (imports["projection_context"], "load_effect_projection_context", "full"),
-        (imports["commitment"], "reduce_asset_facts", "pre"),
-        (imports["materialization"], "reduce_asset_facts", "writer"),
+            (
+                projection_context,
+                "load_effect_projection_context",
+                "full",
+                None,
+            ),
+            (imports["commitment"], "reduce_asset_facts", "pre", None),
+            (imports["materialization"], "reduce_asset_facts", "writer", None),
+        )
     )
-    for module, name, stage in modules:
+    wrapped_functions = set()
+    for module, name, stage, path_name in modules:
+        function_key = (id(module), name)
+        if function_key in wrapped_functions:
+            raise RuntimeError(f"benchmark instrumentation would double-wrap {name}")
+        wrapped_functions.add(function_key)
         original = getattr(module, name)
 
-        def wrapped(*args, __original=original, __stage=stage, **kwargs):
+        def wrapped(
+            *args,
+            __original=original,
+            __stage=stage,
+            __path_name=path_name,
+            **kwargs,
+        ):
             nonlocal active_stage
             previous_stage = active_stage
             start = time.perf_counter()
@@ -1402,10 +1482,37 @@ def _instrument(store, imports, classification=None):
                     )
             if __stage == "context":
                 counts["context_loader_calls"] += 1
+                counts["context_loader_path_calls"][__path_name] += 1
                 try:
                     result = __original(*args, **kwargs)
                     for field in counts["context_rows"]:
                         counts["context_rows"][field] += len(getattr(result, field))
+                    runtime_records = tuple(getattr(result, "runtime_records"))
+                    related_ids = classification.get(
+                        "related_runtime_record_ids", set()
+                    )
+                    related_records = tuple(
+                        record for record in runtime_records if record.id in related_ids
+                    )
+                    counts["context_loader_result_summaries"].append(
+                        {
+                            "path": __path_name,
+                            "runtime_record_rows": len(runtime_records),
+                            "related_runtime_record_rows": len(related_records),
+                            "related_runtime_record_types": dict(
+                                sorted(
+                                    Counter(
+                                        record.record_type for record in related_records
+                                    ).items()
+                                )
+                            ),
+                            "related_runtime_record_ids_sha256": hashlib.sha256(
+                                "\n".join(
+                                    sorted(record.id for record in related_records)
+                                ).encode()
+                            ).hexdigest(),
+                        }
+                    )
                     return result
                 finally:
                     active_stage = previous_stage
@@ -1797,6 +1904,146 @@ def _run_case(
     }
 
 
+def _run_exact_replay_probe(output_dir: Path, imports) -> dict[str, Any]:
+    """Measure one exact P=1 replay bundle after a normally signed H=16 prefix."""
+    output_dir.mkdir(parents=True, exist_ok=False)
+    prefix_path = output_dir / "prefix.sqlite"
+    setup, signer, key, genesis, host, _verifier_signer, _verifier_key = _new_store(
+        prefix_path, imports
+    )
+    history = _build_prefix(setup, signer, key, genesis, 16, imports, host)
+    effects, _assets, _contracts = _candidate_effects(1, imports)
+    candidate = imports["create_candidate_proposal"](
+        domain_id=genesis.id,
+        actor_id=key.actor_id,
+        key_id=key.key_id,
+        effects=effects,
+        signer=signer,
+        idempotency_key="d0c:exact-replay-probe",
+    )
+    from aigineering.core.commitment import CandidateCommitter
+
+    initial = CandidateCommitter(setup, setup).commit(candidate, genesis)
+    all_records = tuple(record for _revision, record in setup.scan_runtime_records())
+    receipts = tuple(
+        record
+        for record in all_records
+        if record.record_type == "candidate.received"
+        and record.payload.get("candidate_id") == candidate.id
+    )
+    heads = tuple(
+        record
+        for record in all_records
+        if record.record_type == "candidate.committed"
+        and record.payload.get("candidate_id") == candidate.id
+    )
+    if not initial.accepted or len(receipts) != 1 or len(heads) != 1:
+        setup.close()
+        raise RuntimeError("H=16 replay fixture lacks its unique receipt or head")
+    member_ids = heads[0].payload.get("committed_record_ids")
+    if type(member_ids) not in (list, tuple) or len(member_ids) != 2:
+        setup.close()
+        raise RuntimeError("H=16 replay fixture head does not name two members")
+    member_records = tuple(
+        record for record in all_records if record.id in set(member_ids)
+    )
+    if len(member_records) != 2 or len(set(member_ids)) != 2:
+        setup.close()
+        raise RuntimeError("H=16 replay fixture members are not unique and present")
+    proof_records = (*receipts, *heads, *member_records)
+    if len(proof_records) != 4:
+        setup.close()
+        raise RuntimeError("H=16 replay fixture did not select four proof records")
+    proof_ids = {record.id for record in proof_records}
+    proof_digest = hashlib.sha256("\n".join(sorted(proof_ids)).encode()).hexdigest()
+    expected_types = dict(
+        sorted(Counter(record.record_type for record in proof_records).items())
+    )
+    proof_roles = {
+        "receipt_rows": len(receipts),
+        "head_rows": len(heads),
+        "member_rows": len(member_records),
+        "member_ids_sha256": hashlib.sha256(
+            "\n".join(sorted(member_ids)).encode()
+        ).hexdigest(),
+    }
+    before_digest = _semantic_digest(setup)
+    setup.close()
+
+    replay_path = output_dir / "replay.sqlite"
+    replay_store = _snapshot(prefix_path, replay_path, imports)
+    history_classification = history.pop("_classification")
+    classification = {
+        "history_asset_ids": set(history_classification["history_asset_ids"]),
+        "history_contract_ids": set(history_classification["history_contract_ids"]),
+        "history_runtime_record_ids": set(
+            history_classification["history_runtime_record_ids"]
+        ),
+        "history_trace_ids": set(history_classification["history_trace_ids"]),
+        "history_claim_ids": set(history_classification["history_claim_ids"]),
+        "history_claim_contract_ids": set(
+            history_classification["history_claim_contract_ids"]
+        ),
+        "related_runtime_record_ids": proof_ids,
+        "related_candidate_ids": {candidate.id},
+        "registration_worker_ids": set(
+            history_classification["registration_worker_ids"]
+        ),
+    }
+    setup_counts = _instrument(replay_store, imports, classification)
+    replay = CandidateCommitter(replay_store, replay_store).commit(candidate, genesis)
+    counts = _restore(replay_store, setup_counts)
+    after_digest = _semantic_digest(replay_store)
+    replay_store.close()
+
+    summaries = counts["context_loader_result_summaries"]
+    expected_path = counts["context_loader_entry_path"]
+    if (
+        not replay.accepted
+        or before_digest != after_digest
+        or len(summaries) != 1
+        or summaries[0]["path"] != expected_path
+        or summaries[0]["related_runtime_record_rows"] != 4
+        or summaries[0]["related_runtime_record_ids_sha256"] != proof_digest
+        or summaries[0]["related_runtime_record_types"] != expected_types
+    ):
+        raise RuntimeError("H=16 exact replay did not return the original proof bundle")
+    if expected_path == "candidate_facade":
+        if (
+            summaries[0]["runtime_record_rows"] != 4
+            or counts["full_projection_context_calls"] != 0
+        ):
+            raise RuntimeError("narrow replay context included non-proof history")
+    elif (
+        counts["full_projection_context_calls"] != 1
+        or counts["context_rows"]["runtime_records"]
+        != counts["full_projection_context_rows"]["runtime_records"]
+    ):
+        raise RuntimeError(
+            "legacy replay context did not retain its full-history route"
+        )
+
+    counts["sqlite_vm_work_proxy"] = (
+        counts["sqlite_vm_progress_callbacks"] * counts["sqlite_vm_interval"]
+    )
+    return {
+        "H": 16,
+        "P": 1,
+        "observation_kind": "separate_exact_replay_not_a_context_pair",
+        "history_assets": history["assets"],
+        "initial_publication_accepted": bool(initial.accepted),
+        "replay_accepted": bool(replay.accepted),
+        "store_unchanged_by_replay": before_digest == after_digest,
+        "expected_proof_runtime_record_rows": len(proof_records),
+        "expected_proof_runtime_record_types": expected_types,
+        "expected_proof_roles": proof_roles,
+        "expected_proof_record_ids_sha256": proof_digest,
+        "reader_path": expected_path,
+        "context_loader_result_summaries": summaries,
+        "instrumentation": counts,
+    }
+
+
 def _args():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", required=True, type=Path)
@@ -1812,7 +2059,42 @@ def _args():
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--smoke", action="store_true")
     group.add_argument("--matrix", action="store_true")
+    group.add_argument(
+        "--context-compat",
+        action="store_true",
+        help="run six focused legacy/new projection-context compatibility pairs",
+    )
     return parser
+
+
+def _mode_parameters(args) -> dict[str, Any]:
+    if args.smoke:
+        return {
+            "mode": "smoke",
+            "P": [2],
+            "H": [0, 1],
+            "modes": ["asset_batch", "asset_sequential", "mixed_asset_declare"],
+            "timing_samples_per_P_H_mode": 1,
+            "context_pairs": 0,
+        }
+    if args.context_compat:
+        return {
+            "mode": "context_compat",
+            "P": [1, 64],
+            "H": [0, 16, 64],
+            "modes": ["asset_only", "mixed_asset_declare"],
+            "timing_samples_per_P_H_mode": 1,
+            "context_pairs": 6,
+            "separate_replay_probe": {"P": 1, "H": 16, "timing_pair": False},
+        }
+    return {
+        "mode": "matrix",
+        "P": [8, 16, 32, 64],
+        "H": [0, 16, 64],
+        "modes": ["asset_batch", "asset_sequential"],
+        "timing_samples_per_P_H_mode": 3,
+        "context_pairs": 6,
+    }
 
 
 def main() -> int:
@@ -1828,6 +2110,9 @@ def main() -> int:
     failed_cell = None
     manifest = {}
     package_manifest_sha = None
+    context_loader_api_capabilities = {}
+    context_loader_entry_path = None
+    replay_probe = None
     try:
         imports = _package_imports(args.package_root)
         package_dir = Path(__import__("aigineering").__path__[0]).resolve()
@@ -1845,6 +2130,10 @@ def main() -> int:
             raise RuntimeError(
                 "loaded package does not match the expected package manifest"
             )
+        (
+            context_loader_api_capabilities,
+            context_loader_entry_path,
+        ) = _context_loader_capabilities(imports)
         phase = "workspace_setup"
         work = Path(tempfile.mkdtemp(prefix="asset-reducer-"))
         phase = "correctness_microcases" if args.smoke else "measurement_cells"
@@ -1854,6 +2143,10 @@ def main() -> int:
                 (2, 1, "asset_batch", False, 0),
                 (2, 1, "asset_sequential", False, 0),
                 (2, 0, "asset_batch", True, 0),
+            ]
+        elif args.context_compat:
+            cases = [(64, h, "asset_only", False, 0) for h in (0, 16, 64)] + [
+                (1, h, "mixed_asset_declare", True, 0) for h in (0, 16, 64)
             ]
         else:
             cases = [
@@ -1884,8 +2177,20 @@ def main() -> int:
             )
             result["case"] = mode
             result["sample"] = sample
+            result["mixed"] = mixed
             results.append(result)
             timing_ms.append(result["timing_ms"])
+            failed_cell = None
+        if args.context_compat:
+            phase = "exact_replay_probe"
+            failed_cell = {
+                "index": None,
+                "P": 1,
+                "H": 16,
+                "mode": "separate_exact_replay_probe",
+                "timing_pair": False,
+            }
+            replay_probe = _run_exact_replay_probe(work / "exact-replay-probe", imports)
             failed_cell = None
         grouped: dict[tuple[str, int, int], list[float]] = {}
         for item in results:
@@ -1917,6 +2222,8 @@ def main() -> int:
                 "package_python_file_count": len(manifest),
                 "package_manifest_sha256": package_manifest_sha,
                 "package_python_files": manifest,
+                "context_loader_api_capabilities": context_loader_api_capabilities,
+                "context_loader_entry_path": context_loader_entry_path,
                 "script_sha256": _sha(Path(__file__)),
                 "python_version": platform.python_version(),
                 "sqlite_version": sqlite3.sqlite_version,
@@ -1937,8 +2244,9 @@ def main() -> int:
                 "correctness_microcases": microcases,
                 "timing_execution_count": len(results),
                 "instrumentation_execution_count": len(results),
-                "source_mode": "smoke" if args.smoke else "full_78_pair_matrix",
+                "source_mode": _mode_parameters(args)["mode"],
             },
+            "replay_probe": replay_probe,
             "measurement": {
                 "context_loader_calls": sum(
                     item["instrumentation"]["context_loader_calls"] for item in results
@@ -1971,11 +2279,7 @@ def main() -> int:
                     "uninstrumented native SQLite work",
                 ],
                 "parameters": {
-                    "P": [2] if args.smoke else [8, 16, 32, 64],
-                    "H": [0, 1] if args.smoke else [0, 16, 64],
-                    "matrix_modes": ["asset_batch", "asset_sequential"],
-                    "timing_samples_per_P_H_mode": 1 if args.smoke else 3,
-                    "context_pairs": 0 if args.smoke else 6,
+                    **_mode_parameters(args),
                     "background_contracts_close_by": "signed worker claims and accepted output facts",
                     "A_measurement": "actual nonterminal Contracts after publication; unclosed is not equivalent to ready or claimable",
                 },
@@ -2002,16 +2306,14 @@ def main() -> int:
                 "package_python_file_count": len(manifest),
                 "package_manifest_sha256": package_manifest_sha,
                 "package_python_files": manifest,
+                "context_loader_api_capabilities": context_loader_api_capabilities,
+                "context_loader_entry_path": context_loader_entry_path,
                 "script_sha256": _sha(Path(__file__)),
                 "python_version": platform.python_version(),
                 "sqlite_version": sqlite3.sqlite_version,
             },
             "parameters": {
-                "mode": "smoke" if args.smoke else "matrix",
-                "P": [2] if args.smoke else [8, 16, 32, 64],
-                "H": [0, 1] if args.smoke else [0, 16, 64],
-                "modes": ["asset_batch", "asset_sequential"],
-                "samples_per_cell": 1 if args.smoke else 3,
+                **_mode_parameters(args),
                 "source_revision_label": args.source_revision,
                 "expected_package_manifest_sha256": args.expected_package_manifest_sha256,
             },

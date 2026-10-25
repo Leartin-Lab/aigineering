@@ -141,6 +141,13 @@ share the fact transaction; reference validation preserves decisions when the
 acceleration is unavailable. Read-only tail selection and integrity checks cannot
 repair or publish facts.
 
+Optional scoped projection readers select immutable facts, never authority.
+Homogeneous Asset proposal selection retains the exact parent and all matching
+receipt/head/member witnesses; the canonical proof owner decides replay.
+Unsupported shapes retain full context, while storage and unknown failures
+remain observable. Selection cannot bypass writer-time authentication, claims
+or Asset consequences.
+
 Registration actor/key binding is part of the verified semantics. Display
 timestamps alone are not identity or lifecycle authority.
 

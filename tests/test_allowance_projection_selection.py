@@ -1181,12 +1181,31 @@ def test_stale_projection_is_rejected_by_fresh_writer_after_other_connection_cha
     # transactions, caches, and narrow validation stay real and independent.
     import aigineering.core.commitment as commitment_module
 
-    original_loader = commitment_module.load_contract_declaration_projection_context
+    projection_context_module = commitment_module.context_inputs
+    original_loader = projection_context_module.load_candidate_projection_context
+    loader_calls = []
+
+    def frozen_context_loader(store, candidate, **kwargs):
+        context = contexts.get(candidate.id)
+        if context is None:
+            return original_loader(store, candidate, **kwargs)
+        loader_calls.append((candidate.id, context))
+        return context
+
     monkeypatch.setattr(
-        commitment_module,
-        "load_contract_declaration_projection_context",
-        lambda _store, candidate, **_kwargs: contexts[candidate.id],
+        projection_context_module,
+        "load_candidate_projection_context",
+        frozen_context_loader,
     )
+    original_reduce = commitment_module.reduce_candidate
+    preprojection_decisions = []
+
+    def observe_reduce(candidate, *args, **kwargs):
+        decision = original_reduce(candidate, *args, **kwargs)
+        preprojection_decisions.append((candidate.id, decision.accepted))
+        return decision
+
+    monkeypatch.setattr(commitment_module, "reduce_candidate", observe_reduce)
     writer_events = []
     for label, store in (("first", first_store), ("second", second_store)):
         original_narrow = store._narrow_allowance_commit_inputs
@@ -1221,6 +1240,14 @@ def test_stale_projection_is_rejected_by_fresh_writer_after_other_connection_cha
     )
     assert first_result.accepted, first_result
     assert not second_result.accepted, second_result
+    assert loader_calls == [
+        (first_candidate.id, contexts[first_candidate.id]),
+        (second_candidate.id, contexts[second_candidate.id]),
+    ]
+    assert preprojection_decisions == [
+        (first_candidate.id, True),
+        (second_candidate.id, True),
+    ]
 
     first_events = [event for event in writer_events if event["writer"] == "first"]
     second_events = [event for event in writer_events if event["writer"] == "second"]
@@ -1260,7 +1287,7 @@ def test_stale_projection_is_rejected_by_fresh_writer_after_other_connection_cha
     assert not first_store.audit_publication_index()
     assert not second_store.audit_publication_index()
     assert (
-        commitment_module.load_contract_declaration_projection_context
+        projection_context_module.load_candidate_projection_context
         is not original_loader
     )
     first_store.close()

@@ -1,6 +1,6 @@
 # 开发功能状态
 
-更新日期：2026-10-24；开发版本：`0.5.13.dev0`。
+更新日期：2026-10-25；开发版本：`0.5.13.dev0`。
 
 项目定位：Zero Trust agent runtime for auditable AI-assisted engineering and research.
 
@@ -18,7 +18,7 @@
 | 功能 | 状态 | 当前可用范围与剩余工作 |
 | --- | --- | --- |
 | 可复算的工程分析验收器 | 部分实现 | [合成校准工具与 oracle](../../examples/thermal_calibration/README.md)已有固定数据、精确计算与逐样本证据检查；[CLI 配置](../../examples/thermal_calibration/CLI.md)的普通规划、双工具续接、不同 actor 确定性接受、实际恢复及原根续跑已通过协议夹具独立复验。源码3,095项与树外安装106项通过；真实模型与业务收益仍待验证。另有[离线直接循环和CLI失败组合](../../reports/111-direct-harness-protocol-development-2026-10-24.md)单包及组合独立验收通过，源码3,208项、零跳过与树外300项通过；前者共享工具/oracle，后者覆盖raw Candidate错误、缺观察及child额度耗尽，不构成公平模型对照。见[F1a记录](../../reports/109-calibration-cli-development-2026-10-24.md)。 |
-| 长期工作区的局部查询成本 | 部分实现 | 已有签名发布基准与 change118 精确去重索引；change120 将纯内置声明的 SQLite projection context 选为局部，固定引用下 H0/16/64 读取计数恒定；change119 将同批共享 head/receipt 完整证明降至各一次。源码组合3,132项通过；Memory/custom fallback、writer、跨次额度、Asset传播与 maintenance 仍待局部化，整体 n² 未关闭。见[局部性能记录](../../reports/110-local-projection-development-2026-10-24.md)。 |
+| 长期工作区的局部查询成本 | 部分实现 | change118–122已覆盖精确去重、同批证明、支持的纯声明上下文与两次writer额度校验，C3已随3d2e815开发交付。change123收窄纯Asset effect-projection上下文，D0c校正真实入口测量；35文件组合源码3,532项、树外656项通过，独立总体验收Passed，最终元数据/源码包按相同717文件代码快照轻闭合。FactReducer传播、claim/maintenance、legacy fallback及整体n²仍开放。见[最新验证](../../reports/113-asset-context-direct-transport-development-2026-10-25.md)。 |
 | 任务创建、状态、列表、看板、统计 | 已实现 | `task create/status/list/board/stats/show`；状态来自已提交事实，Redis 默认必需。 |
 | 文件输入、Skill 与上下文选择 | 已实现 | 冻结输入、角色绑定、按 Contract 披露；`task context` 默认只展示元数据。 |
 | 模型 Worker 与配置入口 | 已实现 | `run --config`、显式任务恢复和兼容模型 Worker；report107 的普通 CLI live08 使用 deepseek-flash 完成有界真实任务，provider 证据见 [开发记录](../../reports/107-cli-dynamic-research-development-2026-10-23.md)。 |
@@ -59,10 +59,10 @@ Reviewer 建议修改；Root 保留该建议，核对生产包与审查包的区
 
 ## 2026-10-23 report107 开发快照
 
-当前 change105–117 的 614 文件代码清单 SHA-256 为
+该历史 change105–117 快照的 614 文件代码清单 SHA-256 为
 `fd51a47d9a805a77d82489b329e138578456f63020db636ab164ccc7111a2d3c`。
 源码全套 3,039 passed、0 skipped、6 条既有 warning，123.78s；Ruff 与 547 文件格式检查通过。
-当前 wheel SHA-256 为 `9859ef509773c722c70d1d9750415e41c8e35b6838a07ff97c470316f7373dbd`，
+该历史 wheel SHA-256 为 `9859ef509773c722c70d1d9750415e41c8e35b6838a07ff97c470316f7373dbd`，
 235 个模块与源码及树外安装逐字节相同；安装后受影响组合原序 334 passed、52.79s。
 独立总体复核已恢复有界目标和 dev 开发交付通过。
 默认隔离构建因网络代理无法下载依赖的失败保留；已有依赖下 `--no-isolation` 构建成功。
@@ -109,8 +109,14 @@ report107 已证明一条经普通 CLI、真实 provider、双工具续接和不
 总体路线见 [ROADMAP](../../ROADMAP.md)，发布证据规则见
 [release evidence](release-evidence.md)。
 
-离线请求计量切片已完成隔离实现复核，源码3,257项和树外49项集成检查通过，非作者对准确集成范围、源码包与树外来源复核通过，独立98项及树外49项通过，已交付开发分支 `dev` 的 `b9a87cd`。它在单进程内提供并发请求许可、保守输出容量预留、cooperative deadline 和未知 usage 汇总；尚未接入 direct/Runtime transport，不能作为真实请求预算、持久重启预算或成本优势证据。详见[工作包计划](../plans/provider-request-meter.md)。
+离线请求计量切片已完成隔离实现复核，源码3,257项和树外49项集成检查通过，非作者对准确集成范围、源码包与树外来源复核通过，独立98项及树外49项通过，已交付开发分支 `dev` 的 `b9a87cd`。它在单进程内提供并发请求许可、保守输出容量预留、cooperative deadline 和未知 usage 汇总；该b9a独立交付没有接入direct/Runtime transport，当前direct接线另见下文，不能作为持久重启预算或成本优势证据。详见[工作包计划](../plans/provider-request-meter.md)。
 
 受支持的 pure declaration/allowance 局部读取已通过隔离独立验收和原36组/216次 B 矩阵，已与 D0 Asset 测量包通过 root 组合源码3,342项、树外444项、构建与安装smoke。派生索引与签名事实同事务维护，双连接旧投影由 fresh writer 重验；最终非作者组合验收 Passed，稳定资格仍开放。D0 确认 Asset 路径仍有历史相关读取，claim 与其他消费者也继续开放。详见[声明局部读取](../plans/scoped-declaration-allowance.md)与[Asset 基线](../plans/asset-publication-locality-baseline.md)。
 
 本批准确源、矩阵、失败保留和安装来源见[开发验证](../../reports/112-local-allowance-development-2026-10-25.md)与[机器证据](../../reports/data/112-local-allowance-verification.json)。
+
+D1a 的精确 Asset 投影上下文、G0b 的显式 direct provider adapter、D0c观察器及D1b0输出判定已通过单包及35文件组合开发门禁与独立总体验收；[组合报告](../../reports/113-asset-context-direct-transport-development-2026-10-25.md)单列状态。D0c已测真实generic入口并分别绑定旧/新Runtime源。当前没有新增真实provider证据、Runtime计量或整体规模/成本资格。
+
+新增输出判定切片已独立接受：FactReducer按实际pending Asset检查业务/creator/independent政策，防止同批工具观察按名称触发错误complete或绕开子任务取消。历史terminal保持；[D1b0计划](../plans/pending-asset-output-policy.md)与[change125](../../changes/125-pending-asset-output-policy.md)限定证据。它与D1a/G0b/D0c已通过本次root组合门禁及独立总体验收；Runtime共享计量仍独立在制。
+
+当前35文件组合的源码3,532项、树外656项、Ruff/581文件格式、构建和实际安装驱动检查通过；独立整体Passed；最终验收元数据/源码包按同一717文件代码快照轻闭合。direct原生transport是显式可选入口，Runtime计量尚未合入；本批无真实provider/key调用，不宣称公平成本优势或阶段目标完成。

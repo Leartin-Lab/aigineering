@@ -353,6 +353,13 @@ Assets, then commits only newly visible consequences. Two concurrent Candidates
 that satisfy different outputs therefore converge on exactly one terminal fact
 instead of leaving an output-complete Contract unterminated.
 
+Pending Asset batches use the shared output policy with actual Asset values,
+retaining every same-name value. Names alone remain activation inputs, while
+business-output origin, system/recovery producer and exact independent
+qualification rules still apply to completion and descendant fences. Existing
+terminal facts remain immutable; see
+[change125](changes/125-pending-asset-output-policy.md).
+
 SQLite can select a bounded immutable context for homogeneous built-in Contract
 declarations. For supported canonical task identities, the allowance owner consumes
 raw per-source totals while the original commitment transaction still performs
@@ -365,6 +372,15 @@ propagate. No task, budget, proof or acceptance authority moves into the indexes
 Cold build, complete audit, rebuild and unsupported history remain explicit costs;
 Asset and claim paths are separate. See [ADR-047](docs/adr/ADR-047-rebuildable-allowance-checkpoints.md)
 and [ADR-048](docs/adr/ADR-048-rebuildable-publication-relations.md).
+
+For homogeneous built-in Asset proposals, an optional Store reader can instead
+select only the exact claimed parent and the complete single-effect Candidate
+replay witnesses. Unbound multi-effect proposals require no historical
+projection context. Mixed, graph, injected and uncertain shapes retain the full
+loader. Selection is read-only; the original replay proof and writer-time
+claim/key/output checks still decide. This does not localize the separate
+pre-commit or writer Asset consequence reducer. See
+[change 123](changes/123-scoped-asset-proposal-context.md).
 
 ## Disclosure
 

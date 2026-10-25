@@ -184,6 +184,20 @@ def test_malformed_wire_and_duplicate_json_keys_fail_closed(raw):
     assert events[-1]["kind"] == "run_failed"
 
 
+def test_offline_v1_still_rejects_non_null_usage():
+    raw = '{"message":{"role":"assistant","content":"{}","tool_calls":[]},"usage":{"prompt_tokens":1}}'
+    with pytest.raises(DirectHarnessError, match="unsupported shape or usage"):
+        run_direct(
+            client=RawResponseClient([raw]),
+            case=fixture_case("short-interval"),
+            standard=fixture_standard("short-interval"),
+            brief="synthetic case",
+            registry=build_registry(),
+            limits=_limits(),
+            event_sink=lambda _event: None,
+        )
+
+
 def test_repeated_tool_ids_and_parallel_calls_are_rejected_without_execution():
     case = fixture_case("short-interval")
     standard = fixture_standard("short-interval")
@@ -817,3 +831,133 @@ def test_direct_path_does_not_import_runtime_publication_or_scheduler():
 
 def test_transient_exception_type_is_explicit_and_narrow():
     assert DirectTransientToolError.__name__ == "DirectTransientToolError"
+
+
+def test_provider_protocol_requires_explicit_opt_in_and_preserves_reasoning_turn():
+    from examples.thermal_calibration.direct_harness import (
+        DirectProviderResponse,
+        ProviderAssistantMessage,
+        ProviderToolCall,
+    )
+
+    case = fixture_case("short-interval")
+    standard = fixture_standard("short-interval")
+    registry = build_registry()
+    normalized = json.loads(
+        registry.run("normalize_calibration", {"case": case, "standard": standard})
+    )
+    report = json.loads(registry.run("analyze_calibration", {"normalized": normalized}))
+    arguments = json.dumps({"case": case, "standard": standard}, separators=(",", ":"))
+    first = DirectProviderResponse(
+        message=ProviderAssistantMessage(
+            role="assistant",
+            content=None,
+            tool_calls=(
+                ProviderToolCall(
+                    id="native-call-1",
+                    name="normalize_calibration",
+                    arguments=arguments,
+                ),
+            ),
+            reasoning_content="keep this only in memory",
+        ),
+        finish_reason="tool_calls",
+    )
+    final = DirectProviderResponse(
+        message=ProviderAssistantMessage(
+            role="assistant",
+            content=json.dumps(report, separators=(",", ":")),
+            tool_calls=(),
+            reasoning_content=None,
+        ),
+        finish_reason="stop",
+    )
+
+    class NativeClient:
+        def __init__(self):
+            self.requests = []
+            self.responses = iter((first, final))
+
+        def complete(self, *, messages, tools, timeout_seconds):
+            self.requests.append(messages)
+            return next(self.responses)
+
+    client = NativeClient()
+    with pytest.raises(DirectHarnessError, match="provider response"):
+        run_direct(
+            client=client,
+            case=case,
+            standard=standard,
+            brief="synthetic case",
+            registry=registry,
+            limits=_limits(),
+            event_sink=lambda _event: None,
+        )
+
+    client = NativeClient()
+    result = run_direct(
+        client=client,
+        case=case,
+        standard=standard,
+        brief="synthetic case",
+        registry=registry,
+        limits=_limits(),
+        event_sink=lambda _event: None,
+        response_protocol="deepseek-chat-v1",
+    )
+    assert result.oracle_result["passed"] is True
+    assert client.requests[1][-2] == {
+        "role": "assistant",
+        "content": None,
+        "tool_calls": [
+            {
+                "id": "native-call-1",
+                "type": "function",
+                "function": {
+                    "name": "normalize_calibration",
+                    "arguments": arguments,
+                },
+            }
+        ],
+        "reasoning_content": "keep this only in memory",
+    }
+
+
+def test_provider_finish_reason_mismatch_fails_before_tool_execution():
+    from examples.thermal_calibration.direct_harness import (
+        DirectProviderResponse,
+        ProviderAssistantMessage,
+        ProviderToolCall,
+    )
+
+    class NativeClient:
+        def complete(self, *, messages, tools, timeout_seconds):
+            return DirectProviderResponse(
+                message=ProviderAssistantMessage(
+                    role="assistant",
+                    content=None,
+                    tool_calls=(
+                        ProviderToolCall(
+                            id="call-1",
+                            name="normalize_calibration",
+                            arguments="{}",
+                        ),
+                    ),
+                    reasoning_content=None,
+                ),
+                finish_reason="stop",
+            )
+
+    events = []
+    with pytest.raises(DirectHarnessError, match="finish reason"):
+        run_direct(
+            client=NativeClient(),
+            case=fixture_case("short-interval"),
+            standard=fixture_standard("short-interval"),
+            brief="synthetic case",
+            registry=build_registry(),
+            limits=_limits(),
+            event_sink=events.append,
+            response_protocol="deepseek-chat-v1",
+        )
+    assert not [event for event in events if event["kind"] == "tool_success"]

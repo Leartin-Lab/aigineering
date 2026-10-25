@@ -68,6 +68,66 @@ def test_activation_batch_order_does_not_change_available_names():
     assert snapshots[1] == [("activation_active", "both", "right")]
 
 
+@pytest.mark.parametrize("reverse", [False, True])
+def test_invalid_pending_output_name_still_activates_but_does_not_complete(reverse):
+    store = MemoryStore()
+    contract = Contract(
+        id="mixed-output",
+        name="mixed-output",
+        outputs=("business_result", "auxiliary_result"),
+        activation="auxiliary_result",
+    )
+    store.add_contract(contract)
+    business = Asset(
+        id="business",
+        name="business_result",
+        content="accepted",
+        origin="human",
+    )
+    observation = Asset(
+        id="observation",
+        name="auxiliary_result",
+        content="observed",
+        origin="tool",
+    )
+    assets = (observation, business) if reverse else (business, observation)
+
+    events = FactReducer(store).on_assets_created(assets)
+
+    assert ("activation_active", contract.id) in {
+        (event.type, event.contract_id) for event in events
+    }
+    assert ("contract_complete", contract.id) not in {
+        (event.type, event.contract_id) for event in events
+    }
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_same_name_valid_pending_output_is_not_hidden_by_observation(reverse):
+    store = MemoryStore()
+    contract = Contract(id="same-name", outputs=("result",))
+    store.add_contract(contract)
+    business = Asset(
+        id="business",
+        name="result",
+        content="accepted",
+        origin="human",
+    )
+    observation = Asset(
+        id="observation",
+        name="result",
+        content="observed",
+        origin="tool",
+    )
+    assets = (observation, business) if reverse else (business, observation)
+
+    events = FactReducer(store).on_assets_created(assets)
+
+    assert ("contract_complete", contract.id) in {
+        (event.type, event.contract_id) for event in events
+    }
+
+
 def test_empty_batch_does_not_read_assets():
     store = MemoryStore()
     reads = 0

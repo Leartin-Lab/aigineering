@@ -7,6 +7,8 @@ from pathlib import Path
 
 import pytest
 
+from conftest import candidate_runtime
+from aigineering.core.output_satisfaction import all_outputs_satisfied
 from aigineering.core.record_conflict import ImmutableRecordConflict
 from aigineering.core.fact_reducer import FactReducer
 from aigineering.core.ids import contract_identity_v3
@@ -15,6 +17,7 @@ from aigineering.core.control_plane import build_control_plane_contract
 from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.core.store import MemoryStore
 from aigineering.core.trace import MemoryTraceStore
+from aigineering.protocol.effect_builders import asset_proposal_effect
 from aigineering.protocol.runtime_record import create_runtime_record
 from aigineering.protocol.types import Asset, Contract
 
@@ -213,6 +216,45 @@ def test_atomic_fact_batch_does_not_cancel_child_satisfied_by_same_batch():
     assert ("child_cancelled", child.id) not in terminals
 
 
+@pytest.mark.parametrize("reverse", [False, True])
+def test_bad_pending_child_output_does_not_evade_cancellation_fence(reverse):
+    store = MemoryStore()
+    parent = Contract(id="parent", name="parent", outputs=("parent_result",))
+    child = Contract(
+        id="child",
+        name="child",
+        parent_id=parent.id,
+        outputs=("child_result",),
+    )
+    store.add_contract(parent)
+    store.add_contract(child)
+    parent_output = Asset(
+        id="parent-output",
+        name="parent_result",
+        content="done",
+        created_by=parent.id,
+        origin="human",
+    )
+    child_observation = Asset(
+        id="child-observation",
+        name="child_result",
+        content="observed",
+        created_by=child.id,
+        origin="tool",
+    )
+    assets = (
+        (child_observation, parent_output)
+        if reverse
+        else (parent_output, child_observation)
+    )
+
+    events = FactReducer(store, MemoryTraceStore()).on_assets_created(assets)
+
+    terminals = {(event.type, event.contract_id) for event in events}
+    assert ("contract_complete", parent.id) in terminals
+    assert ("child_cancelled", child.id) in terminals
+
+
 def test_completed_planning_stage_keeps_ancestor_acceptance_verifier_reachable():
     store = MemoryStore()
     root = replace(
@@ -349,3 +391,71 @@ def test_completion_descendant_projection_is_shared_and_read_only(
     assert [event.contract_id for event in cancelled] == [leaf.id]
     assert cancelled[0].details["parent_id"] == intermediate.id
     assert store.scan_runtime_records() == original_records
+
+
+@pytest.mark.parametrize(
+    ("auxiliary_origin", "expected_complete"),
+    [("tool", False), ("mcp", False), ("label_placeholder", False), ("human", True)],
+)
+def test_signed_same_batch_outputs_retain_provenance_through_reopen_and_rebuild(
+    tmp_path, auxiliary_origin, expected_complete
+):
+    path = str(tmp_path / f"pending-output-{auxiliary_origin}.db")
+    store = SQLiteStore(path)
+    runtime = candidate_runtime(store)
+    contract = runtime.accept_contract(
+        build_control_plane_contract(
+            name=f"pending-output-{auxiliary_origin}",
+            inputs=(),
+            outputs=("business_result", "auxiliary_result"),
+            activation="",
+            budget=1,
+        )
+    )
+    decision = runtime.publisher.publish(
+        (
+            asset_proposal_effect(
+                Asset(
+                    id="",
+                    name="business_result",
+                    content="business output",
+                    origin="human",
+                )
+            ),
+            asset_proposal_effect(
+                Asset(
+                    id="",
+                    name="auxiliary_result",
+                    content="auxiliary observation",
+                    origin=auxiliary_origin,
+                )
+            ),
+        ),
+        idempotency_key=f"pending-output-{auxiliary_origin}",
+    )
+
+    assert decision.accepted
+    assert all_outputs_satisfied(contract, store) is expected_complete
+    terminals = [
+        record.payload.get("terminal")
+        for _, record in store.scan_runtime_records(record_type="lifecycle.terminal")
+        if record.payload.get("contract_id") == contract.id
+    ]
+    assert terminals == (["complete"] if expected_complete else [])
+    digest = store.rebuild_runtime_materializations(strict=True)
+    store.close()
+
+    reopened = SQLiteStore(path)
+    try:
+        assert reopened.rebuild_runtime_materializations(strict=True) == digest
+        assert all_outputs_satisfied(contract, reopened) is expected_complete
+        reopened_terminals = [
+            record.payload.get("terminal")
+            for _, record in reopened.scan_runtime_records(
+                record_type="lifecycle.terminal"
+            )
+            if record.payload.get("contract_id") == contract.id
+        ]
+        assert reopened_terminals == (["complete"] if expected_complete else [])
+    finally:
+        reopened.close()

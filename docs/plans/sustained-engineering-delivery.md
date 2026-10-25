@@ -158,8 +158,16 @@ G0a 两文件离线计量模块由 Luna 编写，root 非作者隔离复核49项
 
 C/D/E 后续局部化方案与 F1/G 公平对照协议仍须逐包审计；已完成切片见上文。真实 provider 执行须绑定冻结协议、有界预算及现有会话授权范围；历史 report107 不能替代新候选的运行证据。多后端、云部署平台和一般自主研究可靠性不在本次实现承诺内。
 
-D0 测量包已独立通过原78组 timing/instrumentation 配对与精确源绑定，root 集成检查待完成；它确认 Asset 路径仍随无关闭合历史增长，不声称修复。G0a 离线计量增量已交付 `dev` 的 `b9a87cd`；该交付没有真实 provider 接线或成本比较。
+D0 测量包已独立通过原78组 timing/instrumentation 配对与精确源绑定，已随3d2e815完成root集成及非作者组合验收；它确认 Asset 路径仍随无关闭合历史增长，不声称修复。G0a 离线计量增量已交付 `dev` 的 `b9a87cd`；该交付没有真实 provider 接线或成本比较。
 
 C3a/C3b 的准确隔离组合及原36组/216次 B 矩阵已独立通过，已与通过的 D0 测量包完成root源码3,342项、树外444项和构建检查，非作者组合终验 Passed。该局部化只覆盖受支持的 pure declaration 投影和两次 allowance writer 校验；Asset、claim、其它消费者和 legacy/opaque/replay 慢路径仍明确开放。
 
-本批准确711文件代码/夹具快照、两份矩阵、安装来源及保留失败见[开发验证](../../reports/112-local-allowance-development-2026-10-25.md)与[机器证据](../../reports/data/112-local-allowance-verification.json)。后续 D1a 仅计划投影上下文局部化；真实 provider 臂接线、公平协议及持续业务质量/成本仍开放。
+本批准确711文件代码/夹具快照、两份矩阵、安装来源及保留失败见[开发验证](../../reports/112-local-allowance-development-2026-10-25.md)与[机器证据](../../reports/data/112-local-allowance-verification.json)。D1a投影上下文局部化和direct transport后续单包状态见下文；Runtime provider计量、公平协议及持续业务质量/成本仍开放。
+
+## D1a / G0b 后续增量
+
+[D1a](asset-proposal-projection-context.md)与[G0b](direct-deepseek-transport.md)隔离单包均已非作者验收Passed；[D0c观察器兼容](asset-projection-benchmark-compatibility.md)实施及非作者验收亦已Passed，与D1b0及三个测试hook维护进入35文件组合并通过root门禁和独立总体验收。D1a只收窄纯Asset effect-projection上下文，reducer热路径仍开放；G0b只接direct原生transport，尚无本轮真实provider、Runtime共享计量或公平成本结论。新组合证据见[开发报告](../../reports/113-asset-context-direct-transport-development-2026-10-25.md)。
+
+本次组合在全套验证前扩为四个已独立接受的切片：corrected D1a、G0b、D0c、[D1b0输出判定](pending-asset-output-policy.md)。D1b0修复既有同批工具观察被名称快捷路径计入业务完成的问题，保留activation与历史事实；它不是性能优化。G0c Runtime计量及后续队列/传播局部化在隔离目录并行，不进入此组合快照。
+
+四切片加三测试hook维护的35文件组合已通过源码3,532项、树外656项、Ruff/581文件格式、构建和实际安装三驱动检查。受测717文件摘要e87654c18b07100d555247e2e15989ffaa28c598e8e602d43158f1c2ee9da9ca；非作者对准确35文件组合独立总体验收Passed；最终元数据/源码包按相同717文件代码快照轻闭合。阶段仍开放，G0c/后续CPU及H局部化不混入本候选。
