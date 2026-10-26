@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
 
@@ -141,6 +142,45 @@ def test_factory_pins_only_selected_dummy_key_and_fixed_llm_profile(monkeypatch)
     assert "dummy-g0c-key" not in repr(runtime_meter.get_process_session())
 
 
+def test_researcher_factory_and_fingerprint_bind_disabled_profile(monkeypatch):
+    _env(monkeypatch)
+    from examples.thermal_calibration.runtime_workers import create_metered_researcher
+
+    worker = create_metered_researcher(worker_id="calibration-researcher")
+    session = runtime_meter.get_process_session()
+    assert worker._thinking_mode == "disabled"
+    assert worker._response_format == ""
+    assert worker._max_retries == 0
+    assert worker._max_output_tokens == 8192
+    assert worker._tool_definitions == session.tool_definitions
+    assert worker._transport.session is session
+    assert session.config.profile_version == "g0c-runtime-v2"
+
+    config = session.config
+    expected = {
+        "attempts": config.max_attempts,
+        "ceiling": config.output_reservation_ceiling,
+        "deadline": config.deadline_seconds,
+        "url": config.base_url,
+        "model": config.model,
+        "max_output_tokens": config.max_output_tokens,
+        "timeout": config.request_timeout_seconds,
+        "tool_registry_ref": config.tool_registry_ref,
+        "profile_version": "g0c-runtime-v2",
+        "api_key_env": config.api_key_env,
+        "planner_id": "calibration-planner",
+        "researcher_id": "calibration-researcher",
+        "retry_count": 0,
+        "planner_thinking": "disabled",
+        "researcher_thinking": "disabled",
+        "planner_response_format": "json_object",
+    }
+    expected_fingerprint = hashlib.sha256(
+        json.dumps(expected, sort_keys=True, separators=(",", ":")).encode("ascii")
+    ).hexdigest()
+    assert session.fingerprint == expected_fingerprint
+
+
 def test_planner_and_researcher_transports_share_one_meter_without_reset(monkeypatch):
     _env(monkeypatch, attempts="2", ceiling="16384")
     session, _key, planner = runtime_meter.create_transport(
@@ -168,7 +208,7 @@ def test_planner_and_researcher_transports_share_one_meter_without_reset(monkeyp
     )
     researcher_payload = _planner_payload()
     researcher_payload.pop("response_format")
-    researcher_payload["thinking"] = {"type": "enabled"}
+    researcher_payload["thinking"] = {"type": "disabled"}
     researcher(
         "https://api.deepseek.com/v1/chat/completions",
         {"Authorization": "Bearer dummy-g0c-key", "Content-Type": "application/json"},

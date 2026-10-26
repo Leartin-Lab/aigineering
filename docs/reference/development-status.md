@@ -126,3 +126,5 @@ D1a 的精确 Asset 投影上下文、G0b 的显式 direct provider adapter、D0
 真实测试另绑定旧183d9c8/旧wheel：两次严格有界请求均HTTP200后native parser拒绝，无工具执行或交付；原失败完整保留，第二次仅以安全类型桶/固定源码fence定位，未保存正文或敏感字段。共已知4,232 tokens，不等于已知费用；不能据此宣称兼容通过、一般质量/成本优势或阶段完成。
 
 G0c/批内分派组合已交devdc0cb4f。后续G0b1 native DTO适配与E1捕获局部头索引的准确16文件开发组合已获非作者整体接受：源码3,635项、585文件格式、actual wheel/sdist通过；树外首次816通过/1失败，保留失败后一次完整观察复跑817通过。独立328通过/8native NotRun、十二次实际安装capture等价；Root源码和树外实际执行native资格与独立NotRun分别记录。原失败根expanded、尚无报告、另有ready工具工作，异常原因仍未知，不因后续通过关闭。E1仍读取完整前缀，活跃工作局部性和新真实provider资格继续开放。见[本批验证](../../reports/115-native-capture-development-2026-10-26.md)。
+
+G0d真实Runtime固定三次日程现已完成证据复核，绑定已交`6b3d7cd`/旧wheel，合格交付0/3。22次HTTP200与117,680已报告tokens仅证明计量传输；前两次输出截断后的恢复资金拒绝、第三次meter耗尽与三个实际失败恢复均保留，费用未知。原始finish reason及逐trial导入来源未保存的限制明确。G0e1固定类别显示和G0e2有界Researcher配置已通过准确组合源码3,639项、树外44模块882项与构建检查，非作者独立152项和准确组合总体接受，最终元数据/源码包按相同代码轻闭合；该配置没有新真实provider资格，恢复资金和重复恢复策略不变。长期活跃局部性仍待完成测量，旧B4未知slot事件继续开放。见[report116](../../reports/116-budget-profile-development-2026-10-26.md)。

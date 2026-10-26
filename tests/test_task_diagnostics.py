@@ -35,6 +35,7 @@ from aigineering.redis_collaboration import RedisCollaborationUnavailable
 from aigineering.task_diagnostics import (
     TaskDiagnosticError,
     _release_terminal_is_valid,
+    _safe_category,
     _validate_grant_provenance,
     task_diagnostics,
     task_invocation_failure_binding,
@@ -541,8 +542,13 @@ def test_cli_registers_read_only_commands_and_reports_integrity(tmp_path, monkey
     assert "private connection detail" not in unavailable.output
 
 
+@pytest.mark.parametrize(
+    "known_budget_category",
+    [False, True],
+    ids=["unknown-sentinel", "fixed-budget-code"],
+)
 def test_invocation_failure_exports_only_allowlisted_usage_and_category(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, known_budget_category
 ):
     database, contract_id, claim_id = _workspace(tmp_path, monkeypatch)
     store = SQLiteStore(database)
@@ -563,7 +569,11 @@ def test_invocation_failure_exports_only_allowlisted_usage_and_category(
                 "contract_id": contract_id,
                 "package_id": claim["package_id"],
                 "worker_id": claim["worker_id"],
-                "category": "unrecognized:" + markers["diagnostic"],
+                "category": (
+                    "worker_error:provider_request_budget_exhausted"
+                    if known_budget_category
+                    else "unrecognized:" + markers["diagnostic"]
+                ),
                 "retryable": True,
                 "status_code": 502,
                 "raw_output": markers["raw_output"],
@@ -597,6 +607,7 @@ def test_invocation_failure_exports_only_allowlisted_usage_and_category(
             package_id=claim["package_id"],
             claim_epoch=claim["epoch"],
         )
+        revision_before_reads = store.get_runtime_revision()
         result = task_diagnostics(store, contract_id, claim_id)
         assert result["ok"] is True, (
             result["data"]["integrity"],
@@ -608,7 +619,16 @@ def test_invocation_failure_exports_only_allowlisted_usage_and_category(
         )
         row = task_runs(store, contract_id)["data"]["runs"][0]
         assert row["status"] == "invocation_failed"
-        assert row["failure"]["category"] == "unknown"
+        expected_category = (
+            "provider_request_budget_exhausted" if known_budget_category else "unknown"
+        )
+        assert row["failure"]["category"] == expected_category
+        failure_event = next(
+            event
+            for event in result["data"]["events"]
+            if event["record_id"] == failure.id
+        )
+        assert failure_event["category"] == expected_category
         assert row["failure"]["usage"] == {
             "prompt_tokens": 4,
             "completion_tokens": 2,
@@ -702,7 +722,7 @@ def test_invocation_failure_exports_only_allowlisted_usage_and_category(
                 if store.get_runtime_record(fact_id).record_type == "claim.released"
             ),
             "watermark": result["revision"],
-            "category": "unknown",
+            "category": expected_category,
             "retryable": True,
             "status_code": 502,
             "usage": {
@@ -769,6 +789,25 @@ def test_invocation_failure_exports_only_allowlisted_usage_and_category(
             assert cli_result.exit_code == 0, cli_result.output
             for marker in markers.values():
                 assert marker not in cli_result.output
+            if output_args == ["--json"]:
+                cli_payload = json.loads(cli_result.output)
+                cli_event = next(
+                    event
+                    for event in cli_payload["data"]["events"]
+                    if event["record_id"] == failure.id
+                )
+                assert cli_event["category"] == expected_category
+
+        runs_cli = CliRunner().invoke(root, ["task", "runs", contract_id, "--json"])
+        assert runs_cli.exit_code == 0, runs_cli.output
+        runs_payload = json.loads(runs_cli.output)
+        cli_run = next(
+            run for run in runs_payload["data"]["runs"] if run["claim_id"] == claim_id
+        )
+        assert cli_run["failure"]["category"] == expected_category
+        for marker in markers.values():
+            assert marker not in runs_cli.output
+        assert store.get_runtime_revision() == revision_before_reads
 
         duplicate_failure = dict(failure.payload)
         duplicate_failure["status_code"] = failure.payload["status_code"] + 1
@@ -786,6 +825,13 @@ def test_invocation_failure_exports_only_allowlisted_usage_and_category(
             )
     finally:
         store.close()
+
+
+def test_safe_category_keeps_unknown_and_non_string_values_closed():
+    marker = "PRIVATE_UNKNOWN_CATEGORY_MARKER"
+    assert _safe_category("worker_error:" + marker) == "unknown"
+    assert _safe_category(17) == "unknown"
+    assert marker not in _safe_category("worker_error:" + marker)
 
 
 @pytest.mark.parametrize("domain_wide", [False, True])

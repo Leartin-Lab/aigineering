@@ -19,6 +19,55 @@ from aigineering.task_diagnostics import task_runs
 from aigineering.task_publication import publish_task_contract
 
 
+@pytest.fixture
+def _offline_collaboration(monkeypatch):
+    class OfflineCollaboration:
+        def sync(self):
+            return {"ok": True}
+
+        def wait(self, *_args, **_kwargs):
+            return None
+
+    def offline_factory(_store):
+        return OfflineCollaboration()
+
+    monkeypatch.setattr(
+        "aigineering.cli.run.sync_runtime", lambda *_args, **_kwargs: None
+    )
+    monkeypatch.setattr(
+        "aigineering.cli.domain.sync_runtime", lambda *_args, **_kwargs: None
+    )
+    monkeypatch.setattr(
+        "aigineering.cli.infrastructure.require_redis", lambda *_args, **_kwargs: None
+    )
+    monkeypatch.setattr(
+        "aigineering.application.require_redis", lambda *_args, **_kwargs: None
+    )
+    monkeypatch.setattr(
+        "aigineering.configured_run.require_redis", lambda *_args, **_kwargs: None
+    )
+    monkeypatch.setattr(
+        "aigineering.configured_run.sync_runtime", lambda *_args, **_kwargs: None
+    )
+    monkeypatch.setattr(
+        "aigineering.local_fleet.require_redis", lambda *_args, **_kwargs: None
+    )
+    monkeypatch.setattr(
+        "aigineering.local_fleet.sync_runtime", lambda *_args, **_kwargs: None
+    )
+    monkeypatch.setattr(
+        "aigineering.local_fleet.collaboration_service", offline_factory
+    )
+    monkeypatch.setattr(
+        "aigineering.local_publication.require_redis", lambda *_args, **_kwargs: None
+    )
+    monkeypatch.setattr("aigineering.cli.run.collaboration_service", offline_factory)
+    monkeypatch.setattr("aigineering.cli.task.collaboration_service", offline_factory)
+    monkeypatch.setattr(
+        "aigineering.runtime_services.collaboration_service", offline_factory
+    )
+
+
 def _create_task(runner, name, output, *extra):
     result = runner.invoke(
         cli, ["task", "create", "--name", name, "--output", output, *extra, "--json"]
@@ -36,6 +85,18 @@ class _FailingWorker:
         del contract, disclosed_assets
         raise WorkerExecutionError(
             "fixture_provider_failure", "PRIVATE_RUN_FAILURE_MARKER"
+        )
+
+
+class _BudgetFailingWorker:
+    worker_id = "fixture-budget-failing-worker"
+
+    def invoke(self, contract, disclosed_assets):
+        from aigineering.agent.worker import WorkerExecutionError
+
+        del contract, disclosed_assets
+        raise WorkerExecutionError(
+            "provider_request_budget_exhausted", "PRIVATE_BUDGET_FAILURE_MARKER"
         )
 
 
@@ -150,6 +211,46 @@ def test_human_run_failure_includes_safe_diagnostic_not_raw_exception(
         assert f'task "{task_id}" claim "lease:' in result.output
         assert "inspect task runs/diagnostics" in result.output
         assert "PRIVATE_RUN_FAILURE_MARKER" not in result.output
+
+
+@pytest.mark.usefixtures("_offline_collaboration")
+def test_run_failure_renders_budget_code_only_after_exact_claim_proof(
+    monkeypatch, tmp_path
+):
+    runner = CliRunner()
+    monkeypatch.setattr(
+        "aigineering.cli.run.build_worker",
+        lambda *_args, **_kwargs: _BudgetFailingWorker(),
+    )
+    with runner.isolated_filesystem(temp_dir=str(tmp_path)):
+        initialized = runner.invoke(cli, ["domain", "init"])
+        assert initialized.exit_code == 0, initialized.output
+        task_id = _create_task(runner, "budget-failure", "budget-output")
+
+        result = runner.invoke(
+            cli,
+            ["run", "--once", "--worker", "llm", "--model", "fixture", "--json"],
+        )
+
+        assert result.exit_code == 1, result.output
+        payload = json.loads(result.output)
+        detail = payload["worker_failure_details"][0]
+        assert detail["kind"] == "invocation_failure"
+        assert detail["status"] == "invocation_failed"
+        assert detail["contract_id"] == task_id
+        assert detail["category"] == "provider_request_budget_exhausted"
+        assert "provider_request_budget_exhausted" in payload["error"]
+        assert "PRIVATE_BUDGET_FAILURE_MARKER" not in result.output
+
+        store = SQLiteStore(".aig/store.db")
+        try:
+            runs = task_runs(store, task_id)["data"]["runs"]
+            proven = next(run for run in runs if run["claim_id"] == detail["claim_id"])
+            assert proven["status"] == "invocation_failed"
+            assert proven["failure"]["record_id"] == detail["failure_record_id"]
+            assert proven["failure"]["category"] == "provider_request_budget_exhausted"
+        finally:
+            store.close()
 
 
 def test_unavailable_claim_proof_does_not_echo_supplied_ids_or_exception(

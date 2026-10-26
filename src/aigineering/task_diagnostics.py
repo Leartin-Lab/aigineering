@@ -24,6 +24,7 @@ _MAX_LIMIT = 100
 _FAILURE_CODES = frozenset(
     {
         "provider_error",
+        "provider_request_budget_exhausted",
         "identity_mismatch",
         "candidate_encoding_rejected",
         "planning_request_rejected",

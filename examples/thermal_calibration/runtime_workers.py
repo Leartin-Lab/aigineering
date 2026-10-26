@@ -35,7 +35,7 @@ def _make_locked(role: str, worker_id: str) -> LLMWorker:
             capacity=1,
             registration_version="1",
             max_output_tokens=config.max_output_tokens,
-            thinking_mode="enabled" if researcher else "disabled",
+            thinking_mode="disabled",
             response_format="" if researcher else "json_object",
         )
     except Exception:

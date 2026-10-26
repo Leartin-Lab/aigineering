@@ -51,7 +51,7 @@ class RuntimeMeterConfig:
     max_output_tokens: int = _OUTPUT_CAP
     request_timeout_seconds: float = _REQUEST_TIMEOUT_CAP
     tool_registry_ref: str = _TOOL_REGISTRY_REF
-    profile_version: str = "g0c-runtime-v1"
+    profile_version: str = "g0c-runtime-v2"
     api_key_env: str = _API_KEY_ENV
 
     @classmethod
@@ -98,7 +98,7 @@ def _fingerprint(config: RuntimeMeterConfig) -> str:
             "researcher_id": "calibration-researcher",
             "retry_count": 0,
             "planner_thinking": "disabled",
-            "researcher_thinking": "enabled",
+            "researcher_thinking": "disabled",
             "planner_response_format": "json_object",
         },
         sort_keys=True,
@@ -310,8 +310,7 @@ def _profile_payload(
             for m in payload["messages"]
         )
         or [m["role"] for m in payload["messages"]] != ["system", "user"]
-        or payload.get("thinking")
-        != {"type": "disabled" if role == "planner" else "enabled"}
+        or payload.get("thinking") != {"type": "disabled"}
     ):
         raise invalid
     if role == "planner" and payload.get("response_format") != {"type": "json_object"}:

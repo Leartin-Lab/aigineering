@@ -9,6 +9,12 @@ Planner and Researcher are local factories that return the existing
 Runtime still owns task planning, tool continuation, invocation failure,
 recovery, claims, output commitment, and independent acceptance.
 
+The current `g0c-runtime-v2` example profile configures both Planner and
+Researcher with thinking disabled. The Researcher still uses the same model,
+tools, response contract and ordinary continuation path. This is a bounded
+profile hypothesis, not a demonstrated cause or fix for earlier truncation or
+allowance failures.
+
 Set `AIGINEERING_REDIS_URL` to a reachable Redis deployment before invoking
 the configured run. Redis is required application infrastructure for Runtime
 task discovery, Worker wakeups and event relay; it is not optional for this
@@ -24,11 +30,20 @@ export PYTHONPATH="$PWD${PYTHONPATH:+:$PYTHONPATH}"
 export AIGINEERING_REDIS_URL='redis://127.0.0.1:6379/0'
 export AIGINEERING_G0C_MAX_ATTEMPTS=8
 export AIGINEERING_G0C_OUTPUT_RESERVATION_CEILING=65536
-export AIGINEERING_G0C_RUN_DEADLINE_SECONDS=900
+export AIGINEERING_G0C_RUN_DEADLINE_SECONDS=180
 export AIGINEERING_API_KEY='...'
 aig -C /path/to/workspace run \
   --config "$PWD/examples/thermal_calibration/run-g0c.toml"
 ```
+
+These values define the candidate profile used for the bounded Runtime-only
+phase: at most 8 process-local attempts, at most 8,192 output tokens per
+request, at most 65,536 output tokens reserved across the process, a
+180-second cooperative deadline, a 60-second request timeout, and zero
+`LLMWorker` retries. The environment values are configurable; changing them
+changes the frozen run profile and does not qualify against this exact phase.
+Each physical attempt consumes a permit. A new process starts a new epoch and
+does not continue a previous process's allowance.
 
 The selected credential is only `AIGINEERING_API_KEY`. The Runtime preset does
 not fall back to `OPENAI_API_KEY`, and the selected value is passed directly to

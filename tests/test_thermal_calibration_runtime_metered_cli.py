@@ -507,9 +507,9 @@ def test_ordinary_cli_runtime_metered_profile_completes_and_is_independently_acc
     _require_g0c_test_redis(monkeypatch)
     monkeypatch.setenv("AIGINEERING_API_KEY", "dummy-g0c-cli-key")
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    monkeypatch.setenv("AIGINEERING_G0C_MAX_ATTEMPTS", "16")
-    monkeypatch.setenv("AIGINEERING_G0C_OUTPUT_RESERVATION_CEILING", "131072")
-    monkeypatch.setenv("AIGINEERING_G0C_RUN_DEADLINE_SECONDS", "900")
+    monkeypatch.setenv("AIGINEERING_G0C_MAX_ATTEMPTS", "8")
+    monkeypatch.setenv("AIGINEERING_G0C_OUTPUT_RESERVATION_CEILING", "65536")
+    monkeypatch.setenv("AIGINEERING_G0C_RUN_DEADLINE_SECONDS", "180")
     runtime_meter.reset_process_session_for_tests()
     monkeypatch.syspath_prepend(str(ROOT))
     monkeypatch.syspath_prepend(str(ROOT / "tests"))
@@ -521,12 +521,17 @@ def test_ordinary_cli_runtime_metered_profile_completes_and_is_independently_acc
             item for item in (str(ROOT), str(ROOT / "tests"), existing) if item
         ),
     )
+    provider_payloads = []
+
+    def fake_provider_transport(**kwargs):
+        body = json.loads(kwargs["body"])
+        provider_payloads.append(body)
+        return runtime_meter.TransportReply(
+            200, json.dumps(_provider_reply(body)).encode()
+        )
+
     monkeypatch.setattr(
-        runtime_meter,
-        "_stdlib_https_transport",
-        lambda **kwargs: runtime_meter.TransportReply(
-            200, json.dumps(_provider_reply(json.loads(kwargs["body"]))).encode()
-        ),
+        runtime_meter, "_stdlib_https_transport", fake_provider_transport
     )
 
     workspace = tmp_path / "workspace"
@@ -550,9 +555,55 @@ def test_ordinary_cli_runtime_metered_profile_completes_and_is_independently_acc
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
     assert payload["completed"] is True
+    assert 1 <= len(provider_payloads) <= 8
+    assert all(item["max_tokens"] == 8192 for item in provider_payloads)
+    planner_payloads = [item for item in provider_payloads if "response_format" in item]
+    researcher_payloads = [
+        item for item in provider_payloads if "response_format" not in item
+    ]
+    assert planner_payloads
+    assert researcher_payloads
+    assert all(item["thinking"] == {"type": "disabled"} for item in provider_payloads)
+    assert all(
+        item.get("response_format") == {"type": "json_object"}
+        for item in planner_payloads
+    )
+    tool_payloads = [item for item in researcher_payloads if "tools" in item]
+    assert tool_payloads
+    tool_names = {
+        tool["function"]["name"] for item in tool_payloads for tool in item["tools"]
+    }
+    assert tool_names == {"normalize_calibration", "analyze_calibration"}
     store = SQLiteStore(workspace / ".aig" / "store.db")
     try:
         report = next(asset for asset in store.get_assets_by_name("calibration_report"))
+        evidence = list(store.get_assets_by_name("calibration_evidence"))
+        assert len(evidence) == 1
+        evidence_value = json.loads(evidence[0].content)
+        assert set(evidence_value) == {
+            "schema",
+            "calibration_case_asset_id",
+            "calibration_standard_asset_id",
+            "observation_asset_ids",
+            "observations",
+        }
+        assert evidence_value["schema"] == "thermal-calibration-evidence-v1"
+        assert len(evidence_value["observation_asset_ids"]) == 2
+        assert len(set(evidence_value["observation_asset_ids"])) == 2
+        assert len(evidence_value["observations"]) == 2
+        assert all(
+            set(item) == {"asset_id", "observation"}
+            and isinstance(item["observation"], dict)
+            for item in evidence_value["observations"]
+        )
+        case = store.get_assets_by_name("calibration_case")
+        standard = store.get_assets_by_name("calibration_standard")
+        assert len(case) == len(standard) == 1
+        assert evidence_value["calibration_case_asset_id"] == case[0].id
+        assert evidence_value["calibration_standard_asset_id"] == standard[0].id
+        assert [item["asset_id"] for item in evidence_value["observations"]] == (
+            evidence_value["observation_asset_ids"]
+        )
         root_id = payload["contract_id"]
         attested = [
             record
@@ -569,6 +620,9 @@ def test_ordinary_cli_runtime_metered_profile_completes_and_is_independently_acc
         assert len(attested) == len(qualified) == 1
         assert attested[0].payload["asset_id"] == report.id
         assert attested[0].payload["verdict"] == "accepted"
+        assert attested[0].payload["evidence_asset_ids"] == tuple(
+            sorted((case[0].id, standard[0].id))
+        )
         logs = list((workspace / ".aig" / "worker-logs").glob("*.jsonl"))
         event_text = "\n".join(path.read_text(encoding="utf-8") for path in logs)
         assert "provider.permit_admitted" in event_text

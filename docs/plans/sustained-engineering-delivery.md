@@ -187,3 +187,13 @@ G0d旧183d9c8制品的两次有界真实请求均HTTP200，但native解析失败
 Native仅把必要工具成员投影到原DTO、丢弃未消费metadata，literal empty content变None；不猜旧请求的实际键，也不把本次fake绿当新真实成功。E1只消除capture中T×N头选择，仍读取完整前缀；worker/递归/排序、claim/maintenance和同Store可用性继续开放。E2a基线与Runtime-only三次freshStore真实验证各自按精确候选/协议推进，不混入本源码通过或相互替代。
 
 本批actual wheel/sdist及准确16文件组合获非作者整体接受；独立328通过/8native NotRun与十二次安装capture等价单列。首次树外816通过/1失败，有限诊断后一次完整观察复跑817通过；原业务无报告且留有ready工具工作，未归因的slot错误保持开放。观察器有健康sink条件与时序开销。最终只对验收元数据/源码包按同一724文件代码轻闭合，详情见[本批验证](../../reports/115-native-capture-development-2026-10-26.md)。
+
+## G0d 真实三次失败与 G0e 有界配置切片
+
+G0d绑定已交付`6b3d7cd`及其真实安装制品，三次fresh Store普通CLI运行完成了固定日程，合格交付为 **0/3**。原样本均保留：前两次Researcher continuation截断后恢复发布因因果allowance不足被拒，第三次请求meter耗尽后的三个新恢复确实领取并失败、没有新增HTTP。三次共有22个HTTP200、117,680已报告tokens，费用和reasoning拆分未知。原始finish reason未保存；两次length只能作源码fence推断。精确审计、原Store读前状态局限、逐运行分母及未完成blocker见[report116](../../reports/116-budget-profile-development-2026-10-26.md)。不把父启动器exit0、工具成功或恢复publication写成合格交付。
+
+G0e1由Luna编写固定失败码显示修正，Root非作者计划审计Ready及组件独立116项通过。只在现有安全allowlist加入`provider_request_budget_exhausted`，保持精确claim proof、任意文本抑制和事实/预算/恢复语义。作者v1过宽autouse Redis替身被独立拒绝，v2仅新单位用例显式启用；既有CLI恢复真实Redis路径。分类本身不证明物理请求或费用。
+
+G0e2由Luna编写并修正共享Skill的预设范围，非作者对新配置作独立组件复核。只修改G0c示例Researcher thinking、profile身份及资源规划提示，保持完整报告/双观察evidence、oracle、独立政策、普通runtime拆解和既有工具。8次/65,536/180秒属于选定冻结计量候选，不能由共用Skill断言原预设或其它环境配置的活跃限制。七请求参考路径和三单位局部下界不是全程或恢复保证。新thinking模式是待测假设，不能据此解释历史输出或宣称修复。
+
+Root预声明组合包含G0e1五文件、G0e2八文件，加本计划、状态页和report116两份元数据；源码3,639项、树外44模块882项检查与构建通过，非作者对准确组合独立152项复验并整体接受；最终元数据与源码包按同一724文件代码轻闭合。本批没有新增真实provider执行、资金转移或非重试资源失败政策。后续真实阶段必须绑定已接受的新组合及安装制品、固定三次日程与独立证据复核；旧三次失败不得替换。E2活跃局部性测量工具仍在私有构建与复核阶段，未取得完整HarnessReady，不将工具单位测试当成H0/16/64正式测量或整体复杂度证明。

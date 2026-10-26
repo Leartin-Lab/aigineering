@@ -1059,8 +1059,10 @@ or a change to the claim writer. See
 [change 060](changes/060-domainwide-claim-diagnostics.md).
 
 Output uses typed identifiers and numeric usage, suppressing arbitrary bodies,
-unknown categories and unsafe legacy metadata. A noncanonical package display is
-null while internal proof compares its original value. Redis synchronization is
+unknown categories and unsafe legacy metadata. The finite safe category list
+includes `provider_request_budget_exhausted`; other unrecognized categories
+remain suppressed. A noncanonical package display is null while internal proof
+compares its original value. Redis synchronization is
 required; SQLite remains the history authority. Cursor pagination bounds output,
 while the current implementation scans runtime history. These summaries do not
 capture Worker I/O. See [change 058](changes/058-task-attempt-diagnostics.md).
