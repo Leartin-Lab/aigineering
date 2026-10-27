@@ -1,6 +1,6 @@
 # 开发功能状态
 
-更新日期：2026-10-26；开发版本：`0.5.13.dev0`。
+更新日期：2026-10-27；开发版本：`0.5.13.dev0`。
 
 项目定位：Zero Trust agent runtime for auditable AI-assisted engineering and research.
 
@@ -128,3 +128,7 @@ D1a 的精确 Asset 投影上下文、G0b 的显式 direct provider adapter、D0
 G0c/批内分派组合已交devdc0cb4f。后续G0b1 native DTO适配与E1捕获局部头索引的准确16文件开发组合已获非作者整体接受：源码3,635项、585文件格式、actual wheel/sdist通过；树外首次816通过/1失败，保留失败后一次完整观察复跑817通过。独立328通过/8native NotRun、十二次实际安装capture等价；Root源码和树外实际执行native资格与独立NotRun分别记录。原失败根expanded、尚无报告、另有ready工具工作，异常原因仍未知，不因后续通过关闭。E1仍读取完整前缀，活跃工作局部性和新真实provider资格继续开放。见[本批验证](../../reports/115-native-capture-development-2026-10-26.md)。
 
 G0d真实Runtime固定三次日程现已完成证据复核，绑定已交`6b3d7cd`/旧wheel，合格交付0/3。22次HTTP200与117,680已报告tokens仅证明计量传输；前两次输出截断后的恢复资金拒绝、第三次meter耗尽与三个实际失败恢复均保留，费用未知。原始finish reason及逐trial导入来源未保存的限制明确。G0e1固定类别显示和G0e2有界Researcher配置已通过准确组合源码3,639项、树外44模块882项与构建检查，非作者独立152项和准确组合总体接受，最终元数据/源码包按相同代码轻闭合；该配置没有新真实provider资格，恢复资金和重复恢复策略不变。长期活跃局部性仍待完成测量，旧B4未知slot事件继续开放。见[report116](../../reports/116-budget-profile-development-2026-10-26.md)。
+
+G0e3新候选固定三次真实运行的合格交付仍0/3；02/03报告及双观察证据正确，但Verifier描述NonJSON，尚无独立接受。23次HTTP200和120,777已报告tokens不等于交付或账单；三份副本严格重建相符。G0f1修复当前编译器失败子任务与示例适配器的输出命名不匹配，独立组件六项离线、八个guard和三个真实Redis/脚本provider CLI回归通过；原验收仍失败，未放宽政策。Root组合源码3,645项、树外45模块888项与构建已通过，非作者独立101项NoNet及准确十文件组合总体接受，最终六份验收元数据与源码包按同一代码独立轻闭合，见[report117](../../reports/117-verifier-failure-development-2026-10-27.md)。
+
+E2a对旧B4的H0/16/64夹具测量完整资格NotPassed：H16留下未领取ready任务，H64因高开销日志落盘的磁盘余量被停止，耗时不能代表正常性能。三个等水位同步窗口直接证明仍各读6/406/1606条完整历史前缀；有界观测器和热路径活跃局部化仍待推进，不能宣称历史增长问题已经解决。原证据与无损归档均独立复核，见[report118](../../reports/118-configured-history-counts-2026-10-27.md)。后续人工辅助接受仍仅为计划；旧B4未知slot与额外lineage诊断保持开放，阶段未完成。

@@ -10,6 +10,7 @@ from click.testing import CliRunner
 from aigineering import fleet_config
 from aigineering.cli.main import cli
 from aigineering.core.causal_allowance import allowance_available
+from aigineering.core.ids import compute_content_hash
 from aigineering.core.provenance import verify_asset_seal
 from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.protocol.immutability import deep_thaw
@@ -45,6 +46,9 @@ def _configure(tmp_path, monkeypatch, scenario):
     shutil.copytree(EXAMPLE, preset)
     planner_factory = "fixtures.thermal_calibration_workers:build_calibration_worker"
     researcher_factory = "fixtures.thermal_calibration_workers:build_calibration_worker"
+    verifier_factory = (
+        "fixtures.thermal_calibration_cli_failures:build_failure_boundary_verifier"
+    )
     if scenario == "malformed-root":
         planner_factory = (
             "fixtures.thermal_calibration_cli_failures:build_malformed_root_worker"
@@ -56,6 +60,7 @@ def _configure(tmp_path, monkeypatch, scenario):
         researcher_factory = (
             "fixtures.thermal_calibration_cli_failures:build_missing_observation_worker"
         )
+        verifier_factory = "examples.thermal_calibration.workers:build_verifier_worker"
     elif scenario == "budget-exhaustion":
         planner_factory = (
             "fixtures.thermal_calibration_cli_failures:build_two_unit_planner"
@@ -89,7 +94,7 @@ tool_registry = "examples.thermal_calibration.tools:build_registry"
 [[workers]]
 id = "test-calibration-verifier"
 kind = "local"
-worker_factory = "fixtures.thermal_calibration_cli_failures:build_failure_boundary_verifier"
+worker_factory = "{verifier_factory}"
 capabilities = ["calibration.verify"]
 pools = ["verification"]
 effect_capabilities = ["asset.attest", "calibration.verify"]
@@ -495,12 +500,45 @@ def test_missing_copied_observation_fails_claimed_verifier_and_blocks_export(
             and "plugin:fail" in contract.labels
         ]
         assert len(fail_children) == 1
+        fail_child = fail_children[0]
+        assert fail_child.origin == "system"
+        assert fail_child.parent_id == verifier_contract.id
+        assert json.loads(fail_child.description)["parent_contract_id"] == (
+            verifier_contract.id
+        )
+        assert fail_child.outputs == (
+            f"failure_result_{compute_content_hash(fail_child.description)[:24]}",
+        )
+        fail_child_candidates = [
+            record
+            for _, record in store.scan_runtime_records(
+                record_type="candidate.received"
+            )
+            if record.payload.get("contract_id") == fail_child.id
+            and record.payload.get("actor_id") == "test-calibration-verifier"
+        ]
+        assert len(fail_child_candidates) == 1
+        fail_child_action = fail_child_candidates[0].payload["raw_output"]
+        assert fail_child_action.startswith("/exec ")
+        fail_child_output = json.loads(fail_child_action.split(" ", 1)[1])
+        assert tuple(fail_child_output["outputs"]) == fail_child.outputs
+        assert json.loads(fail_child_output["outputs"][fail_child.outputs[0]]) == {
+            "method": "fail",
+            "reason": "calibration evidence check failed",
+        }
+        assert not [
+            record
+            for _, record in store.scan_runtime_records(
+                record_type="worker.invocation_failed"
+            )
+            if record.payload.get("contract_id") == fail_child.id
+        ]
         fail_terminals = [
             record
             for _, record in store.scan_runtime_records(
                 record_type="lifecycle.terminal"
             )
-            if record.payload.get("contract_id") == fail_children[0].id
+            if record.payload.get("contract_id") == fail_child.id
         ]
         assert len(fail_terminals) == 1
         assert fail_terminals[0].payload["terminal"] == "complete"

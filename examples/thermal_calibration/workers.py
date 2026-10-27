@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 
+from aigineering.core.ids import compute_content_hash
 from aigineering.plugins.task_semantics import method_payload
 from aigineering.protocol.types import Asset, Candidate, Contract
 
@@ -94,16 +95,28 @@ def _observation_assets(assets: list[Asset]) -> list[tuple[Asset, dict]]:
 def _fail_method(worker_id: str, contract: Contract) -> Candidate | None:
     if "plugin:fail" not in contract.labels:
         return None
+    if not isinstance(contract.description, str):
+        raise ValueError("malformed system fail-method Contract")
     description = method_payload(contract)
     payload = description.get("payload", {})
+    parent_contract_id = description.get("parent_contract_id")
     if (
-        description.get("method") != "fail"
+        contract.origin != "system"
+        or description.get("method") != "fail"
+        or not isinstance(parent_contract_id, str)
+        or not parent_contract_id.strip()
+        or not isinstance(contract.parent_id, str)
+        or not contract.parent_id.strip()
+        or parent_contract_id != contract.parent_id
         or len(contract.outputs) != 1
-        or not contract.outputs[0].startswith("_fail_result_")
         or not isinstance(payload, dict)
         or not isinstance(payload.get("reason"), str)
         or not payload["reason"].strip()
     ):
+        raise ValueError("malformed system fail-method Contract")
+    current_output = f"failure_result_{compute_content_hash(contract.description)[:24]}"
+    compatibility_output = f"_fail_result_{parent_contract_id}"
+    if contract.outputs[0] not in (current_output, compatibility_output):
         raise ValueError("malformed system fail-method Contract")
     return _exec(
         worker_id,
