@@ -29,4 +29,3 @@ continuing CLI goal.
 
 Decision: [ADR-028](../docs/adr/ADR-028-signed-task-comments.md).
 Usage: [task operations](../docs/reference/task-board.md).
-Verification: [report 074](../reports/074-signed-task-comments-2026-10-04.md).

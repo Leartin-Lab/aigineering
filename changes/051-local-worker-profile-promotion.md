@@ -24,8 +24,5 @@ mixed-version adapter matching is outside this guarantee.
 
 See [ADR-039](../docs/adr/ADR-039-local-worker-profile-promotion.md) and the
 [operator guide](../docs/reference/task-board.md#inspect-local-worker-registration).
-Behavior and actual writer-race tests, neutral protocol vectors, independent
-review, full regression and installed-artifact checks pass; see
-[development evidence](../reports/083-local-worker-entry-2026-10-05.md).
-Model-adapter setup and signed fixtures do not establish real provider output.
-Actual-output acceptance and the wider Kanban/stable-release goal remain open.
+Model-adapter setup and signed fixtures do not establish real-provider output
+or stable-release qualification.

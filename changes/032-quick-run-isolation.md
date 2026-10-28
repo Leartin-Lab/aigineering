@@ -18,6 +18,3 @@ A failed root remains terminal under the existing lifecycle rule. Its recovery
 successor is separate work and requires an explicit `aig run --task` call.
 Recovery tasks for a failed descendant share that descendant's parent ID and
 remain claimable through the quick-run root tree.
-
-Focused validation: see
-[`reports/069-quick-run-isolation-2026-10-03.md`](../reports/069-quick-run-isolation-2026-10-03.md).

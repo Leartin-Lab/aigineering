@@ -43,18 +43,17 @@ not automatically repair or consume a prior revision. A successful structural
 gate still does not establish semantic truth: the semantic Worker must accept
 the exact report before the acceptor can attest it.
 
-The supplied draft is frozen from the first recorded claim-review attempt in
-[report 063](../../reports/063-runtime-native-cases-2026-09-13.md); it is deliberately
-incorrect and has no explicit quote bindings. `research-result-duplicate-id.json`
-is a separate malformed-source fixture for a structurally unrepairable run.
-It must be imported as `research_result` in a fresh domain. Inputs are synthetic.
+The supplied synthetic draft is deliberately incorrect and has no explicit
+quote bindings. `research-result-duplicate-id.json` is a separate malformed-source
+fixture for a structurally unrepairable run. It must be imported as
+`research_result` in a fresh domain.
 
 The acceptor reads one unambiguous exact Contract ID from
 its signed child description. Native planning inserts a compile stage, so
 the immediate parent is not necessarily the original root. The runtime still
 checks target policy, evidence, producer independence and actor authority.
 
-See [live development evidence](../../reports/065-guarded-claim-review-2026-09-13.md), including failed attempts and the qualified report.
+
 
 The preset paths are relative to `run.toml`; its database is relative to the
 selected workspace. Use a fresh workspace for an independent run; a new start

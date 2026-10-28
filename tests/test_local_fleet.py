@@ -40,6 +40,8 @@ from aigineering.runtime_services import RedisSyncPending
 def test_fleet_result_includes_capture_warning_completed_during_executor_join(
     monkeypatch,
 ):
+    joined_slot = []
+
     class FakeFuture:
         def cancelled(self):
             return False
@@ -108,8 +110,16 @@ def test_fleet_result_includes_capture_warning_completed_during_executor_join(
         _db, _host, _stop, _errors, _interval, _target, warnings, _failure_details
     ):
         warnings.append("capture_unavailable")
+        joined_slot.append(True)
+
+    def final_projection(*_args):
+        assert joined_slot
+        return {"status": "completed"}
 
     monkeypatch.setattr(local_fleet_module, "_run_slot", finish_slot)
+    monkeypatch.setattr(
+        local_fleet_module, "_final_target_projection", final_projection
+    )
     result = run_local_fleet(
         "unused.sqlite",
         (FleetHost(object()),),
@@ -117,6 +127,7 @@ def test_fleet_result_includes_capture_warning_completed_during_executor_join(
     )
     assert result.completed is True
     assert result.capture_warnings == ("capture_unavailable",)
+    assert result.projection == {"status": "completed"}
 
 
 @pytest.mark.parametrize(
@@ -130,6 +141,7 @@ def test_fleet_result_includes_capture_warning_completed_during_executor_join(
 def test_late_unexpected_future_is_reported_safely_after_executor_join(
     monkeypatch, mode, terminal, timeout, expected_status
 ):
+    joined = []
     late_secret = "PRIVATE_LATE_EXCEPTION_SENTINEL"
     first_secret = "PRIVATE_FIRST_EXCEPTION_SENTINEL"
 
@@ -174,6 +186,7 @@ def test_late_unexpected_future_is_reported_safely_after_executor_join(
                     future.finish(error)
                 else:
                     future.finish()
+            joined.append(True)
 
     class FakeStore:
         def __init__(self, _path):
@@ -219,6 +232,14 @@ def test_late_unexpected_future_is_reported_safely_after_executor_join(
         raise RuntimeError(late_secret)
 
     monkeypatch.setattr(local_fleet_module, "_run_slot", late_slot)
+
+    def final_projection(*_args):
+        assert joined
+        return {"status": "completed" if terminal == "complete" else "running"}
+
+    monkeypatch.setattr(
+        local_fleet_module, "_final_target_projection", final_projection
+    )
     hosts = tuple(
         FleetHost(type("Host", (), {"kind": kind})())
         for kind in (("first", "late") if mode == "first_error" else ("late",))
@@ -742,6 +763,8 @@ def test_local_fleet_executes_specialized_tasks_concurrently(tmp_path, monkeypat
 
     assert result.completed is True
     assert result.status == "complete"
+    assert result.projection["status"] == "completed"
+    assert set(result.projection["outputs"]) == {"cheap_result", "deep_result"}
     reopened = SQLiteStore(db_path)
     try:
         assert reopened.get_assets_by_name("cheap_result")

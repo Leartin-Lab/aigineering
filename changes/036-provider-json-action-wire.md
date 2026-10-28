@@ -12,6 +12,5 @@ action parser and shared Worker action compiler. JSON-valued output Assets are
 serialized once by the adapter. Native tool definitions cannot be combined
 with JSON object mode. Default slash-action handling remains unchanged.
 
-Focused transport and durable-failure tests cover the JSON wire. Integrated
-provider and CLI verification evidence is recorded in
-`reports/070-usable-cli-stabilization-2026-10-03.md`.
+Focused transport and durable-failure tests cover the JSON wire. Provider
+compatibility still requires a bounded run against the selected endpoint.

@@ -1,7 +1,7 @@
 """Plugin-owned plan scaffold model, parser, validator, and symbolic compiler.
 
-ADR-018 structured planning scaffold: before creating child contracts, the plan
-LLM output is parsed as an intermediate scaffold that validates coverage,
+Structured planning scaffold: before creating child contracts, the plan
+output is parsed as an intermediate scaffold that validates coverage,
 data-flow, activation integrity, output re-commitment, and input reachability.
 """
 

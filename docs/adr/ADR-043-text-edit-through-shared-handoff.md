@@ -74,5 +74,4 @@ release qualification are separate gates.
 See [expanded handoff](ADR-035-expanded-root-handoff.md),
 [task assignments](ADR-038-transactional-task-assignments.md),
 [direct fact ownership](ADR-040-injected-direct-fact-ownership.md) and
-[exact hold batches](ADR-042-exact-hold-set-promotion.md) and
-[development verification](../../reports/086-task-edit-successors-2026-10-06.md).
+[exact hold batches](ADR-042-exact-hold-set-promotion.md).

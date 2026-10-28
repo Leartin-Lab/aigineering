@@ -98,6 +98,3 @@ Review authorizes the exact tested method, not arbitrary reports. Different keys
 under one local operator do not establish organizational independence. Installed
 factory code is trusted operator code, loaded only from fleet configuration;
 method import never loads code. See [ADR-024](../../docs/adr/ADR-024-local-validation-workers.md).
-
-Recorded CLI execution, qualification, reuse and gate outcomes are in
-[report 064](../../reports/064-claim-validation-methods-2026-09-13.md).

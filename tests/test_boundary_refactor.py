@@ -11,7 +11,7 @@ from aigineering.protocol.types import Contract
 
 
 class TestTaskIdentityParentCollision:
-    """hash_contract_v2 includes parent_id in contract identity per ADR-002.
+    """hash_contract_v2 includes parent_id in contract identity.
     Two identical child definitions under different parents produce
     different contract IDs.
     """

@@ -1157,7 +1157,9 @@ class TestPublicDocs:
             assert claim not in readme.lower(), (
                 f"G11: README makes unsupported claim: {claim!r}"
             )
-        assert "v0.5.4" in readme.lower()
+        from aigineering import __version__
+
+        assert f"v{__version__}" in readme.lower()
         assert "candidate" in readme.lower()
         assert "transaction" in readme.lower()
         assert "single-machine" in readme.lower()

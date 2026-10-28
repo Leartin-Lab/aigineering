@@ -34,7 +34,8 @@ class MCPExecutor:
         Args:
             tool_name: MCP tool name with server prefix (e.g. ``"search.query"``).
             args: Arguments to pass to the MCP tool handler.
-            contract_id: ID of the contract requesting the tool (for provenance).
+            contract_id: Retained interface parameter; the outer method handler
+                owns claim and provenance binding. This executor does not use it.
 
         Returns:
             Candidate whose ``raw_output`` is a JSON object with fields

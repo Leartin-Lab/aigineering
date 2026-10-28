@@ -2,12 +2,15 @@
 
 from aigineering.agent.prompt import contract_prompt, system_prompt
 from aigineering.agent.worker import compile_worker_envelope
+from aigineering.core.control_plane import build_control_plane_contract
 from aigineering.core.signing import Ed25519Signer
 from aigineering.protocol.actions import parse_action
 from aigineering.protocol.asset_graph import content_object_from_dict
 from aigineering.protocol.candidate import ActorKey
 from aigineering.protocol.envelope import CandidateEnvelope
 from aigineering.protocol.types import Asset, Contract
+from aigineering.plugins.base import PluginRequest
+from aigineering.plugins.staged_planning import StagedPlanningPlugin
 
 
 def test_system_prompt_preserves_candidate_boundary():
@@ -211,6 +214,55 @@ def test_verifier_prompt_distinguishes_target_from_current_contract():
 
     assert "not the current verifier Contract ID" in prompt
     assert "copy that ID exactly" in prompt
+
+
+def test_staged_plan_prompts_distinguish_goal_from_stage_and_bind_frozen_target():
+    policy = {
+        "mode": "independent",
+        "policy_version": "review-v1",
+        "required_attestations": 1,
+        "verifier_capabilities": ("review.verify",),
+    }
+    goal = build_control_plane_contract(
+        name="release_review",
+        outputs=("review",),
+        budget=8,
+        acceptance_policy=policy,
+    )
+    stages = StagedPlanningPlugin().stages(PluginRequest(parent=goal, allowance=8))
+
+    assert all(
+        stage.id != goal.id and stage.parent_id == goal.id for stage in stages.contracts
+    )
+    draft_prompt = contract_prompt(stages.draft, [])
+    compile_prompt = contract_prompt(stages.compile, [])
+
+    assert "The planning goal is this stage's Parent Contract" in draft_prompt
+    assert f"whose exact ID is `{goal.id}`" in draft_prompt
+    assert (
+        f"The stage Contract ID `{stages.draft.id}` identifies only this planning step; "
+        "it is not the business goal or its acceptance target."
+    ) in draft_prompt
+    assert (
+        f"frozen independent acceptance policy targets the Parent Contract `{goal.id}`"
+        in compile_prompt
+    )
+    assert (
+        f"Use `{goal.id}` as the business acceptance target, not this compile stage ID "
+        f"`{stages.compile.id}`"
+    ) in compile_prompt
+    assert (
+        "override any conflicting target ID copied from the planning draft"
+        in compile_prompt
+    )
+    assert "review.verify" in compile_prompt
+
+    ordinary_prompt = contract_prompt(
+        Contract(id="ordinary", description="Write a report.", outputs=("review",)),
+        [],
+    )
+    assert "planning goal is this stage's Parent Contract" not in ordinary_prompt
+    assert "stage Contract ID is not the goal" not in ordinary_prompt
 
 
 def test_contract_prompt_does_not_teach_single_call_parallel_tool():

@@ -37,10 +37,8 @@ model family for its Workers. This limits the independence claim to runtime
 authority, disclosure, lineage, and attestation boundaries, rather than an
 independent model opinion.
 
-The manual review for this case passed in the recorded run. See the
-[`reports/063-runtime-native-cases-2026-09-13.md`](../../reports/063-runtime-native-cases-2026-09-13.md)
-for the measured execution details; that result is evidence for this fixture,
-not a guarantee for arbitrary reports.
+This fixture has a separate manual review aid. A passing fixture review would
+not establish reliable autonomous checking of arbitrary reports.
 
 The preset paths are relative to `run.toml`; its database is relative to the
 selected workspace. Use a fresh workspace for an independent run; a new start

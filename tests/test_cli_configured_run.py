@@ -7,6 +7,8 @@ from types import SimpleNamespace
 import json
 import shlex
 
+import pytest
+
 from click.testing import CliRunner
 
 from aigineering.cli.main import cli
@@ -640,3 +642,108 @@ def test_legacy_fleet_run_delegates_and_reports_incomplete_result(
         "worker invocation failed; exact claim diagnostics are unavailable"
     ]
     assert "no eligible worker" not in json_result.output
+
+
+@pytest.mark.parametrize("fleet", [False, True])
+def test_full_configured_failure_exposes_projection_and_exact_audit_guidance(
+    monkeypatch, tmp_path, fleet
+):
+    config = tmp_path / "workers.toml"
+    config.write_text("", encoding="utf-8")
+    module = "aigineering.cli.fleet" if fleet else "aigineering.cli.run"
+    monkeypatch.setattr("aigineering.cli.infrastructure.require_redis", lambda: None)
+    monkeypatch.setattr(f"{module}.prepare_configured_run", lambda *_a, **_k: object())
+    monkeypatch.setattr(
+        f"{module}.run_configured",
+        lambda *_a, **_k: SimpleNamespace(
+            contract_id="task:root",
+            status="timed_out",
+            completed=False,
+            timed_out=True,
+            worker_errors=(),
+            worker_failure_details=(),
+            capture_warnings=(),
+            projection={
+                "status": "expanded",
+                "blockers": ["claim:submitted", "descendant_failed:task:verifier"],
+            },
+        ),
+    )
+    arguments = ["fleet", "run"] if fleet else ["run"]
+    arguments += ["--config", str(config)]
+    if fleet:
+        arguments += ["--task", "task:root"]
+    result = CliRunner().invoke(cli, arguments + ["--json"])
+    assert result.exit_code == 1, result.output
+    payload = json.loads(result.output)
+    assert payload["projection"]["status"] == "expanded"
+    assert "descendant_failed:task:verifier" in payload["blockers"]
+    assert "task:verifier" in payload["next_step"]
+    assert "aig task audit" in payload["next_step"]
+    assert "resume_command" not in payload
+
+
+@pytest.mark.parametrize("task_status", ["completed", "failed"])
+def test_deadline_presentation_uses_terminal_projection_after_join(task_status):
+    from aigineering.cli._cycle_result import configured_cycle_payload
+
+    result = SimpleNamespace(
+        contract_id="task:drained",
+        status="timed_out",
+        completed=False,
+        timed_out=True,
+        stop_reason="deadline",
+        cycles=(),
+        submission_status=None,
+        worker_errors=(),
+        worker_failure_details=(),
+        capture_warnings=(),
+        projection={
+            "status": task_status,
+            "terminal": True,
+            "blockers": [f"terminal:{task_status}"],
+        },
+    )
+    payload = configured_cycle_payload(result, resume_command="must not be offered")
+    assert payload["timed_out"] is True
+    assert payload["completed"] is False
+    assert payload["projection"]["status"] == task_status
+    assert "resume_command" not in payload
+    assert (
+        "aig task result" in payload["next_step"]
+        if task_status == "completed"
+        else "audit" in payload["next_step"]
+    )
+
+
+@pytest.mark.parametrize("recoveries", [[], ["task:published-recovery"]])
+def test_submitted_projection_never_offers_original_claim_rerun(recoveries):
+    from aigineering.cli._cycle_result import configured_cycle_payload
+
+    result = SimpleNamespace(
+        contract_id="task:submitted",
+        status="timed_out",
+        completed=False,
+        timed_out=True,
+        worker_errors=(),
+        worker_failure_details=(),
+        capture_warnings=(),
+        projection={
+            "status": "submitted",
+            "blockers": ["claim:submitted"],
+            "recoveries": recoveries,
+            "silent_failure_risks": []
+            if recoveries
+            else [{"code": "submitted_without_recovery"}],
+        },
+    )
+    payload = configured_cycle_payload(
+        result, resume_command="must not rerun original claim"
+    )
+    assert "resume_command" not in payload
+    assert "audit" in payload["next_step"]
+    if recoveries:
+        assert recoveries[0] in payload["next_step"]
+        assert "eligible" in payload["next_step"]
+    else:
+        assert "new signed work" in payload["next_step"]

@@ -325,8 +325,7 @@ return nonzero and safe codes such as `asset_not_disclosed`,
 `asset_content_forbidden` or `redis_unavailable`, without raw exception text.
 Signed attachment association and exact-byte export are described in
 [task attachments](task-attachments.md). See
-[change 062](../../changes/062-task-context-view.md) and
-[bounded verification](../../reports/092-task-context-view-2026-10-07.md).
+[change 062](../../changes/062-task-context-view.md).
 
 ## Inspect local Worker logs
 
@@ -380,8 +379,7 @@ Captured fields exclude prompts, keys, headers, URLs, response/Asset/tool bodies
 raw Candidate output and arbitrary exception text. This coverage does not
 sanitize custom Workers' own stdout/stderr. See
 [change 063](../../changes/063-local-worker-operational-logs.md) and
-[ADR-044](../adr/ADR-044-local-worker-operational-logs.md) and
-[bounded verification](../../reports/093-local-worker-operational-logs-2026-10-07.md).
+[ADR-044](../adr/ADR-044-local-worker-operational-logs.md).
 
 ## Apply an operation to several tasks
 
@@ -838,8 +836,7 @@ file/directory durability before recovery. Missing, edited, noncanonical or
 symlink files refuse. Hash addressing is integrity for the named inputs, not a
 signature or protection against coordinated local replacement. A copied Store
 at another path or relocated workspace cannot automatically resume the old ID.
-See [change 069](../../changes/069-reassignment-request-recovery.md) and
-[verification scope](../../reports/099-reassignment-request-recovery-2026-10-08.md).
+See [change 069](../../changes/069-reassignment-request-recovery.md).
 
 For explicit input selection, replace or clear assignments for 2 through 64 tasks with a complete map of
 their exact current heads. Apply one replacement Worker or one clear action to

@@ -19,6 +19,7 @@ REDIS_URL = "redis://127.0.0.1:6379/13"
 def _configured_workspace(
     tmp_path, monkeypatch, *, fail_once: bool, include_verifier: bool = True
 ):
+    redis_url = os.environ.get("AIG_REDIS_TEST_URL", REDIS_URL)
     test_root = str(Path(__file__).resolve().parent)
     monkeypatch.syspath_prepend(test_root)
     pythonpath = os.environ.get("PYTHONPATH", "")
@@ -26,7 +27,7 @@ def _configured_workspace(
         "PYTHONPATH",
         os.pathsep.join(item for item in (test_root, pythonpath) if item),
     )
-    monkeypatch.setenv("AIGINEERING_REDIS_URL", REDIS_URL)
+    monkeypatch.setenv("AIGINEERING_REDIS_URL", redis_url)
     marker = tmp_path / "summarize-failed-once.marker"
     if fail_once:
         monkeypatch.setenv("AIG_MEASUREMENT_FAIL_ONCE_FILE", str(marker))

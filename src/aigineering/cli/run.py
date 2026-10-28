@@ -176,14 +176,14 @@ def _quick_output_exportable(asset) -> bool:
     type=float,
     default=60.0,
     show_default=True,
-    help="Maximum seconds to wait when --task is used.",
+    help="Wait budget for --task, --resume, or --config; not a quick GOAL deadline.",
 )
 @click.option(
     "--interval",
     type=float,
     default=1.0,
     show_default=True,
-    help="Polling interval when waiting for --task.",
+    help="Polling interval for --task or --resume; not used by quick GOAL.",
 )
 @click.option(
     "--mock-output",
@@ -417,50 +417,27 @@ def run(
             raise
         except (OSError, RuntimeError, ValueError) as exc:
             raise click.ClickException(str(exc)) from exc
-        if hasattr(result, "stop_reason"):
-            payload = configured_cycle_payload(
-                result,
-                resume_command=shlex.join(
-                    [
-                        "aig",
-                        "run",
-                        "--config",
-                        str(Path(config_path).resolve()),
-                        "--resume",
-                        result.contract_id,
-                        "--once",
-                        "--json",
-                    ]
-                ),
-            )
-        else:
-            payload = {
-                "contract_id": result.contract_id,
-                "status": result.status,
-                "completed": result.completed,
-                "timed_out": result.timed_out,
-                "worker_errors": safe_worker_error_messages(
-                    result.worker_errors, result.worker_failure_details
-                ),
-                "worker_failure_details": list(result.worker_failure_details),
-                "capture_warnings": list(result.capture_warnings),
-            }
+        payload = configured_cycle_payload(
+            result,
+            resume_command=shlex.join(
+                [
+                    "aig",
+                    "run",
+                    "--config",
+                    str(Path(config_path).resolve()),
+                    "--resume",
+                    result.contract_id,
+                    *(["--once"] if run_once else []),
+                    "--json",
+                ]
+            ),
+        )
         if json_output:
             _output_json(payload)
         else:
-            if hasattr(result, "stop_reason"):
-                _emit_run_result(payload, False)
-            else:
-                click.echo(f"run {result.status}: {result.contract_id}")
-                for error in safe_worker_error_messages(
-                    result.worker_errors, result.worker_failure_details
-                ):
-                    click.echo(f"worker error: {error}")
-                for detail in result.worker_failure_details:
-                    click.echo(
-                        "worker failure detail: "
-                        + json.dumps(detail, ensure_ascii=True, sort_keys=True)
-                    )
+            _emit_run_result(payload, False)
+            for error in payload.get("worker_errors", ()):
+                click.echo(f"worker error: {error}")
             for warning in result.capture_warnings:
                 click.echo(f"capture warning: {warning}")
         if not result.completed:
@@ -475,6 +452,17 @@ def run(
         )
     if goal is not None and not goal.strip():
         raise click.BadParameter("must not be empty or whitespace", param_hint="GOAL")
+    if goal is not None:
+        quick_wait_options = {
+            "wait_timeout": ("--wait-timeout", "--task, --resume, or --config"),
+            "interval": ("--interval", "--task or --resume"),
+        }
+        for name, (option, modes) in quick_wait_options.items():
+            if ctx.get_parameter_source(name) == click.core.ParameterSource.COMMANDLINE:
+                raise click.UsageError(
+                    f"{option} requires {modes}; for quick GOAL request limits "
+                    "use --timeout and --max-retries."
+                )
     if response_format is not None and worker_kind != "llm":
         raise click.UsageError("--response-format requires --worker llm.")
     if response_format is not None and tool_registry is not None:
@@ -1238,7 +1226,7 @@ def _emit_run_result(payload: dict, json_output: bool) -> None:
     if payload.get("failure_categories"):
         click.echo(f"failure_categories: {', '.join(payload['failure_categories'])}")
     for detail in payload.get("worker_failure_details", ()):
-        click.echo(format_worker_failure_detail(detail))
+        click.echo("worker failure detail: " + format_worker_failure_detail(detail))
     if payload.get("next_step"):
         click.echo(f"next_step: {payload['next_step']}")
 

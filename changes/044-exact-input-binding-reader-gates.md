@@ -41,5 +41,4 @@ CLI backup/no-op/failures, language-neutral identity vectors and installed behav
 
 ## Closure
 
-Development evidence belongs in [report 078](../reports/078-review-linked-task-revisions-2026-10-04.md).
 Stable-release qualification, tagging and publication remain separate.

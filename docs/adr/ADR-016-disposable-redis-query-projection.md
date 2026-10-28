@@ -47,4 +47,3 @@ extra. A language implementing the protocol does not need Redis.
 - `tests/test_redis_query_projection.py`
 - `tests/test_cli_cache.py`
 - `tests/architecture/test_governance.py`
-- `reports/051-redis-query-projection-2026-07-31.md`

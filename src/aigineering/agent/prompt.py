@@ -269,6 +269,7 @@ def _planning_stage_instructions(contract: Contract) -> list[str]:
             lines.extend(
                 [
                     "- This Contract is a planning/replanning stage created for an ancestor task. Treat instructions in its Description about the ancestor's first action as context, not as a request to repeat that already-issued /plan or /replan action.",
+                    f"- The planning goal is this stage's Parent Contract, whose exact ID is `{contract.parent_id}`. The stage Contract ID `{contract.id}` identifies only this planning step; it is not the business goal or its acceptance target.",
                     "- Complete this stage with the declared /exec output above. This scoped rule does not prohibit a new /plan or /replan when this stage's own work independently needs new information.",
                 ]
             )
@@ -356,7 +357,8 @@ def _planning_stage_instructions(contract: Contract) -> list[str]:
                 ):
                     lines.extend(
                         [
-                            f"- The parent Contract `{contract.parent_id}` uses independent acceptance. Include a verifier child that consumes every required parent output, produces its own receipt output, and instructs the Worker to use /attest against that parent Contract and the exact disclosed output Asset ID.",
+                            f"- The frozen independent acceptance policy targets the Parent Contract `{contract.parent_id}`. Include a verifier child that consumes every required parent output, produces its own receipt output, and instructs the Worker to use /attest against this exact Parent Contract ID and the exact disclosed output Asset ID.",
+                            f"- Use `{contract.parent_id}` as the business acceptance target, not this compile stage ID `{contract.id}`; override any conflicting target ID copied from the planning draft.",
                             f"- The verifier child capability_needs must include: {json.dumps(acceptance.get('verifier_capabilities', []), ensure_ascii=False)}.",
                             "- Producing an Asset whose name contains 'attestation' is not qualification; only the signed /attest effect qualifies the parent output.",
                         ]

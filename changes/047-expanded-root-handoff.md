@@ -26,5 +26,3 @@ See [ADR-035](../docs/adr/ADR-035-expanded-root-handoff.md) and
 submission, not running OS processes or external side effects. This development
 change is part of the continuing Kanban CLI goal; integrated acceptance and stable
 qualification require their own evidence.
-
-Development evidence is in [report 079](../reports/079-expanded-root-handoff-2026-10-04.md).

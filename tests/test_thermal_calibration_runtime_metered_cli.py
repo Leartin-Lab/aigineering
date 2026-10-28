@@ -7,6 +7,7 @@ import re
 import shutil
 import subprocess
 import sys
+from urllib.parse import urlsplit
 
 from click.testing import CliRunner
 import pytest
@@ -18,15 +19,41 @@ from examples.thermal_calibration import runtime_meter
 
 ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE = ROOT / "examples" / "thermal_calibration"
-_G0C_TEST_REDIS_URL = "redis://127.0.0.1:32770/7"
 
 
 def _require_g0c_test_redis(monkeypatch):
-    redis_url = os.environ.get("AIGINEERING_G0C_TEST_REDIS_URL")
+    allocated = os.environ.get("AIG_REDIS_TEST_URL")
+    selected = os.environ.get("AIGINEERING_G0C_TEST_REDIS_URL")
+    redis_url = selected if selected is not None else allocated
     if redis_url is None:
-        pytest.skip("G0c CLI test requires its explicitly allocated Redis URL")
-    if redis_url != _G0C_TEST_REDIS_URL:
-        pytest.fail("AIGINEERING_G0C_TEST_REDIS_URL must be the exact allocated URL")
+        pytest.skip("metered CLI test requires an explicitly allocated test Redis URL")
+    try:
+        parsed = urlsplit(redis_url)
+        host = parsed.hostname
+        port = parsed.port
+        database = parsed.path.removeprefix("/")
+        if (
+            parsed.scheme not in {"redis", "rediss"}
+            or not host
+            or port is None
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.query
+            or parsed.fragment
+            or not database.isascii()
+            or not database.isdecimal()
+        ):
+            raise ValueError("invalid test Redis URL")
+        display_host = f"[{host}]" if ":" in host else host
+        canonical = f"{parsed.scheme}://{display_host}:{port}/{int(database)}"
+        if redis_url != canonical or (
+            allocated is not None and selected is not None and allocated != selected
+        ):
+            raise ValueError("test Redis allocation mismatch")
+    except ValueError:
+        pytest.fail(
+            "test Redis URL must be canonical and match its explicit allocation"
+        )
     monkeypatch.setenv("AIGINEERING_REDIS_URL", redis_url)
 
 
@@ -38,9 +65,13 @@ def _resume_recovery_with_fake_success(tmp_path, workspace, config, recovery_id)
         [
             "import json, os, socket",
             "from pathlib import Path",
+            "from urllib.parse import urlsplit",
+            "redis = urlsplit(os.environ['AIGINEERING_REDIS_URL'])",
+            "redis_port = redis.port",
+            "redis_addresses = {item[4][0] for item in socket.getaddrinfo(redis.hostname, redis_port, type=socket.SOCK_STREAM)}",
             "original_connect = socket.socket.connect",
             "def guarded_connect(self, address):",
-            "    if not isinstance(address, tuple) or address[1] != 32770 or address[0] != '127.0.0.1':",
+            "    if not isinstance(address, tuple) or len(address) < 2 or address[1] != redis_port or address[0] not in redis_addresses:",
             "        raise OSError('test network denied')",
             "    return original_connect(self, address)",
             "socket.socket.connect = guarded_connect",
@@ -62,7 +93,7 @@ def _resume_recovery_with_fake_success(tmp_path, workspace, config, recovery_id)
     child_env["AIGINEERING_G0C_MAX_ATTEMPTS"] = "16"
     child_env["AIGINEERING_G0C_OUTPUT_RESERVATION_CEILING"] = "131072"
     child_env["AIGINEERING_G0C_RUN_DEADLINE_SECONDS"] = "900"
-    child_env["AIGINEERING_REDIS_URL"] = _G0C_TEST_REDIS_URL
+    child_env["AIGINEERING_REDIS_URL"] = os.environ["AIGINEERING_REDIS_URL"]
     child_env["G0C_FAKE_TRANSPORT_MARKER"] = str(marker)
     child_env["PYTHONPATH"] = os.pathsep.join(
         item
@@ -126,8 +157,6 @@ def _assert_no_unblocked_unfinished_tasks(store):
         "redis://user@127.0.0.1:32770/7",
         "redis://127.0.0.1:32770/7?db=0",
         "redis://127.0.0.1:32770/7#fragment",
-        "redis://127.0.0.1:32771/7",
-        "redis://127.0.0.1:32770/8",
         "redis://127.0.0.1:32770/07",
         "redis://127.0.0.1:32770/7/",
     ],
@@ -136,10 +165,55 @@ def test_cli_redis_guard_rejects_noncanonical_addresses_before_client(
     monkeypatch, redis_url
 ):
     monkeypatch.setenv("AIGINEERING_G0C_TEST_REDIS_URL", redis_url)
+    monkeypatch.setenv("AIG_REDIS_TEST_URL", redis_url)
     monkeypatch.delenv("AIGINEERING_REDIS_URL", raising=False)
     with pytest.raises(pytest.fail.Exception):
         _require_g0c_test_redis(monkeypatch)
     assert "AIGINEERING_REDIS_URL" not in os.environ
+
+
+@pytest.mark.parametrize(
+    "redis_url", ["redis://127.0.0.1:32771/7", "redis://127.0.0.1:32770/8"]
+)
+def test_cli_redis_guard_accepts_explicit_allocated_resources(monkeypatch, redis_url):
+    monkeypatch.setenv("AIG_REDIS_TEST_URL", redis_url)
+    monkeypatch.setenv("AIGINEERING_G0C_TEST_REDIS_URL", redis_url)
+    monkeypatch.delenv("AIGINEERING_REDIS_URL", raising=False)
+    _require_g0c_test_redis(monkeypatch)
+    assert os.environ["AIGINEERING_REDIS_URL"] == redis_url
+
+
+def test_cli_redis_guard_uses_standard_test_allocation_not_application_default(
+    monkeypatch,
+):
+    monkeypatch.delenv("AIGINEERING_G0C_TEST_REDIS_URL", raising=False)
+    monkeypatch.setenv("AIG_REDIS_TEST_URL", "redis://127.0.0.1:32771/15")
+    monkeypatch.setenv("AIGINEERING_REDIS_URL", "redis://127.0.0.1:6379/0")
+    _require_g0c_test_redis(monkeypatch)
+    assert os.environ["AIGINEERING_REDIS_URL"] == "redis://127.0.0.1:32771/15"
+
+
+@pytest.mark.parametrize("selected", ["redis://127.0.0.1:32770/7", ""])
+def test_cli_redis_guard_refuses_conflicting_explicit_allocations(
+    monkeypatch, selected
+):
+    monkeypatch.setenv("AIGINEERING_G0C_TEST_REDIS_URL", selected)
+    monkeypatch.setenv("AIG_REDIS_TEST_URL", "redis://127.0.0.1:32771/15")
+    monkeypatch.delenv("AIGINEERING_REDIS_URL", raising=False)
+    with pytest.raises(pytest.fail.Exception):
+        _require_g0c_test_redis(monkeypatch)
+    assert "AIGINEERING_REDIS_URL" not in os.environ
+
+
+def test_cli_redis_guard_requires_test_resource_instead_of_application_default(
+    monkeypatch,
+):
+    monkeypatch.delenv("AIGINEERING_G0C_TEST_REDIS_URL", raising=False)
+    monkeypatch.delenv("AIG_REDIS_TEST_URL", raising=False)
+    monkeypatch.setenv("AIGINEERING_REDIS_URL", "redis://127.0.0.1:6379/0")
+    with pytest.raises(pytest.skip.Exception):
+        _require_g0c_test_redis(monkeypatch)
+    assert os.environ["AIGINEERING_REDIS_URL"] == "redis://127.0.0.1:6379/0"
 
 
 def test_source_checkout_pythonpath_prepares_example_registry_offline(

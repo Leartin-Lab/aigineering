@@ -21,5 +21,3 @@ already missing descendant terminal facts; authorized repair remains a stable
 qualification gate. Read-only rebuild and audit do not publish replacement facts.
 
 Existing lifecycle decision: [ADR-010](../docs/adr/ADR-010-task-lifecycle-terminal-projection.md).
-
-Verification: [report 077](../reports/077-policy-bound-task-review-2026-10-04.md).

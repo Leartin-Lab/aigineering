@@ -32,11 +32,13 @@ without credentials.
 Request timeouts retain fractional seconds and run-loop timeout values must be
 finite and positive.
 
+Quick-goal execution does not implement run-loop waiting or polling. Explicit
+`--wait-timeout` and `--interval` therefore reject before task setup instead of
+being silently ignored. Use `--timeout` and `--max-retries` for quick-goal
+request limits, or select target/configured execution for a wait budget.
+
 These changes remain in the CLI and application composition layer. An accepted
 Worker output is an authorized assertion; this path does not claim independent
 semantic acceptance or universal truth. `aig run GOAL` does not grant external
 tools; use task publication and the task-pool tool registry path for tool-backed
 work.
-
-Integrated live-provider behavior, retained failures, and release limitations
-are recorded in [report 070](../reports/070-usable-cli-stabilization-2026-10-03.md).

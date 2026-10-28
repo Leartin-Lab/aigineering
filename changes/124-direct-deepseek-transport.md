@@ -12,4 +12,6 @@ The CLI validates nonsecret inputs before exclusive evidence initialization and 
 
 ## Verification and limits
 
-The exact seven-file candidate passed independent fake-transport/CLI and boundary checks. Earlier log-ID disclosure, fixed/chunked EOF, cap+1 and HTTP exit findings are retained and corrected. See the [plan](../docs/plans/direct-deepseek-transport.md) and [combined report](../reports/113-asset-context-direct-transport-development-2026-10-25.md). Root full/build/installed and separate independent overall review Passed; final metadata/source-package light closure is recorded in that report. No real provider was called by these checks; Runtime transport metering, durable restart budgets, input-token or money caps, fair comparisons and quality/cost advantages are unproven.
+Transport fixtures cover bounded reads, EOF/error handling and safe diagnostic
+output. They do not establish real-provider behavior, durable restart budgets,
+input-token or money caps, fair comparisons or quality/cost advantages.

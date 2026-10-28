@@ -44,5 +44,5 @@ signed cross-language vectors and a retained real changes-task continuation.
 
 ## Closure
 
-Development evidence belongs in [report 078](../reports/078-review-linked-task-revisions-2026-10-04.md).
-Expanded-tree handoff and the remaining Kanban/stable-release gates stay open.
+Revision and expanded handoff have separate semantic owners. This change
+record does not qualify the wider task workflow or a stable release.

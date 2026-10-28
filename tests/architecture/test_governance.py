@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parents[2]
 def _public_markdown_files() -> tuple[Path, ...]:
     roots = (
         "README.md",
+        "README.zh-CN.md",
         "DESIGN.md",
         "ROADMAP.md",
         "CONTRIBUTING.md",
@@ -58,6 +59,7 @@ def test_stable_design_change_and_adr_are_current():
 def test_public_sources_do_not_reference_private_workspaces():
     roots = (
         "README.md",
+        "README.zh-CN.md",
         "DESIGN.md",
         "ROADMAP.md",
         "CONTRIBUTING.md",
@@ -96,7 +98,7 @@ def test_documentation_index_routes_to_unique_public_owners():
         "adr/",
         "../changes/",
         "../ROADMAP.md",
-        "../reports/",
+        "../reports/README.md",
         "../conformance/",
         "../CONTRIBUTING.md",
         "../SKILL.md",
@@ -110,17 +112,12 @@ def test_public_skill_prefers_real_workers_and_routes_harness_migration():
 
     assert "HarnessCandidateAdapter" in skill
     assert "docs/reference/agent-harness-migration.md" in skill
-    assert 'aig run "produce a cited release review" --json' in skill
-    assert "Never present mock output as production" in skill
-    assert "--worker mock" in skill
-    assert 'aig run "build a report with citations"' in readme
-    quick_start = readme.split("## v0.5.4 scope", 1)[0]
-    assert (
-        "--worker mock"
-        not in quick_start.split(
-            "Mock execution is an explicit deterministic dry-run", 1
-        )[0]
-    )
+    assert "never present mock output as production" in skill.lower()
+    assert "aig worker next" in skill
+    assert "signed" in skill and "Candidate" in skill
+    assert "--input" in readme
+    assert "README.zh-CN.md" in readme
+    assert "--worker mock" not in readme.split("## Planning", 1)[0]
 
 
 def test_harness_adapter_delegates_to_the_workerhost_compiler():
@@ -149,7 +146,6 @@ def test_public_markdown_local_links_resolve():
 
 
 def test_released_changes_are_ordered_and_design_matches_package_version():
-    roadmap = (ROOT / "ROADMAP.md").read_text(encoding="utf-8")
     redis_change = (ROOT / "changes/003-redis-query-projection.md").read_text(
         encoding="utf-8"
     )
@@ -164,7 +160,6 @@ def test_released_changes_are_ordered_and_design_matches_package_version():
     ).read_text(encoding="utf-8")
     design = (ROOT / "DESIGN.md").read_text(encoding="utf-8")
 
-    assert roadmap.index("v0.5.4") < roadmap.index("Future candidate directions")
     assert "Status: Implemented and verified" in redis_change
     assert "Change 003 is closed" in identity_change
     assert "Status: Partially superseded by ADR-027" in redis_adr

@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 from click.testing import CliRunner
+import pytest
 
 from aigineering.cli.main import cli
 from aigineering.cli.run import _quick_output_exportable
@@ -30,6 +31,27 @@ class _OutputWorker:
         if callable(raw):
             raw = raw(contract)
         return Candidate(worker_id=self.worker_id, raw_output=raw)
+
+
+@pytest.mark.parametrize("option", ["--wait-timeout", "--interval"])
+def test_quick_goal_rejects_unused_wait_options_before_setup(
+    monkeypatch, tmp_path, option
+):
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("unused quick option must reject before setup")
+
+    monkeypatch.setattr("aigineering.cli.infrastructure.require_redis", lambda: None)
+    monkeypatch.setattr("aigineering.cli.run._load_quick_goal_inputs", forbidden)
+    monkeypatch.setattr("aigineering.cli.run._persistent_store", forbidden)
+    result = CliRunner().invoke(
+        cli, ["-C", str(tmp_path), "run", "Summarize", option, "10", "--json"]
+    )
+    assert result.exit_code == 2, result.output
+    assert option in result.output
+    assert "--timeout" in result.output
+    assert "--max-retries" in result.output
+    assert "--task" in result.output
+    assert not (tmp_path / ".aig").exists()
 
 
 def test_run_quick_goal_discloses_file_and_exports_markdown(monkeypatch, tmp_path):

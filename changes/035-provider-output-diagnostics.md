@@ -22,5 +22,3 @@ independent direct children. Stage prompts also clarify the two action-wire
 representations: slash actions encode output content as a JSON string, while
 provider JSON-action mode passes an output object or array for one canonical
 serialization by the adapter.
-
-Verification evidence: [reports/070-usable-cli-stabilization-2026-10-03.md](../reports/070-usable-cli-stabilization-2026-10-03.md).

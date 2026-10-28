@@ -26,4 +26,3 @@ relayed after its SQLite commit; a failed relay reports synchronization pending.
 
 Decision: [ADR-029](../docs/adr/ADR-029-signed-claim-holds.md).
 Usage: [task operations](../docs/reference/task-board.md).
-Evidence: [development verification](../reports/075-signed-task-holds-2026-10-04.md).

@@ -61,6 +61,27 @@ require a non-empty persistent database path and reject SQLite `:memory:`.
 Workspace selection is a path convention, not a filesystem sandbox. Factories must be importable by
 the installed Python environment or an explicit checkout `PYTHONPATH`.
 
+## Bring a Skill or tool to a technical trial
+
+Use a fixed checkout for the first trial; example adapters must be importable
+in addition to the installed runtime. Start from the
+[CLI research recipe](../../examples/cli_research/README.md), reproduce it in a
+fresh workspace, then change the explicitly selected inputs, Skill and adapter.
+This is a supported trial path, not automatic compatibility with every workload.
+
+A Skill directory needs `skill.toml` with `name`, `version` and a relative
+`content_file` (default `skill.md`). List the directory under `run.skills` and
+select the content Asset through the task labels, as the recipe does. A standalone
+`SKILL.md` is not automatically loaded. Skill content supplies instructions;
+Worker capabilities, tool scope, delegation bounds and acceptance remain explicit.
+
+`aig mcp add` publishes capability metadata without connecting to a server.
+Keep an existing Harness's MCP client behind its
+[signed Worker boundary](agent-harness-migration.md), or provide an explicit
+tool/Worker adapter. A configured tool registry selects an importable factory;
+it does not discover arbitrary MCP transports. Staged `/plan` expansion uses
+ordinary runtime tasks and must remain within the root's frozen scope.
+
 ## Preset format
 
 ```toml

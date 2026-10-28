@@ -37,14 +37,9 @@ the fixture was updated narrowly, then its two compatibility regressions
 passed against the dedicated test Redis. These results are author checks, not
 independent acceptance.
 
-The original 36-cell B matrix (108 timing and 108 instrumentation passes) and
-its exact module binding passed independent audit. Two separately captured old
-projections are also covered by explicit fresh-writer spending and terminal
-regressions. Root combination checks pass 3,342 source tests and 444 installed
-tests; final documentation/artifact integration closure is tracked in the
-[development report](../reports/112-local-allowance-development-2026-10-25.md).
-The earlier 67+24 author counts above precede those final race assertions and
-are not a claim that a single independent full suite ran.
+Rebuildable selection indexes remain subordinate to exact publication proofs
+and fresh writer checks. Independent connections must revalidate spending and
+terminal changes; a derived index cannot grant allowance.
 
 This slice localizes reads for the supported pure declaration projection and
 its two writer-time validations. It does not optimize other runtime consumers

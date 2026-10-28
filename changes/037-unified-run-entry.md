@@ -42,6 +42,13 @@ are not promoted to standalone workloads. Quick-goal and single-worker execution
 loops are not yet merged into the Fleet service. Interface inspiration does not
 provide external harness protocol or session compatibility.
 
-This is v0.5.13.dev0 development work, with deterministic and installed fixture
-evidence in [report 071](../reports/071-unified-run-entry-2026-10-03.md). No new
-provider execution, stable release, tag or package publication is claimed.
+The configured entry was introduced as development work. Deterministic and
+installed fixtures do not establish real-provider output or stable qualification.
+
+Full configured runs and single cycles share safe result formatting. A full
+Fleet run captures a read-only final task projection after admitted Workers
+join. Its wait outcome remains separate: a wait deadline can be reached before
+draining work completes the task. Blockers and next steps use the final view;
+completed, failed or submitted obligations are not offered as fresh claims.
+Failed descendants identify work to inspect, rather than merely suggesting
+that the root be run again. These fields do not publish recovery or acceptance.

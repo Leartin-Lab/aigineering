@@ -1,8 +1,9 @@
 """Capability descriptor assets for tools, MCPs, skills, memory, and personas.
 
 Descriptors are Assets that carry origin, trust, and provenance metadata.
-They describe what capabilities exist without exposing private configuration.
-Private config (API keys, secrets) is sealed — only a reference hash is disclosed.
+They describe available capabilities without exposing private configuration.
+Opaque configuration references are host-managed; this module does not store
+or encrypt credentials.
 """
 
 from __future__ import annotations
@@ -40,11 +41,11 @@ def _build_descriptor_asset(
     trust_tier: str = "configured",
     source_uri: str = "",
 ) -> Asset:
-    """Internal helper that builds a signed capability descriptor Asset.
+    """Build a deterministic provenance-sealed capability descriptor Asset.
 
     The disclosed_content dictionary is serialised as the Asset content.
-    Private configuration (API keys, secrets) must NOT be present — only a
-    sealed_config_ref reference is permitted.
+    Private configuration (API keys, secrets) must NOT be present. An opaque
+    host-managed ``sealed_config_ref`` may be included as metadata.
     """
     asset_name = f"{_NAME_PREFIX[kind]}{name}"
     content_str = json.dumps(disclosed_content, sort_keys=True, ensure_ascii=False)
@@ -94,12 +95,12 @@ def create_tool_descriptor(
     version : str
         Tool contract version.
     max_output_bytes : int
-        UTF-8 output limit bound into the signed descriptor.
+        UTF-8 output limit bound into the provenance-sealed descriptor.
 
     Returns
     -------
     Asset
-        Signed descriptor Asset named ``_tool_capability_{name}``.
+        Provenance-sealed descriptor proposal named ``_tool_capability_{name}``.
     """
     disclosed = {
         "kind": "tool",
@@ -125,7 +126,8 @@ def create_mcp_descriptor(
     """Create a capability descriptor Asset for an MCP (Model Context Protocol).
 
     The MCP descriptor carries origin and trust but does NOT expose private
-    transport credentials or endpoint secrets — those are sealed.
+    transport credentials or endpoint secrets. An opaque host-managed
+    configuration reference may be included instead.
 
     Parameters
     ----------
@@ -147,7 +149,7 @@ def create_mcp_descriptor(
     Returns
     -------
     Asset
-        Signed descriptor Asset named ``_mcp_{name}``.
+        Provenance-sealed descriptor proposal named ``_mcp_{name}``.
     """
     disclosed: dict[str, Any] = {
         "kind": "mcp",
@@ -189,7 +191,7 @@ def create_skill_descriptor(
     Returns
     -------
     Asset
-        Signed descriptor Asset named ``_skill_capability_{name}``.
+        Provenance-sealed descriptor proposal named ``_skill_capability_{name}``.
     """
     disclosed = {
         "kind": "skill",
@@ -221,7 +223,7 @@ def create_memory_descriptor(
     Returns
     -------
     Asset
-        Signed descriptor Asset named ``_memory_capability_{name}``.
+        Provenance-sealed descriptor proposal named ``_memory_capability_{name}``.
     """
     disclosed = {
         "kind": "memory",
@@ -252,7 +254,7 @@ def create_persona_descriptor(
     Returns
     -------
     Asset
-        Signed descriptor Asset named ``_persona_capability_{name}``.
+        Provenance-sealed descriptor proposal named ``_persona_capability_{name}``.
     """
     disclosed = {
         "kind": "persona",
@@ -310,7 +312,7 @@ def create_provider_config_snapshot(
     Returns
     -------
     Asset
-        Signed descriptor Asset named ``_provider_config_{provider_name}``.
+        Provenance-sealed descriptor proposal named ``_provider_config_{provider_name}``.
     """
     disclosed_content: dict[str, Any] = {
         "provider_name": provider_name,
@@ -344,7 +346,8 @@ def verify_descriptor(
     """Verify a capability descriptor asset meets the 040 trust gate (G10).
 
     Returns True if:
-    1. Canonical seal valid (verify_asset_seal passes)
+    1. Deterministic provenance seal valid (verify_asset_seal passes; this is
+       not public-key authentication)
     2. Trust tier at or above minimum ("configured"), or passes *policy* evaluation
     3. Name prefix matches expected category (if *kind* provided; unknown kind rejected)
     4. Dual-hash integrity (definition_hash + content_hash non-empty)

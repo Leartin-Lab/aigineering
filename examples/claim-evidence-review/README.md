@@ -34,10 +34,8 @@ authority and evidence checks, rather than independent model training or
 opinions.
 
 The recorded case completed the runtime protocol in four attempts, but all
-four failed at least one manual semantic criterion. See the
-[`reports/063-runtime-native-cases-2026-09-13.md`](../../reports/063-runtime-native-cases-2026-09-13.md)
-for the failure details. This is a diagnostic and boundary case, not evidence
-of reliable autonomous semantic verification.
+four failed at least one manual semantic criterion. This is a diagnostic and
+boundary case, not evidence of reliable autonomous semantic verification.
 
 The preset paths are relative to `run.toml`; its database is relative to the
 selected workspace. Use a fresh workspace for an independent run; a new start

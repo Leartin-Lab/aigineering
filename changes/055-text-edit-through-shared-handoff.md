@@ -32,6 +32,5 @@ facts and their result remain available when relay synchronization is pending.
 
 See [ADR-043](../docs/adr/ADR-043-text-edit-through-shared-handoff.md) and the
 [operator workflow](../docs/reference/task-board.md#edit-task-instructions).
-This implementation does not close the wider Kanban or stable-release gates.
-Exact source, signed behavior, retained failures and outside-source installed
-control are recorded in [report 086](../reports/086-task-edit-successors-2026-10-06.md).
+This implementation does not by itself qualify the wider task workflow or a
+stable release.

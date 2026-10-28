@@ -63,8 +63,7 @@ The implementation provides:
 - focused, architecture, restart, concurrency, full-suite, build, and
   installed-artifact checks pass.
 
-All criteria passed. Real integration used redis-py against `redis:alpine` and
-covered flush/rebuild, stopped Redis, stale catch-up, corrupt/partial
-generations, two SQLite connections, concurrent rebuild, process restart, and
-domain isolation. Evidence is recorded in
-`reports/051-redis-query-projection-2026-07-31.md`.
+The implemented Redis integration covers explicit rebuild, stopped Redis,
+stale catch-up, corrupt/partial generations, concurrent SQLite connections,
+process restart and domain isolation. These boundaries require regression
+checks for the artifact being delivered.

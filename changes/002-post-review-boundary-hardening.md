@@ -73,7 +73,5 @@ request. Worker submission wire semantics are unchanged.
 - full test, lint, format, build, metadata, and artifact-content checks;
 - public and internal design/ADR/change/skill records updated together.
 
-All exit criteria passed on 2026-07-19. Evidence is recorded in
-`reports/050-post-review-boundary-hardening-2026-07-19.md`.
-Final live acceptance additionally completed an exact 20-task serial chain and
-two nested replan cycles with no rejection, recovery, or silent-failure risk.
+The original exit criteria covered exact serial work and nested replanning.
+Historical acceptance does not qualify a later artifact.

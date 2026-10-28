@@ -28,5 +28,3 @@ expanded handoff and revision publication remain future work. Distinct signed
 actors do not prove separate people or models; human decisions remain assertions.
 
 Decision: [ADR-031](../docs/adr/ADR-031-policy-bound-task-review.md).
-
-Verification: [report 077](../reports/077-policy-bound-task-review-2026-10-04.md).

@@ -42,9 +42,6 @@ document checks bind the eventual development closure to a frozen snapshot.
 
 ## Closure
 
-Core and combined independent review, 1,903 integrated tests, actual Redis
-relay/rebuild, outside-source installed runtime and two bounded real provider
-tasks passed. Preparation and installed-process failures remain retained; a
-separate editorial guide is not canonical independent acceptance. See
-[development report080](../reports/080-task-execution-dependencies-2026-10-04.md). This change does not qualify a stable release or finish the broader
-Kanban CLI goal. No tag or publication is implied.
+This change does not qualify a stable release or the wider task workflow.
+Dependency claims, relay/rebuild and installed operation require their own
+checks against the current artifact.

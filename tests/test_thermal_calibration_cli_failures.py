@@ -23,8 +23,9 @@ EXPECTED_REDIS = "redis://127.0.0.1:32770/4"
 
 
 def _configure(tmp_path, monkeypatch, scenario):
-    monkeypatch.setenv("AIGINEERING_REDIS_URL", EXPECTED_REDIS)
-    monkeypatch.setenv("AIG_REDIS_TEST_URL", EXPECTED_REDIS)
+    redis_url = os.environ.get("AIG_REDIS_TEST_URL", EXPECTED_REDIS)
+    monkeypatch.setenv("AIGINEERING_REDIS_URL", redis_url)
+    monkeypatch.setenv("AIG_REDIS_TEST_URL", redis_url)
     tests_path = str(ROOT / "tests")
     repo_path = str(ROOT)
     monkeypatch.syspath_prepend(tests_path)

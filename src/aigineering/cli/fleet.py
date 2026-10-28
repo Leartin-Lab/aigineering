@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import math
 import shlex
 
@@ -12,7 +11,6 @@ from aigineering.cli._common import _output_json
 from aigineering.cli._cycle_result import configured_cycle_payload
 from aigineering.run_failure_diagnostics import (
     format_worker_failure_detail,
-    safe_worker_error_messages,
 )
 from aigineering.configured_run import run_configured
 from aigineering.run_config import prepare_configured_run
@@ -81,60 +79,35 @@ def fleet_run(
     except (OSError, RuntimeError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
 
-    if hasattr(result, "stop_reason"):
-        payload = configured_cycle_payload(
-            result,
-            resume_command=shlex.join(
-                [
-                    "aig",
-                    "fleet",
-                    "run",
-                    "--config",
-                    str(Path(config_path).resolve()),
-                    "--task",
-                    result.contract_id,
-                    "--once",
-                    "--json",
-                ]
-            ),
-        )
-    else:
-        payload = {
-            "contract_id": result.contract_id,
-            "status": result.status,
-            "completed": result.completed,
-            "timed_out": result.timed_out,
-            "worker_errors": safe_worker_error_messages(
-                result.worker_errors, result.worker_failure_details
-            ),
-            "worker_failure_details": list(result.worker_failure_details),
-            "capture_warnings": list(result.capture_warnings),
-        }
+    payload = configured_cycle_payload(
+        result,
+        resume_command=shlex.join(
+            [
+                "aig",
+                "fleet",
+                "run",
+                "--config",
+                str(Path(config_path).resolve()),
+                "--task",
+                result.contract_id,
+                *(["--once"] if run_once else []),
+                "--json",
+            ]
+        ),
+    )
     if as_json:
         _output_json(payload)
     else:
-        if hasattr(result, "stop_reason"):
-            click.echo(f"fleet {result.status}: {result.contract_id}")
-            click.echo(f"stop_reason: {payload['stop_reason']}")
-            for blocker in payload.get("blockers", ()):
-                click.echo(f"blocker: {blocker}")
-            for error in payload.get("worker_errors", ()):
-                click.echo(f"worker error: {error}")
-            for detail in payload.get("worker_failure_details", ()):
-                click.echo(format_worker_failure_detail(detail))
-            if payload.get("next_step"):
-                click.echo(f"next_step: {payload['next_step']}")
-        else:
-            click.echo(f"fleet {result.status}: {result.contract_id}")
-            for error in safe_worker_error_messages(
-                result.worker_errors, result.worker_failure_details
-            ):
-                click.echo(f"worker error: {error}")
-            for detail in result.worker_failure_details:
-                click.echo(
-                    "worker failure detail: "
-                    + json.dumps(detail, ensure_ascii=True, sort_keys=True)
-                )
+        click.echo(f"fleet {result.status}: {result.contract_id}")
+        click.echo(f"stop_reason: {payload['stop_reason']}")
+        for blocker in payload.get("blockers", ()):
+            click.echo(f"blocker: {blocker}")
+        for error in payload.get("worker_errors", ()):
+            click.echo(f"worker error: {error}")
+        for detail in payload.get("worker_failure_details", ()):
+            click.echo("worker failure detail: " + format_worker_failure_detail(detail))
+        if payload.get("next_step"):
+            click.echo(f"next_step: {payload['next_step']}")
         for warning in result.capture_warnings:
             click.echo(f"capture warning: {warning}")
     if not result.completed:

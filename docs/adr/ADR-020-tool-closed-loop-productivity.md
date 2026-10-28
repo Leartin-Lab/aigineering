@@ -63,4 +63,3 @@ deployment, and distributed-systems decisions.
 - `tests/test_tool_worker.py`
 - `tests/test_task_productivity.py`
 - `tests/test_ai4s_runtime_primitives.py`
-- `reports/056-tool-closed-loop-productivity-2026-08-23.md`

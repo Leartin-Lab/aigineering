@@ -29,10 +29,5 @@ trusted handler configuration; it does not sandbox Python callbacks or make
 legacy extensions safe to load from untrusted sources.
 
 See [ADR-040](../docs/adr/ADR-040-injected-direct-fact-ownership.md).
-Focused author checks cover strict declarations, legacy compatibility and
-existing compound replay. Independent scoped review and the combined ownership,
-compound-replay and generic claim-order subset pass 183 tests. Integrated full
-regression and installed-artifact checks pass in
-[report 084](../reports/084-advisory-task-priority-2026-10-05.md), which separately
-records priority control behavior. Provider output and stable qualification
-remain separate gates.
+Strict ownership declarations, legacy compatibility and compound replay require
+regression coverage; they do not establish provider quality.

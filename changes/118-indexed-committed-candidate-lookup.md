@@ -41,10 +41,7 @@ Retain authentication-rejection, commitment, SQLite and full-suite gates.
 
 ## Closure
 
-The targeted author checks passed: 96 tests including the new indexed lookup,
-authentication rejection, commitment and SQLite reopen coverage. The new test
-failed against the previous schema because the query selected only the record-type
-index. With 64 signed heads, an isolated missing-ID measurement changed from 395
-to 10 VM instructions and EXPLAIN selected the exact expression index. These are
-local deterministic measurements; integrated independent review and whole-stage
-status are recorded in the [stage plan](../docs/plans/sustained-engineering-delivery.md).
+The expression index localizes the committed-Candidate lookup without changing
+identity or replay semantics. Cold index construction and unrelated historical
+consumers retain their separate costs; this change does not establish whole-run
+scaling or task delivery.

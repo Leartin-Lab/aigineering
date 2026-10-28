@@ -77,5 +77,5 @@ selected metadata, not complete signed receipts or portable signature proofs.
 
 ## Evidence
 
-Behavior, CLI, scoped ToolRegistry, canonical Harness and reconstruction tests
-are recorded in `reports/059-portable-business-artifacts-2026-09-07.md`.
+Portable artifact checks cover byte integrity, exact selectors, scoped tools
+and reconstruction. They do not establish semantic support or parser fidelity.

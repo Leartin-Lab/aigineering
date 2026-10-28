@@ -37,4 +37,3 @@ release/provider evidence is not requalified by this development slice.
 
 Decision: [ADR-027](../docs/adr/ADR-027-required-redis-collaboration.md).
 Usage: [task operations](../docs/reference/task-board.md).
-Verification: [report 072](../reports/072-task-cli-required-redis-2026-10-03.md).

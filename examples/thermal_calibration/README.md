@@ -134,13 +134,12 @@ at equality. The report displays `-0.240000` drift and `0.200000` maximum error.
 their manifests bind IDs to canonical content hashes and the standard version.
 The eval partition is only relatively held out from test-driven tool tuning.
 Because this repository is public, it is not a secret benchmark. The oracle's
-100% gate applies only to the enumerated local vectors. This package establishes
-neither a CLI end-to-end workflow nor a direct Harness comparison; those belong
-to later work packages.
+100% gate applies only to the enumerated local vectors. The oracle vectors alone establish neither CLI delivery reliability nor a
+quality/cost advantage over a direct Harness.
 
 ## Bounded ordinary Runtime profile
 
-The source-checkout G0c `g0c-runtime-v2` candidate keeps the ordinary Planner,
+The optional source-checkout `g0c-runtime-v2` profile keeps the ordinary Planner,
 Researcher, tool, continuation, claim, commitment, and independent-verifier
 owners. It changes the Researcher profile to thinking disabled; this is a
 bounded hypothesis, not evidence that thinking caused an earlier failure.
@@ -151,10 +150,8 @@ Planner and Researcher share a process-local meter: 8 attempts, an 8,192
 output-token cap per attempt, a 65,536 aggregate output reservation ceiling,
 180-second cooperative deadline, 60-second request timeout, and zero retries.
 The root's 32-unit causal task allowance is separate from those request limits.
-For the described Planner plus two-tool research route, seven provider
-requests is a planning reference if each turn uses one physical request; the
-Planner still chooses ordinary tasks dynamically. The seven-request reference
-is not a task graph or a guarantee that the run can recover after failure.
+The Planner still chooses ordinary tasks dynamically. Configured request limits
+are not a task graph or a guarantee of available recovery funds.
 
 The ordinary CLI requires native Redis for discovery, claims, and event relay.
 The existing fake-provider CLI tests preserve that Runtime path and therefore

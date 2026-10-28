@@ -1,56 +1,26 @@
-# 开发工作流适配
+# Repository workflow
 
-本文件将通用开发工作流接到 Aigineering 现有约束上。它供本仓库任务分派引用，不改变宿主指令优先级，也不扩大提交、推送或发布授权。
+This is the public contribution contract. Use it with
+[CONTRIBUTING](../CONTRIBUTING.md), [DESIGN](../DESIGN.md),
+[boundary invariants](boundary-invariants.md) and relevant public ADRs.
 
-## 仓库特性与维护约束
+- Define one bounded requirement, the affected owners, dependencies and observable
+  acceptance behavior. Recheck historical findings against current code.
+- Obtain independent plan review before implementation. Develop and verify small
+  slices; review the exact resulting snapshot independently of its author.
+- Keep ordinary implementation autonomous within the agreed scope. Return defects
+  to implementation; changes to scope or standards require the appropriate decision.
+- Integrate real dependencies and review the combined result. Author self-checks,
+  independent technical acceptance and the user's product acceptance are separate.
+- Record commands, artifacts, results and limitations against an exact snapshot.
+  Keep credentials, private inputs, raw Stores and development conversations out
+  of public documents and distributions.
+- Public reports are selected cases with inputs, procedure, outcome and limits.
+  Internal plans and diagnostic ledgers are not user documentation.
+- Commit, push, merge, tag and publish only within current authorization. A local
+  commit or development-branch update is not a stable release.
 
-Aigineering 是 Python 3.11+ 的零信任 Agent runtime，产品定位为 “Zero Trust agent runtime for auditable AI-assisted engineering and research.” 代码采用 `src/` 布局，主要使用 SQLite、Click、Ed25519 和可选 FastAPI；Redis 是默认必需的应用协作基础设施。架构边界、证据口径和交付约定以根目录 [贡献指南](../CONTRIBUTING.md)、[DESIGN.md](../DESIGN.md)、[boundary invariants](boundary-invariants.md)、相关 ADR、change 和 [development status](reference/development-status.md) 为准。
-
-本仓库优先交付可用的端到端行为。规划、工具续接、重试、恢复和独立验收须由普通 runtime 任务、签名 Candidate、已有 effect owners 及事实投影承载；示例或 CLI 不能增加第二调度器、领域 DAG、可变任务状态或只读审计写入。输入上下文、capability 路由与 authority 分开；输出是获准断言，独立接受是限定于冻结政策的证据。功能实现、夹具、真实 provider 执行、独立接受及稳定资格分别报告，不相互替代。
-
-## 工作流来源、版本与技能
-
-流程依据是仓库外部通用工作流项目 `development-workflow`，提交基线为 `c626e75`（2026-10-23）。2026-10-24 另读取其本地未提交更新，不能将这些工作树内容仅标成该提交版本；准确文件摘要如下。采用其 `WORKFLOW.md`、项目适配与计划模板、技术原则索引及技能接入说明。工作流规定每个工作包分别经过“规划—审计”和“开发—验收”，最后对预声明组合做独立总体验收；计划依赖、开工依赖、集成依赖单独记录，Ready 需独立计划审计通过且开工依赖满足。
-
-| 上游本地文件 | 2026-10-24 读取内容 SHA-256 |
-| --- | --- |
-| `WORKFLOW.md` | `dce5e11234f51bf359162e775b8a52699885398ba9de1ac36a4d46e56bb1a862` |
-| `docs/skills.md` | `dacbcf2da27fe69620de9ad8677da2aedce49d76b403c732960628b63f092090` |
-| `docs/project-adapter.md` | `5ccae804db9b96778a9364bb523caf7be3585d1189ad57a3449371fbbedb8081` |
-| `templates/plan.md` | `6bf8e811686c6431f1256fce89221f27db737ac9a73fc2168d2617e75a628a9d` |
-| `README.md` | `5f154d3e882f296f44276ba4677b36b5d9d577ab1f49a56d1a5ce383d5c5c6c8` |
-| `examples/parallel-work-example.md` | `10def7c8ed53cb80af6b839c3ec2cbc1c2a6a38282dd60086aa1b8111733ffff` |
-
-| 能力与阶段 | 来源与版本 | 本仓库用法与可用性 |
-| --- | --- | --- |
-| 规划、计划审计、协调、集成与总体验收 | `development-workflow` `c626e75` 加上述本地工作树快照 | 直接采用双循环、真实依赖、准确快照和独立角色要求；按任务引用本适配与计划。 |
-| 关键需求澄清 | 本地更新的按需 `grill-with-docs` 入口 | 先查仓库，只有整体目标、范围或关键产品取舍仍不明确时才进入集中澄清；已确认且未变化的结论直接复用。本轮阶段目标与数据库/缓存边界已有用户确认，未调用该技能，也不声称已接入其 `grilling` / `domain-modeling` 依赖。若后续直接调用，须先核实技能及依赖可用性并遵守其逐轮确认规则，不能静默替代。 |
-| 需求拆分、代码审查、TDD、缺陷诊断 | 技能索引所列上游为候选；本轮未发现或调用这些上游技能包 | 由当前原生 Agent 的文件读取、推理、补丁及 shell 能力按工作流职责执行。视为明确的流程能力替代，不声称运行了 `to-tickets`、`code-review`、`tdd` 或 `diagnosing-bugs`。若后续阶段依赖未提供的技能专属能力，记录限制并选择可验证替代；不得把技能名称存在于目录当作已安装。 |
-
-## 适配、覆盖与证据
-
-| 来源条款 | 处理 | Aigineering 执行方式 |
-| --- | --- | --- |
-| 工作流双循环、独立性与 Ready 门槛 | 沿用并补充 | 计划作者可兼任开发者；计划审计、单项验收和总体验收须由未作者独立完成并读取原始需求和证据。没有审计不得标 Ready，没有独立验收不得记为通过。 |
-| 按需需求澄清及领域文档 | 沿用 | 新的产品选择不能由 Agent 代答；仅重新澄清受影响范围，无关工作继续。结论写回同一需求计划；术语实际改变才更新词汇表，持久取舍达到现有门槛才写 ADR，不为每包重访谈或预建文档。 |
-| 工作包计划与三类依赖 | 沿用 | 在需求计划中列出交付、责任、计划/开工/集成依赖、验收行为；使用普通 runtime 内已有 owner 和能力，不以外部队列标签替代事实。 |
-| 稳定契约验证、测试先行 | 依风险适配 | 稳定规则与可复现缺陷优先用行为测试；探索性问题先明确能改变判断的证据；文档和低影响变更采用针对性检查。遵守本地根指南与贡献指南 的全套适用门禁和隔离证据要求。除用户要求外，不为形式增加或运行测试。 |
-| 小步提交及 `dev` 推送 | 沿用仓库约定 | 对授权的开发任务，在每个可回退且已完成适用检查、独立审查的增量后提交并推送 `dev`；已有检查通过后可先交付开发增量，不必等待稳定版本总体验收。本地根指南与贡献指南 的授权范围优先；本适配本身不授予新的提交、推送、合并、标签或发布权限。 |
-| 稳定发布 | 沿用 | `main`、标签及包发布须等待稳定资格和单独有效授权；推送 `dev` 不等于稳定发布。 |
-| 记录职责与文件位置 | 补充 | 本仓库在一份 `docs/plans/<topic>.md` 中维护目标、批次、计划审计、开发证据、单项验收和集成结论；仅在有独立维护价值时增加 ADR、change 或详细验收材料。适配记录放在本文件。 |
-
-技术原则索引四项均采用：一个业务规则一个语义所有者；边界输入按显式契约验证；失败与副作用保留可关联证据；优先按稳定契约验证行为。详细规则由本地根指南与贡献指南、boundary invariants 与相关 ADR 约束。适配不引入新的架构决策。
-
-## 角色、依赖与集成
-
-协调者按工作包阶段派发，提供原始需求、基线、相关 ADR/适配、文件所有权、接口、验证资源、验收标准及集成人。隔离工作区优先；若共享工作区则明确文件所有者，不覆盖在制改动。只在计划依赖允许时审计，在开工依赖齐备且计划 Ready 后开发；下游使用替身先行只能证明切片，真实集成须等待上游实现。接口或范围改变时仅让受影响的计划和证据待复核。
-
-集成人持续组合检查；全部预声明工作包单项通过后，在同一准确集成快照上由独立总体验收者核对原始目标、组合行为、失败路径、架构边界和适用证据。集成人不能验收自己的集成修改。缺少证据、真实运行或独立角色时，记录为未完成或受限。
-
-## 验证与数据边界
-
-检查目标用户可观察的 CLI 和 runtime 行为，包括成功、错误、缺失证据、预算耗尽、恢复及重开等适用路径。测试结果需绑定源代码快照或安装制品、命令、退出码、结果和未测范围；真实 provider 结果单独标注。使用隔离临时 Store、身份和 pytest 目录及合成输入。凭据和原始业务 Store 不进入公开材料。完整门禁和命令见本地根指南与贡献指南；不得把 author self-check 写成独立验收。
-
-## 文档与未决项
-
-计划文档是每次需求、批次和验收结论的唯一位置。行为、兼容性或迁移发生独立维护价值时增加 change；达到本地根指南与贡献指南 所述门槛时才增加 ADR。只更新受实际行为影响的设计和使用文档。真实执行、失败源覆盖、复杂任务与规模、provider、重建和稳定资格仍需按其各自证据要求核对；旧实验结果不能自动成为当前结论。
+One semantic owner per rule, explicit boundary validation, correlated failure
+evidence and behavior checks through stable interfaces remain the technical
+baseline. Do not add a runtime scheduler, authority source or domain mechanism
+to support a contribution workflow.

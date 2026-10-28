@@ -28,6 +28,6 @@ records unavailable recovery; failed-task recovery retains its existing path.
 Handoff metadata explicitly references both source and successor in task-scoped
 events, without extracting task references from operator text.
 
-Verification: [report 076](../reports/076-signed-task-handoff-2026-10-04.md).
+
 
 Decision: [ADR-030](../docs/adr/ADR-030-transactional-task-handoff.md).

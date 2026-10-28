@@ -65,6 +65,7 @@ class FleetRunResult:
     worker_errors: tuple[str, ...] = ()
     capture_warnings: tuple[str, ...] = ()
     worker_failure_details: tuple[dict[str, Any], ...] = ()
+    projection: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -240,7 +241,19 @@ def run_local_fleet(
         worker_errors=_drain_errors(errors),
         capture_warnings=tuple(capture_warnings),
         worker_failure_details=_drain_failure_details(failure_details),
+        projection=_final_target_projection(db_path, result_contract_id),
     )
+
+
+def _final_target_projection(db_path: str, contract_id: str) -> dict[str, Any]:
+    snapshot = SQLiteStore.snapshot_from_path(db_path)
+    try:
+        contract = snapshot.get_contract(contract_id)
+        if contract is None:
+            raise ValueError(f"fleet target Contract {contract_id!r} does not exist")
+        return project_task_status(contract, snapshot)
+    finally:
+        snapshot.close()
 
 
 def run_local_cycle(

@@ -1,52 +1,32 @@
-# Documentation map
+# Documentation
 
-This index routes readers to the one public owner for each kind of truth. It is
-navigation, not another architecture specification.
+Start with [English](../README.md) or [中文](../README.zh-CN.md).
 
-| Question | Public owner |
+## Use Aigineering
+
+| Goal | Read |
 | --- | --- |
-| What does the runtime implement now? | [`DESIGN.md`](../DESIGN.md) |
-| Which guarantees may not be weakened? | [`boundary-invariants.md`](boundary-invariants.md) |
-| Why was a durable architecture choice made? | [`adr/`](adr/) |
-| What bounded design transition is underway or complete? | [`changes/`](../changes/) |
-| What is supported by the current release? | [`ROADMAP.md`](../ROADMAP.md) |
-| Where is reproducible release evidence? | [`reports/`](../reports/) |
-| How do other implementations verify the wire protocol? | [`conformance/`](../conformance/) |
-| How are release evidence and rebuild failures reproduced? | [`reference/release-evidence.md`](reference/release-evidence.md) |
-| How do contributors change the project? | [`CONTRIBUTING.md`](../CONTRIBUTING.md) |
-| How are work packages planned, independently reviewed and integrated? | [`development-workflow-adapter.md`](development-workflow-adapter.md) |
-| How does an AI coding worker use this repository? | [`SKILL.md`](../SKILL.md) |
-| How do procedures become reusable, evaluated methods? | [`methods.md`](methods.md) |
-| How are examples launched and continued through one entry? | [`reference/configured-runs.md`](reference/configured-runs.md) |
-| How do I discover, assign, prioritize, edit, comment on, hold, promote, order by prerequisites, hand off, review, revise, observe, retry and export tasks, or upgrade and repair Redis? | [`reference/task-board.md`](reference/task-board.md) |
-| How do I import, associate, list and copy task attachments? | [`reference/task-attachments.md`](reference/task-attachments.md) |
-| How does an existing agent harness become a Worker? | [`reference/agent-harness-migration.md`](reference/agent-harness-migration.md) |
-| Where are the declarative runtime-native case studies? | [`examples/README.md`](../examples/README.md) |
+| Understand current support and limits | [Capabilities](reference/development-status.md) |
+| Start a configured task with Skills and tools | [Configured runs](reference/configured-runs.md) |
+| Operate the CLI task board and handle failures | [Task operations](reference/task-board.md) |
+| Connect an existing Agent Harness | [Harness integration](reference/agent-harness-migration.md) |
+| Import and associate files | [Attachments](reference/task-attachments.md) |
+| Run a persistent local Fleet | [Fleet service](reference/local-fleet-service.md) |
+| Find a runnable example or its outcome | [Examples](../examples/README.md), [case reports](../reports/README.md) |
 
-## Reading paths
+Agents should start with the short [operating guide](../SKILL.md), then load only
+the reference needed for the current task. A link is navigation, not required
+context for every invocation.
 
-Runtime users should start with the [README](../README.md), then use the
-[roadmap](../ROADMAP.md) for supported scope and the
-[design](../DESIGN.md) for implemented behavior.
+## Technical reference
 
-Contributors changing a correctness boundary must read the
-[boundary invariants](boundary-invariants.md), the relevant
-[architecture decision](adr/), and the active or completed
-[change record](../changes/) before changing code. Acceptance claims belong in
-[reports](../reports/) only after their commands and evidence are reproducible.
+[DESIGN](../DESIGN.md) owns current architecture; [boundary invariants](boundary-invariants.md)
+define runtime guarantees. [ADRs](adr/) explain durable decisions, while
+[changes](../changes/) record implemented public compatibility and behavior.
+[Conformance](../conformance/) defines protocol interoperability. These are
+on-demand references, not the normal getting-started path.
 
-The [whitepaper](whitepaper.md) explains the model at a conceptual level. It
-does not override the implemented design, invariants, or release scope.
-
-## Ownership rules
-
-- Current behavior is updated in `DESIGN.md`, not inferred from historical ADRs.
-- ADRs record durable decisions and consequences, not implementation progress.
-- Change records define migration and closure for one bounded transition.
-- Reports preserve important acceptance evidence, not exploratory reasoning.
-- Stable reference material gets a separate document only when it has an
-  independent reader and executable verification.
-- Private review notes, analogies, credentials, and speculative work never
-  enter public release artifacts.
-
-- [Persistent local Fleet service](reference/local-fleet-service.md)
+For evaluated procedures, read [methods](methods.md). Contributors use
+[CONTRIBUTING](../CONTRIBUTING.md); reconstruction checks are described in
+[release evidence](reference/release-evidence.md). [ROADMAP](../ROADMAP.md) states
+current priorities rather than a development diary.

@@ -1,6 +1,6 @@
 [project]
 name = "aigineering"
-version = "0.5.13.dev0"
+version = "0.5.14"
 description = "Zero Trust agent runtime for auditable AI-assisted engineering and research."
 requires-python = ">=3.11"
 license = "MIT"
@@ -39,8 +39,28 @@ build-backend = "hatchling.build"
 packages = ["src/aigineering"]
 
 [tool.hatch.build.targets.sdist]
+include = [
+    "/src/aigineering/**",
+    "/examples/**",
+    "/docs/**",
+    "/conformance/**",
+    "/changes/**",
+    "/reports/**",
+    "/scripts/**",
+    "/README.md",
+    "/README.zh-CN.md",
+    "/DESIGN.md",
+    "/ROADMAP.md",
+    "/SKILL.md",
+    "/CONTRIBUTING.md",
+    "/LICENSE",
+    "/pyproject.toml",
+    "/compose.yaml",
+]
 exclude = [
     "tests/**",
+    "**/.env",
+    "**/.env.*",
 ]
 
 [project.optional-dependencies]
@@ -51,6 +71,7 @@ redis = ["redis>=5.0"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]
 asyncio_mode = "auto"
 markers = [
     "stress: stress tests that create many contracts and verify at scale",

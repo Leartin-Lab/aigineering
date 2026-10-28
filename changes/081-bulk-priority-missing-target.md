@@ -4,4 +4,5 @@ Bulk task-priority operations now distinguish a genuinely absent Contract from s
 
 The same check runs before history resolution and publication in both validation and publication paths. Single-target priority now uses the same not-found classification for a genuinely absent Contract. The bulk collector's existing partial-result, per-target key, accepted-pending, and replay semantics remain unchanged.
 
-Focused verification: 41 tests passed across task-priority application, single CLI, bulk priority/retry, and ownership architecture tests. Independent focused review passed 41 tests; root full verification passed 2523. Ruff, format, build and Twine passed. Source-external installed signed fixtures with native Redis verified mixed priority/retry results, relay-pending retention and exact replay. The original failed priority request was recovered with unchanged intent and proved read-only after a retained checker failure. These are metadata-only fixtures with no Worker or provider execution; see [development verification](../reports/102-bulk-priority-verification-2026-10-10.md).
+Mixed priority/retry outcomes, relay-pending retention and exact replay are
+metadata operations. Their fixtures do not prove Worker or provider execution.

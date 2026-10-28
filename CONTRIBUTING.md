@@ -8,6 +8,10 @@ Use the [repository workflow adapter](docs/development-workflow-adapter.md)
 when planning and delegating work. Each work package has its own plan audit
 and implementation acceptance; parallel work follows actual dependencies and
 explicit file ownership. Record the combined result against an exact snapshot.
+Keep independent technical acceptance, the user's product acceptance and release
+authorization separate. Share representative actual results for feedback, then
+return defects or scope changes to the appropriate loop in the existing plan.
+Ordinary implementation remains autonomous within the agreed scope.
 
 ## Branch Flow
 

@@ -1,15 +1,12 @@
 # Aigineering Design
 
-Status: implemented truth for v0.5.13.dev0
+Status: implemented truth for v0.5.14
 
-This document describes the v0.5.13.dev0 implementation in this source tree.
-The configured-run entry is a development addition; v0.5.12 live release evidence
-is bound to its earlier snapshot, not to this development tree.
-Runtime release-preparation gates passed for local verification; this is not a
-published release. See the
-[stabilization report](reports/070-usable-cli-stabilization-2026-10-03.md).
-Future designs do not belong here until their implementation, tests, migration,
-and release evidence are complete.
+This document describes the v0.5.14 implementation in this source tree.
+It is an implementation reference; delivery qualification depends on evidence
+for the applicable case and scope.
+Future designs do not belong here until their implementation, tests, migration
+and applicable verification are complete.
 
 ## Scope
 
@@ -1411,6 +1408,11 @@ recovery successor is a separate task and must be run explicitly with
 Contract's `outputs` and session `produced_asset_ids`, rather than assuming a
 fixed output name.
 
+Quick-goal mode rejects explicit `--wait-timeout` and `--interval` because it
+does not implement those wait/poll controls. Defaults do not create a quick-run
+deadline. Provider request limits use `--timeout` and `--max-retries`; target and
+configured runs retain their existing wait behavior.
+
 `aig run --task CONTRACT_ID` checks an already terminal target before executing
 Worker work and claims only that Contract and its immutable descendants.
 `aig run --once` still claims one task from the domain-wide local pool. Both
@@ -1599,7 +1601,7 @@ terminal, or replay owner.
 
 ## Release limits
 
-The v0.5.13.dev0 development tree extends the local reference runtime. It does
+The v0.5.14 source describes a bounded local single-machine CLI runtime. It does
 not provide:
 
 - a cross-machine distributed Store;
@@ -1609,8 +1611,10 @@ not provide:
 - a guarantee that authorized model content is true;
 - a generic workflow engine.
 
-The release claim is bounded by the tests, conformance vectors, artifact checks,
-and real-LLM scenarios recorded in `reports/`.
+The version alone does not qualify a delivery. Each case claim depends on its
+tested artifact and evidence; broader release qualification also requires the
+applicable verification gates. Historical reports remain tied to their original
+artifacts and do not establish v0.5.14 provider qualification.
 
 Planning compile stages retain the original parent's full acceptance policy.
 Independent qualification and ordinary output completion share unfinished-child
@@ -1622,5 +1626,4 @@ obligation closes. Newly cancelled descendants release claims atomically and
 reject late submissions. This corrects deeper work remaining claimable after
 parent completion; historical already-completed trees require separately
 authorized repair and are not rewritten by rebuilding views.
-See [ADR-025](docs/adr/ADR-025-guarded-review-closure.md) and
-[guarded review evidence](reports/065-guarded-claim-review-2026-09-13.md).
+See [ADR-025](docs/adr/ADR-025-guarded-review-closure.md).

@@ -12,4 +12,6 @@ Only exact homogeneous built-in shapes use the hint. Mixed, graph, injected, unc
 
 ## Verification and limits
 
-The corrected five-file component passed independent conformance, 216 affected/governance tests and full-context semantic/selector probes; exact scope and retained failures are in the [plan](../docs/plans/asset-proposal-projection-context.md). Root combination, artifact and overall gates are tracked in the [development report](../reports/113-asset-context-direct-transport-development-2026-10-25.md). This localizes only effect-projection context: pre-commit/writer FactReducer, claim and other historical consumers remain open.
+This localizes only effect-projection context: pre-commit/writer FactReducer,
+claim and other historical consumers remain open. It is not whole-run locality
+or stable-release qualification.

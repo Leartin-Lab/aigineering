@@ -53,7 +53,7 @@ limits, not billed token usage or task allowance.
 
 The run writes its existing auxiliary Worker log. The four additional event
 types record permit admission, entry to the bounded transport, complete
-response metadata, and successful G0a finalization. They contain no request or
+response metadata, and successful request-meter finalization. They contain no request or
 response body, prompt, tool arguments, reasoning, credential, raw usage object,
 or arbitrary exception text. Capture is auxiliary: a capture warning does not
 change Runtime execution. A missing/invalid credential or invalid budget

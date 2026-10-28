@@ -12,4 +12,6 @@ Legacy explicit name-only helper callers retain their existing API behavior. No 
 
 ## Verification and limits
 
-Independent49 focused tests, four actual signed publication vectors, five-file Ruff/format, and an old-code-created bad terminal reopened/rebuilt without changing its facts/digest passed. Exact snapshots and failure classification are in the [plan](../docs/plans/pending-asset-output-policy.md). Root combination and separate overall gates are tracked in [report113](../reports/113-asset-context-direct-transport-development-2026-10-25.md). This is a correctness repair, not Asset locality or stable-release qualification.
+This is a correctness repair, not Asset locality or stable-release qualification.
+Historical committed facts remain unchanged; current policy checks require
+regression coverage of the actual pending output batch.

@@ -62,8 +62,6 @@ acceptance. It is local routing consistency, not OS isolation or multi-user ACLs
 External workspace adoption does not promise discovery from an unrelated cwd.
 Archive does not prevent explicitly accessing a directory through `-C`.
 
-Lifecycle, controlled partial-failure, concurrent CLI creation and domain
-isolation have [bounded verification](../../reports/100-named-local-board-verification-2026-10-09.md).
-This does not qualify a stable release
-or prove real-provider output quality. Single-domain execution and acceptance
-remain ahead of further convenience expansion.
+Lifecycle, controlled partial failure, concurrent creation and domain isolation
+require bounded checks. Workspace routing does not qualify real-provider output
+quality or a stable release.

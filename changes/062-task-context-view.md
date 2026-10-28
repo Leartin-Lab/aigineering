@@ -12,5 +12,3 @@ redacted, while nonpromptable and tombstoned content is refused. Metadata and
 errors omit content, policy explanations, and private source details. Queries
 retain the required Redis collaboration check and read from an immutable SQLite
 snapshot.
-
-See [bounded integrated verification](../reports/092-task-context-view-2026-10-07.md).

@@ -1,7 +1,7 @@
 # Change 132: Thermal calibration fail-method adapter
 
-Status: Implemented; independent component and ordinary CLI fixture checks
-passed. Exact combined development evidence is tracked in [report 117](../reports/117-verifier-failure-development-2026-10-27.md).
+Status: Implemented. Component and ordinary CLI fixtures cover the adapter;
+they do not retroactively qualify earlier failed model trials.
 
 The thermal-calibration verifier now recognizes the current claimed
 `/fail` Contract output compiled by `TaskDelegationPlugin`: the sole
@@ -23,6 +23,6 @@ independent copied-fact proof; the direct Candidate test remains unsigned.
 
 This change is limited to the example adapter and its regressions. It does not
 change generic runtime method semantics, task policy, verifier evidence rules,
-or model behavior. The original G0e3 trial outcomes remain unchanged; this
+or model behavior. The original trial outcomes remain unchanged; this
 adapter correction is not evidence of successful provider execution or
 independent acceptance.

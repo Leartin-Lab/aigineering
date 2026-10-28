@@ -26,7 +26,6 @@ invocation failures are not yet included as verified publication relations.
 Malformed or conflicting evidence is reported as a safe issue and cannot expand
 the verified component.
 
-Bounded development verification covers both endpoints, malformed history,
-publication ordering, required Redis failures, read-only inspection and
-private-copy reconstruction. See the [verification report](../reports/101-verified-task-lineage-2026-10-10.md)
-for the tested snapshot and remaining lifecycle gates.
+Read-only lineage checks cover supported endpoints and exact publication
+proofs. Malformed history, required Redis failures and reconstruction need
+artifact-specific verification; navigation does not grant task authority.

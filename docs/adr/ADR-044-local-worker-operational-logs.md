@@ -81,10 +81,10 @@ failures disable capture without changing execution.
 Deterministic tests and fake-transport retry controls verify the selected
 behavior. They are not real-provider evidence or stable-release qualification.
 
-## G0c Runtime-metered provider attempts
+## Runtime-metered provider attempts
 
 The opt-in Runtime profile adds four typed auxiliary events: `provider.permit_admitted`, `provider.transport_entered`, `provider.response_observed`, and `provider.attempt_finalized`. The capture envelope is unchanged. Writer allowlists and the strict reader enforce exact closed schemas; unknown or missing event fields are rejected. These events remain invocation-scoped observations associated through the existing exact claim proof.
 
-Permit admission and transport entry describe local boundaries and do not prove provider receipt. Response observation records bounded status, response byte count, decoder state and usage-member state only. Attempt finalization is emitted only after a successful G0a finish. Raw usage mappings, response bodies, prompts, headers, credential values and arbitrary exception text remain excluded. Capture failure remains auxiliary and cannot retry transport or alter task execution.
+Permit admission and transport entry describe local boundaries and do not prove provider receipt. Response observation records bounded status, response byte count, decoder state and usage-member state only. Attempt finalization is emitted only after successful meter finalization. Raw usage mappings, response bodies, prompts, headers, credential values and arbitrary exception text remain excluded. Capture failure remains auxiliary and cannot retry transport or alter task execution.
 
-The G0c profile shares one process-local meter epoch between its two ordinary LLMWorkers, with zero internal retries. It does not persist or restore a budget across processes. Its 8,192-token output cap, timeout of at most 60 seconds, and 4 MiB + 1 byte response-size sentinel are bounds of this configured profile, not a general provider protocol. Usage metadata is not a signed fact, billing record or acceptance decision. Existing strict task-log reading, error containment and required Redis behavior remain unchanged.
+The opt-in metered profile shares one process-local meter epoch between its two ordinary LLMWorkers, with zero internal retries. It does not persist or restore a budget across processes. Its 8,192-token output cap, timeout of at most 60 seconds, and 4 MiB + 1 byte response-size sentinel are bounds of this configured profile, not a general provider protocol. Usage metadata is not a signed fact, billing record or acceptance decision. Existing strict task-log reading, error containment and required Redis behavior remain unchanged.

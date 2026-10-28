@@ -24,5 +24,3 @@ database rewrites. Allowance remains a work-expansion limit, not token billing.
 
 See [ADR-034](../docs/adr/ADR-034-paired-causal-allowance-returns.md). This development
 change does not establish full Kanban parity or stable-release qualification.
-
-Development evidence is in [report 079](../reports/079-expanded-root-handoff-2026-10-04.md).

@@ -20,9 +20,7 @@ or output-satisfied fresh targets reject. Dependencies, activation, assignment,
 capacity, claims, allowance and acceptance are unchanged. Redis remains required;
 pending relay preserves accepted facts.
 
-No Contract identity, Store schema or reader-floor change. Task text editing and
-the wider Kanban and stable-release gates remain separate work. See
+No Contract identity, Store schema or reader-floor change. Promotion does not
+edit task text or reset claims. See
 [ADR-042](../docs/adr/ADR-042-exact-hold-set-promotion.md) and the
 [operator workflow](../docs/reference/task-board.md#recover-manually-held-work).
-Signed behavior, independent review, actual Redis and outside-source installed
-control evidence are recorded in [report 085](../reports/085-exact-hold-promotion-2026-10-05.md).

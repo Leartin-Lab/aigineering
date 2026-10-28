@@ -24,6 +24,3 @@ Target-specific CLI regressions cover unrelated ready work, a terminal target,
 ordinary and recovery descendants, tool-capability filtering, blocked idle
 output, and timeout guidance. CLI wait and interval numeric validation is
 provided at the command boundary.
-
-Integrated CLI verification and release evidence are recorded in
-[report 070](../reports/070-usable-cli-stabilization-2026-10-03.md).

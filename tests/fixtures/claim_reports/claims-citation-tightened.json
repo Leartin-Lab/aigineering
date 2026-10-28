@@ -1,0 +1,49 @@
+{
+  "final_output": {
+    "content": {
+      "claims": [
+        {
+          "claim_id": "claim-1",
+          "evidence_excerpt_ids": [
+            "excerpt-results",
+            "excerpt-design"
+          ],
+          "original_text": "Students who sleep at least seven hours perform better on examinations.",
+          "rationale": "The results excerpt reports that the at-least-seven-hour group had a higher mean examination score than the less-than-six-hour group, and the design excerpt confirms both sleep duration and examination score were measured in the same cross-sectional survey. This is an associational, group-level comparison, which the claim's wording ('perform better') matches without asserting causation.",
+          "revised_text": "Students who sleep at least seven hours perform better on examinations.",
+          "verdict": "supported"
+        },
+        {
+          "claim_id": "claim-2",
+          "evidence_excerpt_ids": [
+            "excerpt-results",
+            "excerpt-design",
+            "excerpt-limitations"
+          ],
+          "original_text": "Getting at least seven hours of sleep improves examination performance.",
+          "rationale": "The claim asserts a causal effect ('improves'), but the results excerpt explicitly notes no random assignment or longitudinal follow-up was performed, and the design is a cross-sectional survey. The limitations excerpt further cites residual confounding and recall error in self-reported sleep, which preclude causal interpretation.",
+          "revised_text": "Getting at least seven hours of sleep is associated with better examination performance in this cross-sectional survey, though the design cannot establish that sleep improves performance.",
+          "verdict": "unsupported"
+        },
+        {
+          "claim_id": "claim-3",
+          "evidence_excerpt_ids": [
+            "excerpt-results",
+            "excerpt-design",
+            "excerpt-limitations"
+          ],
+          "original_text": "The finding applies broadly to university students because the adjusted association was robust.",
+          "rationale": "The adjusted association did remain after controlling for age, year of study, and self-reported employment hours (excerpt-results), but the design excerpt shows recruitment from only two campuses and the limitations excerpt states that two-campus sampling and the single examination outcome limit population-wide interpretation. Generalizing broadly to all university students is therefore overstated.",
+          "revised_text": "The adjusted association was observed among students recruited from two campuses, but two-campus sampling and the single examination outcome limit generalization to university students broadly.",
+          "verdict": "overstated"
+        }
+      ],
+      "limitations": [
+        "Sampling limitation: participants were recruited from only two campuses, so the sample may not represent university students broadly and population-wide generalization is not supported.",
+        "Self-report limitation: sleep duration was self-reported, which is subject to recall error and may not accurately reflect actual sleep.",
+        "Additional design limitations: the cross-sectional design with no random assignment or longitudinal follow-up, residual confounding, and the single examination outcome preclude causal interpretation."
+      ],
+      "revised_summary": "A cross-sectional survey of 1,248 university students measured self-reported sleep duration and one end-of-term examination score. Students reporting at least seven hours of sleep had higher average scores than students reporting less than six hours, and this association remained after adjustment for age, year of study, and self-reported employment hours. Because the design was cross-sectional with no random assignment or longitudinal follow-up, the results support an association between longer self-reported sleep and higher examination scores rather than a causal effect of sleep on performance. Two-campus sampling, self-reported sleep, residual confounding, and the single examination outcome further limit causal and population-wide interpretation."
+    }
+  }
+}

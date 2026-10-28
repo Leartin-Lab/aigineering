@@ -26,6 +26,3 @@ No Contract identity, Store schema or reader floor changes. Ordering applies to
 one scan snapshot, with no global queue, fairness, aging or start-time guarantee.
 Older readers may ignore the hint. See [ADR-041](../docs/adr/ADR-041-advisory-task-priority.md)
 and the [operator workflow](../docs/reference/task-board.md#prioritize-eligible-work).
-Full regression, independently reviewed integration and installed-artifact
-checks pass in [report 084](../reports/084-advisory-task-priority-2026-10-05.md).
-Provider execution and stable qualification remain separate gates.

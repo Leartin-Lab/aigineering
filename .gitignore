@@ -34,3 +34,5 @@ htmlcov/
 .aig/
 .omo/
 AGENTS.md
+.task-evidence/
+.worktrees/

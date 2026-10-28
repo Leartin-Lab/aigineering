@@ -55,8 +55,5 @@ format, build, source-external artifact checks and documentation governance.
 
 ## Closure
 
-Focused and full tests, independent review and source-external installed
-metadata workflows passed; see
-[verification scope](../reports/100-named-local-board-verification-2026-10-09.md).
-This workspace convenience does not establish current
-real-provider task acceptance, whole Kanban parity or stable-release readiness.
+This workspace convenience does not establish real-provider task acceptance,
+whole workflow parity or stable-release readiness.

@@ -151,7 +151,6 @@ def hash_contract_v2(
     the identity computation.  Two identical child definitions under
     different parents will produce different contract IDs.
 
-    This is required by ADR-002 and the 050 runtime boundary plan.
     Legacy ``hash_contract`` is preserved for backward compatibility.
     """
     fields: dict[str, object] = {
