@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
 from aigineering.core.candidate_publisher import publish_effect
@@ -19,7 +21,11 @@ from aigineering.plugins.handoff import (
     project_task_handoffs,
 )
 from aigineering.plugins.handoff_tree import inventory_handoff_tree
-from aigineering.plugins.task_successors import remaining_output_slots
+from aigineering.plugins.task_successors import (
+    remaining_output_slots,
+    satisfied_asset_ids,
+    satisfied_output_slots,
+)
 from aigineering.cli.task_handoff import _human_handoff
 from aigineering.protocol.candidate import (
     ActorKey,
@@ -316,6 +322,41 @@ def test_system_observation_repairs_own_output_but_not_business_source_output():
         (system_child.id, ((observation_name, (observation.id,), ()),)),
     )
     assert remaining_output_slots(source, context) == (observation_name,)
+
+
+def test_successor_output_selection_preserves_entry_compatibility():
+    empty = _contract("empty")
+    assert satisfied_output_slots(empty, object()) == ()
+    assert remaining_output_slots(empty, object()) == ()
+
+    source = _contract("source", outputs=("declared",))
+    repeated = replace(source, outputs=("draft", "other", "draft"))
+    assets = tuple(
+        Asset(
+            id=asset_id,
+            name=name,
+            content="fixture",
+            created_by=source.id,
+            origin=origin,
+        )
+        for asset_id, name, origin in (
+            ("asset:draft-z", "draft", "human"),
+            ("asset:observation", "draft", "tool"),
+            ("asset:other", "other", "human"),
+            ("asset:draft-a", "draft", "human"),
+            ("asset:caller-name", "caller-name", "human"),
+            ("asset:empty-name", "", "human"),
+        )
+    )
+    context = EffectProjectionContext(contracts=(repeated,), assets=assets)
+
+    assert satisfied_output_slots(repeated, context) == (
+        ("draft", ("asset:draft-a", "asset:draft-z")),
+        ("other", ("asset:other",)),
+        ("draft", ("asset:draft-a", "asset:draft-z")),
+    )
+    assert satisfied_asset_ids(source, "caller-name", context) == ("asset:caller-name",)
+    assert satisfied_asset_ids(source, "", context) == ("asset:empty-name",)
 
 
 def test_human_expanded_handoff_shows_copyable_exact_decisions():

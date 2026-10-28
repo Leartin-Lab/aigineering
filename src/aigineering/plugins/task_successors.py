@@ -26,49 +26,56 @@ def satisfied_asset_ids(
     context: EffectProjectionContext,
 ) -> tuple[str, ...]:
     """Return exact eligible Asset IDs satisfying one output slot."""
-    view = ProjectionStoreView(context)
-    slot = replace(contract, outputs=(output_name,))
-    if not all_outputs_satisfied(slot, view):
-        return ()
-    qualified = {
-        str(record.payload.get("asset_id", ""))
-        for record in context.runtime_records
-        if record.record_type == "output.qualified"
-        and record.payload.get("contract_id") == contract.id
-        and record.payload.get("output_name") == output_name
-    }
-    selected: set[str] = set()
-    for asset in context.assets:
-        if asset.name != output_name:
-            continue
-        if (
-            contract.acceptance_policy is not None
-            and contract.acceptance_policy.get("mode") == "independent"
-        ):
-            if (
-                not is_business_output(asset, output_name)
-                or asset.id not in qualified
-                or not _is_contract_or_descendant(asset.created_by, contract.id, view)
-            ):
-                continue
-        elif contract.origin in {"system", "recovery"}:
-            if asset.created_by != contract.id:
-                continue
-        elif not is_business_output(asset, output_name):
-            continue
-        selected.add(asset.id)
-    return tuple(sorted(selected))
+    slots = satisfied_output_slots(replace(contract, outputs=(output_name,)), context)
+    return slots[0][1] if slots else ()
 
 
 def satisfied_output_slots(
     contract: Contract, context: EffectProjectionContext
 ) -> tuple[tuple[str, tuple[str, ...]], ...]:
     """Return satisfied declared slots and their exact qualifying Asset IDs."""
-    return tuple(
-        (name, ids)
-        for name in contract.outputs
-        if (ids := satisfied_asset_ids(contract, name, context))
-    )
+    if not contract.outputs:
+        return ()
+
+    view = ProjectionStoreView(context)
+    slots = []
+    for name in contract.outputs:
+        slot = replace(contract, outputs=(name,))
+        if not all_outputs_satisfied(slot, view):
+            continue
+        qualified = {
+            str(record.payload.get("asset_id", ""))
+            for record in context.runtime_records
+            if record.record_type == "output.qualified"
+            and record.payload.get("contract_id") == contract.id
+            and record.payload.get("output_name") == name
+        }
+        selected: set[str] = set()
+        for asset in context.assets:
+            if asset.name != name:
+                continue
+            if (
+                contract.acceptance_policy is not None
+                and contract.acceptance_policy.get("mode") == "independent"
+            ):
+                if (
+                    not is_business_output(asset, name)
+                    or asset.id not in qualified
+                    or not _is_contract_or_descendant(
+                        asset.created_by, contract.id, view
+                    )
+                ):
+                    continue
+            elif contract.origin in {"system", "recovery"}:
+                if asset.created_by != contract.id:
+                    continue
+            elif not is_business_output(asset, name):
+                continue
+            selected.add(asset.id)
+        ids = tuple(sorted(selected))
+        if ids:
+            slots.append((name, ids))
+    return tuple(slots)
 
 
 def remaining_output_slots(

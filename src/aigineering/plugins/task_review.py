@@ -22,38 +22,12 @@ from aigineering.core.output_satisfaction import (
     is_business_output,
 )
 from aigineering.core.projection_context import EffectProjectionContext
+from aigineering.core.projection_store_view import ProjectionStoreView
 from aigineering.protocol.candidate import CandidateEffect, CandidateProposal
 from aigineering.protocol.effect_builders import asset_attestation_effect
 from aigineering.protocol.identity import contract_from_fields
 from aigineering.protocol.runtime_record import RuntimeRecord, create_runtime_record
 from aigineering.protocol.types import Asset, Contract
-
-
-class _ContextAssetReader:
-    """Read-only exact-ID adapter used to verify reviewer disclosure."""
-
-    def __init__(self, assets: tuple[Asset, ...]) -> None:
-        self._assets = assets
-
-    def get_asset(self, asset_id: str) -> Asset | None:
-        return next((asset for asset in self._assets if asset.id == asset_id), None)
-
-    def get_assets_by_ids(self, asset_ids: tuple[str, ...]) -> list[Asset]:
-        wanted = set(asset_ids)
-        return [asset for asset in self._assets if asset.id in wanted]
-
-    def get_assets_by_name(self, name: str) -> list[Asset]:
-        return [asset for asset in self._assets if asset.name == name]
-
-
-class _ContextContractReader:
-    """Read-only ancestry adapter over loaded contracts."""
-
-    def __init__(self, contracts: tuple[Contract, ...]) -> None:
-        self._contracts = {contract.id: contract for contract in contracts}
-
-    def get_contract(self, contract_id: str) -> Contract | None:
-        return self._contracts.get(contract_id)
 
 
 def is_task_review_source_eligible(source: Contract) -> bool:
@@ -141,10 +115,10 @@ def project_task_review_request_effect(
         target.name != output_name
         or target.tombstoned
         or not is_business_output(target, output_name)
-        or not _is_contract_or_descendant(
-            target.created_by, source.id, _ContextContractReader(context.contracts)
-        )
     ):
+        raise ValueError("task.review.request target is not an eligible source output")
+    view = ProjectionStoreView(context)
+    if not _is_contract_or_descendant(target.created_by, source.id, view):
         raise ValueError("task.review.request target is not an eligible source output")
     validate_claim_bound_output(
         context, target, _contract(context.contracts, target.created_by)
@@ -194,7 +168,7 @@ def project_task_review_request_effect(
         sensitive_input_policy=None,
         acceptance_policy=None,
     )
-    disclosed = compute_disclosure(reviewer, _ContextAssetReader(context.assets))
+    disclosed = compute_disclosure(reviewer, view)
     if {asset.id for asset in disclosed} != set(context_ids):
         raise ValueError("reviewer disclosure does not match its exact frozen context")
 
@@ -319,9 +293,10 @@ def project_task_review_decision_effect(
     target = next((asset for asset in context.assets if asset.id == target_id), None)
     if target is None or _is_qualified(source.id, output_name, context.runtime_records):
         raise ValueError("task.review.decide source output is no longer eligible")
-    if not is_business_output(target, output_name) or not _is_contract_or_descendant(
-        target.created_by, source.id, _ContextContractReader(context.contracts)
-    ):
+    if not is_business_output(target, output_name):
+        raise ValueError("task.review.decide target is no longer source-owned")
+    view = ProjectionStoreView(context)
+    if not _is_contract_or_descendant(target.created_by, source.id, view):
         raise ValueError("task.review.decide target is no longer source-owned")
     validate_claim_bound_output(
         context, target, _contract(context.contracts, target.created_by)
@@ -336,11 +311,7 @@ def project_task_review_decision_effect(
         or report.name != report_name
         or report.tombstoned
         or not is_business_output(report, report_name)
-        or not _is_contract_or_descendant(
-            report.created_by,
-            reviewer.id,
-            _ContextContractReader(context.contracts),
-        )
+        or not _is_contract_or_descendant(report.created_by, reviewer.id, view)
     ):
         raise ValueError("task.review.decide requires the exact reviewer report output")
     validate_claim_bound_output(
