@@ -7,7 +7,11 @@ from dataclasses import dataclass, replace
 import json
 import math
 
-from aigineering.core.output_satisfaction import all_outputs_satisfied
+from aigineering.core.output_satisfaction import (
+    _is_contract_or_descendant,
+    all_outputs_satisfied,
+)
+from aigineering.core.projection_store_view import ProjectionStoreView
 from aigineering.core.publication_history import (
     read_effect_types,
     validate_published_member,
@@ -215,9 +219,9 @@ def project_asset_attestation_records(
         isinstance(value, str) and value for value in evidence_value
     ):
         raise ValueError("asset.attest evidence_asset_ids must be strings")
-    contracts = {contract.id: contract for contract in context.contracts}
+    view = ProjectionStoreView(context)
     assets = {asset.id: asset for asset in context.assets}
-    contract = contracts.get(contract_id)
+    contract = view.get_contract(contract_id)
     asset = assets.get(asset_id)
     if contract is None:
         raise ValueError(f"asset.attest references unknown Contract {contract_id!r}")
@@ -225,11 +229,11 @@ def project_asset_attestation_records(
         raise ValueError(f"asset.attest references unknown Asset {asset_id!r}")
     if output_name not in contract.outputs or asset.name != output_name:
         raise ValueError("asset.attest must bind an exact declared output slot")
-    if not _is_contract_or_descendant(asset.created_by, contract.id, contracts):
+    if not _is_contract_or_descendant(asset.created_by, contract.id, view):
         raise ValueError(
             "asset.attest target was not produced for this Contract or its descendants"
         )
-    validate_claim_bound_output(context, asset, contracts[asset.created_by])
+    validate_claim_bound_output(context, asset, view.get_contract(asset.created_by))
     if asset.signed_by == candidate.actor_id:
         raise ValueError("asset producer cannot attest its own output")
     policy = contract.acceptance_policy
@@ -402,23 +406,6 @@ def validate_output_shape(
     shape_error = _output_shape_error(output_value, output_shapes[output_name])
     if shape_error is not None:
         raise ValueError(f"acceptance output shape mismatch: {shape_error}")
-
-
-def _is_contract_or_descendant(
-    producer_id: str,
-    contract_id: str,
-    contracts: Mapping[str, object],
-) -> bool:
-    """Prove output provenance by following immutable parent links."""
-    current_id = producer_id
-    visited: set[str] = set()
-    while current_id and current_id not in visited:
-        if current_id == contract_id:
-            return True
-        visited.add(current_id)
-        current = contracts.get(current_id)
-        current_id = str(getattr(current, "parent_id", "") or "")
-    return False
 
 
 def validate_output_qualification_commit(
