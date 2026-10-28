@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from threading import Barrier, Event
+from types import SimpleNamespace
 
 import pytest
 
@@ -1675,3 +1676,117 @@ def test_local_cycle_rejects_stale_signed_host_registration(tmp_path, monkeypatc
         assert worker.invocations == []
     finally:
         store.close()
+
+
+def test_full_fleet_settles_fail_parent_after_admitted_child_drains(
+    tmp_path, monkeypatch
+):
+    admitted = Event()
+    stopped = []
+    real_monotonic = local_fleet_module.time.monotonic
+    started = real_monotonic()
+
+    class DrainFailWorker(_CycleWorker):
+        def invoke(self, contract, disclosed_assets):
+            del disclosed_assets
+            self.invocations.append(contract.id)
+            if method_payload(contract).get("method") == "fail":
+                admitted.set()
+                assert stopped[0].wait(5), "controller did not stop admitted work"
+                return Candidate(
+                    worker_id=self.worker_id,
+                    raw_output="/exec "
+                    + json.dumps(
+                        {
+                            "outputs": {
+                                name: "explicit failure" for name in contract.outputs
+                            }
+                        }
+                    ),
+                )
+            return Candidate(
+                worker_id=self.worker_id,
+                raw_output='/fail {"reason":"intentional bounded failure"}',
+            )
+
+    worker = DrainFailWorker()
+    root = build_control_plane_contract(
+        name="drained-failure",
+        outputs=("business_report",),
+        budget=2,
+        worker_capabilities=("text.extract",),
+    )
+    db_path, store, host = _prepare_local_cycle_case(
+        tmp_path, monkeypatch, worker, (root,)
+    )
+    store.close()
+    original_slot = local_fleet_module._run_slot
+
+    def observed_slot(*args):
+        stopped.append(args[2])
+        return original_slot(*args)
+
+    monkeypatch.setattr(local_fleet_module, "_run_slot", observed_slot)
+
+    def fleet_wait_clock():
+        elapsed_after_limit = max(0, real_monotonic() - started - 10)
+        return (102 if admitted.is_set() else 100) + elapsed_after_limit
+
+    monkeypatch.setattr(
+        local_fleet_module, "time", SimpleNamespace(monotonic=fleet_wait_clock)
+    )
+    monkeypatch.setattr(
+        local_fleet_module,
+        "collaboration_service",
+        lambda _store: SimpleNamespace(wait=lambda *_a, **_k: admitted.wait(0.01)),
+    )
+    result = run_local_fleet(
+        db_path,
+        (FleetHost(host),),
+        target_contract_id=root.id,
+        timeout=1,
+        poll_interval=0.01,
+    )
+    assert admitted.is_set(), result
+    assert result.status == "timed_out" and result.timed_out is True
+    assert result.completed is False
+    reopened = SQLiteStore(db_path)
+    try:
+        tasks = reopened.get_all_contracts()
+        child = next(
+            task for task in tasks if method_payload(task).get("method") == "fail"
+        )
+        records = reopened.scan_runtime_records()
+        child_terminal = [
+            (revision, r)
+            for revision, r in records
+            if r.record_type == "lifecycle.terminal"
+            and r.payload.get("contract_id") == child.id
+        ]
+        parent_terminal = [
+            (revision, r)
+            for revision, r in records
+            if r.record_type == "lifecycle.terminal"
+            and r.payload.get("contract_id") == root.id
+        ]
+        assert (
+            len(child_terminal) == 1
+            and child_terminal[0][1].payload["terminal"] == "complete"
+        )
+        assert (
+            len(parent_terminal) == 1
+            and parent_terminal[0][1].payload["terminal"] == "failed"
+        )
+        assert child_terminal[0][0] < parent_terminal[0][0]
+        grants = [r for _, r in records if r.record_type == "claim.granted"]
+        assert len(grants) == 2 and {r.payload["contract_id"] for r in grants} == {
+            root.id,
+            child.id,
+        }
+        assert worker.invocations == [root.id, child.id]
+        assert reopened.get_claim(root.id)["status"] == "submitted"
+        assert reopened.get_claim(child.id)["status"] == "submitted"
+        assert result.projection["status"] == "failed"
+        assert not reopened.get_assets_by_name("business_report")
+    finally:
+        reopened.close()

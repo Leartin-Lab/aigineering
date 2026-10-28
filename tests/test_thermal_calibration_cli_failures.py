@@ -4,10 +4,13 @@ import json
 import os
 from pathlib import Path
 import shutil
+from threading import Event
+import time
+from types import SimpleNamespace
 
 from click.testing import CliRunner
 
-from aigineering import fleet_config
+from aigineering import fleet_config, local_fleet
 from aigineering.cli.main import cli
 from aigineering.core.causal_allowance import allowance_available
 from aigineering.core.ids import compute_content_hash
@@ -15,7 +18,7 @@ from aigineering.core.provenance import verify_asset_seal
 from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.protocol.immutability import deep_thaw
 from aigineering.task_lineage import task_lineage
-from aigineering.task_views import project_task_status
+from aigineering.task_views import contract_tree_ids, project_task_status
 
 ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE = ROOT / "examples" / "thermal_calibration"
@@ -121,6 +124,126 @@ def _run(workspace, config, evidence_dir, *, timeout=8):
         ],
     )
     _save_result(result, evidence_dir / "run")
+    return result
+
+
+def _budget_rejection_witness(contracts, records, root_id):
+    """Select the exact rejected continuation of this root's research task."""
+    scope = contract_tree_ids(list(contracts.values()), root_id)
+    research_ids = {
+        contract.id
+        for contract in contracts.values()
+        if contract.id in scope and contract.name == "calibration_research"
+    }
+    by_id = {record.id: record for record in records}
+    witnesses = []
+    for rejection in records:
+        reason = rejection.payload.get("reason")
+        if (
+            rejection.record_type != "candidate.rejected"
+            or not isinstance(reason, str)
+            or "causal allowance exceeded" not in reason
+            or "requested 1, available 0" not in reason
+            or rejection.payload.get("effect_types") != ("contract.declare",)
+            or len(rejection.causal_parents) != 1
+        ):
+            continue
+        received = by_id.get(rejection.causal_parents[0])
+        if (
+            received is None
+            or received.record_type != "candidate.received"
+            or received.payload.get("candidate_id")
+            != rejection.payload.get("candidate_id")
+            or received.payload.get("actor_id") != "plugin:continuation.publish.v1"
+            or len(received.causal_parents) != 1
+        ):
+            continue
+        tool = contracts.get(received.causal_parents[0])
+        source = contracts.get(tool.parent_id) if tool is not None else None
+        if (
+            tool is not None
+            and tool.origin == "system"
+            and source is not None
+            and source.id in scope
+            and source.origin == "continuation"
+            and source.parent_id in research_ids
+            and source.budget == 1
+            and f"'{source.id}'" in reason
+        ):
+            witnesses.append((rejection.id, received.id, source.id))
+    return witnesses[0] if len(witnesses) == 1 else None
+
+
+def _run_until_committed_fence(monkeypatch, workspace, config, evidence_dir, *, fence):
+    """Separate functional progress from the Fleet's tested wait deadline."""
+    if fence not in {"verifier_failed", "continuation_allowance_rejected"}:
+        raise AssertionError(f"unknown functional fence: {fence}")
+    wait_timeout = 8
+    real_monotonic = time.monotonic
+    started = real_monotonic()
+    original_sync = local_fleet.sync_runtime
+    db_path = (workspace / ".aig" / "store.db").resolve()
+    reached = Event()
+    wall_limit = Event()
+    observed_root = []
+    logical_time = 0.0
+
+    def wait_monotonic():
+        nonlocal logical_time
+        if real_monotonic() - started >= 60:
+            wall_limit.set()
+        if reached.is_set() or wall_limit.is_set():
+            logical_time += wait_timeout + 1
+        return logical_time
+
+    def sync_and_observe(store):
+        result = original_sync(store)
+        if Path(store._db_path).resolve() != db_path:
+            return result
+        contracts = _contracts_by_id(store)
+        roots = [
+            contract
+            for contract in contracts.values()
+            if contract.origin == "human" and contract.parent_id is None
+        ]
+        if len(roots) != 1:
+            return result
+        root_id = roots[0].id
+        records = _all_records(store)
+        if fence == "verifier_failed":
+            scope = contract_tree_ids(list(contracts.values()), root_id)
+            verifier_ids = {
+                contract.id
+                for contract in contracts.values()
+                if contract.id in scope
+                and contract.name == "calibration_verifier"
+                and "calibration.verify" in contract.worker_capabilities
+            }
+            matched = len(verifier_ids) == 1 and any(
+                record.record_type == "lifecycle.terminal"
+                and record.payload.get("contract_id") in verifier_ids
+                and record.payload.get("terminal") == "failed"
+                for record in records
+            )
+        else:
+            matched = _budget_rejection_witness(contracts, records, root_id) is not None
+        if matched:
+            observed_root[:] = [root_id]
+            reached.set()
+        return result
+
+    monkeypatch.setattr(
+        local_fleet,
+        "time",
+        SimpleNamespace(monotonic=wait_monotonic, sleep=time.sleep),
+    )
+    monkeypatch.setattr(local_fleet, "sync_runtime", sync_and_observe)
+    result = _run(workspace, config, evidence_dir, timeout=wait_timeout)
+    assert not wall_limit.is_set() and real_monotonic() - started < 60, (
+        f"60s functional resource limit: {fence}\n{result.output}"
+    )
+    assert reached.is_set(), f"committed fence not reached: {fence}\n{result.output}"
+    assert observed_root == [json.loads(result.output)["contract_id"]], result.output
     return result
 
 
@@ -386,7 +509,9 @@ def test_missing_copied_observation_fails_claimed_verifier_and_blocks_export(
         tmp_path, monkeypatch, "missing-observation"
     )
     evidence_dir = tmp_path / "evidence"
-    result = _run(workspace, config, evidence_dir)
+    result = _run_until_committed_fence(
+        monkeypatch, workspace, config, evidence_dir, fence="verifier_failed"
+    )
     assert result.exit_code == 1, result.output
     payload = json.loads(result.output)
     assert payload["completed"] is False
@@ -581,7 +706,13 @@ def test_budget_two_is_spent_then_continuation_request_is_rejected(
 ):
     workspace, config, _workers = _configure(tmp_path, monkeypatch, "budget-exhaustion")
     evidence_dir = tmp_path / "evidence"
-    result = _run(workspace, config, evidence_dir)
+    result = _run_until_committed_fence(
+        monkeypatch,
+        workspace,
+        config,
+        evidence_dir,
+        fence="continuation_allowance_rejected",
+    )
     assert result.exit_code == 1, result.output
     payload = json.loads(result.output)
     assert payload["completed"] is False
@@ -648,6 +779,11 @@ def test_budget_two_is_spent_then_continuation_request_is_rejected(
         assert source.origin == "continuation"
         assert source.parent_id == research.id
         assert source.budget == 1
+        assert _budget_rejection_witness(contracts, records, root_id) == (
+            rejection.id,
+            received.id,
+            source.id,
+        )
         source_terminals = [
             record
             for record in records

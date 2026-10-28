@@ -200,14 +200,17 @@ def test_reference_context_keeps_all_heads_and_effective_mapping_order():
 
 
 @pytest.mark.parametrize(
-    ("head_order", "expected_error"),
+    ("head_order", "expected_messages"),
     [
-        (("a1", "b", "a2"), "NoneType"),
-        (("a2", "b", "a1"), "mappingproxy"),
+        (("a1", "b", "a2"), ("'NoneType' object is not iterable",)),
+        (
+            ("a2", "b", "a1"),
+            ("unhashable type: 'mappingproxy'", "unhashable type: 'dict'"),
+        ),
     ],
 )
 def test_reference_context_preserves_global_first_error_order(
-    head_order, expected_error
+    head_order, expected_messages
 ):
     members = [
         create_runtime_record(
@@ -240,11 +243,13 @@ def test_reference_context_preserves_global_first_error_order(
     }
     context = build_runtime_record_reference_context(index)
 
-    with pytest.raises(TypeError, match=expected_error) as legacy_error:
+    with pytest.raises(TypeError) as legacy_error:
         runtime_record_contract_references(trace, index)
-    with pytest.raises(TypeError, match=expected_error) as indexed_error:
+    with pytest.raises(TypeError) as indexed_error:
         runtime_record_contract_references(trace, context)
     assert type(indexed_error.value) is type(legacy_error.value)
+    assert str(indexed_error.value) == str(legacy_error.value)
+    assert str(legacy_error.value) in expected_messages
 
 
 def test_reference_context_lazily_falls_back_for_non_string_candidate_ids():
@@ -267,10 +272,15 @@ def test_reference_context_lazily_falls_back_for_non_string_candidate_ids():
     assert runtime_record_contract_references(direct, context) == frozenset({"direct"})
     assert runtime_record_contract_references(direct, index) == frozenset({"direct"})
     for trace in (empty_commitment, other_commitment):
-        with pytest.raises(TypeError, match="mappingproxy"):
+        with pytest.raises(TypeError) as legacy_error:
             runtime_record_contract_references(trace, index)
-        with pytest.raises(TypeError, match="mappingproxy"):
+        with pytest.raises(TypeError) as indexed_error:
             runtime_record_contract_references(trace, context)
+        assert str(indexed_error.value) == str(legacy_error.value)
+        assert str(legacy_error.value) in {
+            "unhashable type: 'mappingproxy'",
+            "unhashable type: 'dict'",
+        }
 
 
 def test_reference_context_uses_only_effective_by_id_values():

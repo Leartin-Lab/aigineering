@@ -46,8 +46,10 @@ The configured entry was introduced as development work. Deterministic and
 installed fixtures do not establish real-provider output or stable qualification.
 
 Full configured runs and single cycles share safe result formatting. A full
-Fleet run captures a read-only final task projection after admitted Workers
-join. Its wait outcome remains separate: a wait deadline can be reached before
+Fleet run performs one normal maintenance step after admitted Workers join,
+then captures a read-only final task projection. This settles accepted method
+results through their existing completion owners. Its wait outcome remains
+separate: a wait deadline can be reached before
 draining work completes the task. Blockers and next steps use the final view;
 completed, failed or submitted obligations are not offered as fresh claims.
 Failed descendants identify work to inspect, rather than merely suggesting

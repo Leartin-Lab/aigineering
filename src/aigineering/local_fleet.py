@@ -233,6 +233,16 @@ def run_local_fleet(
             detail = _slot_failure_detail()
             failure_details.put(detail)
             errors.put(_format_worker_failure_detail(detail))
+    store = SQLiteStore(db_path)
+    try:
+        run_runtime_maintenance_step(
+            store,
+            default_completion_registry(),
+            candidate_publishers=ensure_local_runtime_publishers(store),
+        )
+        sync_runtime(store)
+    finally:
+        store.close()
     return FleetRunResult(
         contract_id=result_contract_id,
         status=result_status,

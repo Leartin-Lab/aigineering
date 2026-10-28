@@ -20,6 +20,7 @@ from aigineering.core.projection_context import (
     build_contract_declaration_projection_request,
     load_contract_declaration_projection_context,
 )
+from aigineering.core.store import StoreProtocol
 from aigineering.protocol.candidate import (
     CandidateClaimBinding,
     CandidateEffect,
@@ -698,15 +699,40 @@ def test_custom_store_without_optional_reader_uses_full_context_at_commit(
     )
 
     class LegacyStore:
+        _OBSERVED_FULL_READS = {
+            "get_all_contracts",
+            "get_all_assets",
+            "scan_runtime_records",
+        }
+
         def __init__(self, delegate):
             self.delegate = delegate
             self.full_read_calls = []
+            for owner in StoreProtocol.__mro__:
+                for name, member in vars(owner).items():
+                    if (
+                        name.startswith("_")
+                        or not callable(member)
+                        or name in self._OBSERVED_FULL_READS
+                    ):
+                        continue
+                    setattr(self, name, getattr(delegate, name))
+
+        def get_all_contracts(self, *args, **kwargs):
+            self.full_read_calls.append("get_all_contracts")
+            return self.delegate.get_all_contracts(*args, **kwargs)
+
+        def get_all_assets(self, *args, **kwargs):
+            self.full_read_calls.append("get_all_assets")
+            return self.delegate.get_all_assets(*args, **kwargs)
+
+        def scan_runtime_records(self, *args, **kwargs):
+            self.full_read_calls.append("scan_runtime_records")
+            return self.delegate.scan_runtime_records(*args, **kwargs)
 
         def __getattr__(self, name):
             if name == "read_contract_declaration_projection_inputs":
                 raise AttributeError(name)
-            if name in {"get_all_contracts", "get_all_assets", "scan_runtime_records"}:
-                self.full_read_calls.append(name)
             return getattr(self.delegate, name)
 
     legacy = LegacyStore(store)

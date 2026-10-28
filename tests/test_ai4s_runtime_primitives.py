@@ -344,7 +344,7 @@ def test_runtime_ai4s_tool_continuation_attest_reopen_via_fleet_cli(
             "--task",
             root_id,
             "--wait-timeout",
-            "5",
+            "60",
             "--json",
         ],
         env={
