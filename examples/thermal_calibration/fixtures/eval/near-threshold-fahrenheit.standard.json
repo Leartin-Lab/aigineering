@@ -1,0 +1,5 @@
+{
+  "schema": "thermal-calibration-standard-v1",
+  "standard_id": "synthetic-temperature-calibration-v1-near-200mC",
+  "max_abs_error_C": "0.200001"
+}

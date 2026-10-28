@@ -6,13 +6,14 @@ import json
 
 import click
 
-from aigineering.cli._common import _output_json, _persistent_store, _query_projection
-from aigineering.cli._candidate import commit_local_effect, require_accepted
-from aigineering.core.control_plane import (
-    bind_contract_label_assets,
-    build_control_plane_contract,
+from aigineering.cli._common import (
+    _output_json,
+    _persistent_snapshot,
+    _persistent_store,
+    _query_projection,
 )
-from aigineering.protocol.effect_builders import contract_declaration_effect
+from aigineering.core.domain import load_genesis
+from aigineering.task_publication import prepare_task_contract, publish_task_contract
 
 
 @click.group("contract")
@@ -66,46 +67,36 @@ def contract_add(
     as_json: bool,
 ) -> None:
     """Inject a contract into the runtime store."""
-    store = _persistent_store()
-
-    policy: dict | None = None
-    if sensitive_input_policy:
-        try:
-            policy = json.loads(sensitive_input_policy)
-        except json.JSONDecodeError as e:
-            raise click.UsageError(f"--sensitive-input-policy is not valid JSON: {e}")
-    output_policy: dict | None = None
-    if acceptance_policy:
-        try:
-            output_policy = json.loads(acceptance_policy)
-        except json.JSONDecodeError as e:
-            raise click.UsageError(f"--acceptance-policy is not valid JSON: {e}")
+    policy = _parse_json_object(sensitive_input_policy, "--sensitive-input-policy")
+    output_policy = _parse_json_object(acceptance_policy, "--acceptance-policy")
     try:
-        contract = build_control_plane_contract(
-            name=name,
-            inputs=inputs,
-            outputs=outputs,
-            activation=activation,
-            budget=budget,
-            labels=labels,
-            tool_scope=tool_scope,
-            worker_capabilities=worker_capabilities,
-            worker_pools=worker_pools,
-            delegation_capabilities=delegation_capabilities,
-            delegation_pools=delegation_pools,
-            sensitive_input_policy=policy,
-            acceptance_policy=output_policy,
+        contract = prepare_task_contract(
+            {
+                "name": name,
+                "inputs": inputs,
+                "outputs": outputs,
+                "activation": activation,
+                "budget": budget,
+                "labels": labels,
+                "tool_scope": tool_scope,
+                "worker_capabilities": worker_capabilities,
+                "worker_pools": worker_pools,
+                "delegation_capabilities": delegation_capabilities,
+                "delegation_pools": delegation_pools,
+                "sensitive_input_policy": policy,
+                "acceptance_policy": output_policy,
+            }
         )
-        contract = bind_contract_label_assets(contract, store)
-        require_accepted(
-            commit_local_effect(
-                store,
-                contract_declaration_effect(contract),
-                idempotency_key=f"contract:{contract.id}",
-            )
-        )
-    except (LookupError, ValueError) as e:
+    except (LookupError, TypeError, ValueError) as e:
         raise click.ClickException(str(e)) from e
+
+    store = _persistent_store()
+    try:
+        contract = publish_task_contract(store, contract)
+    except (LookupError, TypeError, ValueError) as e:
+        raise click.ClickException(str(e)) from e
+    finally:
+        store.close()
 
     if as_json:
         _output_json({"id": contract.id, "name": contract.name})
@@ -113,12 +104,27 @@ def contract_add(
         click.echo(f"Contract injected: {contract.name} ({contract.id})")
 
 
+def _parse_json_object(value: str | None, option: str) -> dict | None:
+    if value is None:
+        return None
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError as error:
+        raise click.UsageError(f"{option} is not valid JSON: {error}") from error
+    if not isinstance(parsed, dict):
+        raise click.UsageError(f"{option} must be a JSON object")
+    return parsed
+
+
 @contract_group.command("ls")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON.")
 def contract_list(as_json: bool) -> None:
     """List contracts in the store."""
-    store = _persistent_store()
-    all_contracts = _query_projection(store).get_all_contracts()
+    store = _contract_snapshot()
+    try:
+        all_contracts = _query_projection(store).get_all_contracts()
+    finally:
+        store.close()
     if as_json:
         _output_json([{"id": c.id, "name": c.name} for c in all_contracts])
     else:
@@ -133,8 +139,11 @@ def contract_list(as_json: bool) -> None:
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON.")
 def contract_show(contract_id: str, as_json: bool) -> None:
     """Show contract details by ID."""
-    store = _persistent_store()
-    contract = _query_projection(store).get_contract(contract_id)
+    store = _contract_snapshot()
+    try:
+        contract = _query_projection(store).get_contract(contract_id)
+    finally:
+        store.close()
     if contract is None:
         raise click.ClickException(f"No contract with id '{contract_id}'")
 
@@ -171,3 +180,23 @@ def contract_run(contract_id: str) -> None:
         "aig contract run is deprecated. Use 'aig run --task "
         f"{contract_id} --worker <mock|llm>' or 'aig run --once'."
     )
+
+
+def _contract_snapshot():
+    try:
+        store = _persistent_snapshot()
+    except FileNotFoundError as error:
+        raise click.ClickException(
+            "Local domain is not initialized; run 'aig domain init'."
+        ) from error
+    try:
+        load_genesis(store)
+    except LookupError as error:
+        store.close()
+        raise click.ClickException(
+            "Local domain is not initialized; run 'aig domain init'."
+        ) from error
+    except Exception:
+        store.close()
+        raise
+    return store

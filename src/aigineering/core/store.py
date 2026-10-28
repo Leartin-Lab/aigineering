@@ -6,7 +6,7 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Optional, Protocol, runtime_checkable
+from typing import Callable, Optional, Protocol, runtime_checkable
 
 from aigineering.core.authority import (
     ReservedNamespaceError,
@@ -66,6 +66,7 @@ class StoreProtocol(CandidateCommitStore, Protocol):
     def unregister_declared_outputs(self, contract_id: str) -> None: ...
     def rebuild_projection_indexes(self) -> None: ...
     def append_runtime_record(self, record: RuntimeRecord) -> int: ...
+    def get_claim_history_contract_ids(self) -> frozenset[str]: ...
     def commit_replacement_claim(self, claim, trace_entry) -> None: ...
 
 
@@ -212,6 +213,14 @@ class MemoryStore(_ProjectionIndexMixin):
     def get_worker_registrations(self) -> list:
         return list(self._worker_registrations.values())
 
+    def get_claim_history_contract_ids(self) -> frozenset[str]:
+        """Return claim history represented by this non-operational adapter."""
+        return frozenset(
+            str(record.payload.get("contract_id", ""))
+            for _, record in self.scan_runtime_records(record_type="claim.granted")
+            if record.payload.get("contract_id")
+        )
+
     def rebuild_worker_registration_projection(self) -> None:
         self._worker_registrations.clear()
         for _, record in self.scan_runtime_records(record_type="worker.registered"):
@@ -219,6 +228,26 @@ class MemoryStore(_ProjectionIndexMixin):
             self._worker_registrations[registration.worker_id] = registration
 
     def append_runtime_record(self, record: RuntimeRecord) -> int:
+        if record.record_type in {
+            "allowance.granted",
+            "allowance.reserved",
+            "allowance.returned",
+            "allowance.extinguished",
+        }:
+            raise ValueError("allowance facts require Candidate ingress commitment")
+        if record.record_type in {
+            "claim.constraint.placed",
+            "claim.constraint.released",
+        }:
+            raise ValueError(
+                "claim constraint facts require Candidate ingress commitment"
+            )
+        if record.record_type == "claim.assignment.changed":
+            raise ValueError("assignment facts require Candidate ingress commitment")
+        return self._append_runtime_record(record)
+
+    def _append_runtime_record(self, record: RuntimeRecord) -> int:
+        """Append from a Store-owned transaction after its ingress gate."""
         existing = self._runtime_records.get(record.id)
         if existing is not None:
             revision, existing_record = existing
@@ -288,6 +317,92 @@ class MemoryStore(_ProjectionIndexMixin):
     def get_runtime_revision(self) -> int:
         return self._runtime_revision
 
+    def read_contract_declaration_projection_inputs(self, request):
+        """Read only exact declaration inputs and relevant runtime facts."""
+        from aigineering.core.projection_context import (
+            ContractDeclarationProjectionInputs,
+        )
+
+        contract_ids = tuple(
+            dict.fromkeys(
+                (*request.incoming_contract_ids, *request.parent_contract_ids)
+            )
+        )
+        contracts = tuple(
+            contract
+            for contract_id in contract_ids
+            if (contract := self.get_contract(contract_id)) is not None
+        )
+        assets = tuple(
+            asset
+            for asset_id in request.asset_ids
+            if (asset := self.get_asset(asset_id)) is not None
+        )
+
+        source_ids = set(request.allowance_source_contract_ids)
+        selected: dict[str, tuple[int, RuntimeRecord]] = {}
+        heads: list[RuntimeRecord] = []
+
+        def source_matches(payload, field: str) -> bool:
+            value = payload.get(field)
+            return isinstance(value, str) and value in source_ids
+
+        for revision, record in self._runtime_records.values():
+            payload = record.payload
+            matched = record.record_type == "allowance.granted" and (
+                source_matches(payload, "contract_id")
+            )
+            matched = (
+                matched
+                or record.record_type == "allowance.reserved"
+                and source_matches(payload, "source_contract_id")
+            )
+            matched = (
+                matched
+                or record.record_type == "allowance.returned"
+                and (
+                    source_matches(payload, "source_contract_id")
+                    or source_matches(payload, "from_contract_id")
+                )
+            )
+            matched = (
+                matched
+                or record.record_type == "allowance.extinguished"
+                and source_matches(payload, "contract_id")
+            )
+            replay_match = (
+                request.include_candidate_replay
+                and record.record_type in {"candidate.received", "candidate.committed"}
+                and payload.get("candidate_id") == request.candidate_id
+            )
+            if matched or replay_match:
+                selected[record.id] = (revision, record)
+                if record.record_type == "candidate.committed":
+                    heads.append(record)
+
+        member_ids = {
+            member_id
+            for head in heads
+            if isinstance(
+                (member_ids_value := head.payload.get("committed_record_ids")),
+                (list, tuple),
+            )
+            for member_id in member_ids_value
+            if isinstance(member_id, str)
+        }
+        for member_id in member_ids:
+            found = self._runtime_records.get(member_id)
+            if found is not None:
+                selected[member_id] = found
+        runtime_records = tuple(
+            record for _, record in sorted(selected.values(), key=lambda item: item[0])
+        )
+        return ContractDeclarationProjectionInputs(
+            contracts=contracts,
+            assets=assets,
+            runtime_records=runtime_records,
+        )
+
     def _graph_payloads(self, position: int) -> list[dict]:
         from aigineering.core.asset_graph_facts import graph_rows_from_record
 
@@ -327,6 +442,11 @@ class MemoryStore(_ProjectionIndexMixin):
         candidate_actor_id: str = "",
         candidate_key_id: str = "",
         candidate_id: str = "",
+        candidate_proposal=None,
+        effect_fact_owners=(),
+        assignment_intents=(),
+        successor_assignment_witnesses=(),
+        validate_snapshot: Callable[[], None] | None = None,
     ) -> tuple[tuple, tuple]:
         """Apply one ingress batch with rollback-equivalent memory semantics."""
         if claim_binding is not None:
@@ -339,8 +459,117 @@ class MemoryStore(_ProjectionIndexMixin):
             for _, record in self.scan_runtime_records()
         ):
             return (), ()
-        del candidate_actor_id, candidate_key_id, candidate_id
+        if validate_snapshot is not None:
+            validate_snapshot()
+        has_assignment_facts = any(
+            record.record_type == "claim.assignment.changed"
+            for record in runtime_records
+        )
+        if has_assignment_facts or assignment_intents or successor_assignment_witnesses:
+            if validate_snapshot is None or candidate_proposal is None:
+                raise ValueError(
+                    "assignment facts require their signed Candidate projection"
+                )
+            from aigineering.core.claim_assignments import (
+                assignment_context_from_projection,
+                validate_assignment_batch,
+            )
+            from aigineering.core.projection_context import (
+                load_effect_projection_context,
+            )
+
+            context = assignment_context_from_projection(
+                load_effect_projection_context(self)
+            )
+            receipt = next(
+                (
+                    record
+                    for record in runtime_records
+                    if record.record_type == "candidate.received"
+                    and record.payload.get("candidate_id") == candidate_id
+                ),
+                None,
+            )
+            if receipt is None:
+                raise ValueError("assignment Candidate receipt is missing")
+            validate_assignment_batch(
+                context,
+                runtime_records,
+                contracts,
+                candidate=candidate_proposal,
+                receipt_id=receipt.id,
+                effect_fact_owners=tuple(effect_fact_owners),
+                assignment_intents=tuple(assignment_intents),
+                successor_assignment_witnesses=tuple(successor_assignment_witnesses),
+            )
         del trace_entries
+        declarations = ((contract,) if contract is not None else ()) + tuple(contracts)
+        from aigineering.core.causal_allowance import materialize_terminal_allowance
+
+        derived_records = materialize_terminal_allowance(
+            self, declarations, runtime_records
+        )
+        runtime_records = runtime_records + derived_records
+        if any(
+            record.record_type
+            in {"claim.constraint.placed", "claim.constraint.released"}
+            for record in runtime_records
+        ):
+            from aigineering.core.claim_constraints import (
+                validate_claim_constraint_batch,
+            )
+            from aigineering.core.output_satisfaction import all_outputs_satisfied
+
+            existing_records = tuple(
+                record for _, record in self.scan_runtime_records()
+            )
+            all_contracts = tuple(self.get_all_contracts()) + declarations
+            known_contract_ids = frozenset(item.id for item in all_contracts)
+            claimed_ids = frozenset(
+                str(record.payload.get("contract_id", ""))
+                for record in existing_records
+                if record.record_type == "claim.granted"
+            )
+            terminal_ids = frozenset(
+                str(record.payload.get("contract_id", ""))
+                for record in existing_records
+                if record.record_type == "lifecycle.terminal"
+            )
+            output_satisfied_ids = frozenset(
+                item.id
+                for item in all_contracts
+                if all_outputs_satisfied(item, self, require_outputs=True)
+            )
+            validate_claim_constraint_batch(
+                existing_records,
+                runtime_records,
+                candidate_id=candidate_id,
+                actor_id=candidate_actor_id,
+                key_id=candidate_key_id,
+                known_contract_ids=known_contract_ids,
+                claimed_contract_ids=claimed_ids,
+                terminal_contract_ids=terminal_ids,
+                output_satisfied_contract_ids=output_satisfied_ids,
+            )
+        if any(
+            record.record_type
+            in {
+                "allowance.granted",
+                "allowance.reserved",
+                "allowance.returned",
+                "allowance.extinguished",
+            }
+            for record in runtime_records
+        ):
+            from aigineering.core.causal_allowance import validate_allowance_commit
+
+            validate_allowance_commit(
+                tuple(self.get_all_contracts()) + declarations,
+                tuple(record for _, record in self.scan_runtime_records()),
+                runtime_records,
+                candidate_id=candidate_id,
+            )
+        del candidate_actor_id, candidate_key_id, candidate_id
         if any(record.record_type == "output.qualified" for record in runtime_records):
             from aigineering.core.acceptance import (
                 validate_output_qualification_commit,
@@ -367,9 +596,6 @@ class MemoryStore(_ProjectionIndexMixin):
         )
         committed = False
         try:
-            declarations = ((contract,) if contract is not None else ()) + tuple(
-                contracts
-            )
             for declaration in declarations:
                 self.add_contract(declaration)
             for asset in accepted_assets:
@@ -379,9 +605,9 @@ class MemoryStore(_ProjectionIndexMixin):
             if reducer_callback is not None:
                 reducer_callback()
             for record in runtime_records:
-                self.append_runtime_record(record)
+                self._append_runtime_record(record)
             committed = True
-            return (), ()
+            return (), derived_records
         finally:
             if not committed:
                 (

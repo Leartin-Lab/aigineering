@@ -16,6 +16,8 @@ import json
 from pathlib import Path
 import re
 from collections.abc import Mapping
+from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Optional
 
 from aigineering.core.ids import now_iso
@@ -27,9 +29,40 @@ from aigineering.protocol.runtime_record import RuntimeRecord
 _SESSION_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}\Z")
 
 
+@dataclass(frozen=True)
+class RuntimeRecordReferenceContext:
+    """One capture-local index for typed Candidate commitment heads."""
+
+    records_by_id: Mapping[str, RuntimeRecord]
+    candidate_heads_by_id: Mapping[str, tuple[tuple[int, RuntimeRecord], ...]]
+    fallback_to_legacy_commitment_scan: bool
+
+
+def build_runtime_record_reference_context(
+    records_by_id: Mapping[str, RuntimeRecord],
+) -> RuntimeRecordReferenceContext:
+    """Index exact-string Candidate IDs in the effective mapping's value order."""
+    heads: dict[str, list[tuple[int, RuntimeRecord]]] = {}
+    fallback = False
+    for position, record in enumerate(records_by_id.values()):
+        if record.record_type != "candidate.committed":
+            continue
+        candidate_id = record.payload.get("candidate_id")
+        if type(candidate_id) is not str:
+            fallback = True
+            continue
+        heads.setdefault(candidate_id, []).append((position, record))
+    frozen_heads = MappingProxyType(
+        {candidate_id: tuple(bucket) for candidate_id, bucket in heads.items()}
+    )
+    return RuntimeRecordReferenceContext(records_by_id, frozen_heads, fallback)
+
+
 def runtime_record_contract_references(
     record: RuntimeRecord,
-    records_by_id: Mapping[str, RuntimeRecord] | None = None,
+    records_by_id: Mapping[str, RuntimeRecord]
+    | RuntimeRecordReferenceContext
+    | None = None,
 ) -> frozenset[str]:
     """Return Contract IDs explicitly referenced by a typed runtime record.
 
@@ -38,10 +71,28 @@ def runtime_record_contract_references(
     ID joins to a committed record whose committed record IDs resolve to a
     declared Contract; the label itself never grants ownership.
     """
-    return _runtime_record_contract_references(record, records_by_id or {}, set())
+    context = (
+        records_by_id
+        if isinstance(records_by_id, RuntimeRecordReferenceContext)
+        else None
+    )
+    index = context.records_by_id if context is not None else records_by_id or {}
+    return _runtime_record_contract_references(record, index, set(), context)
 
 
-def _runtime_record_contract_references(
+def runtime_record_worker_references(
+    record: RuntimeRecord,
+    records_by_id: Mapping[str, RuntimeRecord] | None = None,
+) -> frozenset[str]:
+    """Return Worker IDs explicitly named by known typed runtime facts.
+
+    This is a scoped read-model helper. It never searches descriptions, trace
+    prose, or arbitrary nested candidate content for strings that resemble IDs.
+    """
+    return _runtime_record_worker_references(record, records_by_id or {}, set())
+
+
+def _runtime_record_worker_references(
     record: RuntimeRecord,
     index: Mapping[str, RuntimeRecord],
     visited: set[str],
@@ -49,9 +100,70 @@ def _runtime_record_contract_references(
     if record.id in visited:
         return frozenset()
     visited.add(record.id)
+    typed_worker_records = {
+        "worker.registered",
+        "worker.claim.requested",
+        "worker.claim.renew.requested",
+        "claim.granted",
+        "claim.renewed",
+        "claim.expired",
+        "claim.released",
+        "claim.submitted",
+        "claim.assignment.changed",
+    }
+    references: set[str] = set()
+    if record.record_type in typed_worker_records:
+        value = record.payload.get("worker_id")
+        if isinstance(value, str) and value:
+            references.add(value)
+    if record.record_type == "candidate.committed":
+        for committed_id in record.payload.get("committed_record_ids", ()):
+            committed = index.get(committed_id)
+            if committed is not None:
+                references.update(
+                    _runtime_record_worker_references(committed, index, visited)
+                )
+    elif record.record_type in {"claim.renewed", "worker.claim.renew.requested"}:
+        for parent_id in record.causal_parents:
+            parent = index.get(parent_id)
+            if parent is not None and parent.record_type == "claim.granted":
+                references.update(
+                    _runtime_record_worker_references(parent, index, visited)
+                )
+    # Derive successor Worker references from typed causal facts instead of
+    # teaching this core reader about plugin-owned handoff/revision records.
+    for parent_id in record.causal_parents:
+        parent = index.get(parent_id)
+        if parent is not None:
+            references.update(_runtime_record_worker_references(parent, index, visited))
+    return frozenset(references)
+
+
+def _runtime_record_contract_references(
+    record: RuntimeRecord,
+    index: Mapping[str, RuntimeRecord],
+    visited: set[str],
+    context: RuntimeRecordReferenceContext | None = None,
+) -> frozenset[str]:
+    if record.id in visited:
+        return frozenset()
+    visited.add(record.id)
     payload = record.payload
     references: set[str] = set()
-    for key in ("contract_id", "source_contract_id", "parent_contract_id"):
+    reference_fields = (
+        "contract_id",
+        "source_contract_id",
+        "from_contract_id",
+        "parent_contract_id",
+        "child_contract_id",
+        "successor_id",
+    )
+    if record.record_type in {
+        "claim.constraint.placed",
+        "claim.constraint.released",
+    }:
+        reference_fields += ("prerequisite_contract_id",)
+    for key in reference_fields:
         value = payload.get(key)
         if isinstance(value, str):
             references.add(value)
@@ -86,13 +198,32 @@ def _runtime_record_contract_references(
                         continue
                     if isinstance(candidate_id, str):
                         candidate_ids.add(candidate_id)
-                for candidate_record in index.values():
-                    if (
-                        candidate_record.record_type != "candidate.committed"
-                        or candidate_record.payload.get("candidate_id")
-                        not in candidate_ids
-                    ):
-                        continue
+                if (
+                    context is not None
+                    and not context.fallback_to_legacy_commitment_scan
+                ):
+                    ordered_heads = sorted(
+                        (
+                            head_entry
+                            for candidate_id in candidate_ids
+                            for head_entry in context.candidate_heads_by_id.get(
+                                candidate_id, ()
+                            )
+                        ),
+                        key=lambda head_entry: head_entry[0],
+                    )
+                    selected_heads = (head for _position, head in ordered_heads)
+                else:
+                    selected_heads = (
+                        candidate_record
+                        for candidate_record in index.values()
+                        if (
+                            candidate_record.record_type == "candidate.committed"
+                            and candidate_record.payload.get("candidate_id")
+                            in candidate_ids
+                        )
+                    )
+                for candidate_record in selected_heads:
                     for committed_id in candidate_record.payload.get(
                         "committed_record_ids", ()
                     ):
@@ -100,7 +231,7 @@ def _runtime_record_contract_references(
                         if committed is not None:
                             references.update(
                                 _runtime_record_contract_references(
-                                    committed, index, visited
+                                    committed, index, visited, context
                                 )
                             )
     elif record.record_type == "candidate.committed":
@@ -108,7 +239,16 @@ def _runtime_record_contract_references(
             committed = index.get(committed_id)
             if committed is not None:
                 references.update(
-                    _runtime_record_contract_references(committed, index, visited)
+                    _runtime_record_contract_references(
+                        committed, index, visited, context
+                    )
+                )
+    elif record.record_type in {"claim.renewed", "worker.claim.renew.requested"}:
+        for parent_id in record.causal_parents:
+            parent = index.get(parent_id)
+            if parent is not None and parent.record_type == "claim.granted":
+                references.update(
+                    _runtime_record_contract_references(parent, index, visited, context)
                 )
 
     return frozenset(references)
@@ -140,8 +280,6 @@ class SessionStore:
 
     def __init__(self, sessions_dir: str = ".aig/sessions") -> None:
         self._dir = Path(sessions_dir)
-        if not self._dir.exists():
-            self._dir.mkdir(parents=True, exist_ok=True)
 
     def _file_path(self, session_id: str) -> Path:
         session_id = validate_session_id(session_id)
@@ -172,7 +310,9 @@ class SessionStore:
                 unassigned_trace_ids=session.unassigned_trace_ids,
             )
         payload = session_to_dict(session)
-        with open(self._file_path(session.id), "w", encoding="utf-8") as f:
+        destination = self._file_path(session.id)
+        self._dir.mkdir(parents=True, exist_ok=True)
+        with open(destination, "w", encoding="utf-8") as f:
             json.dump(payload, f, ensure_ascii=False, indent=2)
             f.write("\n")
 

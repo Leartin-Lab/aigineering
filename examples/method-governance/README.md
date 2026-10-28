@@ -31,7 +31,7 @@ aig method instantiate METHOD_ASSET_ID \
   --name trial --budget 2 --allow-unverified --json
 aig method test METHOD_ASSET_ID --cases CASES_ASSET_ID \
   --name method-tests --budget 1 --json
-aig fleet run --config workers.toml --task TEST_CONTRACT_ID --json
+aig run --config workers.toml --resume TEST_CONTRACT_ID --json
 aig method assess TEST_RUN_ID --json
 ```
 

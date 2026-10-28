@@ -1,0 +1,28 @@
+{
+  "schema": "thermal-calibration-case-v1",
+  "case_id": "mix-three-point",
+  "sensor_id": "sensor-synthetic-01",
+  "samples": [
+    {
+      "sample_id": "s-000",
+      "time_utc": "2026-01-01T00:00:00Z",
+      "reference_C": "20",
+      "reading": "68",
+      "unit": "F"
+    },
+    {
+      "sample_id": "s-020",
+      "time_utc": "2026-01-01T00:20:00Z",
+      "reference_C": "20.000000",
+      "reading": "293.150000",
+      "unit": "K"
+    },
+    {
+      "sample_id": "s-050",
+      "time_utc": "2026-01-01T00:50:00Z",
+      "reference_C": "20.000000",
+      "reading": "19.800000",
+      "unit": "C"
+    }
+  ]
+}

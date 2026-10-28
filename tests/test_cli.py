@@ -6,10 +6,14 @@ from pathlib import Path
 from click.testing import CliRunner
 
 from aigineering.cli.main import cli
+from aigineering.core.control_plane import build_control_plane_contract
 from aigineering.core.methods import retry_contract
+from aigineering.core.session import SessionStore
 from aigineering.core.sqlite_store import SQLiteStore
-from aigineering.protocol.types import Candidate, TraceEntry
+from aigineering.protocol.identity import contract_from_fields
+from aigineering.protocol.types import Candidate, Session, TraceEntry
 from aigineering.protocol.wire import trace_entry_to_dict
+from aigineering.task_publication import publish_task_contract
 
 
 def _write_trace_entries(trace_file: Path, entries: list[TraceEntry]) -> None:
@@ -120,11 +124,21 @@ def test_run_persists_assets_contracts_and_session_manifest():
         assert store_path.exists(), "SQLite store DB must exist"
 
         store = SQLiteStore(str(store_path))
-        assets = store.get_assets_by_name("final_report")
-        assert len(assets) > 0, "final_report asset must exist in SQLite store"
-        contracts = [c for c in store.get_all_contracts() if c.name == "build_report"]
-        assert len(contracts) > 0, "build_report contract must exist in SQLite store"
-        assert contracts[0].description == "Build a report for goal: test"
+        contracts = [
+            c
+            for c in store.get_all_contracts()
+            if c.name == "build_report"
+            and c.description.startswith("Goal: test\nInput slots: ")
+        ]
+        assert len(contracts) == 1, "quick run root Contract must exist"
+        root = contracts[0]
+        assert len(root.outputs) == 1
+        assert root.outputs[0].startswith("final_report_")
+        assert len(root.inputs) == 1
+        assert root.inputs[0].startswith("aig_input_")
+        assets = store.get_assets_by_name(root.outputs[0])
+        assert assets, "quick run output Asset must exist under its root output name"
+        assert any(asset.created_by == root.id for asset in assets)
         record_types = [
             record.record_type for _, record in store.scan_runtime_records()
         ]
@@ -277,6 +291,158 @@ def test_trace_no_sessions_shows_error():
         assert "No sessions found" in result.output
 
 
+def test_trace_session_manifest_missing_text_rc1():
+    """aig trace --session with no session manifest exits 1 (C3)."""
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        result = runner.invoke(cli, ["trace", "--session", "missing"])
+
+        assert result.exit_code == 1
+        assert result.output == "Session 'missing' not found.\n"
+        assert result.stderr == ""
+
+
+def _write_audit_trace_fixture() -> None:
+    """Write a readable latest-session trace with a named projection asset."""
+    activation = TraceEntry(
+        id="act_1",
+        contract_id="contract_1",
+        event_type="activation",
+        timestamp="2025-01-01T00:00:00",
+    )
+    projection = TraceEntry(
+        id="proj_1",
+        parent_id="act_1",
+        contract_id="contract_1",
+        event_type="projection",
+        accepted_fragments=["asset_abc"],
+        accepted_asset_names=["test_output"],
+        worker_id="mock_worker",
+        timestamp="2025-01-01T00:00:01",
+    )
+    _write_trace_entries(
+        Path(".aig/traces/session_test.jsonl"),
+        [activation, projection],
+    )
+
+
+def test_audit_session_missing_text_exits_1():
+    """audit --session <missing> prints the error payload then exits 1."""
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        result = runner.invoke(cli, ["audit", "--session", "missing"])
+
+        assert result.exit_code == 1
+        assert result.output == "Session 'missing' not found.\n"
+        assert result.stderr == ""
+
+
+def test_trace_session_export_missing_text_rc1():
+    """aig trace --session with a manifest but no trace export exits 1 (C3)."""
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        # Manifest exists; no .aig/traces directory, so neither the direct
+        # export nor the fallback scan can produce a store.
+        SessionStore().create_session(
+            Session(id="missing", trace_ids=("trace_missing",))
+        )
+
+        result = runner.invoke(cli, ["trace", "--session", "missing"])
+
+        assert result.exit_code == 1
+        assert result.output == "Session 'missing' not found.\n"
+        assert result.stderr == ""
+
+
+def test_audit_session_manifest_without_export_text_exits_1():
+    """audit --session with a manifest but no matching export exits 1.
+
+    The fixture rules out both the direct export hit and the fallback
+    trace-id scan, so the miss comes from a fully exhausted search.
+    """
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        unrelated = TraceEntry(
+            id="unrelated_1",
+            contract_id="contract_other",
+            event_type="activation",
+            timestamp="2025-01-01T00:00:00",
+        )
+        _write_trace_entries(
+            Path(".aig/traces/session_other.jsonl"),
+            [unrelated],
+        )
+        SessionStore(sessions_dir=".aig/sessions").create_session(
+            Session(id="sess_ghost", trace_ids=("t_ghost",))
+        )
+
+        result = runner.invoke(cli, ["audit", "--session", "sess_ghost"])
+
+        assert result.exit_code == 1
+        assert result.output == "Session 'sess_ghost' not found.\n"
+        assert result.stderr == ""
+
+
+def test_audit_asset_id_not_found_text_exits_1():
+    """audit --asset <unknown> prints the error payload then exits 1."""
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        _write_audit_trace_fixture()
+
+        result = runner.invoke(cli, ["audit", "--asset", "nope"])
+
+        assert result.exit_code == 1
+        assert result.output == "No asset found with id or name 'nope'\n"
+        assert result.stderr == ""
+
+
+def test_audit_asset_name_not_found_text_exits_1():
+    """audit --asset-name <unknown> prints the error payload then exits 1."""
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        _write_audit_trace_fixture()
+
+        result = runner.invoke(cli, ["audit", "--asset-name", "nope"])
+
+        assert result.exit_code == 1
+        assert result.output == "No asset found with name 'nope'\n"
+        assert result.stderr == ""
+
+
+def test_audit_target_unresolved_text_exits_1(monkeypatch):
+    """Defensive target seam: unresolved target prints payload then exits 1."""
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        _write_audit_trace_fixture()
+        monkeypatch.setattr(
+            "aigineering.cli.trace._resolve_asset_by_name",
+            lambda asset_name, trace_store: ("", "ghost"),
+        )
+
+        result = runner.invoke(cli, ["audit", "--asset-name", "test_output"])
+
+        assert result.exit_code == 1
+        assert result.output == "Could not determine target asset.\n"
+        assert result.stderr == ""
+
+
+def test_audit_empty_lineage_text_seam_exits_0(monkeypatch):
+    """Seam regression: resolved asset with empty lineage stays rc=0."""
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        _write_audit_trace_fixture()
+        monkeypatch.setattr(
+            "aigineering.cli.trace._resolve_asset_by_name",
+            lambda asset_name, trace_store: ("ghost_asset", "ghost"),
+        )
+
+        result = runner.invoke(cli, ["audit", "--asset-name", "test_output"])
+
+        assert result.exit_code == 0
+        assert result.output == "ghost\n  (no lineage found)\n"
+        assert result.stderr == ""
+
+
 def test_demo_command_exists():
     """aig demo <goal> runs and exits 0 (preserves quickstart)."""
     runner = CliRunner()
@@ -382,27 +548,109 @@ def test_replay_valid_session():
 # ---------------------------------------------------------------------------
 
 
+def _publish_funded_retry_target(store, *, name: str, budget: int = 2):
+    """Publish a funded parent plus a child Contract that retries can draw from."""
+    parent = publish_task_contract(
+        store,
+        build_control_plane_contract(
+            name=f"{name}-funder",
+            description="Funded containment parent for retry conservation.",
+            outputs=(),
+            budget=5,
+        ),
+    )
+    return publish_task_contract(
+        store,
+        contract_from_fields(
+            name=name,
+            description="Funded retry target under a containment parent.",
+            inputs=(),
+            outputs=(),
+            activation="",
+            budget=budget,
+            tool_scope=(),
+            labels=(),
+            origin="human",
+            parent_id=parent.id,
+            minting_authority=(),
+        ),
+    )
+
+
+def test_retry_root_contract_rejected_without_funding_expansion():
+    """aig retry on a root Contract is rejected and mints no unfunded root grant."""
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        initialized = runner.invoke(cli, ["domain", "init"])
+        assert initialized.exit_code == 0, initialized.output
+
+        store = SQLiteStore(".aig/store.db")
+        root = publish_task_contract(
+            store,
+            build_control_plane_contract(
+                name="root retry target",
+                description="Root Contract retry must not mint fresh allowance.",
+                outputs=(),
+                budget=3,
+            ),
+        )
+        store.close()
+
+        expected_id = retry_contract(root).id
+        result = runner.invoke(cli, ["retry", "--contract", root.id, "--json"])
+        assert result.exit_code == 1, result.output
+        payload = json.loads(result.output)
+        assert payload["ok"] is False
+        assert payload["error"]["code"] == "retry_rejected"
+        assert payload["candidate_accepted"] is False
+        assert payload["facts_retained"] is True
+        assert payload["data"]["rejection_fact_id"]
+
+        store2 = SQLiteStore(".aig/store.db")
+        assert all(
+            contract.id != expected_id for contract in store2.get_all_contracts()
+        )
+        root_grants = [
+            record
+            for _, record in store2.scan_runtime_records(
+                record_type="allowance.granted"
+            )
+            if record.payload.get("contract_id") == expected_id
+        ]
+        assert root_grants == []
+        store2.close()
+
+        # A repeat attempt stays rejected: no second chance to mint allowance.
+        replay = runner.invoke(cli, ["retry", "--contract", root.id, "--json"])
+        assert replay.exit_code == 1, replay.output
+        assert json.loads(replay.output)["error"]["code"] == "retry_rejected"
+        store3 = SQLiteStore(".aig/store.db")
+        assert all(
+            contract.id != expected_id for contract in store3.get_all_contracts()
+        )
+        store3.close()
+
+
 def test_retry_creates_deterministic_contract():
     """aig retry --contract <id> creates a contract with deterministic retry ID."""
     runner = CliRunner()
     with runner.isolated_filesystem():
-        run_result = runner.invoke(cli, ["run", "test", "--worker", "mock"])
-        assert run_result.exit_code == 0
+        initialized = runner.invoke(cli, ["domain", "init"])
+        assert initialized.exit_code == 0, initialized.output
 
         store = SQLiteStore(".aig/store.db")
-        contracts = store.get_all_contracts()
-        build_report = next(c for c in contracts if c.name == "build_report")
-        original_id = build_report.id
-        expected_id = retry_contract(build_report).id
+        original = _publish_funded_retry_target(store, name="retry-determinism")
+        original_id = original.id
+        expected_id = retry_contract(original).id
         store.close()
 
         result1 = runner.invoke(cli, ["retry", "--contract", original_id])
-        assert result1.exit_code == 0
+        assert result1.exit_code == 0, result1.output
         assert "Retry contract created:" in result1.output
         retry_id_1 = result1.output.strip().split("\n")[0].split(": ")[-1].strip()
 
         result2 = runner.invoke(cli, ["retry", "--contract", original_id])
-        assert result2.exit_code == 0
+        assert result2.exit_code == 0, result2.output
         retry_id_2 = result2.output.strip().split("\n")[0].split(": ")[-1].strip()
 
         assert retry_id_1 == retry_id_2
@@ -423,6 +671,15 @@ def test_retry_creates_deterministic_contract():
         assert len(receipts) == 1
         committed = store2.get_by_event_type("candidate_committed")
         assert any(entry.relation_target == expected_id for entry in committed)
+        # Conservation: the retry grant is funded by the parent, not minted.
+        reserved = [
+            record
+            for _, record in store2.scan_runtime_records(
+                record_type="allowance.reserved"
+            )
+            if record.payload.get("child_contract_id") == expected_id
+        ]
+        assert len(reserved) == 1
         store2.close()
 
 
@@ -430,30 +687,78 @@ def test_retry_json_output():
     """aig retry --contract <id> --json returns deterministic retry ID in JSON."""
     runner = CliRunner()
     with runner.isolated_filesystem():
-        run_result = runner.invoke(cli, ["run", "test", "--worker", "mock"])
-        assert run_result.exit_code == 0
+        initialized = runner.invoke(cli, ["domain", "init"])
+        assert initialized.exit_code == 0, initialized.output
 
         store = SQLiteStore(".aig/store.db")
-        contracts = store.get_all_contracts()
-        original = next(c for c in contracts if c.name == "build_report")
+        original = _publish_funded_retry_target(store, name="retry-json")
         original_id = original.id
         expected_id = retry_contract(original).id
         store.close()
 
         result = runner.invoke(cli, ["retry", "--contract", original_id, "--json"])
-        assert result.exit_code == 0
+        assert result.exit_code == 0, result.output
         data = json.loads(result.output)
+        assert data["ok"] is True
         assert data["original_contract_id"] == original_id
         assert data["retry_contract_id"] == expected_id
 
 
-def test_retry_contract_not_found():
+def test_retry_contract_not_found(monkeypatch):
     """aig retry --contract <nonexistent> reports error."""
+    import aigineering.cli.infrastructure as infrastructure
+
+    # A nonexistent target is resolved before publication; keep this error
+    # contract test independent of the required operational Redis service.
+    monkeypatch.setattr(infrastructure, "require_redis", lambda: None)
     runner = CliRunner()
     with runner.isolated_filesystem():
         result = runner.invoke(cli, ["retry", "--contract", "nonexistent"])
-        assert result.exit_code == 0
+        assert result.exit_code == 1
         assert "not found" in result.output
+
+        json_result = runner.invoke(
+            cli, ["retry", "--contract", "nonexistent", "--json"]
+        )
+        assert json_result.exit_code == 1
+        assert json.loads(json_result.output) == {
+            "ok": False,
+            "not_found": True,
+            "error": {
+                "code": "not_found",
+                "message": "Contract was not found.",
+            },
+            "revision": None,
+        }
+
+
+def test_retry_closes_store_after_signed_publication(monkeypatch):
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        initialized = runner.invoke(cli, ["domain", "init"])
+        assert initialized.exit_code == 0, initialized.output
+        import importlib
+
+        retry_cli = importlib.import_module("aigineering.cli.retry")
+        store = retry_cli._persistent_store()
+        close = store.close
+        store.closed_by_cli = False
+
+        def close_spy():
+            store.closed_by_cli = True
+            close()
+
+        monkeypatch.setattr(store, "close", close_spy)
+        # P0-7: retry the funded child, not the root, so the publication is
+        # funded by a containment parent reservation.
+        child = _publish_funded_retry_target(store, name="retry-close-target")
+        monkeypatch.setattr(retry_cli, "_persistent_store", lambda: store)
+
+        result = runner.invoke(cli, ["retry", "--contract", child.id, "--json"])
+
+        assert result.exit_code == 0, result.output
+        assert json.loads(result.output)["ok"] is True
+        assert store.closed_by_cli
 
 
 def test_trace_tree_view():

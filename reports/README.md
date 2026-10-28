@@ -1,10 +1,11 @@
-# Release evidence
+# Case reports
 
-This directory retains only evidence that materially supports a release claim:
-conformance matrices, restart/active-active results, live-worker scenario
-reports, security review closure, and artifact inspection. Generated routine
-test logs and exploratory notes do not belong here.
+Short summaries of selected outcomes and their limits:
 
-Every report must identify the commit, environment, command or scenario,
-expected result, observed result, unresolved limitations, and evidence files.
+- [Bounded local CLI research](cli-research.md): current 0.5.14 installed-wheel
+  case, with dynamic planning, retained failures and policy-bound export.
+- [Calibration review](calibration-review.md): historical three trials with
+  zero qualified deliveries.
 
+Each result belongs to its tested artifact. These summaries are not general
+reliability scores or replay bundles. See [current support](../docs/reference/development-status.md).

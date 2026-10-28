@@ -1,0 +1,22 @@
+{
+  "cases": [
+    {
+      "case_file": "near-threshold-fahrenheit.case.json",
+      "case_id": "near-threshold-fahrenheit",
+      "case_sha256": "3fd8f9ffaed45f152ade2228ba0d358f47a5387ac8b012c54795ae981439400e",
+      "standard_file": "near-threshold-fahrenheit.standard.json",
+      "standard_id": "synthetic-temperature-calibration-v1-near-200mC",
+      "standard_sha256": "e9385d9fd0d5f971127223ab26501c2562c13dce4b51d4c7c75c47a7b734a651"
+    },
+    {
+      "case_file": "short-interval.case.json",
+      "case_id": "short-interval",
+      "case_sha256": "7500dfda89820c7faf76f3ba1fbe4dbd5905b832e99f86827579c9d1d4b16996",
+      "standard_file": "short-interval.standard.json",
+      "standard_id": "synthetic-temperature-calibration-v1-equal-200mC",
+      "standard_sha256": "f98345053e9e8d6375c12d5369505202791398ef9548f228068930851f968ee4"
+    }
+  ],
+  "partition": "eval",
+  "schema": "thermal-calibration-fixture-manifest-v1"
+}

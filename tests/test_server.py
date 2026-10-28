@@ -18,6 +18,7 @@ from aigineering.core.asset_versions import (
     create_replacement_claim,
     create_slice_asset,
 )
+from aigineering.core.commitment import CandidateCommitter
 from aigineering.core.domain import initialize_genesis
 from aigineering.core.signing import Ed25519Signer
 from aigineering.core.sqlite_store import SQLiteStore
@@ -37,7 +38,9 @@ from aigineering.protocol.effect_builders import (
     worker_claim_effect,
     worker_claim_renewal_effect,
     worker_registration_effect,
+    task_assign_effect,
 )
+from aigineering.plugins.task_assignment import TASK_ASSIGNMENT_EFFECTS
 from aigineering.server.app import app
 
 
@@ -57,6 +60,9 @@ def test_request_store_dependency_closes_connection(monkeypatch):
 
     store = TrackingStore()
     monkeypatch.setattr("aigineering.server.app._persistent_store", lambda: store)
+    monkeypatch.setattr(
+        "aigineering.application.query_projection", lambda _store: _store
+    )
 
     response = TestClient(app).get("/contracts")
 
@@ -80,6 +86,7 @@ def _signed_client():
                     "asset.relate",
                     "contract.publish",
                     "worker.register",
+                    "task.assignment.manage",
                 ),
             )
         ],
@@ -222,6 +229,167 @@ def test_create_and_get_asset(tmp_path, monkeypatch):
     assert rows[0]["id"] == body["id"]
 
 
+@pytest.mark.parametrize("disclosure_view", ["redacted", "transformed"])
+def test_asset_read_and_candidate_responses_redact_non_original_bodies(
+    tmp_path, monkeypatch, disclosure_view
+):
+    from aigineering.core.query_projection import StoreQueryProjection
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("aigineering.server.app.require_redis", lambda: None)
+    monkeypatch.setattr("aigineering.server.app.sync_runtime", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        "aigineering.server.app._persistent_store",
+        lambda: SQLiteStore(".aig/store.db"),
+    )
+    monkeypatch.setattr(
+        "aigineering.application.query_projection",
+        lambda store: StoreQueryProjection(store),
+    )
+    client, actor = _signed_client()
+    marker = f"private-{disclosure_view}-marker"
+
+    created = _post_asset(
+        client,
+        actor,
+        name="sealed_doc",
+        content=marker,
+        disclosure_view=disclosure_view,
+    )
+    assert created.status_code == 201, created.text
+    created_body = created.json()
+    assert created_body["content"] == "[redacted]"
+    assert created_body["disclosure_view"] == disclosure_view
+    assert marker not in created.text
+
+    candidate = _candidate_body(
+        actor,
+        CandidateEffect(
+            "asset.propose",
+            {
+                "asset": {
+                    "name": "candidate_doc",
+                    "content": marker,
+                    "disclosure_view": disclosure_view,
+                }
+            },
+        ),
+    )
+    candidate_response = client.post("/candidates", json=candidate)
+    assert candidate_response.status_code == 200, candidate_response.text
+    candidate_asset = candidate_response.json()["assets"][0]
+    assert candidate_asset["content"] == "[redacted]"
+    assert candidate_asset["disclosure_view"] == disclosure_view
+    assert marker not in candidate_response.text
+
+    operator_marker = "private-nonpromptable-original-marker"
+    original_response = _post_asset(
+        client,
+        actor,
+        name="operator_only",
+        content=operator_marker,
+        promptable=False,
+    )
+    assert original_response.status_code == 201, original_response.text
+    original_body = original_response.json()
+    assert original_body["content"] == operator_marker
+    assert original_body["promptable"] is False
+    assert original_body["disclosure_view"] == "original"
+
+    store = SQLiteStore(".aig/store.db")
+    revision_before_reads = store.get_runtime_revision()
+    store.close()
+    for path in ("/assets", "/assets/sealed_doc", "/assets/sealed_doc/versions"):
+        response = client.get(path)
+        assert response.status_code == 200, response.text
+        assert marker not in response.text
+        rows = {row["id"]: row for row in response.json()}
+        assert rows[created_body["id"]]["content"] == "[redacted]"
+        assert rows[created_body["id"]]["disclosure_view"] == disclosure_view
+        if path == "/assets":
+            assert rows[original_body["id"]]["content"] == operator_marker
+            assert rows[original_body["id"]]["disclosure_view"] == "original"
+
+    store = SQLiteStore(".aig/store.db")
+    try:
+        assert store.get_runtime_revision() == revision_before_reads
+        stored = store.get_asset(created_body["id"])
+        assert stored is not None
+        assert stored.content == marker
+        assert stored.content_hash == created_body["content_hash"]
+        assert stored.disclosure_view == disclosure_view
+        original_stored = store.get_asset(original_body["id"])
+        assert original_stored is not None
+        assert original_stored.content == operator_marker
+        assert original_stored.promptable is False
+    finally:
+        store.close()
+
+
+def test_http_slice_response_preserves_non_original_disclosure_view(
+    tmp_path, monkeypatch
+):
+    from aigineering.core.query_projection import StoreQueryProjection
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("aigineering.server.app.require_redis", lambda: None)
+    monkeypatch.setattr("aigineering.server.app.sync_runtime", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        "aigineering.server.app._persistent_store",
+        lambda: SQLiteStore(".aig/store.db"),
+    )
+    monkeypatch.setattr(
+        "aigineering.application.query_projection",
+        lambda store: StoreQueryProjection(store),
+    )
+    client, actor = _signed_client()
+    marker = "private-sliced-body-marker"
+    source_response = _post_asset(
+        client, actor, name="source_doc", content=marker, disclosure_view="redacted"
+    )
+    assert source_response.status_code == 201, source_response.text
+    source_body = source_response.json()
+    assert source_body["content"] == "[redacted]"
+
+    store = SQLiteStore(".aig/store.db")
+    source = store.get_asset(source_body["id"])
+    assert source is not None
+    source_before = source
+    store.close()
+    slice_asset = create_slice_asset(
+        source, slice_name="source_excerpt", range_spec=f"chars:0-{len(marker)}"
+    )
+    slice_request = _candidate_body(actor, asset_proposal_effect(slice_asset))
+    slice_request["range"] = f"chars:0-{len(marker)}"
+    slice_response = client.post("/assets/source_doc/slice", json=slice_request)
+    assert slice_response.status_code == 201, slice_response.text
+    slice_body = slice_response.json()
+    assert slice_body["content"] == "[redacted]"
+    assert slice_body["disclosure_view"] == "redacted"
+    assert marker not in slice_response.text
+
+    store = SQLiteStore(".aig/store.db")
+    try:
+        before_reads_revision = store.get_runtime_revision()
+        assert store.get_asset(source_body["id"]) == source_before
+        sliced = store.get_asset(slice_body["id"])
+        assert sliced is not None
+        assert sliced.content == marker
+        assert sliced.disclosure_view == "redacted"
+    finally:
+        store.close()
+
+    listed = client.get("/assets/source_excerpt")
+    assert listed.status_code == 200, listed.text
+    assert listed.json()[0]["content"] == "[redacted]"
+    store = SQLiteStore(".aig/store.db")
+    try:
+        assert store.get_runtime_revision() == before_reads_revision
+        assert store.get_asset(source_body["id"]) == source_before
+    finally:
+        store.close()
+
+
 def test_asset_graph_read_endpoints_project_committed_assets(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     client, actor = _signed_client()
@@ -300,6 +468,38 @@ def test_generic_candidate_endpoint_returns_decision_evidence(tmp_path, monkeypa
     assert decision["candidate_id"] == body["id"]
     assert decision["assets"][0]["name"] == "generic"
     assert "candidate.received" in decision["record_types"]
+
+
+def test_candidate_endpoint_rejects_non_nfc_keys_before_store_write(
+    tmp_path, monkeypatch
+):
+    from aigineering.server.app import _request_store
+
+    store = SQLiteStore(str(tmp_path / "candidate-boundary.db"))
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("aigineering.server.app.sync_runtime", lambda *a, **k: None)
+    previous_override = app.dependency_overrides.get(_request_store)
+    app.dependency_overrides[_request_store] = lambda: store
+    try:
+        client, actor = _signed_client()
+        body = _candidate_body(
+            actor,
+            CandidateEffect("asset.propose", {"asset": {"name": "boundary-control"}}),
+        )
+        body["effects"][0]["payload"] = {"asset": {"café": "value"}}
+        before = store.get_runtime_revision()
+
+        response = client.post("/candidates", json=body)
+
+        assert response.status_code == 422
+        assert "NFC" in response.json()["detail"]
+        assert store.get_runtime_revision() == before
+    finally:
+        if previous_override is None:
+            app.dependency_overrides.pop(_request_store, None)
+        else:
+            app.dependency_overrides[_request_store] = previous_override
+        store.close()
 
 
 def test_create_and_get_contract(tmp_path, monkeypatch):
@@ -498,6 +698,122 @@ def test_worker_protocol_cross_replica_claim_renew_submit(tmp_path, monkeypatch)
     assert "claim.renewed" in record_types
     assert record_types.count("worker.claim.renew.requested") == 1
     assert record_types.count("claim.submitted") == 1
+
+
+def test_worker_submission_authentication_rejection_preserves_claim(
+    tmp_path, monkeypatch
+):
+    """The HTTP adapter exposes auth failure without accepting its claim header."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("aigineering.server.app.require_redis", lambda: None)
+    monkeypatch.setattr(
+        "aigineering.server.app.sync_runtime", lambda *args, **kwargs: None
+    )
+    client, actor = _signed_client()
+    created = _post_contract(client, actor, name="auth_reject", outputs=["out"])
+    contract_id = created.json()["id"]
+    worker_key = _register_worker(client, actor, "auth-reject-worker")
+    claimed = client.post(
+        "/worker/claims",
+        json=_worker_command(
+            actor,
+            worker_key,
+            worker_claim_effect(
+                "auth-reject-worker", contract_id=contract_id, lease_seconds=60
+            ),
+            "claim:auth-reject-worker:1",
+        ),
+    )
+    assert claimed.status_code == 200, claimed.text
+    package = claimed.json()
+    proposal = _worker_submission(
+        actor, worker_key, package, "out: output must not be committed"
+    )
+    proposal["signature"] = "invalid-test-signature"
+
+    response = client.post("/worker/submissions", json=proposal)
+
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "rejected"
+    persisted = SQLiteStore(".aig/store.db")
+    try:
+        assert persisted.get_claim(contract_id)["status"] == "active"
+        assert persisted.scan_runtime_records(
+            record_type="candidate.authentication_rejected"
+        )
+        assert not persisted.scan_runtime_records(record_type="attempt.closed")
+        assert not any(
+            record.payload.get("contract_id") == contract_id
+            for _, record in persisted.scan_runtime_records(
+                record_type="lifecycle.terminal"
+            )
+        )
+        assert not persisted.get_assets_by_name("out")
+    finally:
+        persisted.close()
+
+
+def test_http_claim_respects_signed_assignment_and_selected_worker(
+    tmp_path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("aigineering.server.app.require_redis", lambda: None)
+    monkeypatch.setattr(
+        "aigineering.server.app.sync_runtime", lambda _store, *, accepted: None
+    )
+    client, actor = _signed_client()
+    created = _post_contract(
+        client, actor, name="http assigned", outputs=["result"], budget=1
+    )
+    contract_id = created.json()["id"]
+    wrong_worker = _register_worker(client, actor, "worker:wrong")
+    selected_worker = _register_worker(client, actor, "worker:selected")
+
+    signer, genesis = actor
+    assignment_candidate = create_candidate_proposal(
+        domain_id=genesis.id,
+        actor_id="test:client",
+        key_id="root",
+        effects=[
+            task_assign_effect(contract_id, "worker:selected", "", "route via HTTP")
+        ],
+        signer=signer,
+        idempotency_key="http-assignment-selected-worker",
+    )
+    store = SQLiteStore(".aig/store.db")
+    assignment = CandidateCommitter(
+        store, store, additional_effects=TASK_ASSIGNMENT_EFFECTS
+    ).commit(assignment_candidate, genesis)
+    assert assignment.accepted
+    store.close()
+
+    denied = client.post(
+        "/worker/claims",
+        json=_worker_command(
+            actor,
+            wrong_worker,
+            worker_claim_effect("worker:wrong", contract_id=contract_id),
+            "claim-wrong-assigned-worker",
+        ),
+    )
+    assert denied.status_code == 409
+    store = SQLiteStore(".aig/store.db")
+    assert store.get_claim(contract_id) is None
+    store.close()
+
+    claimed = client.post(
+        "/worker/claims",
+        json=_worker_command(
+            actor,
+            selected_worker,
+            worker_claim_effect("worker:selected", contract_id=contract_id),
+            "claim-selected-assigned-worker",
+        ),
+    )
+    assert claimed.status_code == 200, claimed.text
+    store = SQLiteStore(".aig/store.db")
+    assert store.get_claim(contract_id)["worker_id"] == "worker:selected"
+    store.close()
 
 
 def test_unregistered_worker_cannot_lock_a_server_task(tmp_path, monkeypatch):

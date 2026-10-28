@@ -9,11 +9,13 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import sqlite3
+from dataclasses import dataclass
 from collections.abc import Callable
 from pathlib import Path
 from types import MappingProxyType
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from aigineering.core.authority import (
     ReservedNamespaceError,
@@ -21,6 +23,16 @@ from aigineering.core.authority import (
     matched_reserved_prefix,
 )
 from aigineering.core.activation import activation_names
+from aigineering.core.claim_holds import (
+    ClaimHoldConflict,
+    open_claim_holds,
+    validate_claim_hold_batch,
+)
+from aigineering.core.causal_allowance import (
+    RawAllowanceTotals,
+    _raw_integer_text,
+    fold_raw_allowance_records,
+)
 from aigineering.core.crash import check_crash_point
 from aigineering.core.ids import (
     compute_content_hash,
@@ -75,11 +87,29 @@ from aigineering.protocol.wire import (
     trace_entry_to_dict,
 )
 
+if TYPE_CHECKING:
+    from aigineering.core.projection_context import (
+        AssetProposalProjectionInputs,
+        AssetProposalProjectionRequest,
+    )
+
 _logger = logging.getLogger(__name__)
+_ASSET_ID_QUERY_CHUNK_SIZE = 900
+_PROJECTION_ID_QUERY_RELATION_COUNT = 5
 
 
 class WorkerBindingConflict(ValueError):
     """The registered worker actor/key changed before Candidate commitment."""
+
+
+@dataclass(frozen=True)
+class RawAllowanceCheckpointRead:
+    status: str
+    totals: RawAllowanceTotals | None
+    through_revision: int
+    tail_record_count: int
+    decoded_record_count: int
+    fold_record_count: int
 
 
 def _is_sqlite_contention(exc: sqlite3.OperationalError) -> bool:
@@ -104,7 +134,15 @@ class SQLiteStore:
     databases.
     """
 
-    def __init__(self, db_path: str = ":memory:") -> None:
+    def __init__(
+        self,
+        db_path: str = ":memory:",
+        *,
+        allowance_checkpoint_mode: str = "checkpoint",
+    ) -> None:
+        if allowance_checkpoint_mode not in {"checkpoint", "reference"}:
+            raise ValueError("unknown allowance checkpoint mode")
+        self._allowance_checkpoint_mode = allowance_checkpoint_mode
         self._db_path = db_path
 
         if db_path != ":memory:":
@@ -134,7 +172,9 @@ class SQLiteStore:
         source projections. The returned store has its own connection and
         should be closed by its caller.
         """
-        snapshot = SQLiteStore(":memory:")
+        snapshot = SQLiteStore(
+            ":memory:", allowance_checkpoint_mode=self._allowance_checkpoint_mode
+        )
         try:
             self._conn.backup(snapshot._conn)
         except Exception:
@@ -187,6 +227,22 @@ class SQLiteStore:
     # ── Immutable runtime-record envelope ────────────────────────────────
 
     def append_runtime_record(self, record: RuntimeRecord) -> int:
+        if record.record_type in {
+            "allowance.granted",
+            "allowance.reserved",
+            "allowance.returned",
+            "allowance.extinguished",
+        }:
+            raise ValueError("allowance facts require Candidate ingress commitment")
+        if record.record_type in {
+            "claim.constraint.placed",
+            "claim.constraint.released",
+        }:
+            raise ValueError(
+                "claim constraint facts require Candidate ingress commitment"
+            )
+        if record.record_type == "claim.assignment.changed":
+            raise ValueError("assignment facts require Candidate ingress commitment")
         with self._conn:
             revision = self._insert_runtime_record(record)
             if record.record_type == "lifecycle.terminal":
@@ -242,8 +298,47 @@ class SQLiteStore:
                 )
             )
 
-    def _insert_runtime_record(self, record: RuntimeRecord) -> int:
+    def _insert_runtime_record(
+        self,
+        record: RuntimeRecord,
+        *,
+        allow_claim_hold_fact: bool = False,
+        allow_claim_constraint_fact: bool = False,
+        allow_claim_assignment_fact: bool = False,
+    ) -> int:
         """Insert within the caller's transaction without committing it."""
+        if record.record_type.startswith("claim.hold."):
+            if record.record_type not in {
+                "claim.hold.placed",
+                "claim.hold.released",
+            }:
+                raise ClaimHoldConflict("unsupported generic claim-hold fact")
+            if not allow_claim_hold_fact:
+                raise ClaimHoldConflict(
+                    "claim-hold facts must enter through authenticated Candidate commitment"
+                )
+        if (
+            record.record_type
+            in {
+                "claim.constraint.placed",
+                "claim.constraint.released",
+            }
+            and not allow_claim_constraint_fact
+        ):
+            from aigineering.core.claim_constraints import ClaimConstraintConflict
+
+            raise ClaimConstraintConflict(
+                "claim constraint facts must enter through authenticated Candidate commitment"
+            )
+        if (
+            record.record_type == "claim.assignment.changed"
+            and not allow_claim_assignment_fact
+        ):
+            from aigineering.core.claim_assignments import AssignmentConflict
+
+            raise AssignmentConflict(
+                "assignment facts must enter through authenticated Candidate commitment"
+            )
         row = self._conn.execute(
             "SELECT * FROM runtime_records WHERE record_id = ?", (record.id,)
         ).fetchone()
@@ -318,7 +413,465 @@ class SQLiteStore:
         if replacement_claim is not None:
             self._insert_replacement_claim(replacement_claim)
         self._materialize_asset_graph_record(record)
-        return int(cursor.lastrowid)
+        revision = int(cursor.lastrowid)
+        self._refresh_allowance_checkpoint_for_record(record, revision)
+        if record.record_type == "candidate.committed":
+            self._refresh_publication_index_for_record(record, revision)
+        return revision
+
+    def _publication_index_tables_present(self) -> bool:
+        names = {
+            str(row[0])
+            for row in self._conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+        }
+        return {
+            "runtime_records",
+            "publication_head_members",
+            "publication_index_state",
+        } <= names
+
+    def _publication_index_state(self):
+        return self._conn.execute(
+            "SELECT format_version, through_revision, basis_record_id, has_opaque_heads "
+            "FROM publication_index_state WHERE singleton=1"
+        ).fetchone()
+
+    def _write_publication_index_state(
+        self, through: int, basis: str, has_opaque: bool
+    ) -> None:
+        self._conn.execute(
+            "INSERT INTO publication_index_state VALUES (1, 1, ?, ?, ?) "
+            "ON CONFLICT(singleton) DO UPDATE SET format_version=excluded.format_version, "
+            "through_revision=excluded.through_revision, basis_record_id=excluded.basis_record_id, "
+            "has_opaque_heads=excluded.has_opaque_heads",
+            (through, basis, int(has_opaque)),
+        )
+
+    def _index_publication_head(self, record: RuntimeRecord) -> bool:
+        from aigineering.core.allowance_publication_index import (
+            safe_committed_head_relations,
+        )
+
+        relations = safe_committed_head_relations(record)
+        if relations is None:
+            return False
+        members, _parents = relations
+        self._conn.executemany(
+            "INSERT OR IGNORE INTO publication_head_members VALUES (?, ?)",
+            ((record.id, member_id) for member_id in members),
+        )
+        return True
+
+    def _refresh_publication_index_for_record(
+        self, record: RuntimeRecord, revision: int
+    ) -> None:
+        if (
+            record.record_type != "candidate.committed"
+            or self._allowance_checkpoint_mode == "reference"
+            or not self._publication_index_tables_present()
+        ):
+            return
+        state = self._publication_index_state()
+        if state is None:
+            # A missing cursor is the only implicit cold-build case. The
+            # accepted head is already in this transaction's immutable prefix.
+            self.rebuild_publication_index()
+            return
+        if (
+            type(state["format_version"]) is not int
+            or state["format_version"] != 1
+            or type(state["through_revision"]) is not int
+            or state["through_revision"] < 0
+            or state["through_revision"] >= revision
+            or type(state["has_opaque_heads"]) is not int
+            or state["has_opaque_heads"] not in (0, 1)
+        ):
+            return
+        through = int(state["through_revision"])
+        if through:
+            basis = self._conn.execute(
+                "SELECT record_id FROM runtime_records WHERE revision=?", (through,)
+            ).fetchone()
+            if basis is None or basis["record_id"] != state["basis_record_id"]:
+                return
+        elif state["basis_record_id"] != "":
+            return
+        tail = self._conn.execute(
+            "SELECT * FROM runtime_records WHERE record_type='candidate.committed' "
+            "AND revision>? AND revision<=? ORDER BY revision",
+            (through, revision),
+        ).fetchall()
+        has_opaque = bool(state["has_opaque_heads"])
+        for row in tail:
+            head = self._row_to_runtime_record(row)
+            if not self._index_publication_head(head):
+                has_opaque = True
+        basis_row = self._conn.execute(
+            "SELECT record_id FROM runtime_records WHERE revision=?", (revision,)
+        ).fetchone()
+        if basis_row is not None:
+            self._write_publication_index_state(
+                revision, str(basis_row["record_id"]), has_opaque
+            )
+
+    def _publication_query_chunk_size(
+        self,
+        parameters_per_item: int,
+        *,
+        fixed_parameters: int = 0,
+        maximum: int = 900,
+    ) -> int:
+        parameter_limit = self._conn.getlimit(sqlite3.SQLITE_LIMIT_VARIABLE_NUMBER)
+        available = parameter_limit - fixed_parameters
+        chunk_size = min(maximum, available // parameters_per_item)
+        if chunk_size < 1:
+            raise sqlite3.OperationalError(
+                "SQLite variable limit does not permit publication relation lookup"
+            )
+        return chunk_size
+
+    def rebuild_publication_index(self) -> None:
+        """Rebuild the derived head-member relation without owning outer transactions."""
+        if not self._publication_index_tables_present():
+            return
+        owns_transaction = not self._conn.in_transaction
+        if owns_transaction:
+            self._conn.execute("BEGIN IMMEDIATE")
+        try:
+            through = self.get_runtime_revision()
+            records = self._conn.execute(
+                "SELECT * FROM runtime_records WHERE record_type='candidate.committed' "
+                "AND revision<=? ORDER BY revision",
+                (through,),
+            ).fetchall()
+            self._conn.execute("DELETE FROM publication_head_members")
+            has_opaque = False
+            for row in records:
+                if not self._index_publication_head(self._row_to_runtime_record(row)):
+                    has_opaque = True
+            basis = ""
+            if through:
+                row = self._conn.execute(
+                    "SELECT record_id FROM runtime_records WHERE revision=?", (through,)
+                ).fetchone()
+                if row is None:
+                    raise sqlite3.IntegrityError("publication index basis is missing")
+                basis = str(row["record_id"])
+            self._write_publication_index_state(through, basis, has_opaque)
+        except Exception:
+            if owns_transaction:
+                self._conn.execute("ROLLBACK")
+            raise
+        else:
+            if owns_transaction:
+                self._conn.execute("COMMIT")
+
+    def audit_publication_index(self) -> tuple[str, ...]:
+        """Audit the derived relation against one immutable runtime prefix."""
+        if not self._publication_index_tables_present():
+            return ()
+        owns_snapshot = not self._conn.in_transaction
+        if owns_snapshot:
+            self._conn.execute("BEGIN")
+        try:
+            current_revision = self.get_runtime_revision()
+            state = self._publication_index_state()
+            if state is None:
+                has_rows = self._conn.execute(
+                    "SELECT 1 FROM publication_head_members LIMIT 1"
+                ).fetchone()
+                return (
+                    ("publication index state is missing",)
+                    if has_rows is not None
+                    else ()
+                )
+            cursor = state["through_revision"]
+            if (
+                type(state["format_version"]) is not int
+                or state["format_version"] != 1
+                or type(cursor) is not int
+                or cursor < 0
+                or cursor > current_revision
+                or not isinstance(state["basis_record_id"], str)
+                or type(state["has_opaque_heads"]) is not int
+                or state["has_opaque_heads"] not in (0, 1)
+            ):
+                return ("publication index integrity mismatch",)
+            records = self._conn.execute(
+                "SELECT * FROM runtime_records WHERE record_type='candidate.committed' "
+                "AND revision<=? ORDER BY revision",
+                (cursor,),
+            ).fetchall()
+            expected: set[tuple[str, str]] = set()
+            opaque = False
+            for row in records:
+                record = self._row_to_runtime_record(row)
+                from aigineering.core.allowance_publication_index import (
+                    safe_committed_head_relations,
+                )
+
+                relations = safe_committed_head_relations(record)
+                if relations is None:
+                    opaque = True
+                    continue
+                expected.update((record.id, member) for member in relations[0])
+            actual = {
+                (str(row[0]), str(row[1]))
+                for row in self._conn.execute(
+                    "SELECT head_record_id, member_id FROM publication_head_members"
+                )
+            }
+            basis = ""
+            if cursor:
+                row = self._conn.execute(
+                    "SELECT record_id FROM runtime_records WHERE revision=?", (cursor,)
+                ).fetchone()
+                basis = "" if row is None else str(row["record_id"])
+            if (
+                type(state["format_version"]) is not int
+                or state["format_version"] != 1
+                or type(cursor) is not int
+                or cursor < 0
+                or cursor > current_revision
+                or state["basis_record_id"] != basis
+                or type(state["has_opaque_heads"]) is not int
+                or state["has_opaque_heads"] != int(opaque)
+                or actual != expected
+            ):
+                return ("publication index integrity mismatch",)
+            return ()
+        finally:
+            if owns_snapshot:
+                self._conn.execute("ROLLBACK")
+
+    def read_allowance_publication_selection(self, request):
+        """Execute one typed, snapshot-local publication relation lookup.
+
+        ``None`` means the relation cannot safely narrow the historical input;
+        callers must then use their existing reference reader.
+        """
+        from aigineering.core.allowance_publication_index import (
+            DeclarationPairsRequest,
+            PublicationClosureRequest,
+            PublicationHeadsRequest,
+            PublicationSelection,
+            safe_committed_head_relations,
+        )
+
+        if (
+            self._allowance_checkpoint_mode == "reference"
+            or not self._publication_index_tables_present()
+        ):
+            return None
+        owns_snapshot = not self._conn.in_transaction
+        if owns_snapshot:
+            self._conn.execute("BEGIN")
+        try:
+            through = self.get_runtime_revision()
+            state = self._publication_index_state()
+            if state is None:
+                return None
+            cursor = state["through_revision"]
+            if (
+                type(state["format_version"]) is not int
+                or state["format_version"] != 1
+                or type(cursor) is not int
+                or cursor < 0
+                or cursor > through
+                or type(state["has_opaque_heads"]) is not int
+                or state["has_opaque_heads"] not in (0, 1)
+            ):
+                return None
+            if cursor:
+                basis = self._conn.execute(
+                    "SELECT record_id FROM runtime_records WHERE revision=?",
+                    (cursor,),
+                ).fetchone()
+                if basis is None or basis["record_id"] != state["basis_record_id"]:
+                    return None
+            elif state["basis_record_id"] != "":
+                return None
+            if state["has_opaque_heads"]:
+                return None
+
+            rows = []
+            if isinstance(request, PublicationHeadsRequest):
+                if not all(
+                    isinstance(value, str) and value for value in request.member_ids
+                ):
+                    return None
+                member_ids = tuple(dict.fromkeys(request.member_ids))
+                member_id_set = frozenset(member_ids)
+                chunk_size = (
+                    self._publication_query_chunk_size(1, fixed_parameters=1)
+                    if member_ids
+                    else 1
+                )
+                for start in range(0, len(member_ids), chunk_size):
+                    chunk = member_ids[start : start + chunk_size]
+                    if not chunk:
+                        continue
+                    placeholders = ",".join("?" for _ in chunk)
+                    rows.extend(
+                        self._conn.execute(
+                            "SELECT DISTINCT h.* FROM publication_head_members m "
+                            "INDEXED BY idx_publication_head_members_member "
+                            "CROSS JOIN runtime_records h ON h.record_id=m.head_record_id "
+                            "WHERE m.member_id IN (" + placeholders + ") "
+                            "AND h.record_type='candidate.committed' AND h.revision<=?",
+                            (*chunk, cursor),
+                        ).fetchall()
+                    )
+                # Old binaries can append facts without maintaining this index.
+                tail = self._conn.execute(
+                    "SELECT * FROM runtime_records WHERE record_type='candidate.committed' "
+                    "AND revision>? AND revision<=? ORDER BY revision",
+                    (cursor, through),
+                ).fetchall()
+                selected_ids = {str(row["record_id"]) for row in rows}
+                for row in tail:
+                    head = self._row_to_runtime_record(row)
+                    relations = safe_committed_head_relations(head)
+                    if relations is None:
+                        return None
+                    if (
+                        not relations[0].isdisjoint(member_id_set)
+                        and head.id not in selected_ids
+                    ):
+                        rows.append(row)
+                        selected_ids.add(head.id)
+            elif isinstance(request, DeclarationPairsRequest):
+                if not all(
+                    isinstance(pair, tuple)
+                    and len(pair) == 2
+                    and all(isinstance(value, str) and value for value in pair)
+                    for pair in request.pairs
+                ):
+                    return None
+                chunk_size = (
+                    self._publication_query_chunk_size(2, maximum=300)
+                    if request.pairs
+                    else 1
+                )
+                for start in range(0, len(request.pairs), chunk_size):
+                    pairs = request.pairs[start : start + chunk_size]
+                    if not pairs:
+                        continue
+                    where = " OR ".join(
+                        "(json_extract(payload_json,'$.candidate_id')=? AND "
+                        "json_extract(payload_json,'$.contract.id')=?)"
+                        for _ in pairs
+                    )
+                    values = tuple(value for pair in pairs for value in pair)
+                    rows.extend(
+                        self._conn.execute(
+                            "SELECT * FROM runtime_records WHERE record_type='contract.declared' "
+                            "AND json_type(payload_json,'$.candidate_id')='text' "
+                            "AND json_extract(payload_json,'$.candidate_id')<>'' "
+                            "AND json_type(payload_json,'$.contract')='object' "
+                            "AND json_type(payload_json,'$.contract.id')='text' "
+                            "AND json_extract(payload_json,'$.contract.id')<>'' AND "
+                            + where
+                            + " ORDER BY revision",
+                            values,
+                        ).fetchall()
+                    )
+            elif isinstance(request, PublicationClosureRequest):
+                if not all(
+                    isinstance(value, str) and value for value in request.record_ids
+                ):
+                    return None
+                ids = tuple(dict.fromkeys(request.record_ids))
+                chunk_size = (
+                    self._publication_query_chunk_size(1, fixed_parameters=1)
+                    if ids
+                    else 1
+                )
+                for start in range(0, len(ids), chunk_size):
+                    chunk = ids[start : start + chunk_size]
+                    if not chunk:
+                        continue
+                    placeholders = ",".join("?" for _ in chunk)
+                    rows.extend(
+                        self._conn.execute(
+                            "SELECT * FROM runtime_records WHERE record_id IN ("
+                            + placeholders
+                            + ") AND revision<=?",
+                            (*chunk, through),
+                        ).fetchall()
+                    )
+                rows_by_id = {str(row["record_id"]): row for row in rows}
+                decoded = [
+                    self._row_to_runtime_record(row) for row in rows_by_id.values()
+                ]
+                head_ids = tuple(
+                    record.id
+                    for record in decoded
+                    if record.record_type == "candidate.committed"
+                )
+                closure_ids = set(ids)
+                for record in decoded:
+                    closure_ids.update(record.causal_parents)
+                for head_id in head_ids:
+                    row = rows_by_id[head_id]
+                    head = self._row_to_runtime_record(row)
+                    relations = safe_committed_head_relations(head)
+                    if relations is None:
+                        return None
+                    if int(row["revision"]) > cursor:
+                        closure_ids.update(relations[0])
+                chunk_size = self._publication_query_chunk_size(1) if head_ids else 1
+                for start in range(0, len(head_ids), chunk_size):
+                    chunk = head_ids[start : start + chunk_size]
+                    if not chunk:
+                        continue
+                    placeholders = ",".join("?" for _ in chunk)
+                    rows.extend(
+                        self._conn.execute(
+                            "SELECT DISTINCT r.* FROM publication_head_members m "
+                            "JOIN runtime_records r ON r.record_id=m.member_id "
+                            "WHERE m.head_record_id IN (" + placeholders + ")",
+                            chunk,
+                        ).fetchall()
+                    )
+                available_ids = rows_by_id.keys() | {
+                    str(row["record_id"]) for row in rows
+                }
+                missing = tuple(closure_ids - available_ids)
+                chunk_size = (
+                    self._publication_query_chunk_size(1, fixed_parameters=1)
+                    if missing
+                    else 1
+                )
+                for start in range(0, len(missing), chunk_size):
+                    chunk = missing[start : start + chunk_size]
+                    if not chunk:
+                        continue
+                    placeholders = ",".join("?" for _ in chunk)
+                    rows.extend(
+                        self._conn.execute(
+                            "SELECT * FROM runtime_records WHERE record_id IN ("
+                            + placeholders
+                            + ") AND revision<=?",
+                            (*chunk, through),
+                        ).fetchall()
+                    )
+            else:
+                return None
+
+            unique_rows = {str(row["record_id"]): row for row in rows}
+            selected = tuple(
+                self._row_to_runtime_record(row)
+                for row in sorted(
+                    unique_rows.values(), key=lambda row: int(row["revision"])
+                )
+            )
+            return PublicationSelection(selected, True)
+        finally:
+            if owns_snapshot:
+                self._conn.execute("ROLLBACK")
 
     def _materialize_asset_graph_record(self, record: RuntimeRecord) -> None:
         content, definition, assertion = graph_rows_from_record(record)
@@ -465,6 +1018,654 @@ class SQLiteStore:
             (int(row["revision"]), self._row_to_runtime_record(row)) for row in rows
         ]
 
+    _ALLOWANCE_RELATIONS = (
+        ("allowance.granted", "contract_id"),
+        ("allowance.reserved", "source_contract_id"),
+        ("allowance.returned", "source_contract_id"),
+        ("allowance.returned", "from_contract_id"),
+        ("allowance.extinguished", "contract_id"),
+    )
+
+    def _allowance_relation_rows(
+        self, contract_id: str, after_revision: int, through_revision: int
+    ) -> list[tuple[int, RuntimeRecord]]:
+        rows_by_revision: dict[int, sqlite3.Row] = {}
+        for record_type, field in self._ALLOWANCE_RELATIONS:
+            sql = (
+                "SELECT * FROM runtime_records WHERE record_type = ? "
+                f"AND json_extract(payload_json, '$.{field}') = ? "
+                "AND revision > ? AND revision <= ? ORDER BY revision"
+            )
+            params = (record_type, contract_id, after_revision, through_revision)
+            rows = self._conn.execute(sql, params).fetchall()
+            rows_by_revision.update({int(row["revision"]): row for row in rows})
+        decoded = [
+            (revision, self._row_to_runtime_record(row))
+            for revision, row in sorted(rows_by_revision.items())
+        ]
+        return decoded
+
+    @staticmethod
+    def _checkpoint_totals_from_row(row) -> RawAllowanceTotals | None:
+        if (
+            row is None
+            or type(row["format_version"]) is not int
+            or row["format_version"] != 1
+        ):
+            return None
+        fields = (
+            "grant_count",
+            "granted_total",
+            "reserved_total",
+            "returned_in_total",
+            "returned_out_total",
+            "extinguished_total",
+        )
+        values: list[int] = []
+        for field in fields:
+            value = row[field]
+            if (
+                not isinstance(value, str)
+                or re.fullmatch(r"-?(?:0|[1-9][0-9]*)", value) is None
+            ):
+                return None
+            try:
+                from decimal import Decimal
+
+                parsed = int(Decimal(value))
+            except (ValueError, OverflowError):
+                return None
+            if _raw_integer_text(parsed) != value:
+                return None
+            values.append(parsed)
+        return RawAllowanceTotals(*values)
+
+    def read_raw_allowance_checkpoint(
+        self, contract_id: str
+    ) -> RawAllowanceCheckpointRead:
+        """Read checkpoint plus exact indexed tail without mutating cache state."""
+        if self._allowance_checkpoint_mode == "reference":
+            owns_snapshot = not self._conn.in_transaction
+            if owns_snapshot:
+                self._conn.execute("BEGIN")
+            try:
+                scanned = self.scan_runtime_records()
+                records = [
+                    record
+                    for _, record in scanned
+                    if contract_id in self._allowance_accounts_for_record(record)
+                ]
+                through = self.get_runtime_revision()
+                totals = fold_raw_allowance_records(contract_id, records)
+                return RawAllowanceCheckpointRead(
+                    "valid" if totals is not None else "opaque",
+                    totals,
+                    through,
+                    len(scanned),
+                    len(scanned),
+                    len(records),
+                )
+            finally:
+                if owns_snapshot:
+                    self._conn.execute("ROLLBACK")
+        owns_snapshot = not self._conn.in_transaction
+        if owns_snapshot:
+            self._conn.execute("BEGIN")
+        try:
+            tables = {
+                str(row[0])
+                for row in self._conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                )
+            }
+            through = self.get_runtime_revision()
+            checkpoint = None
+            if "allowance_checkpoints" in tables:
+                checkpoint = self._conn.execute(
+                    "SELECT * FROM allowance_checkpoints WHERE contract_id = ?",
+                    (contract_id,),
+                ).fetchone()
+            if checkpoint is not None and checkpoint["status"] == "opaque":
+                cursor_value = checkpoint["through_revision"]
+                cursor = cursor_value if type(cursor_value) is int else -1
+                return RawAllowanceCheckpointRead("opaque", None, cursor, 0, 0, 0)
+            totals = self._checkpoint_totals_from_row(checkpoint)
+            cursor_value = (
+                None if checkpoint is None else checkpoint["through_revision"]
+            )
+            cursor = (
+                0
+                if checkpoint is None
+                else (cursor_value if type(cursor_value) is int else -1)
+            )
+            if cursor < 0 or cursor > through:
+                totals = None
+            if checkpoint is not None and (
+                checkpoint["status"] != "valid" or totals is None
+            ):
+                return RawAllowanceCheckpointRead("opaque", None, cursor, 0, 0, 0)
+            if checkpoint is not None and cursor:
+                basis = self._conn.execute(
+                    "SELECT record_id FROM runtime_records WHERE revision = ?",
+                    (cursor,),
+                ).fetchone()
+                if basis is None or basis["record_id"] != checkpoint["basis_record_id"]:
+                    return RawAllowanceCheckpointRead("opaque", None, cursor, 0, 0, 0)
+            elif checkpoint is not None and checkpoint["basis_record_id"] != "":
+                return RawAllowanceCheckpointRead("opaque", None, cursor, 0, 0, 0)
+            tail = self._allowance_relation_rows(
+                contract_id, cursor if totals is not None else 0, through
+            )
+            if totals is None:
+                totals = RawAllowanceTotals(0, 0, 0, 0, 0, 0)
+            tail_totals = fold_raw_allowance_records(
+                contract_id, [record for _, record in tail]
+            )
+            if tail_totals is None:
+                return RawAllowanceCheckpointRead(
+                    "opaque", None, through, len(tail), len(tail), len(tail)
+                )
+            totals = RawAllowanceTotals(
+                totals.grant_count + tail_totals.grant_count,
+                totals.granted_total + tail_totals.granted_total,
+                totals.reserved_total + tail_totals.reserved_total,
+                totals.returned_in_total + tail_totals.returned_in_total,
+                totals.returned_out_total + tail_totals.returned_out_total,
+                totals.extinguished_total + tail_totals.extinguished_total,
+            )
+            return RawAllowanceCheckpointRead(
+                "valid", totals, through, len(tail), len(tail), len(tail)
+            )
+        finally:
+            if owns_snapshot:
+                self._conn.execute("ROLLBACK")
+
+    def _write_allowance_checkpoint(
+        self, contract_id: str, through: int, totals: RawAllowanceTotals | None
+    ) -> None:
+        if self._allowance_checkpoint_mode != "checkpoint":
+            return
+        table = self._conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='allowance_checkpoints'"
+        ).fetchone()
+        if table is None:
+            return
+        basis = ""
+        if through:
+            row = self._conn.execute(
+                "SELECT record_id FROM runtime_records WHERE revision = ?", (through,)
+            ).fetchone()
+            if row is None:
+                raise sqlite3.IntegrityError("allowance checkpoint basis is missing")
+            basis = str(row["record_id"])
+        values = (
+            (None,) * 6
+            if totals is None
+            else tuple(
+                _raw_integer_text(value)
+                for value in (
+                    totals.grant_count,
+                    totals.granted_total,
+                    totals.reserved_total,
+                    totals.returned_in_total,
+                    totals.returned_out_total,
+                    totals.extinguished_total,
+                )
+            )
+        )
+        self._conn.execute(
+            "INSERT INTO allowance_checkpoints VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(contract_id) DO UPDATE SET format_version=excluded.format_version, "
+            "status=excluded.status, through_revision=excluded.through_revision, "
+            "basis_record_id=excluded.basis_record_id, grant_count=excluded.grant_count, "
+            "granted_total=excluded.granted_total, reserved_total=excluded.reserved_total, "
+            "returned_in_total=excluded.returned_in_total, returned_out_total=excluded.returned_out_total, "
+            "extinguished_total=excluded.extinguished_total",
+            (
+                contract_id,
+                "valid" if totals is not None else "opaque",
+                through,
+                basis,
+                *values,
+            ),
+        )
+
+    def _refresh_allowance_checkpoint_for_record(
+        self, record: RuntimeRecord, revision: int
+    ) -> None:
+        if (
+            self._allowance_checkpoint_mode != "checkpoint"
+            or record.record_type not in {item[0] for item in self._ALLOWANCE_RELATIONS}
+        ):
+            return
+        payload = record.payload
+        affected = set()
+        if record.record_type in {"allowance.granted", "allowance.extinguished"}:
+            affected.add(str(payload.get("contract_id", "")))
+        elif record.record_type == "allowance.reserved":
+            affected.add(str(payload.get("source_contract_id", "")))
+        elif record.record_type == "allowance.returned":
+            affected.add(str(payload.get("source_contract_id", "")))
+            affected.add(str(payload.get("from_contract_id", "")))
+        affected.discard("")
+        for contract_id in sorted(affected):
+            table = self._conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='allowance_checkpoints'"
+            ).fetchone()
+            if table is None:
+                return
+            row = self._conn.execute(
+                "SELECT * FROM allowance_checkpoints WHERE contract_id=?",
+                (contract_id,),
+            ).fetchone()
+            if row is not None and row["status"] != "valid":
+                continue
+            old = self._checkpoint_totals_from_row(row)
+            if row is not None and old is None:
+                continue
+            if row is not None and type(row["through_revision"]) is not int:
+                continue
+            cursor = 0 if row is None else int(row["through_revision"])
+            if cursor > revision:
+                continue
+            if row is not None and old is not None and cursor:
+                basis = self._conn.execute(
+                    "SELECT record_id FROM runtime_records WHERE revision=?", (cursor,)
+                ).fetchone()
+                if basis is None or basis["record_id"] != row["basis_record_id"]:
+                    continue
+            elif row is not None and row["basis_record_id"] != "":
+                continue
+            tail = self._allowance_relation_rows(contract_id, cursor, revision)
+            folded = fold_raw_allowance_records(contract_id, [item for _, item in tail])
+            if folded is None:
+                self._write_allowance_checkpoint(contract_id, revision, None)
+                continue
+            if old is None:
+                self._write_allowance_checkpoint(contract_id, revision, folded)
+            else:
+                totals = RawAllowanceTotals(
+                    old.grant_count + folded.grant_count,
+                    old.granted_total + folded.granted_total,
+                    old.reserved_total + folded.reserved_total,
+                    old.returned_in_total + folded.returned_in_total,
+                    old.returned_out_total + folded.returned_out_total,
+                    old.extinguished_total + folded.extinguished_total,
+                )
+                self._write_allowance_checkpoint(contract_id, revision, totals)
+
+    @staticmethod
+    def _allowance_accounts_for_record(record: RuntimeRecord) -> set[str]:
+        payload = record.payload
+        if record.record_type in {"allowance.granted", "allowance.extinguished"}:
+            return {str(payload.get("contract_id", ""))} - {""}
+        if record.record_type == "allowance.reserved":
+            return {str(payload.get("source_contract_id", ""))} - {""}
+        if record.record_type == "allowance.returned":
+            return {
+                str(payload.get("source_contract_id", "")),
+                str(payload.get("from_contract_id", "")),
+            } - {""}
+        return set()
+
+    def rebuild_allowance_checkpoints(
+        self,
+        records: list[tuple[int, RuntimeRecord]] | None = None,
+        through_revision: int | None = None,
+    ) -> None:
+        """Rebuild only derived allowance rows from one immutable prefix."""
+        if self._allowance_checkpoint_mode != "checkpoint":
+            return
+        table = self._conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='allowance_checkpoints'"
+        ).fetchone()
+        if table is None:
+            return
+        owns_transaction = not self._conn.in_transaction
+        if owns_transaction:
+            self._conn.execute("BEGIN IMMEDIATE")
+        try:
+            if records is None:
+                through = self.get_runtime_revision()
+                captured = self.scan_runtime_records(through_revision=through)
+            else:
+                captured = [
+                    item
+                    for item in records
+                    if through_revision is None or item[0] <= through_revision
+                ]
+                through = (
+                    through_revision
+                    if through_revision is not None
+                    else (captured[-1][0] if captured else 0)
+                )
+            by_account: dict[str, list[RuntimeRecord]] = {}
+            for _, record in captured:
+                for account in self._allowance_accounts_for_record(record):
+                    by_account.setdefault(account, []).append(record)
+            self._conn.execute("DELETE FROM allowance_checkpoints")
+            for account, account_records in by_account.items():
+                totals = fold_raw_allowance_records(account, account_records)
+                self._write_allowance_checkpoint(account, through, totals)
+        except Exception:
+            if owns_transaction:
+                self._conn.execute("ROLLBACK")
+            raise
+        else:
+            if owns_transaction:
+                self._conn.execute("COMMIT")
+
+    def audit_allowance_checkpoints(self) -> tuple[str, ...]:
+        """Read-only audit of cache rows against exact immutable prefixes."""
+        table = self._conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='allowance_checkpoints'"
+        ).fetchone()
+        if table is None:
+            return ()
+        owns_snapshot = not self._conn.in_transaction
+        if owns_snapshot:
+            self._conn.execute("BEGIN")
+        try:
+            through = self.get_runtime_revision()
+            all_records = self.scan_runtime_records(through_revision=through)
+            records_by_account: dict[str, list[tuple[int, RuntimeRecord]]] = {}
+            for revision, record in all_records:
+                for account in self._allowance_accounts_for_record(record):
+                    records_by_account.setdefault(account, []).append(
+                        (revision, record)
+                    )
+            issues: list[str] = []
+            for row in self._conn.execute(
+                "SELECT * FROM allowance_checkpoints ORDER BY contract_id"
+            ).fetchall():
+                contract_id = str(row["contract_id"])
+                cursor_value = row["through_revision"]
+                cursor = cursor_value if type(cursor_value) is int else -1
+                if (
+                    type(row["format_version"]) is not int
+                    or row["format_version"] != 1
+                    or cursor < 0
+                    or cursor > through
+                ):
+                    issues.append("allowance checkpoint metadata is invalid")
+                    continue
+                if cursor:
+                    basis = self._conn.execute(
+                        "SELECT record_id FROM runtime_records WHERE revision=?",
+                        (cursor,),
+                    ).fetchone()
+                    if basis is None or basis["record_id"] != row["basis_record_id"]:
+                        issues.append("allowance checkpoint prefix basis is invalid")
+                        continue
+                elif row["basis_record_id"] != "":
+                    issues.append("allowance checkpoint prefix basis is invalid")
+                    continue
+                if row["status"] == "opaque":
+                    if any(
+                        row[field] is not None
+                        for field in (
+                            "grant_count",
+                            "granted_total",
+                            "reserved_total",
+                            "returned_in_total",
+                            "returned_out_total",
+                            "extinguished_total",
+                        )
+                    ):
+                        issues.append("opaque allowance checkpoint metadata is invalid")
+                    continue
+                if row["status"] != "valid":
+                    issues.append("allowance checkpoint status is invalid")
+                    continue
+                actual = fold_raw_allowance_records(
+                    contract_id,
+                    [
+                        record
+                        for revision, record in records_by_account.get(contract_id, ())
+                        if revision <= cursor
+                    ],
+                )
+                expected = self._checkpoint_totals_from_row(row)
+                if actual is None or expected is None or actual != expected:
+                    issues.append(
+                        "allowance checkpoint totals do not match immutable prefix"
+                    )
+            return tuple(issues)
+        finally:
+            if owns_snapshot:
+                self._conn.execute("ROLLBACK")
+
+    def read_contract_declaration_projection_inputs(self, request):
+        """Read exact declaration inputs and relevant runtime facts by index."""
+        owns_snapshot = not self._conn.in_transaction
+        if owns_snapshot:
+            self._conn.execute("BEGIN")
+        try:
+            return self._read_contract_declaration_projection_inputs(request)
+        finally:
+            if owns_snapshot:
+                self._conn.execute("ROLLBACK")
+
+    def read_asset_proposal_projection_inputs(
+        self, request: AssetProposalProjectionRequest
+    ) -> AssetProposalProjectionInputs:
+        """Read the exact parent and replay witnesses for Asset proposals."""
+        owns_snapshot = not self._conn.in_transaction
+        if owns_snapshot:
+            self._conn.execute("BEGIN")
+        try:
+            return self._read_asset_proposal_projection_inputs(request)
+        finally:
+            if owns_snapshot:
+                self._conn.execute("ROLLBACK")
+
+    def _read_asset_proposal_projection_inputs(
+        self, request: AssetProposalProjectionRequest
+    ) -> AssetProposalProjectionInputs:
+        from aigineering.core.projection_context import AssetProposalProjectionInputs
+
+        contracts = ()
+        if request.claim_bound_contract_id is not None:
+            parent = self.get_contract(request.claim_bound_contract_id)
+            if parent is not None:
+                contracts = (parent,)
+
+        selected: dict[int, RuntimeRecord] = {}
+        heads: list[RuntimeRecord] = []
+        if request.include_candidate_replay:
+            for record_type in ("candidate.received", "candidate.committed"):
+                rows = self._conn.execute(
+                    "SELECT * FROM runtime_records WHERE record_type = ? AND "
+                    "json_extract(payload_json, '$.candidate_id') = ? ORDER BY revision",
+                    (record_type, request.candidate_id),
+                ).fetchall()
+                for row in rows:
+                    record = self._row_to_runtime_record(row)
+                    revision = int(row["revision"])
+                    selected[revision] = record
+                    if record.record_type == "candidate.committed":
+                        heads.append(record)
+
+        # De-duplicate only the physical lookup keys. The complete original head
+        # remains present for exact_single_effect_head_replay's shape/uniqueness checks.
+        member_ids = tuple(
+            dict.fromkeys(
+                member_id
+                for head in heads
+                if isinstance(
+                    (members := head.payload.get("committed_record_ids")), (list, tuple)
+                )
+                for member_id in members
+                if isinstance(member_id, str)
+            )
+        )
+        if member_ids:
+            parameter_limit = self._conn.getlimit(sqlite3.SQLITE_LIMIT_VARIABLE_NUMBER)
+            chunk_size = min(_ASSET_ID_QUERY_CHUNK_SIZE, parameter_limit)
+            if chunk_size < 1:
+                raise sqlite3.OperationalError(
+                    "SQLite variable limit does not permit replay-member lookup"
+                )
+            for start in range(0, len(member_ids), chunk_size):
+                chunk = member_ids[start : start + chunk_size]
+                placeholders = ", ".join("?" for _ in chunk)
+                rows = self._conn.execute(
+                    "SELECT * FROM runtime_records WHERE record_id IN ("
+                    + placeholders
+                    + ")",
+                    chunk,
+                ).fetchall()
+                for row in rows:
+                    selected[int(row["revision"])] = self._row_to_runtime_record(row)
+
+        return AssetProposalProjectionInputs(
+            contracts=contracts,
+            runtime_records=tuple(selected[key] for key in sorted(selected)),
+        )
+
+    def _read_contract_declaration_projection_inputs(self, request):
+        from aigineering.core.projection_context import (
+            ContractDeclarationProjectionInputs,
+        )
+        from aigineering.core.allowance_publication_index import AllowanceBalanceInput
+
+        contract_ids = tuple(
+            dict.fromkeys(
+                (*request.incoming_contract_ids, *request.parent_contract_ids)
+            )
+        )
+        contracts = tuple(
+            contract
+            for contract_id in contract_ids
+            if (contract := self.get_contract(contract_id)) is not None
+        )
+        assets = tuple(self.get_assets_by_ids(request.asset_ids))
+        selected: dict[str, tuple[int, RuntimeRecord]] = {}
+        heads: list[RuntimeRecord] = []
+        balance_inputs = None
+
+        if request.allowance_source_contract_ids:
+            source_ids = tuple(dict.fromkeys(request.allowance_source_contract_ids))
+            if self._allowance_checkpoint_mode == "reference":
+                self._select_declaration_allowance_reference_rows(source_ids, selected)
+            else:
+                raw_balances = tuple(
+                    self.read_raw_allowance_checkpoint(source_id)
+                    for source_id in source_ids
+                )
+                if all(
+                    item.status == "valid" and item.totals is not None
+                    for item in raw_balances
+                ):
+                    balance_inputs = tuple(
+                        AllowanceBalanceInput(source_id, item.totals)
+                        for source_id, item in zip(
+                            source_ids, raw_balances, strict=True
+                        )
+                    )
+                if balance_inputs is None:
+                    self._select_declaration_allowance_reference_rows(
+                        source_ids, selected
+                    )
+
+        if request.include_candidate_replay:
+            for record_type in ("candidate.received", "candidate.committed"):
+                rows = self._conn.execute(
+                    "SELECT * FROM runtime_records WHERE record_type = ? AND "
+                    "json_extract(payload_json, '$.candidate_id') = ? ORDER BY revision",
+                    (record_type, request.candidate_id),
+                ).fetchall()
+                for row in rows:
+                    record = self._row_to_runtime_record(row)
+                    selected[record.id] = (int(row["revision"]), record)
+                    if record.record_type == "candidate.committed":
+                        heads.append(record)
+
+        member_ids = tuple(
+            dict.fromkeys(
+                member_id
+                for head in heads
+                if isinstance(
+                    (member_ids_value := head.payload.get("committed_record_ids")),
+                    (list, tuple),
+                )
+                for member_id in member_ids_value
+                if isinstance(member_id, str)
+            )
+        )
+        if member_ids:
+            parameter_limit = self._conn.getlimit(sqlite3.SQLITE_LIMIT_VARIABLE_NUMBER)
+            chunk_size = min(_ASSET_ID_QUERY_CHUNK_SIZE, parameter_limit)
+            if chunk_size < 1:
+                raise sqlite3.OperationalError(
+                    "SQLite variable limit does not permit replay-member lookup"
+                )
+            for start in range(0, len(member_ids), chunk_size):
+                chunk = member_ids[start : start + chunk_size]
+                placeholders = ", ".join("?" for _ in chunk)
+                rows = self._conn.execute(
+                    "SELECT * FROM runtime_records WHERE record_id IN ("
+                    + placeholders
+                    + ")",
+                    chunk,
+                ).fetchall()
+                for row in rows:
+                    record = self._row_to_runtime_record(row)
+                    selected[record.id] = (int(row["revision"]), record)
+
+        runtime_records = tuple(
+            record for _, record in sorted(selected.values(), key=lambda item: item[0])
+        )
+        return ContractDeclarationProjectionInputs(
+            contracts=contracts,
+            assets=assets,
+            runtime_records=runtime_records,
+            allowance_balance_inputs=balance_inputs,
+        )
+
+    def _select_declaration_allowance_reference_rows(self, source_ids, selected):
+        parameter_limit = self._conn.getlimit(sqlite3.SQLITE_LIMIT_VARIABLE_NUMBER)
+        relation_count = _PROJECTION_ID_QUERY_RELATION_COUNT
+        if parameter_limit <= relation_count:
+            raise sqlite3.OperationalError(
+                "SQLite variable limit does not permit projection relation lookup"
+            )
+        chunk_size = min(
+            _ASSET_ID_QUERY_CHUNK_SIZE,
+            (parameter_limit - relation_count) // relation_count,
+        )
+        if chunk_size < 1:
+            raise sqlite3.OperationalError(
+                "SQLite variable limit does not permit projection relation lookup"
+            )
+        for start in range(0, len(source_ids), chunk_size):
+            chunk = source_ids[start : start + chunk_size]
+            placeholders = ", ".join("?" for _ in chunk)
+            clauses = (
+                ("allowance.granted", "contract_id"),
+                ("allowance.reserved", "source_contract_id"),
+                ("allowance.returned", "source_contract_id"),
+                ("allowance.returned", "from_contract_id"),
+                ("allowance.extinguished", "contract_id"),
+            )
+            where = " OR ".join(
+                "(record_type = ? AND json_extract(payload_json, '$.%s') IN (%s))"
+                % (payload_field, placeholders)
+                for _record_type, payload_field in clauses
+            )
+            values = tuple(
+                value
+                for record_type, _payload_field in clauses
+                for value in (record_type, *chunk)
+            )
+            rows = self._conn.execute(
+                "SELECT * FROM runtime_records WHERE " + where,
+                values,
+            ).fetchall()
+            for row in rows:
+                record = self._row_to_runtime_record(row)
+                selected[record.id] = (int(row["revision"]), record)
+
     def get_runtime_revision(self) -> int:
         row = self._conn.execute(
             "SELECT COALESCE(MAX(revision), 0) FROM runtime_records"
@@ -609,6 +1810,30 @@ class SQLiteStore:
         cur = self._conn.execute("SELECT * FROM assets WHERE id = ?", (asset_id,))
         row = cur.fetchone()
         return self._row_to_asset(row) if row else None
+
+    def get_assets_by_ids(self, asset_ids: tuple[str, ...] | list[str]) -> list[Asset]:
+        """Read existing Assets for IDs in request order using bounded queries."""
+        ordered_ids = tuple(dict.fromkeys(asset_ids))
+        if not ordered_ids:
+            return []
+
+        found: dict[str, Asset] = {}
+        parameter_limit = self._conn.getlimit(sqlite3.SQLITE_LIMIT_VARIABLE_NUMBER)
+        if parameter_limit < 1:
+            raise sqlite3.OperationalError(
+                "SQLite variable limit does not permit Asset ID lookup"
+            )
+        chunk_size = min(_ASSET_ID_QUERY_CHUNK_SIZE, parameter_limit)
+        for start in range(0, len(ordered_ids), chunk_size):
+            chunk = ordered_ids[start : start + chunk_size]
+            placeholders = ", ".join("?" for _ in chunk)
+            cur = self._conn.execute(
+                f"SELECT * FROM assets WHERE id IN ({placeholders})", chunk
+            )
+            for row in cur.fetchall():
+                asset = self._row_to_asset(row)
+                found[asset.id] = asset
+        return [found[asset_id] for asset_id in ordered_ids if asset_id in found]
 
     def get_assets_by_name(self, name: str) -> list[Asset]:
         cur = self._conn.execute("SELECT * FROM assets WHERE name = ?", (name,))
@@ -826,6 +2051,15 @@ class SQLiteStore:
         ).fetchall()
         return [self._row_to_worker_registration(row) for row in rows]
 
+    def get_claim_history_contract_ids(self) -> frozenset[str]:
+        """Return all contract IDs with any durable worker-claim row."""
+        return frozenset(
+            str(row[0])
+            for row in self._conn.execute(
+                "SELECT DISTINCT contract_id FROM worker_claims"
+            ).fetchall()
+        )
+
     def _row_to_worker_registration(self, row: sqlite3.Row) -> WorkerRegistration:
         active_claims = self._conn.execute(
             "SELECT COUNT(*) FROM worker_claims WHERE worker_id = ? AND status = 'active'",
@@ -940,9 +2174,17 @@ class SQLiteStore:
 
     def runtime_materialization_digest(self) -> str:
         """Hash semantic materialized views, excluding cache timestamps."""
+        checkpoint_issues = self.audit_allowance_checkpoints()
+        if checkpoint_issues:
+            raise RuntimeError("allowance checkpoint integrity failure")
+        publication_issues = self.audit_publication_index()
+        if publication_issues:
+            raise RuntimeError("publication index integrity failure")
         registrations = [
             {
                 "worker_id": registration.worker_id,
+                "actor_id": registration.actor_id,
+                "key_id": registration.key_id,
                 "capabilities": registration.capabilities,
                 "pools": registration.pools,
                 "profile_id": registration.profile_id,
@@ -1100,6 +2342,10 @@ class SQLiteStore:
                 self.set_idempotency(contract_id, key, result)
             for payload in replacement_payloads.values():
                 self._insert_replacement_claim(ReplacementClaim(**payload))
+            self.rebuild_allowance_checkpoints(
+                records, max((revision for revision, _ in records), default=0)
+            )
+            self.rebuild_publication_index()
         self.rebuild_worker_registration_projection()
         self.rebuild_claim_projection()
         self.rebuild_asset_graph_projection()
@@ -1409,6 +2655,8 @@ class SQLiteStore:
         package_id: str = "",
         expected_registration_version: str = "",
         runtime_records: tuple[RuntimeRecord, ...] = (),
+        *,
+        claim_candidate=None,
     ) -> dict | None:
         """Atomically arbitrate contract exclusivity and registered capacity."""
         from datetime import datetime, timedelta, timezone
@@ -1427,6 +2675,20 @@ class SQLiteStore:
             if terminal is not None:
                 self._conn.rollback()
                 return None
+            if open_claim_holds(
+                (record for _, record in self.scan_runtime_records()),
+                contract_id=contract_id,
+            ):
+                self._conn.rollback()
+                return None
+            from aigineering.core.claim_constraints import claim_constraint_blockers
+
+            if claim_constraint_blockers(
+                (record for _, record in self.scan_runtime_records()),
+                contract_id=contract_id,
+            ):
+                self._conn.rollback()
+                return None
             existing = self._conn.execute(
                 "SELECT claim_id, status FROM worker_claims "
                 "WHERE contract_id = ? "
@@ -1442,6 +2704,75 @@ class SQLiteStore:
                 "WHERE worker_id = ?",
                 (worker_id,),
             ).fetchone()
+            from aigineering.core.claim_assignments import (
+                assignment_context_from_projection,
+                effective_assignment,
+            )
+            from aigineering.core.projection_context import (
+                EffectProjectionContext,
+            )
+
+            assignment_context = assignment_context_from_projection(
+                EffectProjectionContext(
+                    runtime_records=tuple(
+                        record for _, record in self.scan_runtime_records()
+                    )
+                )
+            )
+            assignment = effective_assignment(
+                assignment_context, contract_id=contract_id
+            )
+            if assignment is not None:
+                current_registration = self.get_worker_registration(worker_id)
+                contract = self.get_contract(contract_id)
+                from aigineering.core.worker_routing import is_compatible
+
+                if (
+                    assignment.payload.get("worker_id") != worker_id
+                    or current_registration is None
+                    or not current_registration.enabled
+                    or contract is None
+                    or not is_compatible(contract, current_registration)
+                ):
+                    self._conn.rollback()
+                    return None
+            candidate_records = ()
+            if claim_candidate is not None:
+                if registration is None:
+                    self._conn.rollback()
+                    return None
+                from aigineering.core.worker_coordination import (
+                    same_worker_command_records,
+                    validate_worker_claim_candidate,
+                )
+                from aigineering.core.actor_facts import load_effective_actor_keys
+                from aigineering.core.domain import load_genesis
+
+                current_registration = self.get_worker_registration(worker_id)
+                genesis = load_genesis(self)
+                actor_keys = load_effective_actor_keys(self, genesis)
+                candidate_records = validate_worker_claim_candidate(
+                    claim_candidate,
+                    genesis=genesis,
+                    actor_keys=actor_keys,
+                    registration=current_registration,
+                    worker_id=worker_id,
+                    requested_contract_id=contract_id,
+                    lease_seconds=lease_seconds,
+                    expected_registration_version=expected_registration_version,
+                )
+                if runtime_records and not same_worker_command_records(
+                    tuple(runtime_records), candidate_records
+                ):
+                    self._conn.rollback()
+                    return None
+            elif runtime_records:
+                self._conn.rollback()
+                raise ValueError(
+                    "claim runtime_records require their signed claim_candidate"
+                )
+            else:
+                candidate_records = ()
             if registration is not None:
                 active_claims = self._conn.execute(
                     "SELECT COUNT(*) FROM worker_claims "
@@ -1469,12 +2800,20 @@ class SQLiteStore:
             timestamp = now_iso()
             if any(
                 self.get_runtime_record(record.id) is not None
-                for record in runtime_records
+                for record in candidate_records
             ):
                 self._conn.rollback()
                 return None
-            for record in runtime_records:
+            for record in candidate_records:
                 self._insert_runtime_record(record)
+            claim_request = next(
+                (
+                    record
+                    for record in candidate_records
+                    if record.record_type == "worker.claim.requested"
+                ),
+                None,
+            )
             self._conn.execute(
                 """INSERT INTO worker_claims (
                     claim_id, contract_id, worker_id, lease_until, status,
@@ -1502,6 +2841,7 @@ class SQLiteStore:
                         "package_id": package_id,
                         "worker_id": worker_id,
                     },
+                    causal_parents=(claim_request.id,) if claim_request else (),
                 )
             )
             self._conn.commit()
@@ -1513,6 +2853,9 @@ class SQLiteStore:
             if _is_sqlite_contention(exc):
                 return None
             raise
+        except Exception:
+            self._conn.rollback()
+            raise
         return self.get_claim(contract_id)
 
     def renew_claim(
@@ -1523,6 +2866,7 @@ class SQLiteStore:
         *,
         lease_seconds: int = 60,
         runtime_records: tuple[RuntimeRecord, ...] = (),
+        claim_candidate=None,
     ) -> dict | None:
         """Renew an active claim only when all fencing identities still match."""
         from datetime import datetime, timedelta, timezone
@@ -1531,11 +2875,59 @@ class SQLiteStore:
             return None
         now = datetime.now(timezone.utc)
         deadline = (now + timedelta(seconds=lease_seconds)).isoformat()
-        with self._conn:
+        try:
+            self._conn.execute("BEGIN IMMEDIATE")
+            row = self._conn.execute(
+                "SELECT contract_id, worker_id, epoch, package_id, lease_until "
+                "FROM worker_claims WHERE claim_id = ? AND epoch = ? "
+                "AND worker_id = ? AND status = 'active' AND lease_until >= ?",
+                (claim_id, epoch, worker_id, now.isoformat()),
+            ).fetchone()
+            if row is None:
+                self._conn.rollback()
+                return None
+
+            candidate_records = ()
+            if claim_candidate is not None:
+                registration = self.get_worker_registration(worker_id)
+                if registration is None:
+                    self._conn.rollback()
+                    return None
+                from aigineering.core.actor_facts import load_effective_actor_keys
+                from aigineering.core.domain import load_genesis
+                from aigineering.core.worker_coordination import (
+                    same_worker_command_records,
+                    validate_worker_renewal_candidate,
+                )
+
+                genesis = load_genesis(self)
+                actor_keys = load_effective_actor_keys(self, genesis)
+                candidate_records = validate_worker_renewal_candidate(
+                    claim_candidate,
+                    genesis=genesis,
+                    actor_keys=actor_keys,
+                    registration=registration,
+                    claim_id=claim_id,
+                    claim_epoch=epoch,
+                    worker_id=worker_id,
+                    lease_seconds=lease_seconds,
+                )
+                if runtime_records and not same_worker_command_records(
+                    tuple(runtime_records), candidate_records
+                ):
+                    self._conn.rollback()
+                    return None
+            elif runtime_records:
+                self._conn.rollback()
+                raise ValueError(
+                    "renewal runtime_records require their signed claim_candidate"
+                )
+
             if any(
                 self.get_runtime_record(record.id) is not None
-                for record in runtime_records
+                for record in candidate_records
             ):
+                self._conn.rollback()
                 return None
             cursor = self._conn.execute(
                 "UPDATE worker_claims SET lease_until = ?, updated_at = ? "
@@ -1544,14 +2936,21 @@ class SQLiteStore:
                 (deadline, now_iso(), claim_id, epoch, worker_id, now.isoformat()),
             )
             if cursor.rowcount != 1:
+                self._conn.rollback()
                 return None
-            for record in runtime_records:
+            for record in candidate_records:
                 self._insert_runtime_record(record)
-            row = self._conn.execute(
-                "SELECT contract_id, worker_id, epoch, package_id, lease_until "
-                "FROM worker_claims WHERE claim_id = ?",
-                (claim_id,),
-            ).fetchone()
+            renewal_request = next(
+                (
+                    record
+                    for record in candidate_records
+                    if record.record_type == "worker.claim.renew.requested"
+                ),
+                None,
+            )
+            causal_parents = [self._claim_granted_record_id(claim_id)]
+            if renewal_request is not None:
+                causal_parents.append(renewal_request.id)
             self._insert_runtime_record(
                 create_runtime_record(
                     "claim.renewed",
@@ -1561,10 +2960,22 @@ class SQLiteStore:
                         "lease_until": deadline,
                         "worker_id": worker_id,
                     },
-                    causal_parents=[self._claim_granted_record_id(claim_id)],
+                    causal_parents=causal_parents,
                 )
             )
-        return self.get_claim(row["contract_id"]) if row is not None else None
+            self._conn.commit()
+        except sqlite3.IntegrityError:
+            self._conn.rollback()
+            return None
+        except sqlite3.OperationalError as exc:
+            self._conn.rollback()
+            if _is_sqlite_contention(exc):
+                return None
+            raise
+        except Exception:
+            self._conn.rollback()
+            raise
+        return self.get_claim(row["contract_id"])
 
     def mark_claim_submitted(self, claim_id: str) -> None:
         with self._conn:
@@ -1741,9 +3152,7 @@ class SQLiteStore:
     ) -> bool:
         """Atomically record provider failure, terminal fact, and fenced release."""
         with self._conn:
-            self._insert_trace_entry(trace_entry)
-            for record in runtime_records:
-                self._insert_runtime_record(record)
+            self._conn.execute("BEGIN IMMEDIATE")
             recorded_at = now_iso()
             cursor = self._conn.execute(
                 "UPDATE worker_claims SET status = 'released', updated_at = ? "
@@ -1771,21 +3180,26 @@ class SQLiteStore:
                 for record in runtime_records
                 if record.record_type == "worker.invocation_failed"
             ]
-            self._insert_runtime_record(
-                create_runtime_record(
-                    "claim.released",
-                    {
-                        "claim_id": claim_id,
-                        "contract_id": claim_row["contract_id"],
-                        "epoch": int(claim_row["epoch"]),
-                        "package_id": claim_row["package_id"],
-                        "worker_id": claim_row["worker_id"],
-                    },
-                    causal_parents=[self._claim_granted_record_id(claim_id)]
-                    + failure_parents,
-                    recorded_at=recorded_at,
-                )
+            released = create_runtime_record(
+                "claim.released",
+                {
+                    "claim_id": claim_id,
+                    "contract_id": claim_row["contract_id"],
+                    "epoch": int(claim_row["epoch"]),
+                    "package_id": claim_row["package_id"],
+                    "worker_id": claim_row["worker_id"],
+                },
+                causal_parents=[self._claim_granted_record_id(claim_id)]
+                + failure_parents,
+                recorded_at=recorded_at,
             )
+            pending = runtime_records + (released,)
+            derived = self._commit_time_ingress_consequences((), (), (), pending)
+            pending += derived[1]
+            self._validate_allowance_records(pending)
+            self._insert_trace_entry(trace_entry)
+            for record in pending:
+                self._insert_runtime_record(record)
         return True
 
     def commit_claim_expiration(
@@ -1800,6 +3214,7 @@ class SQLiteStore:
     ) -> bool:
         """Atomically turn an expired lease into durable failure facts."""
         with self._conn:
+            self._conn.execute("BEGIN IMMEDIATE")
             cursor = self._conn.execute(
                 "UPDATE worker_claims SET status = 'expired', updated_at = ? "
                 "WHERE claim_id = ? AND epoch = ? AND status = 'active' "
@@ -1808,13 +3223,20 @@ class SQLiteStore:
             )
             if cursor.rowcount != 1:
                 return False
-            self._insert_trace_entry(trace_entry)
-            for record in runtime_records:
-                self._insert_runtime_record(record)
             if not any(
                 record.record_type == "claim.expired" for record in runtime_records
             ):
                 raise ValueError("claim expiration commit requires claim.expired fact")
+            derived = self._commit_time_ingress_consequences(
+                (), (), (), runtime_records
+            )
+            pending = runtime_records + derived[1]
+            self._validate_allowance_records(pending)
+            self._insert_trace_entry(trace_entry)
+            for record in runtime_records:
+                self._insert_runtime_record(record)
+            for record in derived[1]:
+                self._insert_runtime_record(record)
         return True
 
     def commit_ingress_batch(
@@ -1830,6 +3252,11 @@ class SQLiteStore:
         candidate_actor_id: str = "",
         candidate_key_id: str = "",
         candidate_id: str = "",
+        candidate_proposal=None,
+        effect_fact_owners=(),
+        assignment_intents=(),
+        successor_assignment_witnesses=(),
+        validate_snapshot: Callable[[], None] | None = None,
     ) -> tuple[tuple[TraceEntry, ...], tuple[RuntimeRecord, ...]]:
         with self._conn:
             # Conditional allowance/key/claim checks must observe the same
@@ -1845,16 +3272,179 @@ class SQLiteStore:
                 candidate_id,
             ):
                 return (), ()
+            if validate_snapshot is not None:
+                validate_snapshot()
+            has_assignment_fact = any(
+                record.record_type == "claim.assignment.changed"
+                for record in runtime_records
+            )
+            if has_assignment_fact and validate_snapshot is None:
+                from aigineering.core.claim_assignments import AssignmentConflict
+
+                raise AssignmentConflict(
+                    "assignment facts require the registered Candidate projection validator"
+                )
+            if (
+                has_assignment_fact
+                or assignment_intents
+                or successor_assignment_witnesses
+            ):
+                from aigineering.core.claim_assignments import (
+                    AssignmentConflict,
+                    assignment_context_from_projection,
+                    validate_assignment_batch,
+                )
+                from aigineering.core.projection_context import (
+                    load_effect_projection_context,
+                )
+                from aigineering.core.actor_facts import load_effective_actor_keys
+                from aigineering.core.domain import load_genesis
+
+                if validate_snapshot is None or candidate_proposal is None:
+                    raise AssignmentConflict(
+                        "assignment facts require their signed Candidate projection"
+                    )
+                genesis = load_genesis(self)
+                actor_keys = load_effective_actor_keys(self, genesis)
+                assignment_context = assignment_context_from_projection(
+                    load_effect_projection_context(self, actor_keys=actor_keys)
+                )
+                receipt = next(
+                    (
+                        record
+                        for record in runtime_records
+                        if record.record_type == "candidate.received"
+                        and record.payload.get("candidate_id") == candidate_id
+                    ),
+                    None,
+                )
+                if receipt is None:
+                    raise AssignmentConflict("assignment Candidate receipt is missing")
+                validate_assignment_batch(
+                    assignment_context,
+                    runtime_records,
+                    contracts,
+                    candidate=candidate_proposal,
+                    receipt_id=receipt.id,
+                    effect_fact_owners=tuple(effect_fact_owners),
+                    assignment_intents=tuple(assignment_intents),
+                    successor_assignment_witnesses=tuple(
+                        successor_assignment_witnesses
+                    ),
+                )
+            has_hold_transition = any(
+                record.record_type in {"claim.hold.placed", "claim.hold.released"}
+                for record in runtime_records
+            )
+            has_constraint_transition = any(
+                record.record_type
+                in {"claim.constraint.placed", "claim.constraint.released"}
+                for record in runtime_records
+            )
+            existing_records = (
+                tuple(record for _, record in self.scan_runtime_records())
+                if has_hold_transition or has_constraint_transition
+                else ()
+            )
+            new_placements = (
+                validate_claim_hold_batch(
+                    existing_records,
+                    runtime_records,
+                    candidate_id=candidate_id,
+                    actor_id=candidate_actor_id,
+                    key_id=candidate_key_id,
+                )
+                if has_hold_transition
+                else ()
+            )
+            for placement in new_placements:
+                target = str(placement.payload["contract_id"])
+                declarations_for_holds = (
+                    (contract,) if contract is not None else ()
+                ) + tuple(contracts)
+                declared_ids = {item.id for item in declarations_for_holds}
+                if target not in declared_ids and self.get_contract(target) is None:
+                    raise ClaimHoldConflict("claim hold references an unknown Contract")
+                has_terminal_fact = any(
+                    record.record_type == "lifecycle.terminal"
+                    and record.payload.get("contract_id") == target
+                    for record in existing_records + runtime_records
+                )
+                if has_terminal_fact:
+                    raise ClaimHoldConflict(
+                        "cannot place a hold on a terminal Contract"
+                    )
+                claim_row = self._conn.execute(
+                    "SELECT 1 FROM worker_claims WHERE contract_id = ? LIMIT 1",
+                    (target,),
+                ).fetchone()
+                has_claim_fact = any(
+                    record.record_type == "claim.granted"
+                    and record.payload.get("contract_id") == target
+                    for record in existing_records
+                )
+                if claim_row is not None or has_claim_fact:
+                    raise ClaimHoldConflict(
+                        "cannot place a hold on a Contract with claim history"
+                    )
+            if has_constraint_transition:
+                from aigineering.core.claim_constraints import (
+                    validate_claim_constraint_batch,
+                )
+                from aigineering.core.output_satisfaction import all_outputs_satisfied
+
+                declared_contracts = (
+                    (contract,) if contract is not None else ()
+                ) + tuple(contracts)
+                all_contracts = tuple(self.get_all_contracts()) + declared_contracts
+                known_contract_ids = frozenset(item.id for item in all_contracts)
+                claimed_ids = {
+                    str(record.payload.get("contract_id", ""))
+                    for record in existing_records
+                    if record.record_type == "claim.granted"
+                }
+                claimed_ids.update(
+                    str(row[0])
+                    for row in self._conn.execute(
+                        "SELECT DISTINCT contract_id FROM worker_claims"
+                    )
+                )
+                terminal_ids = frozenset(
+                    str(record.payload.get("contract_id", ""))
+                    for record in existing_records
+                    if record.record_type == "lifecycle.terminal"
+                )
+                output_satisfied_ids = frozenset(
+                    item.id
+                    for item in all_contracts
+                    if all_outputs_satisfied(item, self, require_outputs=True)
+                )
+                validate_claim_constraint_batch(
+                    existing_records,
+                    runtime_records,
+                    candidate_id=candidate_id,
+                    actor_id=candidate_actor_id,
+                    key_id=candidate_key_id,
+                    known_contract_ids=known_contract_ids,
+                    claimed_contract_ids=frozenset(claimed_ids),
+                    terminal_contract_ids=terminal_ids,
+                    output_satisfied_contract_ids=output_satisfied_ids,
+                )
             declarations = ((contract,) if contract is not None else ()) + tuple(
                 contracts
             )
             self._validate_output_qualification_records(runtime_records)
             for declaration in declarations:
                 self._insert_contract(declaration)
-            self._validate_allowance_records(runtime_records)
+            self._validate_allowance_records(
+                runtime_records,
+                candidate_id=candidate_id,
+                candidate_proposal=candidate_proposal,
+                effect_fact_owners=tuple(effect_fact_owners),
+            )
             self._insert_ingress_assets(accepted_assets)
             check_crash_point("after_asset_before_trace")
-            derived_traces, derived_records = self._commit_time_asset_consequences(
+            derived_traces, derived_records = self._commit_time_ingress_consequences(
                 accepted_assets,
                 declarations,
                 trace_entries,
@@ -1862,7 +3452,12 @@ class SQLiteStore:
             )
             trace_entries = list(trace_entries) + list(derived_traces)
             runtime_records = runtime_records + derived_records
-            self._validate_allowance_records(derived_records)
+            self._validate_allowance_records(
+                runtime_records,
+                candidate_id=candidate_id,
+                candidate_proposal=candidate_proposal,
+                effect_fact_owners=tuple(effect_fact_owners),
+            )
             if reducer_callback is not None:
                 reducer_traces: list[TraceEntry] = reducer_callback()
                 trace_entries = list(trace_entries) + reducer_traces
@@ -1870,7 +3465,24 @@ class SQLiteStore:
                 self._insert_trace_entry(entry)
             check_crash_point("after_trace_before_runtime_records")
             for record in runtime_records:
-                self._insert_runtime_record(record)
+                if record.record_type in {
+                    "claim.hold.placed",
+                    "claim.hold.released",
+                }:
+                    self._insert_runtime_record(record, allow_claim_hold_fact=True)
+                elif record.record_type in {
+                    "claim.constraint.placed",
+                    "claim.constraint.released",
+                }:
+                    self._insert_runtime_record(
+                        record, allow_claim_constraint_fact=True
+                    )
+                elif record.record_type == "claim.assignment.changed":
+                    self._insert_runtime_record(
+                        record, allow_claim_assignment_fact=True
+                    )
+                else:
+                    self._insert_runtime_record(record)
             if any(
                 record.record_type == "lifecycle.terminal" for record in runtime_records
             ):
@@ -1890,14 +3502,14 @@ class SQLiteStore:
                 )
             return derived_traces, derived_records
 
-    def _commit_time_asset_consequences(
+    def _commit_time_ingress_consequences(
         self,
         accepted_assets: list[Asset],
         declarations: tuple[Contract, ...],
         trace_entries: list[TraceEntry],
         runtime_records: tuple[RuntimeRecord, ...],
     ) -> tuple[tuple[TraceEntry, ...], tuple[RuntimeRecord, ...]]:
-        """Close races between pure reduction and serialized commitment.
+        """Close races between pure projection and serialized commitment.
 
         Candidate reduction normally derives these facts before the write
         transaction.  A concurrent Candidate may commit another output before
@@ -1905,27 +3517,29 @@ class SQLiteStore:
         pure reducer against the transaction-visible snapshot materializes
         only consequences that the earlier snapshot could not observe.
         """
-        if not accepted_assets:
-            return (), ()
-
         from aigineering.core.causal_allowance import materialize_terminal_allowance
-        from aigineering.core.fact_materialization import (
-            reduce_asset_facts,
-            trace_records,
-        )
 
-        projected_traces, projected_records = reduce_asset_facts(
-            self,
-            self,
-            accepted_assets,
-            pending_contracts=declarations,
-        )
+        if accepted_assets:
+            from aigineering.core.fact_materialization import (
+                reduce_asset_facts,
+                trace_records,
+            )
+
+            projected_traces, projected_records = reduce_asset_facts(
+                self,
+                self,
+                accepted_assets,
+                pending_contracts=declarations,
+            )
+        else:
+            projected_traces, projected_records = (), ()
         known_trace_ids = {entry.id for entry in trace_entries}
         known_record_ids = {record.id for record in runtime_records}
         new_traces = tuple(
             entry for entry in projected_traces if entry.id not in known_trace_ids
         )
-        candidates = tuple(projected_records) + trace_records(new_traces)
+        projected_trace_records = trace_records(new_traces) if accepted_assets else ()
+        candidates = tuple(projected_records) + projected_trace_records
         new_records = tuple(
             record for record in candidates if record.id not in known_record_ids
         )
@@ -2008,24 +3622,269 @@ class SQLiteStore:
             runtime_records,
         )
 
+    def _narrow_allowance_commit_inputs(
+        self,
+        runtime_records: tuple[RuntimeRecord, ...],
+        candidate_id: str,
+        *,
+        candidate_proposal=None,
+        effect_fact_owners=(),
+    ):
+        """Select exact inputs for a canonical declaration-only allowance batch.
+
+        Any uncertainty returns None so the existing full-history validator
+        retains its original ordering and rejection behavior.
+        """
+        from aigineering.core.allowance_publication_index import (
+            DeclarationPairsRequest,
+            AllowanceBalanceInput,
+            build_canonical_allowance_declaration_batch,
+            publication_closure_for_funding_batch,
+            publication_closure_for_heads,
+            publication_declaration_pairs,
+            publication_heads_for_declarations,
+            publication_heads_for_funding_facts,
+        )
+
+        if self._allowance_checkpoint_mode == "reference":
+            return None
+        batch = build_canonical_allowance_declaration_batch(
+            runtime_records,
+            candidate_id,
+            candidate_proposal=candidate_proposal,
+            effect_fact_owners=effect_fact_owners,
+        )
+        if batch is None:
+            return None
+        incoming = batch.incoming_contracts
+        declarations = batch.declarations
+        pending_facts = batch.funding_facts
+
+        pending_ids = tuple(dict.fromkeys(record.id for record in runtime_records))
+        pending_chunk_size = self._publication_query_chunk_size(1)
+        for start in range(0, len(pending_ids), pending_chunk_size):
+            chunk = pending_ids[start : start + pending_chunk_size]
+            placeholders = ",".join("?" for _ in chunk)
+            if self._conn.execute(
+                "SELECT 1 FROM runtime_records WHERE record_id IN ("
+                + placeholders
+                + ") LIMIT 1",
+                chunk,
+            ).fetchone():
+                return None
+        existing_candidate = self._conn.execute(
+            "SELECT 1 FROM runtime_records WHERE "
+            "(record_type='candidate.received' AND "
+            "json_extract(payload_json,'$.candidate_id')=?) OR "
+            "(record_type='candidate.committed' AND "
+            "json_extract(payload_json,'$.candidate_id')=?) LIMIT 1",
+            (candidate_id, candidate_id),
+        ).fetchone()
+        if existing_candidate is not None:
+            return None
+
+        def records_for_ids(ids: tuple[str, ...]) -> tuple[RuntimeRecord, ...]:
+            selected: dict[str, tuple[int, RuntimeRecord]] = {}
+            if not ids:
+                return ()
+            chunk_size = self._publication_query_chunk_size(1)
+            for start in range(0, len(ids), chunk_size):
+                chunk = ids[start : start + chunk_size]
+                if not chunk:
+                    continue
+                placeholders = ",".join("?" for _ in chunk)
+                for row in self._conn.execute(
+                    "SELECT * FROM runtime_records WHERE record_id IN ("
+                    + placeholders
+                    + ")",
+                    chunk,
+                ).fetchall():
+                    record = self._row_to_runtime_record(row)
+                    selected[record.id] = (int(row["revision"]), record)
+            return tuple(
+                record for _, record in sorted(selected.values(), key=lambda x: x[0])
+            )
+
+        source_ids = tuple(
+            dict.fromkeys(
+                contract.parent_id for contract in incoming if contract.parent_id
+            )
+        )
+        contract_ids = tuple(
+            dict.fromkeys((*[contract.id for contract in incoming], *source_ids))
+        )
+        existing_contracts = tuple(
+            contract
+            for contract_id in contract_ids
+            if (contract := self.get_contract(contract_id)) is not None
+        )
+        existing_contract_ids = {contract.id for contract in existing_contracts}
+        contracts = existing_contracts + tuple(
+            contract
+            for contract in incoming
+            if contract.id not in existing_contract_ids
+        )
+        if len({contract.id for contract in contracts}) != len(contract_ids):
+            return None
+
+        if not pending_facts:
+            # Declaration batches without allowance changes do not use this path.
+            return None
+        first = self.read_allowance_publication_selection(
+            publication_heads_for_funding_facts(batch)
+        )
+        if first is None:
+            return None
+        if first.records:
+            # New fact IDs cannot already have an accepted owner. Preserve the
+            # reference validator's replay/ambiguity ordering on that history.
+            return None
+        pairs = publication_declaration_pairs(batch)
+        if pairs is None:
+            return None
+        declaration_fact_ids: list[str] = []
+        first_closure_request = publication_closure_for_funding_batch(batch)
+        if first_closure_request is None:
+            return None
+        first_closure = self.read_allowance_publication_selection(first_closure_request)
+        if first_closure is None:
+            return None
+
+        # Exact declarations are selected for every candidate/target pair; the
+        # pending declaration remains in the caller-owned overlay.
+        declaration_selection = self.read_allowance_publication_selection(
+            DeclarationPairsRequest(pairs)
+        )
+        if declaration_selection is None:
+            return None
+        declaration_fact_ids.extend(
+            record.id for record in declaration_selection.records
+        )
+        pair_set = set(pairs)
+        declaration_fact_ids.extend(
+            record.id
+            for record in declarations
+            if (
+                record.payload.get("candidate_id"),
+                record.payload.get("contract", {}).get("id"),
+            )
+            in pair_set
+        )
+
+        second_member_ids = tuple(dict.fromkeys(declaration_fact_ids))
+        second = self.read_allowance_publication_selection(
+            publication_heads_for_declarations(second_member_ids)
+        )
+        if second is None:
+            return None
+        second_closure = self.read_allowance_publication_selection(
+            publication_closure_for_heads(second_member_ids, second.records)
+        )
+        if second_closure is None:
+            return None
+
+        selected: dict[str, RuntimeRecord] = {}
+        for group in (
+            first_closure.records,
+            declaration_selection.records,
+            second_closure.records,
+        ):
+            selected.update((record.id, record) for record in group)
+        selected.update(
+            (record.id, record)
+            for record in records_for_ids(
+                tuple(
+                    record.id
+                    for record in runtime_records
+                    if record.record_type in {"allowance.granted", "allowance.reserved"}
+                )
+            )
+        )
+        target_ids = tuple(dict.fromkeys(contract.id for contract in incoming))
+        target_chunk_size = self._publication_query_chunk_size(1) if target_ids else 1
+        for start in range(0, len(target_ids), target_chunk_size):
+            chunk = target_ids[start : start + target_chunk_size]
+            placeholders = ",".join("?" for _ in chunk)
+            rows = self._conn.execute(
+                "SELECT * FROM runtime_records WHERE record_type='allowance.granted' "
+                "AND json_extract(payload_json,'$.contract_id') IN ("
+                + placeholders
+                + ")",
+                chunk,
+            ).fetchall()
+            for row in rows:
+                record = self._row_to_runtime_record(row)
+                selected[record.id] = record
+        source_chunk_size = self._publication_query_chunk_size(1) if source_ids else 1
+        for start in range(0, len(source_ids), source_chunk_size):
+            chunk = source_ids[start : start + source_chunk_size]
+            if not chunk:
+                continue
+            placeholders = ",".join("?" for _ in chunk)
+            rows = self._conn.execute(
+                "SELECT * FROM runtime_records WHERE record_type='lifecycle.terminal' "
+                "AND json_extract(payload_json,'$.contract_id') IN ("
+                + placeholders
+                + ")",
+                chunk,
+            ).fetchall()
+            for row in rows:
+                record = self._row_to_runtime_record(row)
+                selected[record.id] = record
+
+        balances = []
+        for source_id in source_ids:
+            checkpoint = self.read_raw_allowance_checkpoint(source_id)
+            if checkpoint.status != "valid" or checkpoint.totals is None:
+                return None
+            balances.append(AllowanceBalanceInput(source_id, checkpoint.totals))
+        return contracts, tuple(selected.values()), tuple(balances)
+
     def _validate_allowance_records(
-        self, runtime_records: tuple[RuntimeRecord, ...]
+        self,
+        runtime_records: tuple[RuntimeRecord, ...],
+        *,
+        candidate_id: str | None = None,
+        candidate_proposal=None,
+        effect_fact_owners=(),
     ) -> None:
         if not any(
-            record.record_type in {"allowance.reserved", "allowance.extinguished"}
+            record.record_type
+            in {
+                "allowance.granted",
+                "allowance.reserved",
+                "allowance.returned",
+                "allowance.extinguished",
+            }
             for record in runtime_records
         ):
             return
         from aigineering.core.causal_allowance import validate_allowance_commit
 
-        pending_ids = {record.id for record in runtime_records}
-        existing_records = tuple(
-            record
-            for _, record in self.scan_runtime_records()
-            if record.id not in pending_ids
+        narrow = (
+            self._narrow_allowance_commit_inputs(
+                runtime_records,
+                candidate_id,
+                candidate_proposal=candidate_proposal,
+                effect_fact_owners=effect_fact_owners,
+            )
+            if candidate_id is not None
+            else None
         )
+        if narrow is None:
+            existing_records = tuple(
+                record for _, record in self.scan_runtime_records()
+            )
+            contracts = tuple(self.get_all_contracts())
+            balances = None
+        else:
+            contracts, existing_records, balances = narrow
         validate_allowance_commit(
-            tuple(self.get_all_contracts()), existing_records, runtime_records
+            contracts,
+            existing_records,
+            runtime_records,
+            candidate_id=candidate_id,
+            balance_inputs=balances,
         )
 
     def _insert_ingress_assets(self, accepted_assets: list[Asset]) -> None:

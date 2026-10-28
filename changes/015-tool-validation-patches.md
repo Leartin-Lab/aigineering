@@ -17,5 +17,3 @@ schema keywords fail registration, except the valid `const: null` case.
 Historical ADR implementation notes distinguish the retained subtask and source
 isolation principles from superseded Method-owned implementation. No protocol
 identity, Store schema, tool side-effect semantics, or commitment owner changes.
-
-Verification is recorded in `reports/057-tool-validation-patches-2026-09-06.md`.

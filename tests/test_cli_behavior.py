@@ -123,6 +123,7 @@ class TestBehaviorList:
         """aig behavior list on empty store shows no behaviours."""
         runner = CliRunner()
         with runner.isolated_filesystem():
+            assert runner.invoke(cli, ["domain", "init"]).exit_code == 0
             result = runner.invoke(cli, ["behavior", "list"])
             assert result.exit_code == 0
             assert "No behaviour assets found" in result.output
@@ -207,6 +208,7 @@ class TestBehaviorShow:
         """aig behavior show <missing> fails with an error."""
         runner = CliRunner()
         with runner.isolated_filesystem():
+            assert runner.invoke(cli, ["domain", "init"]).exit_code == 0
             result = runner.invoke(cli, ["behavior", "show", "nope"])
             assert result.exit_code != 0
             assert "No behaviour asset named" in result.output

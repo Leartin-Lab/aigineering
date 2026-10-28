@@ -1,220 +1,110 @@
 # Aigineering
 
-> **Smarter boundaries, not smarter models.**
+[English](README.md) · [中文](README.zh-CN.md)
 
-Aigineering is a zero-trust runtime for AI workers. A Worker output is a
-Candidate, not shared state. Only effects that pass signature, claim,
-projection, authority, allowance, and acceptance checks become durable facts.
+**Zero Trust agent runtime for auditable AI-assisted engineering and research.**
 
-It is not a prompt harness, a static workflow engine, or a hidden multi-agent
-scheduler. Models may still produce incorrect content inside an authorized
-output; Aigineering prevents unauthorized output and invisible control flow
-from becoming runtime truth.
+Aigineering gives existing Agent Harnesses a durable boundary for delegated
+work: explicit inputs and outputs, bounded permissions, claim-bound execution,
+and policy-bound acceptance. Worker output is an untrusted Candidate;
+authenticated, authorized effects become durable facts through transactional
+commitment.
 
-## Quick start
+Content-addressed Assets fix the versions being checked. Recorded lineage helps
+you revisit evidence and revise questionable results without reconstructing a
+model's private reasoning. Content correctness still needs appropriate checks.
 
-Python 3.11 or newer is required.
+## What you can use
+
+- Run a task from explicit files, or a configured fleet with Skills and tools.
+- Let `/plan` and `/replan` expand work into ordinary, bounded runtime tasks.
+- Inspect the CLI task board, blockers, claims, evidence and recovery successors.
+- Review exact output Assets and export results that satisfy the task's policy.
+- Keep an existing Harness's model and tool loop behind the signed Worker API.
+
+Current source: **v0.5.14**, for bounded local single-machine CLI workflows.
+SQLite owns facts and claims; **Redis is required** for application discovery,
+event feeds and wakeups. Version metadata alone does not qualify a delivery:
+claims depend on evidence for the applicable case. General unattended delivery,
+production MCP transport and distributed deployment are outside current support.
+See [support and limits](docs/reference/development-status.md).
+
+## Start with one task
+
+Requires Python 3.11+ and Redis. Use the source checkout for the supplied examples.
 
 ```bash
 git clone https://github.com/Leartin-Lab/aigineering.git
 cd aigineering
-pip install -e ".[dev]"
+python -m venv .venv
+source .venv/bin/activate
+pip install -e .
+docker compose up -d redis
+aig redis status --json
 
-# Configure an OpenAI-compatible LLM Worker
-export AIGINEERING_API_KEY="..."
+export AIGINEERING_API_KEY="your-provider-key"
 export AIGINEERING_MODEL="your-model"
-export AIGINEERING_BASE_URL="https://provider.example/v1"
+export AIGINEERING_BASE_URL="https://your-provider.example/v1"
 
-# Persistent execution through the normal claim/package/submit protocol
-aig run "build a report with citations"
-
-# Inspect the resulting facts and trace
-aig trace
-aig asset ls
+mkdir -p workspaces/quick
+aig -C workspaces/quick run "Summarize the supplied measurements and their limitations." \
+  --input sample="$PWD/examples/cli_research/sample.json" \
+  --output report.md --timeout 60 --max-retries 1 \
+  --max-output-tokens 8192 --json
 ```
 
-Initialize a signed local domain before publishing tasks or assets directly:
+Use a compatible model that can follow the Worker action protocol. Replace the
+provider settings explicitly; keep credentials in environment variables. The
+report is written to `workspaces/quick/report.md`; existing files are not
+overwritten. This quick path does not grant tools or independent acceptance.
+
+Use the returned `contract_id` to inspect the actual task:
 
 ```bash
-aig domain init
-aig asset add --name source --content "reviewed evidence"
-aig task create \
-  --name research \
-  --description "Produce a report from the disclosed source." \
-  --input source \
-  --activation source \
-  --output report
+aig -C workspaces/quick task status TASK_ID --json
+aig -C workspaces/quick task board --json
+aig -C workspaces/quick task audit TASK_ID --json
 ```
 
-Mock execution is an explicit deterministic dry-run, never the production
-default:
+## Planning, tools and independent acceptance
+
+The [CLI research example](examples/cli_research/README.md) starts from one root
+task, frozen input and a Skill. The model plans the work; two tools compute a
+sample mean and unit conversion, then a different authorized Worker checks the
+exact report. There is no example-owned task scheduler.
+
+Its preset selects `deepseek-flash`; edit `workers.toml` for another compatible
+provider. The example adapter must also be importable:
 
 ```bash
-aig demo "build a report with citations" --worker mock
+export PYTHONPATH="$PWD${PYTHONPATH:+:$PYTHONPATH}"
+mkdir -p workspaces/research
+aig -C workspaces/research run \
+  --config "$PWD/examples/cli_research/run.toml" --wait-timeout 300 --json
 ```
 
-Existing agent harnesses can keep their own model and tool orchestration while
-using signed pull/submit Candidates. See the
-[agent harness migration reference](docs/reference/agent-harness-migration.md).
+Skills supply selected context, not authority. `aig mcp add` registers capability
+metadata; it does not connect to an MCP server. Keep your Harness's MCP client or
+supply an explicit tool/Worker adapter. See [configured runs](docs/reference/configured-runs.md)
+and [Harness integration](docs/reference/agent-harness-migration.md).
 
-Executable AI-for-science integrations are available as installable example
-skills: [`literature-evidence`](examples/literature-evidence/SKILL.md) turns
-retrieval through independent review into separately testable tasks, while
-[`scientific-data-profile`](examples/scientific-data-profile/SKILL.md) safely
-profiles authorized CSV/TSV inputs without disclosing raw rows. Both use
-zero-dependency adapters and offline replay fixtures. The
-[`runtime-compiled AI4S run`](examples/ai4s/README.md) additionally exercises a
-Skill-guided root task, a capability-routed local Fleet, and ordinary tool
-continuations. The runtime-only acceptance path also covers staged planning,
-independent `/attest`, root qualification, and SQLite reopen without relying
-on the example audit driver.
+## When work stops
 
-Declarative non-tool case studies are indexed in
-[`examples/README.md`](examples/README.md), including report consistency and
-claim-evidence review. Their scenario evidence is collected in
-[`reports/063-runtime-native-cases-2026-09-13.md`](reports/063-runtime-native-cases-2026-09-13.md).
+Read `task status` first. Use `task runs`, `diagnostics`, `lineage` and `logs` only
+for the relevant task and claim. Submission, tool observations and scheduled
+recovery are not business completion. Continue an eligible task with the same
+configuration and `--resume TASK_ID`; a published recovery successor has its own
+ID. Do not rerun a submitted producer just because acceptance is pending.
 
-## Current development
+`--timeout` bounds one provider request; `--wait-timeout` is for target/configured
+runs, not quick-goal execution.
+Provider retries and new runtime recovery tasks are different. `--json` selects
+CLI output; it does not select the provider's JSON response mode. Commands have
+their own result schemas and exit codes. See [task operations](docs/reference/task-board.md).
 
-v0.5.11 adds declarative method packages and a local create → test → independently
-accept → reuse lifecycle. Methods run as ordinary Contracts; generated methods
-remain unverified until explicitly evaluated. See the [method guide](docs/methods.md)
-and [fixture example](examples/method-governance/README.md).
+## Read next
 
-The v0.5.10 baseline converges Contract construction and stateless runtime
-maintenance, fixes concurrent trace reconstruction and local signing-key
-publication, and preserves the v0.5.9 protocol and SQLite schema. The artifact
-adapter provides bounded attachments, extraction, exact evidence and offline
-citation export; see the [artifact guide](docs/business-artifacts.md).
-
-## Reference runtime scope
-
-The single-machine reference runtime provides:
-
-- actor-signed Candidate publication;
-- one Candidate commitment boundary for CLI, Worker, Plugin, and HTTP surfaces;
-- SQLite transactions for claims, fencing, projection, facts, trace, and
-  idempotency;
-- reconstructable runtime views derived from append-only records;
-- claim-bound Worker packages and authenticated submissions;
-- staged planning and replanning as ordinary independently claimable tasks;
-- causal allowance containment for recursive publication;
-- independent output attestation where a Contract requires it;
-- deterministic replay, lineage, audit, and task-status views;
-- same-machine active-active Worker arbitration over one SQLite domain;
-- mock and OpenAI-compatible LLM Workers;
-- optional FastAPI integration through the `api` extra;
-- an optional Redis read projection that is disposable and reconstructable from
-  SQLite;
-- separate content, signed-definition, and signed-association identities with
-  many-to-many history;
-- v4 Contracts that bind label-selected context to exact Asset IDs;
-- v5 Contracts that separate execution requirements from delegated routing
-  scope;
-- graph-native ordinary Worker outputs signed by the WorkerHost;
-- terminal/claim fencing and durable deterministic commitment rejections;
-- one causal allowance source and one terminal-fact constructor;
-- planning label containment before Candidate commitment;
-- explicitly configured, Contract-scoped tool registries and a separate
-  ToolWorker;
-- exact verifiable slice derivations and claim-gated disclosure;
-- independently attested descendant outputs;
-- deterministic JSON output shapes that independent review cannot override;
-- executable AI4S literature and safe data-profile examples;
-- heterogeneous local Worker fleets using independent SQLite connections;
-- parallel tool calls compiled into ordinary tasks and a boolean join;
-- durable recovery from claim-bound structural output rejection;
-- executable local tool contracts with deterministic input/output schemas,
-  version binding, UTF-8 output limits, and descriptor-drift rejection;
-- structured tool execution metadata and a read-only `task audit --json`
-  productivity projection derived from durable lineage facts;
-- a runtime-only AI4S/Fleet tool-observation → continuation → independent
-  verifier loop that survives SQLite reopen.
-
-The release has deterministic boundary, reconstruction, concurrency, artifact,
-and bounded real-LLM evidence. See the
-[v0.5.3 convergence report](reports/053-boundary-convergence-2026-08-09.md) and
-the [v0.5.4 AI4S evidence](reports/054-ai4s-auditable-example-2026-08-13.md),
-the [v0.5.5 Fleet evidence](reports/055-local-worker-fleet-2026-08-14.md), and
-the [v0.5.6 tool-closure evidence](reports/056-tool-closed-loop-productivity-2026-08-23.md).
-
-Inspect the accepted asset graph without changing authoritative state:
-
-```bash
-aig graph contents --json
-aig graph definitions --json
-aig graph assertions --json
-```
-
-The graph is reconstructed from SQLite RuntimeRecords. Similarity adapters may
-propose signed relations, but a score is neither identity nor authority.
-
-For read-heavy CLI or API use, install and configure the optional projection:
-
-```bash
-pip install "aigineering[redis]"
-export AIGINEERING_REDIS_URL="redis://127.0.0.1:6379/0"
-aig cache status --json
-aig cache rebuild --json
-```
-
-Redis never stores authoritative Candidates, facts, claims, allowance,
-acceptance, or terminal state. If it is unavailable, supported read views fall
-back to SQLite. Release evidence for this adapter is recorded in
-[`reports/051-redis-query-projection-2026-07-31.md`](reports/051-redis-query-projection-2026-07-31.md).
-The signed graph acceptance evidence is recorded in
-[`reports/052-signed-definition-content-graph-2026-07-31.md`](reports/052-signed-definition-content-graph-2026-07-31.md).
-
-v0.5.7 adds fail-closed tool argument and schema fixes plus historical ADR
-clarifications. See [patch evidence](reports/057-tool-validation-patches-2026-09-06.md).
-
-v0.5.8 adds backup-first reconstruction diagnostics, reproducible scaling
-measurements, AST dependency checks, and broader automated release gates.
-See the [release evidence guide](docs/reference/release-evidence.md) and
-[v0.5.8 evidence](reports/058-reproducible-release-evidence-2026-09-06.md).
-
-## Non-goals
-
-The current runtime does not claim:
-
-- cross-machine consensus or distributed Store semantics;
-- public-network deployment hardening;
-- an external security audit;
-- semantic truth of model-produced content;
-- scheduler fairness across independent machines;
-- a generic workflow language;
-- production MCP transport;
-- process-level tool timeout, cancellation, or isolation;
-- exactly-once delivery for external side effects;
-- cross-machine Store and Worker discovery.
-
-The optional HTTP adapter binds to the local reference runtime. Authentication,
-TLS, rate limiting, and hostile-network controls remain deployment
-responsibilities.
-
-## Core boundary
-
-```text
-Contract + disclosed facts
-        ↓
-authenticated Worker claim
-        ↓
-signed Candidate effects
-        ↓
-projection + authority + allowance + acceptance
-        ↓
-atomic fact and trace commitment
-```
-
-The non-negotiable rules are documented in
-[`docs/boundary-invariants.md`](docs/boundary-invariants.md). The implemented
-architecture is described by [`DESIGN.md`](DESIGN.md).
-
-## Development
-
-Development happens on `dev`. Stable releases are promoted to `main` after the
-full CI and artifact gates pass. See [`CONTRIBUTING.md`](CONTRIBUTING.md).
-
-## License
-
-MIT — see [`LICENSE`](LICENSE).
+- [Agent operating guide](SKILL.md): a short loop and references to load on demand.
+- [Examples](examples/README.md) and [case reports](reports/README.md): inputs, outcomes and limits.
+- [Documentation](docs/README.md): configuration, task operations and integration.
+- [Roadmap](ROADMAP.md) · [Contributing](CONTRIBUTING.md) · [License](LICENSE).

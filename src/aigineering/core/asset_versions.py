@@ -101,6 +101,8 @@ def create_slice_asset(
         if range_spec
         else f"slice_of:{source.name}",
         trust_tier=source.trust_tier,
+        promptable=source.promptable,
+        disclosure_view=source.disclosure_view,
         source_uri=source.source_uri,
         lineage_id=lineage_id,
         definition_hash=hash_asset_definition(slice_name),

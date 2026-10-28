@@ -1,0 +1,358 @@
+{
+  "format": "aigineering-task-handoff-v1",
+  "canonical_json": {
+    "input": {
+      "": "BMP",
+      "𐀀": "supplementary",
+      "text": "中文 café",
+      "values": [
+        null,
+        true,
+        9007199254740991
+      ]
+    },
+    "expected": "{\"text\":\"中文 café\",\"values\":[null,true,9007199254740991],\"\":\"BMP\",\"𐀀\":\"supplementary\"}"
+  },
+  "ed25519_test_key": {
+    "private_key_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+    "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8"
+  },
+  "genesis": {
+    "id": "genesis:29ff969d2d3ce6ffb2bd8c7068813727179efbcc343280f3bfc3b95a54c173fd",
+    "domain": "handoff-conformance",
+    "policy_hash": "policy:vector",
+    "root_keys": [
+      {
+        "actor_id": "human:handoff-vector",
+        "capabilities": [
+          "contract.cancel",
+          "contract.publish",
+          "task.block",
+          "task.handoff"
+        ],
+        "key_id": "handoff-vector-key",
+        "kind": "ed25519",
+        "public_key": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+        "revoked": false
+      }
+    ],
+    "schema_version": 1
+  },
+  "contract": {
+    "value": {
+      "id": "task:v3:409960009e39716b36b3c9765ce263d98b812cd00ab9b6c57b7eaa37a237f78a",
+      "parent_id": null,
+      "name": "handoff target",
+      "description": "Finish the report",
+      "inputs": [],
+      "outputs": [
+        "report"
+      ],
+      "activation": "",
+      "budget": 5,
+      "tool_scope": [],
+      "labels": [
+        "research"
+      ],
+      "context_asset_ids": [],
+      "worker_capabilities": [
+        "asset.publish",
+        "worker.submit"
+      ],
+      "worker_pools": [],
+      "delegation_capabilities": [],
+      "delegation_pools": [],
+      "origin": "human",
+      "minting_authority": [],
+      "sensitive_input_policy": null,
+      "acceptance_policy": null
+    },
+    "expected_id": "task:v3:409960009e39716b36b3c9765ce263d98b812cd00ab9b6c57b7eaa37a237f78a"
+  },
+  "effect_vectors": [
+    {
+      "name": "explicit-budget",
+      "candidate": {
+        "value": {
+          "id": "candidate:v1:fe68376e73015dfa1810197dfead987c27c0c58e68a12339a4050b9b35455a95",
+          "signature": "ed25519:iHzkvO+HDX6HnHvuHXGMR/jIuIov4/svhQMmYZaujeZDJ6XFfZKG7lL6H+zkd7Uq+duvguzWRQKVswaFRM/OAA==",
+          "actor_id": "human:handoff-vector",
+          "causal_parents": [],
+          "domain_id": "genesis:29ff969d2d3ce6ffb2bd8c7068813727179efbcc343280f3bfc3b95a54c173fd",
+          "effects": [
+            {
+              "atomic_group": "",
+              "effect_type": "task.handoff",
+              "payload": {
+                "budget": 2,
+                "contract_id": "task:v3:409960009e39716b36b3c9765ce263d98b812cd00ab9b6c57b7eaa37a237f78a",
+                "hold_reason": "",
+                "reason": "继续 unfinished report"
+              }
+            }
+          ],
+          "idempotency_key": "handoff-vector-explicit-budget",
+          "key_id": "handoff-vector-key",
+          "protocol_version": 1,
+          "signature_kind": "ed25519"
+        },
+        "expected_signing_utf8": "{\"actor_id\":\"human:handoff-vector\",\"causal_parents\":[],\"domain_id\":\"genesis:29ff969d2d3ce6ffb2bd8c7068813727179efbcc343280f3bfc3b95a54c173fd\",\"effects\":[{\"atomic_group\":\"\",\"effect_type\":\"task.handoff\",\"payload\":{\"budget\":2,\"contract_id\":\"task:v3:409960009e39716b36b3c9765ce263d98b812cd00ab9b6c57b7eaa37a237f78a\",\"hold_reason\":\"\",\"reason\":\"继续 unfinished report\"}}],\"idempotency_key\":\"handoff-vector-explicit-budget\",\"key_id\":\"handoff-vector-key\",\"protocol_version\":1,\"signature_kind\":\"ed25519\"}"
+      },
+      "successor": {
+        "id": "task:v3:fe44ddad5d0db6cd0bbe1c34e0d0dcec54dd12029e90880c7d13876e8157e978",
+        "parent_id": "task:v3:409960009e39716b36b3c9765ce263d98b812cd00ab9b6c57b7eaa37a237f78a",
+        "name": "handoff target.handoff",
+        "description": "Finish the report\n\nTask handoff reason: 继续 unfinished report",
+        "inputs": [],
+        "outputs": [
+          "report"
+        ],
+        "activation": "",
+        "budget": 2,
+        "tool_scope": [],
+        "labels": [
+          "research"
+        ],
+        "context_asset_ids": [],
+        "worker_capabilities": [
+          "asset.publish",
+          "worker.submit"
+        ],
+        "worker_pools": [],
+        "delegation_capabilities": [],
+        "delegation_pools": [],
+        "origin": "human",
+        "minting_authority": [],
+        "sensitive_input_policy": null,
+        "acceptance_policy": null
+      },
+      "records": [
+        {
+          "id": "record:dd29c7d539a73666248a3a6aab76cf548d7cd892272a5813c350fe928d8a7f13",
+          "record_type": "lifecycle.terminal",
+          "schema_version": 1,
+          "payload": {
+            "contract_id": "task:v3:409960009e39716b36b3c9765ce263d98b812cd00ab9b6c57b7eaa37a237f78a",
+            "terminal": "cancelled",
+            "reason": "继续 unfinished report",
+            "actor_id": "human:handoff-vector"
+          },
+          "causal_parents": [
+            "record:3632688c58b93a09dbb1b138fbb5897cc12ca1cd5852e28ad3a74ba41b438087"
+          ]
+        },
+        {
+          "id": "record:bfc06fbc98d9f824009f0e1a64e716c88fc0ef00c9b56ea3902f7ee9a4ee21a2",
+          "record_type": "contract.declared",
+          "schema_version": 1,
+          "payload": {
+            "candidate_id": "candidate:v1:fe68376e73015dfa1810197dfead987c27c0c58e68a12339a4050b9b35455a95",
+            "contract": {
+              "id": "task:v3:fe44ddad5d0db6cd0bbe1c34e0d0dcec54dd12029e90880c7d13876e8157e978",
+              "parent_id": "task:v3:409960009e39716b36b3c9765ce263d98b812cd00ab9b6c57b7eaa37a237f78a",
+              "name": "handoff target.handoff",
+              "description": "Finish the report\n\nTask handoff reason: 继续 unfinished report",
+              "inputs": [],
+              "outputs": [
+                "report"
+              ],
+              "activation": "",
+              "budget": 2,
+              "tool_scope": [],
+              "labels": [
+                "research"
+              ],
+              "context_asset_ids": [],
+              "worker_capabilities": [
+                "asset.publish",
+                "worker.submit"
+              ],
+              "worker_pools": [],
+              "delegation_capabilities": [],
+              "delegation_pools": [],
+              "origin": "human",
+              "minting_authority": [],
+              "sensitive_input_policy": null,
+              "acceptance_policy": null
+            }
+          },
+          "causal_parents": [
+            "record:3632688c58b93a09dbb1b138fbb5897cc12ca1cd5852e28ad3a74ba41b438087"
+          ]
+        },
+        {
+          "id": "record:6f290afab13f2af32193d3586d4e606077dc15a8635854a034f2f98610073462",
+          "record_type": "task.handed_off",
+          "schema_version": 1,
+          "payload": {
+            "actor_id": "human:handoff-vector",
+            "budget": 2,
+            "candidate_id": "candidate:v1:fe68376e73015dfa1810197dfead987c27c0c58e68a12339a4050b9b35455a95",
+            "completed_outputs": [],
+            "contract_id": "task:v3:409960009e39716b36b3c9765ce263d98b812cd00ab9b6c57b7eaa37a237f78a",
+            "hold_id": "",
+            "key_id": "handoff-vector-key",
+            "reason": "继续 unfinished report",
+            "retained_asset_ids": [],
+            "successor_id": "task:v3:fe44ddad5d0db6cd0bbe1c34e0d0dcec54dd12029e90880c7d13876e8157e978"
+          },
+          "causal_parents": [
+            "record:3632688c58b93a09dbb1b138fbb5897cc12ca1cd5852e28ad3a74ba41b438087",
+            "record:dd29c7d539a73666248a3a6aab76cf548d7cd892272a5813c350fe928d8a7f13",
+            "record:bfc06fbc98d9f824009f0e1a64e716c88fc0ef00c9b56ea3902f7ee9a4ee21a2"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "null-budget-held",
+      "candidate": {
+        "value": {
+          "id": "candidate:v1:68bdaf851f92cb256422a179e4b439f5e94a37f300a2bee45af0d1a9990fc765",
+          "signature": "ed25519:xRLgsn59BESAnRx+AwHgT9iQPNjbrqkZWYiRIEmF169snxOX7rB+Kep3AMBesTjzmM8eLpjE42iN8yObAX2nCA==",
+          "actor_id": "human:handoff-vector",
+          "causal_parents": [],
+          "domain_id": "genesis:29ff969d2d3ce6ffb2bd8c7068813727179efbcc343280f3bfc3b95a54c173fd",
+          "effects": [
+            {
+              "atomic_group": "",
+              "effect_type": "task.handoff",
+              "payload": {
+                "budget": null,
+                "contract_id": "task:v3:409960009e39716b36b3c9765ce263d98b812cd00ab9b6c57b7eaa37a237f78a",
+                "hold_reason": "等待 café / café 来源核验",
+                "reason": "继续 unfinished report"
+              }
+            }
+          ],
+          "idempotency_key": "handoff-vector-null-budget-held",
+          "key_id": "handoff-vector-key",
+          "protocol_version": 1,
+          "signature_kind": "ed25519"
+        },
+        "expected_signing_utf8": "{\"actor_id\":\"human:handoff-vector\",\"causal_parents\":[],\"domain_id\":\"genesis:29ff969d2d3ce6ffb2bd8c7068813727179efbcc343280f3bfc3b95a54c173fd\",\"effects\":[{\"atomic_group\":\"\",\"effect_type\":\"task.handoff\",\"payload\":{\"budget\":null,\"contract_id\":\"task:v3:409960009e39716b36b3c9765ce263d98b812cd00ab9b6c57b7eaa37a237f78a\",\"hold_reason\":\"等待 café / café 来源核验\",\"reason\":\"继续 unfinished report\"}}],\"idempotency_key\":\"handoff-vector-null-budget-held\",\"key_id\":\"handoff-vector-key\",\"protocol_version\":1,\"signature_kind\":\"ed25519\"}"
+      },
+      "successor": {
+        "id": "task:v3:462dcd969bfcaa62f7e73d4a594a8eaeeeed4d3c26b1ee8fa091a99bf0a67583",
+        "parent_id": "task:v3:409960009e39716b36b3c9765ce263d98b812cd00ab9b6c57b7eaa37a237f78a",
+        "name": "handoff target.handoff",
+        "description": "Finish the report\n\nTask handoff reason: 继续 unfinished report",
+        "inputs": [],
+        "outputs": [
+          "report"
+        ],
+        "activation": "",
+        "budget": 5,
+        "tool_scope": [],
+        "labels": [
+          "research"
+        ],
+        "context_asset_ids": [],
+        "worker_capabilities": [
+          "asset.publish",
+          "worker.submit"
+        ],
+        "worker_pools": [],
+        "delegation_capabilities": [],
+        "delegation_pools": [],
+        "origin": "human",
+        "minting_authority": [],
+        "sensitive_input_policy": null,
+        "acceptance_policy": null
+      },
+      "records": [
+        {
+          "id": "record:862fc86c5618767e40992261a033b8e1a5271817f8f3f8f5a1e17abfbc0a4737",
+          "record_type": "lifecycle.terminal",
+          "schema_version": 1,
+          "payload": {
+            "contract_id": "task:v3:409960009e39716b36b3c9765ce263d98b812cd00ab9b6c57b7eaa37a237f78a",
+            "terminal": "cancelled",
+            "reason": "继续 unfinished report",
+            "actor_id": "human:handoff-vector"
+          },
+          "causal_parents": [
+            "record:ec54b9912900112315ddf9a10f03e34b9cbc895f95969f02ba4417e3c667c3ae"
+          ]
+        },
+        {
+          "id": "record:48dc964a6841545279a6c0a613b6ca2b10743e674680cc45341bf5074835dd2f",
+          "record_type": "contract.declared",
+          "schema_version": 1,
+          "payload": {
+            "candidate_id": "candidate:v1:68bdaf851f92cb256422a179e4b439f5e94a37f300a2bee45af0d1a9990fc765",
+            "contract": {
+              "id": "task:v3:462dcd969bfcaa62f7e73d4a594a8eaeeeed4d3c26b1ee8fa091a99bf0a67583",
+              "parent_id": "task:v3:409960009e39716b36b3c9765ce263d98b812cd00ab9b6c57b7eaa37a237f78a",
+              "name": "handoff target.handoff",
+              "description": "Finish the report\n\nTask handoff reason: 继续 unfinished report",
+              "inputs": [],
+              "outputs": [
+                "report"
+              ],
+              "activation": "",
+              "budget": 5,
+              "tool_scope": [],
+              "labels": [
+                "research"
+              ],
+              "context_asset_ids": [],
+              "worker_capabilities": [
+                "asset.publish",
+                "worker.submit"
+              ],
+              "worker_pools": [],
+              "delegation_capabilities": [],
+              "delegation_pools": [],
+              "origin": "human",
+              "minting_authority": [],
+              "sensitive_input_policy": null,
+              "acceptance_policy": null
+            }
+          },
+          "causal_parents": [
+            "record:ec54b9912900112315ddf9a10f03e34b9cbc895f95969f02ba4417e3c667c3ae"
+          ]
+        },
+        {
+          "id": "record:a91a2b1d73a7d54b9b7d1a40b86246d323aa189890640dead5fbf49074686216",
+          "record_type": "claim.hold.placed",
+          "schema_version": 1,
+          "payload": {
+            "actor_id": "human:handoff-vector",
+            "candidate_id": "candidate:v1:68bdaf851f92cb256422a179e4b439f5e94a37f300a2bee45af0d1a9990fc765",
+            "contract_id": "task:v3:462dcd969bfcaa62f7e73d4a594a8eaeeeed4d3c26b1ee8fa091a99bf0a67583",
+            "key_id": "handoff-vector-key",
+            "reason": "等待 café / café 来源核验"
+          },
+          "causal_parents": [
+            "record:ec54b9912900112315ddf9a10f03e34b9cbc895f95969f02ba4417e3c667c3ae"
+          ]
+        },
+        {
+          "id": "record:1588a29197aa97e718d265e5e1fd2a98d537132bbb38d1aaede58ac97da5bd03",
+          "record_type": "task.handed_off",
+          "schema_version": 1,
+          "payload": {
+            "actor_id": "human:handoff-vector",
+            "budget": 5,
+            "candidate_id": "candidate:v1:68bdaf851f92cb256422a179e4b439f5e94a37f300a2bee45af0d1a9990fc765",
+            "completed_outputs": [],
+            "contract_id": "task:v3:409960009e39716b36b3c9765ce263d98b812cd00ab9b6c57b7eaa37a237f78a",
+            "hold_id": "record:a91a2b1d73a7d54b9b7d1a40b86246d323aa189890640dead5fbf49074686216",
+            "key_id": "handoff-vector-key",
+            "reason": "继续 unfinished report",
+            "retained_asset_ids": [],
+            "successor_id": "task:v3:462dcd969bfcaa62f7e73d4a594a8eaeeeed4d3c26b1ee8fa091a99bf0a67583"
+          },
+          "causal_parents": [
+            "record:ec54b9912900112315ddf9a10f03e34b9cbc895f95969f02ba4417e3c667c3ae",
+            "record:862fc86c5618767e40992261a033b8e1a5271817f8f3f8f5a1e17abfbc0a4737",
+            "record:48dc964a6841545279a6c0a613b6ca2b10743e674680cc45341bf5074835dd2f",
+            "record:a91a2b1d73a7d54b9b7d1a40b86246d323aa189890640dead5fbf49074686216"
+          ]
+        }
+      ]
+    }
+  ]
+}

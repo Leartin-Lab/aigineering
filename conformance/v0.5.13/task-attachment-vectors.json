@@ -1,0 +1,16 @@
+{
+  "format": "aigineering-task-attachment-v1",
+  "effect": {
+    "effect_type": "task.attachment.link",
+    "payload": {
+      "asset_candidate_id": "candidate:v1:asset-publication",
+      "asset_head_id": "record:asset-head",
+      "asset_id": "asset:v1:attachment",
+      "asset_record_id": "record:asset-committed",
+      "asset_receipt_id": "record:asset-receipt",
+      "contract_id": "task:v6:exact-task",
+      "contract_record_id": "record:contract-declared"
+    }
+  },
+  "expected_canonical_json": "{\"effect_type\":\"task.attachment.link\",\"payload\":{\"asset_candidate_id\":\"candidate:v1:asset-publication\",\"asset_head_id\":\"record:asset-head\",\"asset_id\":\"asset:v1:attachment\",\"asset_receipt_id\":\"record:asset-receipt\",\"asset_record_id\":\"record:asset-committed\",\"contract_id\":\"task:v6:exact-task\",\"contract_record_id\":\"record:contract-declared\"}}"
+}

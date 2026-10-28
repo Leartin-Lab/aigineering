@@ -94,6 +94,6 @@ disclosure or execution during replay.
 
 ## Closure
 
-All exit criteria are covered by protocol, migration, reconstruction, label
-replay, real Redis, conformance, and release-artifact tests. Acceptance evidence
-is recorded in `reports/052-signed-definition-content-graph-2026-07-31.md`.
+Protocol, migration, reconstruction, label replay, Redis and conformance
+checks cover the implemented boundary. Historical acceptance does not qualify
+a later artifact.

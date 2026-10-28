@@ -1,0 +1,13 @@
+Read sample and the cli_research Skill, then begin with /plan. Dynamically
+decompose calculation, reporting and independent verification into ordinary
+runtime tasks. Produce measurement_report with the exact structure in the
+Skill, backed by summarize_sample followed by convert_mean consuming its
+committed result. Retain both complete observations in an ordinary evidence
+output for the verifier. The verifier must recompute against the exact sample,
+read the exact report and evidence output, and /attest the root Contract ID
+copied from the planning compiler's Parent Contract ID. Copy the frozen sample
+evidence ID too. Allocate explicit sufficient budgets for both tools and their
+continuations, and retain bounded allowance for failure recovery. Do not repeat
+this root's initial /plan instruction inside a planning stage or continuation.
+Keep the Skill label on children needing its procedures. When evidence cannot
+be obtained, return a visible failure rather than an unsupported final result.

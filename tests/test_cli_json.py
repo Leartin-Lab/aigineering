@@ -1,11 +1,23 @@
 """Tests for --json flag on CLI commands."""
 
 import json
+from pathlib import Path
 
 from click.testing import CliRunner
 
 from aigineering.cli.main import cli
 from aigineering.core.session import SessionStore
+from aigineering.core.sqlite_store import SQLiteStore
+from aigineering.protocol.types import Session, TraceEntry
+from aigineering.protocol.wire import trace_entry_to_dict
+
+
+def _write_trace_entries(trace_file: Path, entries: list[TraceEntry]) -> None:
+    """Serialize a list of TraceEntry objects as JSONL to *trace_file*."""
+    trace_file.parent.mkdir(parents=True, exist_ok=True)
+    with open(trace_file, "w") as f:
+        for entry in entries:
+            f.write(json.dumps(trace_entry_to_dict(entry)) + "\n")
 
 
 def test_run_json_output():
@@ -52,12 +64,12 @@ def test_run_session_contains_only_root_tree_window():
         assert first_session.contract_ids == (first_data["contract_id"],)
         assert second_session.contract_ids == (second_data["contract_id"],)
         assert set(second_session.produced_asset_ids) <= set(second_session.asset_ids)
-        assert not set(first_session.produced_asset_ids) & set(
+        assert first_session.produced_asset_ids
+        assert second_session.produced_asset_ids
+        assert set(first_session.produced_asset_ids).isdisjoint(
             second_session.produced_asset_ids
         )
         assert set(first_session.contract_ids).isdisjoint(second_session.contract_ids)
-        # The second run may reuse an output satisfied before it starts. That
-        # historical asset is not attributed unless this run disclosed it.
         assert not set(first_session.produced_asset_ids) & set(second_session.asset_ids)
         assert set(first_data["trace_ids"]).isdisjoint(second_data["trace_ids"])
 
@@ -136,11 +148,18 @@ def test_audit_json_output():
     """aig audit --json produces valid JSON with asset_id, asset_name, lineage."""
     runner = CliRunner()
     with runner.isolated_filesystem():
-        runner.invoke(cli, ["run", "test", "--worker", "mock"])
+        run_result = runner.invoke(cli, ["run", "test", "--worker", "mock", "--json"])
+        assert run_result.exit_code == 0, run_result.output
+        run_payload = json.loads(run_result.output)
+        store = SQLiteStore(".aig/store.db")
+        root = store.get_contract(run_payload["contract_id"])
+        assert root is not None
+        output_name = root.outputs[0]
+        store.close()
 
         result = runner.invoke(
             cli,
-            ["audit", "--asset-name", "final_report", "--json"],
+            ["audit", "--asset-name", output_name, "--json"],
         )
         assert result.exit_code == 0
         data = json.loads(result.output)
@@ -148,7 +167,7 @@ def test_audit_json_output():
         assert isinstance(data, dict)
         assert "asset_id" in data
         assert "asset_name" in data
-        assert data["asset_name"] == "final_report"
+        assert data["asset_name"] == output_name
         assert "lineage" in data
         assert isinstance(data["lineage"], list)
         assert len(data["lineage"]) > 0
@@ -212,8 +231,38 @@ def test_trace_json_no_sessions():
         assert len(data) == 0
 
 
+def test_trace_json_session_manifest_missing_rc1():
+    """aig trace --session --json with no session manifest exits 1 (C3)."""
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        result = runner.invoke(cli, ["trace", "--session", "missing", "--json"])
+
+        assert result.exit_code == 1
+        data = json.loads(result.output)
+        assert data == {"error": "Session 'missing' not found."}
+        assert result.stderr == ""
+
+
+def test_trace_json_session_export_missing_rc1():
+    """aig trace --session --json with a manifest but no export exits 1 (C3)."""
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        # Manifest exists; no .aig/traces directory, so neither the direct
+        # export nor the fallback scan can produce a store.
+        SessionStore().create_session(
+            Session(id="missing", trace_ids=("trace_missing",))
+        )
+
+        result = runner.invoke(cli, ["trace", "--session", "missing", "--json"])
+
+        assert result.exit_code == 1
+        data = json.loads(result.output)
+        assert data == {"error": "Session 'missing' not found."}
+        assert result.stderr == ""
+
+
 def test_audit_json_error_message():
-    """aig audit --json returns error dict when asset not found."""
+    """aig audit --json returns error dict with exit 1 when asset not found."""
     runner = CliRunner()
     with runner.isolated_filesystem():
         runner.invoke(cli, ["run", "test", "--worker", "mock"])
@@ -222,7 +271,7 @@ def test_audit_json_error_message():
             cli,
             ["audit", "--asset-name", "nonexistent_asset", "--json"],
         )
-        assert result.exit_code == 0
+        assert result.exit_code == 1
         data = json.loads(result.output)
         assert "error" in data
 
@@ -257,3 +306,135 @@ def test_replay_all_json():
             assert "session" in item
             assert "entries" in item
             assert "consistent" in item
+
+
+def _write_audit_trace_fixture() -> None:
+    """Write a readable latest-session trace with a named projection asset."""
+    activation = TraceEntry(
+        id="act_1",
+        contract_id="contract_1",
+        event_type="activation",
+        timestamp="2025-01-01T00:00:00",
+    )
+    projection = TraceEntry(
+        id="proj_1",
+        parent_id="act_1",
+        contract_id="contract_1",
+        event_type="projection",
+        accepted_fragments=["asset_abc"],
+        accepted_asset_names=["test_output"],
+        worker_id="mock_worker",
+        timestamp="2025-01-01T00:00:01",
+    )
+    _write_trace_entries(
+        Path(".aig/traces/session_test.jsonl"),
+        [activation, projection],
+    )
+
+
+def test_audit_session_missing_json_exits_1():
+    """audit --session <missing> --json prints the error object then exits 1."""
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        result = runner.invoke(cli, ["audit", "--session", "missing", "--json"])
+
+        assert result.exit_code == 1
+        assert json.loads(result.output) == {"error": "Session 'missing' not found."}
+        assert result.stderr == ""
+
+
+def test_audit_session_manifest_without_export_json_exits_1():
+    """audit --session --json with a manifest but no matching export exits 1.
+
+    The fixture rules out both the direct export hit and the fallback
+    trace-id scan, so the miss comes from a fully exhausted search.
+    """
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        unrelated = TraceEntry(
+            id="unrelated_1",
+            contract_id="contract_other",
+            event_type="activation",
+            timestamp="2025-01-01T00:00:00",
+        )
+        _write_trace_entries(
+            Path(".aig/traces/session_other.jsonl"),
+            [unrelated],
+        )
+        SessionStore(sessions_dir=".aig/sessions").create_session(
+            Session(id="sess_ghost", trace_ids=("t_ghost",))
+        )
+
+        result = runner.invoke(cli, ["audit", "--session", "sess_ghost", "--json"])
+
+        assert result.exit_code == 1
+        assert json.loads(result.output) == {"error": "Session 'sess_ghost' not found."}
+        assert result.stderr == ""
+
+
+def test_audit_asset_id_not_found_json_exits_1():
+    """audit --asset <unknown> --json prints the error object then exits 1."""
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        _write_audit_trace_fixture()
+
+        result = runner.invoke(cli, ["audit", "--asset", "nope", "--json"])
+
+        assert result.exit_code == 1
+        assert json.loads(result.output) == {
+            "error": "No asset found with id or name 'nope'"
+        }
+        assert result.stderr == ""
+
+
+def test_audit_asset_name_not_found_json_exits_1():
+    """audit --asset-name <unknown> --json prints the error object then exits 1."""
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        _write_audit_trace_fixture()
+
+        result = runner.invoke(cli, ["audit", "--asset-name", "nope", "--json"])
+
+        assert result.exit_code == 1
+        assert json.loads(result.output) == {"error": "No asset found with name 'nope'"}
+        assert result.stderr == ""
+
+
+def test_audit_target_unresolved_json_exits_1(monkeypatch):
+    """Defensive target seam: unresolved target prints error object then exits 1."""
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        _write_audit_trace_fixture()
+        monkeypatch.setattr(
+            "aigineering.cli.trace._resolve_asset_by_name",
+            lambda asset_name, trace_store: ("", "ghost"),
+        )
+
+        result = runner.invoke(cli, ["audit", "--asset-name", "test_output", "--json"])
+
+        assert result.exit_code == 1
+        assert json.loads(result.output) == {
+            "error": "Could not determine target asset."
+        }
+        assert result.stderr == ""
+
+
+def test_audit_empty_lineage_json_seam_exits_0(monkeypatch):
+    """Seam regression: resolved asset with empty lineage stays rc=0 (JSON)."""
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        _write_audit_trace_fixture()
+        monkeypatch.setattr(
+            "aigineering.cli.trace._resolve_asset_by_name",
+            lambda asset_name, trace_store: ("ghost_asset", "ghost"),
+        )
+
+        result = runner.invoke(cli, ["audit", "--asset-name", "test_output", "--json"])
+
+        assert result.exit_code == 0
+        assert json.loads(result.output) == {
+            "asset_id": "ghost_asset",
+            "asset_name": "ghost",
+            "lineage": [],
+        }
+        assert result.stderr == ""

@@ -5,8 +5,13 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 import json
+import math
 
 from aigineering.core.output_satisfaction import all_outputs_satisfied
+from aigineering.core.publication_history import (
+    read_effect_types,
+    validate_published_member,
+)
 from aigineering.core.lifecycle_facts import create_terminal_record
 from aigineering.core.ids import acceptance_policy_id
 from aigineering.core.projection_context import EffectProjectionContext
@@ -15,6 +20,161 @@ from aigineering.core.candidate_decision import trace_record
 from aigineering.protocol.runtime_record import RuntimeRecord, create_runtime_record
 from aigineering.protocol.candidate import CandidateEffect, CandidateProposal
 from aigineering.protocol.types import TraceEntry
+
+
+def validate_claim_bound_output(context, asset, producer) -> None:
+    """Prove an output Asset is in its producer's exact submitted claim."""
+    from aigineering.core.asset_graph_facts import asset_from_graph_values
+    from aigineering.protocol.runtime_record import validate_runtime_record
+    from aigineering.protocol.wire import asset_to_dict
+
+    if asset.created_by != producer.id or asset.name not in producer.outputs:
+        raise ValueError("task output does not match a producer-declared output")
+    rows = context.runtime_records
+    committed_by_id = tuple(
+        row
+        for row in rows
+        if row.record_type == "asset.committed"
+        and isinstance(row.payload.get("asset"), Mapping)
+        and row.payload["asset"].get("id") == asset.id
+    )
+    if len(committed_by_id) != 1:
+        raise ValueError("task output has no unique immutable publication fact")
+    committed = committed_by_id[0]
+    validate_runtime_record(committed)
+    if (
+        committed.payload.get("asset") != asset_to_dict(asset)
+        or committed.payload.get("contract_id") != producer.id
+    ):
+        raise ValueError("task output publication differs from its exact Asset")
+    if asset.definition_hash.startswith("definition:v1:"):
+        assertions = tuple(
+            row
+            for row in rows
+            if row.record_type == "asset.definition-content.asserted"
+            and isinstance(row.payload.get("assertion"), Mapping)
+            and committed.causal_parents == (row.id,)
+        )
+        if len(assertions) != 1:
+            raise ValueError("graph task output has no exact assertion publication")
+        assertion = assertions[0]
+        content_id = assertion.payload["assertion"].get("content_id")
+        definition_id = assertion.payload["assertion"].get("definition_id")
+        content_rows = tuple(
+            row
+            for row in rows
+            if row.record_type == "asset.content.published"
+            and isinstance(row.payload.get("content"), Mapping)
+            and row.payload["content"].get("id") == content_id
+        )
+        definition_rows = tuple(
+            row
+            for row in rows
+            if row.record_type == "asset.definition.published"
+            and isinstance(row.payload.get("definition"), Mapping)
+            and row.payload["definition"].get("id") == definition_id
+        )
+        for row in (*content_rows, *definition_rows):
+            validate_runtime_record(row)
+        contents = tuple(row.payload["content"] for row in content_rows)
+        definitions = tuple(row.payload["definition"] for row in definition_rows)
+        if (
+            not contents
+            or any(item != contents[0] for item in contents[1:])
+            or not definitions
+            or any(item != definitions[0] for item in definitions[1:])
+            or asset_from_graph_values(
+                contents[0], definitions[0], assertion.payload["assertion"]
+            )
+            != asset
+        ):
+            raise ValueError("graph task output differs from its exact assertion")
+        member = assertion
+    else:
+        member = committed
+    receipt, head = validate_published_member(rows, member)
+    if receipt.payload.get("contract_id") != producer.id:
+        raise ValueError("task output receipt is not bound to its producer Contract")
+    if committed.id not in head.payload.get("committed_record_ids", ()):
+        raise ValueError("task output fact is outside its publication head")
+    submitted_rows = tuple(
+        row
+        for row in rows
+        if row.record_type == "claim.submitted"
+        and row.payload.get("candidate_id") == receipt.payload.get("candidate_id")
+    )
+    if len(submitted_rows) != 1:
+        raise ValueError("task output Candidate has no unique claim submission")
+    submitted = submitted_rows[0]
+    validate_runtime_record(submitted)
+    claim_id = submitted.payload.get("claim_id")
+    if (
+        not isinstance(claim_id, str)
+        or not claim_id
+        or not isinstance(submitted.payload.get("package_id"), str)
+        or not submitted.payload.get("package_id")
+        or type(submitted.payload.get("epoch")) is not int
+        or submitted.payload.get("epoch") < 1
+    ):
+        raise ValueError("task output claim submission has malformed typed bindings")
+    grants = tuple(
+        row
+        for row in rows
+        if row.record_type == "claim.granted"
+        and row.id in submitted.causal_parents
+        and row.payload.get("claim_id") == claim_id
+    )
+    if len(grants) != 1:
+        raise ValueError("task output submission has no exact claim grant")
+    grant = grants[0]
+    validate_runtime_record(grant)
+    if (
+        submitted.causal_parents != (grant.id, head.id)
+        or submitted.payload.get("contract_id") != producer.id
+        or submitted.payload.get("worker_id") != receipt.payload.get("actor_id")
+        or receipt.payload.get("claim_id") != claim_id
+        or grant.payload.get("contract_id") != producer.id
+        or grant.payload.get("worker_id") != submitted.payload.get("worker_id")
+        or grant.payload.get("package_id") != submitted.payload.get("package_id")
+        or grant.payload.get("epoch") != submitted.payload.get("epoch")
+        or type(grant.payload.get("epoch")) is not int
+        or grant.payload.get("epoch") < 1
+    ):
+        raise ValueError("task output claim bindings do not match the exact grant")
+    if grant.causal_parents:
+        if len(grant.causal_parents) != 1:
+            raise ValueError("task output claim grant has malformed request provenance")
+        request_id = grant.causal_parents[0]
+        requests = tuple(
+            row
+            for row in rows
+            if row.id == request_id and row.record_type == "worker.claim.requested"
+        )
+        if len(requests) != 1 or requests[0].payload.get(
+            "worker_id"
+        ) != grant.payload.get("worker_id"):
+            raise ValueError(
+                "task output claim grant request does not match its Worker"
+            )
+        request = requests[0]
+        validate_runtime_record(request)
+        if request.payload.get("contract_id") != grant.payload.get("contract_id"):
+            raise ValueError(
+                "task output claim request does not match its granted Contract"
+            )
+        request_receipts = tuple(
+            row
+            for row in rows
+            if row.record_type == "candidate.received"
+            and row.id in request.causal_parents
+            and row.payload.get("candidate_id") == request.payload.get("candidate_id")
+            and row.payload.get("actor_id") == grant.payload.get("worker_id")
+        )
+        if len(request.causal_parents) != 1 or len(request_receipts) != 1:
+            raise ValueError("task output claim request lacks its signed receipt")
+        validate_runtime_record(request_receipts[0])
+        if "worker.claim" not in read_effect_types(request_receipts[0].payload):
+            raise ValueError("task output claim request receipt has the wrong effect")
 
 
 @dataclass(frozen=True)
@@ -69,6 +229,7 @@ def project_asset_attestation_records(
         raise ValueError(
             "asset.attest target was not produced for this Contract or its descendants"
         )
+    validate_claim_bound_output(context, asset, contracts[asset.created_by])
     if asset.signed_by == candidate.actor_id:
         raise ValueError("asset producer cannot attest its own output")
     policy = contract.acceptance_policy
@@ -191,11 +352,10 @@ def _output_shape_error(value: object, shape: object, path: str = "$") -> str | 
             else f"{path} must be a non-empty string"
         )
     if shape == "number":
-        return (
-            None
-            if isinstance(value, (int, float)) and not isinstance(value, bool)
-            else f"{path} must be a number"
+        is_finite_number = (isinstance(value, int) and not isinstance(value, bool)) or (
+            isinstance(value, float) and math.isfinite(value)
         )
+        return None if is_finite_number else f"{path} must be a finite number"
     if shape == "boolean":
         return None if isinstance(value, bool) else f"{path} must be a boolean"
     if isinstance(shape, Mapping):
@@ -220,6 +380,10 @@ def _output_shape_error(value: object, shape: object, path: str = "$") -> str | 
     return f"{path} uses an unsupported output shape"
 
 
+def _reject_non_finite_json_constant(value: str):
+    raise ValueError(f"non-finite JSON constant {value}")
+
+
 def validate_output_shape(
     policy: Mapping[str, object], output_name: str, content: str
 ) -> None:
@@ -230,8 +394,10 @@ def validate_output_shape(
     if output_name not in output_shapes:
         return
     try:
-        output_value = json.loads(content)
-    except json.JSONDecodeError as exc:
+        output_value = json.loads(
+            content, parse_constant=_reject_non_finite_json_constant
+        )
+    except (json.JSONDecodeError, ValueError) as exc:
         raise ValueError("acceptance output shape requires valid JSON") from exc
     shape_error = _output_shape_error(output_value, output_shapes[output_name])
     if shape_error is not None:

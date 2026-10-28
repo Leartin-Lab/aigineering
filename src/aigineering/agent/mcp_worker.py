@@ -12,6 +12,7 @@ import json
 from typing import TYPE_CHECKING
 
 from aigineering.agent.mcp_executor import MCPExecutor
+from aigineering.agent.worker import WorkerExecutionError
 from aigineering.core.capability_descriptors import verify_descriptor
 from aigineering.core.worker_routing import WorkerRegistration
 from aigineering.plugins.task_semantics import method_payload
@@ -68,48 +69,46 @@ class MCPWorker:
         tool_name = tool_payload.get("name", "")
         args = tool_payload.get("args", {})
 
+        if len(contract.outputs) != 1:
+            raise WorkerExecutionError(
+                "mcp_contract_invalid",
+                "MCP task must declare exactly one observation output.",
+            )
+        if not isinstance(tool_name, str) or not tool_name:
+            raise WorkerExecutionError(
+                "mcp_name_invalid", "MCP tool name must be nonempty."
+            )
         scoped_name = tool_name
-        if isinstance(tool_name, str) and tool_name.startswith("mcp:"):
+        if tool_name.startswith("mcp:"):
             tool_name = tool_name[4:]
-        server_name = tool_name.split(".", 1)[0] if isinstance(tool_name, str) else ""
+        if not tool_name:
+            raise WorkerExecutionError(
+                "mcp_name_invalid", "MCP tool name must be nonempty."
+            )
+        if not isinstance(args, dict):
+            raise WorkerExecutionError(
+                "mcp_arguments_invalid", "MCP arguments must be an object."
+            )
+        server_name = tool_name.split(".", 1)[0]
         descriptor_name = f"_mcp_{server_name}"
         descriptor = next(
             (asset for asset in disclosed_assets if asset.name == descriptor_name),
             None,
         )
         if scoped_name not in contract.tool_scope:
-            obs = json.dumps(
-                {
-                    "ok": False,
-                    "tool": str(tool_name),
-                    "result": "",
-                    "error": f"tool '{scoped_name}' is not in contract.tool_scope",
-                },
-                sort_keys=True,
-                ensure_ascii=False,
+            raise WorkerExecutionError(
+                "mcp_scope_denied", "MCP tool is outside the task's declared scope."
             )
         elif descriptor is None or not verify_descriptor(descriptor, kind="mcp"):
-            obs = json.dumps(
-                {
-                    "ok": False,
-                    "tool": str(tool_name),
-                    "result": "",
-                    "error": f"MCP descriptor '{descriptor_name}' is missing or invalid",
-                },
-                sort_keys=True,
-                ensure_ascii=False,
+            raise WorkerExecutionError(
+                "mcp_descriptor_invalid", "MCP descriptor is missing or invalid."
             )
         else:
             obs = self._executor.invoke(
                 tool_name,
-                args if isinstance(args, dict) else {},
+                args,
                 contract.id,
             ).raw_output
-        if len(contract.outputs) != 1:
-            return Candidate(
-                worker_id=self.worker_id,
-                raw_output="MCP method contract must declare exactly one observation output",
-            )
         outputs = {contract.outputs[0]: obs}
         return Candidate(
             worker_id=self.worker_id,

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import json
+import pytest
 
 from conftest import candidate_runtime, hosted_worker
 
@@ -13,10 +13,14 @@ from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.core.tools import ToolRegistry
 from aigineering.protocol.actions import parse_action
 from aigineering.protocol.types import Contract, ToolSpec
-from aigineering.runtime import claim_next_package, execute_claimed_package
+from aigineering.runtime import (
+    WorkerInvocationError,
+    claim_next_package,
+    execute_claimed_package,
+)
 
 
-def test_malformed_tool_args_are_rejected_durably(tmp_path) -> None:
+def test_malformed_tool_args_fail_without_observation_or_handler_call(tmp_path) -> None:
     db_path = tmp_path / "tool-arguments.db"
     store = SQLiteStore(str(db_path))
     calls: list[dict] = []
@@ -71,14 +75,18 @@ def test_malformed_tool_args_are_rejected_durably(tmp_path) -> None:
         )
         assert claimed is not None
 
-        result = execute_claimed_package(claimed, host, store)
-
-        assert result["status"] == "accepted", result
+        with pytest.raises(WorkerInvocationError):
+            execute_claimed_package(claimed, host, store)
         assert calls == []
-        observation = json.loads(store.get_assets_by_name(child.outputs[0])[0].content)
-        assert observation["ok"] is False
-        assert observation["error_type"] == "ToolActionError"
-        assert "JSON object" in observation["error"]
+        assert store.get_assets_by_name(child.outputs[0]) == []
+        failure = next(
+            record
+            for _, record in store.scan_runtime_records(
+                record_type="worker.invocation_failed"
+            )
+            if record.payload.get("contract_id") == child.id
+        )
+        assert failure.payload["category"] == "worker_error:tool_arguments_invalid"
     finally:
         store.close()
 
@@ -86,11 +94,12 @@ def test_malformed_tool_args_are_rejected_durably(tmp_path) -> None:
     try:
         before_digest = reopened.runtime_materialization_digest()
         assert reopened.rebuild_runtime_materializations() == before_digest
-        observation = json.loads(
-            reopened.get_assets_by_name(child.outputs[0])[0].content
+        assert reopened.get_assets_by_name(child.outputs[0]) == []
+        assert any(
+            record.payload.get("contract_id") == child.id
+            for _, record in reopened.scan_runtime_records(
+                record_type="worker.invocation_failed"
+            )
         )
-        assert observation["ok"] is False
-        assert observation["error_type"] == "ToolActionError"
-        assert "JSON object" in observation["error"]
     finally:
         reopened.close()

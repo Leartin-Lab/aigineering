@@ -12,6 +12,7 @@ import json
 from typing import TYPE_CHECKING
 
 from aigineering.agent.tool_executor import ToolExecutor
+from aigineering.agent.worker import WorkerExecutionError
 from aigineering.core.capability_descriptors import verify_descriptor
 from aigineering.core.worker_routing import WorkerRegistration
 from aigineering.protocol.immutability import deep_thaw
@@ -92,84 +93,66 @@ class ToolWorker:
         args = tool_payload.get("args", {})
 
         if len(contract.outputs) != 1:
-            return self._executor.error_candidate(
-                str(tool_name),
-                contract.id,
-                "tool method contract must declare exactly one observation output",
-                error_type="ToolContractError",
-                worker_id=self.worker_id,
+            raise WorkerExecutionError(
+                "tool_contract_invalid",
+                "Tool task must declare exactly one observation output.",
             )
         if not isinstance(tool_name, str) or not tool_name:
-            return self._executor.error_candidate(
-                str(tool_name),
-                contract.id,
-                "tool action missing string payload.name",
-                error_type="ToolActionError",
-                worker_id=self.worker_id,
+            raise WorkerExecutionError(
+                "tool_action_invalid", "Tool action requires a nonempty name."
             )
 
         descriptor_name = f"_tool_capability_{tool_name}"
-        descriptor = next(
-            (asset for asset in disclosed_assets if asset.name == descriptor_name),
-            None,
-        )
         if tool_name not in contract.tool_scope:
-            return _wrap_execution_candidate(
-                self.worker_id,
-                contract,
-                self._executor.error_candidate(
-                    tool_name,
-                    contract.id,
-                    f"tool '{tool_name}' is not in contract.tool_scope",
-                    error_type="ToolScopeError",
-                    worker_id=self.worker_id,
-                ),
+            raise WorkerExecutionError(
+                "tool_scope_denied", "Tool is outside the task's declared scope."
             )
-        elif descriptor is None or not verify_descriptor(descriptor, kind="tool"):
-            return _wrap_execution_candidate(
-                self.worker_id,
-                contract,
-                self._executor.error_candidate(
-                    tool_name,
-                    contract.id,
-                    f"tool descriptor '{descriptor_name}' is missing or invalid",
-                    error_type="ToolCapabilityError",
-                    worker_id=self.worker_id,
-                ),
+
+        valid_descriptors = []
+        seen_descriptor_ids: set[str] = set()
+        for asset in disclosed_assets:
+            if asset.name != descriptor_name or not verify_descriptor(
+                asset, kind="tool"
+            ):
+                continue
+            if asset.id in seen_descriptor_ids:
+                continue
+            seen_descriptor_ids.add(asset.id)
+            valid_descriptors.append(asset)
+
+        if not valid_descriptors:
+            raise WorkerExecutionError(
+                "tool_descriptor_invalid", "Tool descriptor is missing or invalid."
             )
-        elif not _descriptor_matches_spec(
-            descriptor.content, tool_name, self._registry.get_spec(tool_name)
-        ):
-            return _wrap_execution_candidate(
-                self.worker_id,
-                contract,
-                self._executor.error_candidate(
-                    tool_name,
-                    contract.id,
-                    f"tool descriptor '{descriptor_name}' does not match the registered tool contract",
-                    error_type="ToolCapabilityDriftError",
-                    worker_id=self.worker_id,
-                ),
+
+        spec = self._registry.get_spec(tool_name)
+        matching_descriptors = [
+            asset
+            for asset in valid_descriptors
+            if _descriptor_matches_spec(asset.content, tool_name, spec)
+        ]
+        if len(matching_descriptors) > 1:
+            raise WorkerExecutionError(
+                "tool_descriptor_ambiguous",
+                "More than one disclosed tool descriptor matches the registered tool contract.",
             )
-        elif not isinstance(args, dict):
-            return _wrap_execution_candidate(
-                self.worker_id,
-                contract,
-                self._executor.error_candidate(
-                    tool_name,
-                    contract.id,
-                    "tool payload.args must be a JSON object",
-                    error_type="ToolActionError",
-                    worker_id=self.worker_id,
-                ),
+        if not matching_descriptors:
+            raise WorkerExecutionError(
+                "tool_descriptor_mismatch",
+                "Tool descriptor does not match the registered tool contract.",
             )
-        else:
-            executed = self._executor.invoke(
-                tool_name,
-                args,
-                contract.id,
+
+        if not isinstance(args, dict):
+            raise WorkerExecutionError(
+                "tool_arguments_invalid", "Tool arguments must be an object."
             )
-            return _wrap_execution_candidate(self.worker_id, contract, executed)
+
+        executed = self._executor.invoke(
+            tool_name,
+            args,
+            contract.id,
+        )
+        return _wrap_execution_candidate(self.worker_id, contract, executed)
 
 
 def _descriptor_matches_spec(content: str, tool_name: str, spec: object) -> bool:

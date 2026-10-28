@@ -119,6 +119,10 @@ def test_v5_materializations_backfill_into_reconstructable_runtime_facts(tmp_pat
     store.close()
 
     conn = sqlite3.connect(path)
+    # These derived caches did not exist in a schema-v5 database.
+    conn.execute("DROP TABLE allowance_checkpoints")
+    conn.execute("DROP TABLE publication_head_members")
+    conn.execute("DROP TABLE publication_index_state")
     conn.execute("DELETE FROM runtime_records")
     conn.execute("DELETE FROM schema_version")
     conn.execute("INSERT INTO schema_version VALUES (5, 'legacy-v5')")

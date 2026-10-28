@@ -1,4 +1,4 @@
-"""Cryptographic signer and verifier interfaces (ADR-007)."""
+"""Signer and verifier interfaces for protocol authentication."""
 
 from __future__ import annotations
 

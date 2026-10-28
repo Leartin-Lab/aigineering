@@ -15,11 +15,11 @@ from aigineering.agent.tool_registry_loader import (
     provider_tool_definitions,
 )
 from aigineering.cli.main import cli
-from aigineering.cli.run import _PoolHost, _claim_for_pool_host
 from aigineering.agent.tool_worker import ToolWorker
 from aigineering.local_identity import ensure_local_worker_host
 from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.cli.task_state import project_task_status
+from aigineering.local_fleet import FleetHost, run_local_cycle
 
 ROOT = Path(__file__).parents[1]
 FIXTURE = ROOT / "examples/literature-evidence/assets/openalex-response.json"
@@ -70,10 +70,30 @@ def test_report_verifier_rejects_fabricated_citation():
         verify_report(forged, manifests)
 
 
-def test_tool_execution_lane_does_not_claim_generic_task():
+def test_tool_execution_lane_does_not_claim_generic_task(monkeypatch):
     runner = CliRunner()
+    monkeypatch.setattr("aigineering.application.require_redis", lambda *_args: None)
+    monkeypatch.setattr(
+        "aigineering.cli.infrastructure.require_redis", lambda *_args: None
+    )
+    monkeypatch.setattr(
+        "aigineering.runtime_services.sync_runtime", lambda *_args, **_kwargs: None
+    )
+    monkeypatch.setattr(
+        "aigineering.task_publication.sync_runtime", lambda *_args, **_kwargs: None
+    )
+    monkeypatch.setattr(
+        "aigineering.local_publication.require_redis", lambda *_args: None
+    )
+    monkeypatch.setattr(
+        "aigineering.local_publication.sync_runtime", lambda *_args, **_kwargs: None
+    )
+    monkeypatch.setattr(
+        "aigineering.cli.domain.sync_runtime", lambda *args, **kwargs: None
+    )
     with runner.isolated_filesystem():
-        assert runner.invoke(cli, ["domain", "init"]).exit_code == 0
+        initialized = runner.invoke(cli, ["domain", "init"])
+        assert initialized.exit_code == 0, initialized.output
         created = runner.invoke(
             cli,
             ["task", "create", "--name", "generic", "--output", "result", "--json"],
@@ -82,10 +102,20 @@ def test_tool_execution_lane_does_not_claim_generic_task():
         store = SQLiteStore(".aig/store.db")
         registry = load_tool_registry(f"{TOOLS}:build_registry")
         host = ensure_local_worker_host(store, ToolWorker(registry))
-
-        assert (
-            _claim_for_pool_host(store, _PoolHost(host, "tool-execution"), None) is None
+        # This routing regression exercises the shared application owner. Redis
+        # transport is outside this test's purpose; preserve its local SQLite
+        # claim-selection semantics without a network preflight.
+        monkeypatch.setattr("aigineering.local_fleet.require_redis", lambda: None)
+        monkeypatch.setattr("aigineering.local_fleet.sync_runtime", lambda _store: None)
+        result = run_local_cycle(
+            store,
+            (FleetHost(host, required_contract_capability="tool-execution"),),
+            db_path=str(Path(".aig/store.db").resolve()),
         )
+        assert result.contract_id is None
+        assert result.status == "idle"
+        assert result.stop_reason == "idle"
+        assert result.completed is False
         assert not store.scan_runtime_records(record_type="claim.granted")
         store.close()
 

@@ -3,27 +3,30 @@
 from __future__ import annotations
 
 import json
+import math
 import time
 from pathlib import Path
 from collections.abc import Mapping
 
 import click
 
+from aigineering.application import collaboration_service
 from aigineering.cli._common import (
     _output_json,
     _persistent_snapshot,
     _persistent_store,
 )
-from aigineering.cli._candidate import commit_local_effect, require_accepted
 from aigineering.cli.task_state import project_task_status
 from aigineering.core.session import runtime_record_contract_references
-from aigineering.core.control_plane import (
-    bind_contract_label_assets,
-    build_control_plane_contract,
-)
 from aigineering.core.task_productivity import project_task_productivity
-from aigineering.protocol.effect_builders import contract_declaration_effect
 from aigineering.protocol.wire import trace_entry_to_dict
+from aigineering.task_publication import prepare_task_contract, publish_task_contract
+from aigineering.cli.task_priority import register_task_priority_commands
+from aigineering.cli.task_diagnostics import register_task_diagnostic_commands
+from aigineering.cli.task_context import register_task_context_command
+from aigineering.cli.task_logs import register_task_log_command
+from aigineering.cli.task_attachments import register_task_attachment_command
+from aigineering.cli.task_lineage import register_task_lineage_command
 
 
 @click.group("task")
@@ -42,9 +45,24 @@ def task_group() -> None:
 )
 @click.option("--input", "inputs", multiple=True, help="Input asset names.")
 @click.option("--output", "outputs", multiple=True, help="Declared output names.")
-@click.option("--activation", default="", help="Activation expression.")
-@click.option("--budget", type=int, default=5, show_default=True, help="Task budget.")
-@click.option("--label", "labels", multiple=True, help="Injection labels.")
+@click.option(
+    "--activation",
+    default="",
+    help="Asset-name expression using uppercase AND/OR and parentheses; no NOT.",
+)
+@click.option(
+    "--budget",
+    type=int,
+    default=5,
+    show_default=True,
+    help="Causal task allowance for work; not a token or currency limit.",
+)
+@click.option(
+    "--label",
+    "labels",
+    multiple=True,
+    help="Select frozen label-to-Asset context; grants no capability or authority.",
+)
 @click.option("--tool", "tool_scope", multiple=True, help="Allowed tool scope.")
 @click.option(
     "--requires-capability",
@@ -96,50 +114,48 @@ def task_create(
     acceptance_policy: str | None,
     as_json: bool,
 ) -> None:
-    """Create a task through authenticated Candidate commitment."""
+    """Create one ordinary task through authenticated Candidate commitment."""
+    if budget < 1:
+        raise click.BadParameter("must be a positive integer", param_hint="--budget")
     if description_file is not None:
-        description = Path(description_file).read_text()
-    policy = None
-    if sensitive_input_policy:
         try:
-            policy = json.loads(sensitive_input_policy)
-        except json.JSONDecodeError as e:
-            raise click.UsageError(f"--sensitive-input-policy is not valid JSON: {e}")
-    output_policy = None
-    if acceptance_policy:
-        try:
-            output_policy = json.loads(acceptance_policy)
-        except json.JSONDecodeError as e:
-            raise click.UsageError(f"--acceptance-policy is not valid JSON: {e}")
+            description = Path(description_file).read_bytes().decode("utf-8")
+        except (OSError, UnicodeDecodeError) as error:
+            raise click.UsageError(
+                f"--description-file must be readable UTF-8 text: {description_file}"
+            ) from error
+    policy = _parse_json_object(sensitive_input_policy, "--sensitive-input-policy")
+    output_policy = _parse_json_object(acceptance_policy, "--acceptance-policy")
+
+    try:
+        contract = prepare_task_contract(
+            {
+                "name": name,
+                "description": description,
+                "inputs": inputs,
+                "outputs": outputs,
+                "activation": activation,
+                "budget": budget,
+                "labels": labels,
+                "tool_scope": tool_scope,
+                "worker_capabilities": worker_capabilities,
+                "worker_pools": worker_pools,
+                "delegation_capabilities": delegation_capabilities,
+                "delegation_pools": delegation_pools,
+                "sensitive_input_policy": policy,
+                "acceptance_policy": output_policy,
+            }
+        )
+    except (LookupError, TypeError, ValueError) as e:
+        raise click.ClickException(str(e)) from e
 
     store = _persistent_store()
     try:
-        contract = build_control_plane_contract(
-            name=name,
-            description=description,
-            inputs=inputs,
-            outputs=outputs,
-            activation=activation,
-            budget=budget,
-            labels=labels,
-            tool_scope=tool_scope,
-            worker_capabilities=worker_capabilities,
-            worker_pools=worker_pools,
-            delegation_capabilities=delegation_capabilities,
-            delegation_pools=delegation_pools,
-            sensitive_input_policy=policy,
-            acceptance_policy=output_policy,
-        )
-        contract = bind_contract_label_assets(contract, store)
-        require_accepted(
-            commit_local_effect(
-                store,
-                contract_declaration_effect(contract),
-                idempotency_key=f"contract:{contract.id}",
-            )
-        )
-    except (LookupError, ValueError) as e:
+        contract = publish_task_contract(store, contract)
+    except (LookupError, TypeError, ValueError) as e:
         raise click.ClickException(str(e)) from e
+    finally:
+        store.close()
 
     payload = {
         "ok": True,
@@ -168,7 +184,7 @@ def task_status(contract_id: str, as_json: bool) -> None:
             status = project_task_status(contract, store, check_integrity=True)
         finally:
             store.close()
-    except click.ClickException:
+    except (click.exceptions.Exit, click.ClickException):
         raise
     except Exception as error:
         _emit_inspection_error(error, as_json)
@@ -206,6 +222,7 @@ def task_wait(
     as_json: bool,
 ) -> None:
     """Poll until a task reaches a terminal projected status."""
+    _validate_wait_durations(timeout_seconds, interval)
     deadline = time.monotonic() + timeout_seconds
     last_status: dict | None = None
     while True:
@@ -216,6 +233,7 @@ def task_wait(
                 if contract is None:
                     _emit_error(f"Task '{contract_id}' not found.", as_json)
                     return
+                collaboration_service(store).sync()
                 last_status = project_task_status(contract, store)
                 if last_status["terminal"]:
                     last_status = project_task_status(
@@ -227,6 +245,8 @@ def task_wait(
                         click.echo(f"{contract_id} {last_status['status']}")
                         click.echo(f"integrity: {last_status['integrity']['status']}")
                     if not last_status["integrity"]["consistent"]:
+                        raise click.exceptions.Exit(1)
+                    if last_status["status"] != "completed":
                         raise click.exceptions.Exit(1)
                     return
                 if time.monotonic() >= deadline:
@@ -245,7 +265,7 @@ def task_wait(
                         _output_json(payload)
                     else:
                         click.echo(f"{contract_id} {last_status['status']} (timed out)")
-                    return
+                    raise click.exceptions.Exit(1)
             finally:
                 store.close()
         except (click.exceptions.Exit, click.ClickException):
@@ -253,7 +273,7 @@ def task_wait(
         except Exception as error:
             _emit_inspection_error(error, as_json)
             return
-        time.sleep(max(interval, 0.05))
+        time.sleep(min(max(interval, 0.05), 0.5))
 
 
 @task_group.command("audit")
@@ -307,7 +327,7 @@ def task_audit(contract_id: str, as_json: bool) -> None:
             }
         finally:
             store.close()
-    except click.ClickException:
+    except (click.exceptions.Exit, click.ClickException):
         raise
     except Exception as error:
         _emit_inspection_error(error, as_json)
@@ -330,8 +350,28 @@ def task_audit(contract_id: str, as_json: bool) -> None:
 def _emit_error(message: str, as_json: bool) -> None:
     if as_json:
         _output_json({"ok": False, "error": message})
+        raise click.exceptions.Exit(1)
     else:
         raise click.ClickException(message)
+
+
+def _parse_json_object(value: str | None, option: str) -> dict | None:
+    if value is None:
+        return None
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError as error:
+        raise click.UsageError(f"{option} is not valid JSON: {error}") from error
+    if not isinstance(parsed, dict):
+        raise click.UsageError(f"{option} must be a JSON object")
+    return parsed
+
+
+def _validate_wait_durations(timeout_seconds: float, interval: float) -> None:
+    if not math.isfinite(timeout_seconds) or timeout_seconds < 0:
+        raise click.BadParameter("must be a finite number greater than or equal to 0")
+    if not math.isfinite(interval) or interval <= 0:
+        raise click.BadParameter("must be a finite number greater than 0")
 
 
 def _emit_inspection_error(error: Exception, as_json: bool) -> None:
@@ -346,3 +386,11 @@ def _emit_inspection_error(error: Exception, as_json: bool) -> None:
     else:
         click.echo(f"{payload['error']} ({payload['error_type']})")
     raise click.exceptions.Exit(1)
+
+
+register_task_priority_commands(task_group)
+register_task_diagnostic_commands(task_group)
+register_task_context_command(task_group)
+register_task_log_command(task_group)
+register_task_attachment_command(task_group)
+register_task_lineage_command(task_group)

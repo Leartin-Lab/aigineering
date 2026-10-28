@@ -8,12 +8,12 @@ from dataclasses import dataclass
 from typing import Any
 
 from aigineering.agent.worker import compile_worker_envelope
+from aigineering.core.worker_coordination import compile_worker_command
 from aigineering.core.signing import Ed25519Signer, Signer
 from aigineering.protocol.candidate import (
     ActorKey,
     CandidateProposal,
     candidate_proposal_to_dict,
-    create_candidate_proposal,
 )
 from aigineering.protocol.effect_builders import (
     worker_claim_effect,
@@ -114,7 +114,15 @@ class HarnessCandidateAdapter:
         usage_metadata: Mapping[str, Any] | None = None,
         idempotency_key: str | None = None,
     ) -> CandidateProposal:
-        """Compile and sign one harness result against its exact package."""
+        """Compile and sign one raw action string against its exact package.
+
+        For example, build ``/exec `` plus ``json.dumps({"outputs":
+        {"declared_name": "non-empty text"}})`` using the package's exact
+        declared output names. The returned proposal is a signed Candidate.
+        Use ``candidate_dict()`` when an HTTP client's ``json=`` parameter
+        encodes Python objects; use ``candidate_json()`` for CLI JSON text or
+        a raw JSON body. The raw action string is not Candidate JSON.
+        """
         package = _worker_package(package)
         if not package.claim_id or package.claim_epoch < 1:
             raise ValueError("result requires a claimed WorkerPackage")
@@ -149,12 +157,11 @@ class HarnessCandidateAdapter:
     def _command_candidate(self, effect, *, request_id: str) -> CandidateProposal:
         if not request_id.strip():
             raise ValueError("request_id must not be empty")
-        return create_candidate_proposal(
-            domain_id=self.domain_id,
-            actor_id=self.actor_key.actor_id,
-            key_id=self.actor_key.key_id,
-            effects=(effect,),
-            signer=self.signer,
+        return compile_worker_command(
+            self.domain_id,
+            self.actor_key,
+            self.signer,
+            effect,
             idempotency_key=request_id,
         )
 

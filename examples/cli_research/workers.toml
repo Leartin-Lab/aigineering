@@ -1,0 +1,52 @@
+[fleet]
+db_path = ".aig/store.db"
+poll_interval = 0.05
+
+[[workers]]
+id = "measurement-planner"
+kind = "llm"
+model = "deepseek-flash"
+base_url = "https://api.deepseek.com/v1"
+api_key_env = "AIGINEERING_API_KEY"
+capabilities = ["measurement.plan"]
+pools = ["planning"]
+response_format = "json_object"
+max_output_tokens = 8192
+thinking_mode = "disabled"
+timeout = 60
+max_retries = 1
+
+[[workers]]
+id = "measurement-researcher"
+kind = "llm"
+model = "deepseek-flash"
+base_url = "https://api.deepseek.com/v1"
+api_key_env = "AIGINEERING_API_KEY"
+capabilities = ["measurement.research"]
+pools = ["research"]
+provider_capabilities = ["tool_calling"]
+tool_registry = "examples.cli_research.tools:build_registry"
+max_output_tokens = 8192
+thinking_mode = "enabled"
+timeout = 60
+max_retries = 1
+
+[[workers]]
+id = "measurement-tools"
+kind = "tool"
+tool_registry = "examples.cli_research.tools:build_registry"
+
+[[workers]]
+id = "measurement-verifier"
+kind = "llm"
+model = "deepseek-flash"
+base_url = "https://api.deepseek.com/v1"
+api_key_env = "AIGINEERING_API_KEY"
+capabilities = ["measurement.verify"]
+pools = ["verification"]
+effect_capabilities = ["asset.attest", "measurement.verify"]
+max_output_tokens = 8192
+thinking_mode = "enabled"
+response_format = "json_object"
+timeout = 60
+max_retries = 1

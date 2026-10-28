@@ -1,0 +1,266 @@
+{
+  "format": "aigineering-task-assignment-v1",
+  "canonical_json": {
+    "input": {
+      "text": "中文 café",
+      "values": [
+        null,
+        true,
+        9007199254740991
+      ],
+      "": "BMP",
+      "𐀀": "supplementary"
+    },
+    "expected": "{\"text\":\"中文 café\",\"values\":[null,true,9007199254740991],\"\":\"BMP\",\"𐀀\":\"supplementary\"}"
+  },
+  "genesis": {
+    "id": "genesis:178a4a3f6971a90e50414229a090c740335a9feb827b2de79dd3d1560b3fac79",
+    "domain": "assignment-conformance",
+    "policy_hash": "policy:vector",
+    "root_keys": [
+      {
+        "actor_id": "human:assignment-vector",
+        "capabilities": [
+          "task.assignment.manage"
+        ],
+        "key_id": "assignment-vector-key",
+        "kind": "ed25519",
+        "public_key": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+        "revoked": false
+      }
+    ],
+    "schema_version": 1
+  },
+  "contract": {
+    "id": "task:v3:e72ca4cc5aaf152a0dc83ac7905cba05d57e7fb6233e8dab59a240debcef83e6",
+    "parent_id": null,
+    "name": "assignment-target",
+    "description": "One exact task.",
+    "inputs": [],
+    "outputs": [
+      "result"
+    ],
+    "activation": "",
+    "budget": 2,
+    "tool_scope": [],
+    "labels": [],
+    "context_asset_ids": [],
+    "worker_capabilities": [],
+    "worker_pools": [],
+    "delegation_capabilities": [],
+    "delegation_pools": [],
+    "origin": "human",
+    "minting_authority": [],
+    "sensitive_input_policy": null,
+    "acceptance_policy": null
+  },
+  "context_records": [
+    {
+      "id": "record:03b8c76e06e0a2d7b5adaa15823504f8ae3e4e83b7ac6839ef30303625313522",
+      "record_type": "contract.declared",
+      "schema_version": 1,
+      "payload": {
+        "contract": {
+          "id": "task:v3:e72ca4cc5aaf152a0dc83ac7905cba05d57e7fb6233e8dab59a240debcef83e6",
+          "parent_id": null,
+          "name": "assignment-target",
+          "description": "One exact task.",
+          "inputs": [],
+          "outputs": [
+            "result"
+          ],
+          "activation": "",
+          "budget": 2,
+          "tool_scope": [],
+          "labels": [],
+          "context_asset_ids": [],
+          "worker_capabilities": [],
+          "worker_pools": [],
+          "delegation_capabilities": [],
+          "delegation_pools": [],
+          "origin": "human",
+          "minting_authority": [],
+          "sensitive_input_policy": null,
+          "acceptance_policy": null
+        }
+      },
+      "causal_parents": []
+    },
+    {
+      "id": "record:f1be33d4fad40fa96695fc7aed56e599fbae0cf2860ddc167b81259d29a2dc61",
+      "record_type": "worker.registered",
+      "schema_version": 1,
+      "payload": {
+        "capabilities": [],
+        "capacity": 1,
+        "enabled": true,
+        "pools": [],
+        "profile_id": "",
+        "version": "1",
+        "worker_id": "worker:assignment-vector",
+        "actor_id": "worker:assignment-vector",
+        "key_id": "worker-assignment-vector"
+      },
+      "causal_parents": []
+    }
+  ],
+  "registration": {
+    "worker_id": "worker:assignment-vector",
+    "actor_id": "worker:assignment-vector",
+    "key_id": "worker-assignment-vector",
+    "capabilities": [],
+    "pools": [],
+    "profile_id": "",
+    "capacity": 1,
+    "active_claims": 0,
+    "enabled": true,
+    "version": "1"
+  },
+  "effect_vector": {
+    "candidate": {
+      "value": {
+        "id": "candidate:v1:220eac593b17217daffb16dff1ddc18ede76ca0ca8d67cda9c1e59f0f7fee5fb",
+        "signature": "ed25519:l1wKpZWhceuAlTudsvwvscRdIJ2+XDau/4tcMVXxZ3dbTpmBw83BwCWHji/UXaSq/0+UmtZItv7o4Y4LIC1zDg==",
+        "actor_id": "human:assignment-vector",
+        "causal_parents": [],
+        "domain_id": "genesis:178a4a3f6971a90e50414229a090c740335a9feb827b2de79dd3d1560b3fac79",
+        "effects": [
+          {
+            "atomic_group": "",
+            "effect_type": "task.assign",
+            "payload": {
+              "contract_id": "task:v3:e72ca4cc5aaf152a0dc83ac7905cba05d57e7fb6233e8dab59a240debcef83e6",
+              "previous_assignment_id": "",
+              "reason": "assign exact work",
+              "worker_id": "worker:assignment-vector"
+            }
+          }
+        ],
+        "idempotency_key": "assignment-vector-1",
+        "key_id": "assignment-vector-key",
+        "protocol_version": 1,
+        "signature_kind": "ed25519"
+      },
+      "expected_signing_utf8": "{\"actor_id\":\"human:assignment-vector\",\"causal_parents\":[],\"domain_id\":\"genesis:178a4a3f6971a90e50414229a090c740335a9feb827b2de79dd3d1560b3fac79\",\"effects\":[{\"atomic_group\":\"\",\"effect_type\":\"task.assign\",\"payload\":{\"contract_id\":\"task:v3:e72ca4cc5aaf152a0dc83ac7905cba05d57e7fb6233e8dab59a240debcef83e6\",\"previous_assignment_id\":\"\",\"reason\":\"assign exact work\",\"worker_id\":\"worker:assignment-vector\"}}],\"idempotency_key\":\"assignment-vector-1\",\"key_id\":\"assignment-vector-key\",\"protocol_version\":1,\"signature_kind\":\"ed25519\"}"
+    },
+    "receipt": {
+      "id": "record:88a66cefc2f068600006fae24483a1fcb22ae193bc76b7abf91e525b42f9d379",
+      "record_type": "candidate.received",
+      "schema_version": 1,
+      "payload": {
+        "actor_id": "human:assignment-vector",
+        "candidate_id": "candidate:v1:220eac593b17217daffb16dff1ddc18ede76ca0ca8d67cda9c1e59f0f7fee5fb",
+        "domain_id": "genesis:178a4a3f6971a90e50414229a090c740335a9feb827b2de79dd3d1560b3fac79",
+        "effect_types": [
+          "task.assign"
+        ],
+        "key_id": "assignment-vector-key",
+        "metadata": {},
+        "signature": "ed25519:l1wKpZWhceuAlTudsvwvscRdIJ2+XDau/4tcMVXxZ3dbTpmBw83BwCWHji/UXaSq/0+UmtZItv7o4Y4LIC1zDg==",
+        "signature_kind": "ed25519"
+      },
+      "causal_parents": []
+    },
+    "records": [
+      {
+        "id": "record:913fa94d3c2401eafd09b33bf5e8bf2bf51db4d854bac79162b9a33201c97fe6",
+        "record_type": "claim.assignment.changed",
+        "schema_version": 1,
+        "payload": {
+          "actor_id": "human:assignment-vector",
+          "candidate_id": "candidate:v1:220eac593b17217daffb16dff1ddc18ede76ca0ca8d67cda9c1e59f0f7fee5fb",
+          "contract_id": "task:v3:e72ca4cc5aaf152a0dc83ac7905cba05d57e7fb6233e8dab59a240debcef83e6",
+          "key_id": "assignment-vector-key",
+          "previous_assignment_id": "",
+          "reason": "assign exact work",
+          "worker_id": "worker:assignment-vector"
+        },
+        "causal_parents": [
+          "record:88a66cefc2f068600006fae24483a1fcb22ae193bc76b7abf91e525b42f9d379",
+          "record:03b8c76e06e0a2d7b5adaa15823504f8ae3e4e83b7ac6839ef30303625313522",
+          "record:f1be33d4fad40fa96695fc7aed56e599fbae0cf2860ddc167b81259d29a2dc61"
+        ]
+      }
+    ]
+  },
+  "ed25519_test_key": {
+    "private_key_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+    "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8"
+  },
+  "successor_override_vectors": [
+    {
+      "name": "set",
+      "assignment_override": {
+        "source_assignment_id": "record:source-assignment-vector",
+        "worker_id": "worker:assignment-vector"
+      },
+      "candidate": {
+        "value": {
+          "id": "candidate:v1:47c1d4141251c76f9511ed0a41f742e324a8b6d0b855653f6471d294f3b98eb3",
+          "signature": "ed25519:4q7iob6XIzvGdFHDWz7nhU+OGimX2QyGxdCIjcYLEA1ec2fFR08Pjeo0mJoSfA7jB6UI5j+f5lf5aH8QBFi9Bg==",
+          "actor_id": "human:assignment-vector",
+          "causal_parents": [],
+          "domain_id": "genesis:178a4a3f6971a90e50414229a090c740335a9feb827b2de79dd3d1560b3fac79",
+          "effects": [
+            {
+              "atomic_group": "",
+              "effect_type": "task.handoff",
+              "payload": {
+                "budget": 2,
+                "contract_id": "task:v3:e72ca4cc5aaf152a0dc83ac7905cba05d57e7fb6233e8dab59a240debcef83e6",
+                "hold_reason": "",
+                "reason": "set successor Worker",
+                "assignment_override": {
+                  "source_assignment_id": "record:source-assignment-vector",
+                  "worker_id": "worker:assignment-vector"
+                }
+              }
+            }
+          ],
+          "idempotency_key": "assignment-successor-set-1",
+          "key_id": "assignment-vector-key",
+          "protocol_version": 1,
+          "signature_kind": "ed25519"
+        },
+        "expected_signing_utf8": "{\"actor_id\":\"human:assignment-vector\",\"causal_parents\":[],\"domain_id\":\"genesis:178a4a3f6971a90e50414229a090c740335a9feb827b2de79dd3d1560b3fac79\",\"effects\":[{\"atomic_group\":\"\",\"effect_type\":\"task.handoff\",\"payload\":{\"assignment_override\":{\"source_assignment_id\":\"record:source-assignment-vector\",\"worker_id\":\"worker:assignment-vector\"},\"budget\":2,\"contract_id\":\"task:v3:e72ca4cc5aaf152a0dc83ac7905cba05d57e7fb6233e8dab59a240debcef83e6\",\"hold_reason\":\"\",\"reason\":\"set successor Worker\"}}],\"idempotency_key\":\"assignment-successor-set-1\",\"key_id\":\"assignment-vector-key\",\"protocol_version\":1,\"signature_kind\":\"ed25519\"}"
+      }
+    },
+    {
+      "name": "clear",
+      "assignment_override": {
+        "source_assignment_id": "record:source-assignment-vector",
+        "worker_id": ""
+      },
+      "candidate": {
+        "value": {
+          "id": "candidate:v1:acb5e393875714afb9c5ba3ecd329f6d760e73d1f442852dda21ac6a0833d5ba",
+          "signature": "ed25519:A8fPQS+d/egXdyMRfda/KD5F2u8t4pQ3SyhzczpeSP71E49R5CHJmTuSWfAhyy0ZxvOO9r4OSDCzTFa4pU5tBQ==",
+          "actor_id": "human:assignment-vector",
+          "causal_parents": [],
+          "domain_id": "genesis:178a4a3f6971a90e50414229a090c740335a9feb827b2de79dd3d1560b3fac79",
+          "effects": [
+            {
+              "atomic_group": "",
+              "effect_type": "task.handoff",
+              "payload": {
+                "budget": 2,
+                "contract_id": "task:v3:e72ca4cc5aaf152a0dc83ac7905cba05d57e7fb6233e8dab59a240debcef83e6",
+                "hold_reason": "",
+                "reason": "clear successor Worker",
+                "assignment_override": {
+                  "source_assignment_id": "record:source-assignment-vector",
+                  "worker_id": ""
+                }
+              }
+            }
+          ],
+          "idempotency_key": "assignment-successor-clear-1",
+          "key_id": "assignment-vector-key",
+          "protocol_version": 1,
+          "signature_kind": "ed25519"
+        },
+        "expected_signing_utf8": "{\"actor_id\":\"human:assignment-vector\",\"causal_parents\":[],\"domain_id\":\"genesis:178a4a3f6971a90e50414229a090c740335a9feb827b2de79dd3d1560b3fac79\",\"effects\":[{\"atomic_group\":\"\",\"effect_type\":\"task.handoff\",\"payload\":{\"assignment_override\":{\"source_assignment_id\":\"record:source-assignment-vector\",\"worker_id\":\"\"},\"budget\":2,\"contract_id\":\"task:v3:e72ca4cc5aaf152a0dc83ac7905cba05d57e7fb6233e8dab59a240debcef83e6\",\"hold_reason\":\"\",\"reason\":\"clear successor Worker\"}}],\"idempotency_key\":\"assignment-successor-clear-1\",\"key_id\":\"assignment-vector-key\",\"protocol_version\":1,\"signature_kind\":\"ed25519\"}"
+      }
+    }
+  ]
+}

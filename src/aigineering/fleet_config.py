@@ -12,6 +12,7 @@ from aigineering.agent.llm import (
     LLMWorker,
     validate_llm_max_retries,
     validate_llm_timeout,
+    validate_llm_response_format,
 )
 from aigineering.agent.local_worker import build_local_worker
 from aigineering.agent.tool_registry_loader import (
@@ -39,6 +40,7 @@ class FleetWorkerSpec:
     max_retries: int = 3
     max_output_tokens: int = 2048
     thinking_mode: str = ""
+    response_format: str = ""
     effect_capabilities: tuple[str, ...] = ()
     version: str = "1"
 
@@ -73,6 +75,11 @@ class FleetWorkerSpec:
             raise ValueError(
                 "fleet thinking_mode must be 'enabled', 'disabled', or empty"
             )
+        validate_llm_response_format(self.response_format)
+        if self.kind != "llm" and self.response_format:
+            raise ValueError("response_format is only valid for LLM workers")
+        if self.response_format and self.tool_registry:
+            raise ValueError("response_format cannot be combined with tool_registry")
 
 
 @dataclass(frozen=True)
@@ -116,11 +123,12 @@ def load_fleet_config(path: str | Path) -> LocalFleetConfig:
     )
 
 
-def build_fleet_worker(spec: FleetWorkerSpec):
+def build_fleet_worker(spec: FleetWorkerSpec, *, registry=None):
     """Build one stateless Worker adapter from an operator-owned profile."""
     if spec.kind == "local":
         return build_local_worker(spec.worker_factory, spec)
-    registry = load_tool_registry(spec.tool_registry) if spec.tool_registry else None
+    if registry is None and spec.tool_registry:
+        registry = load_tool_registry(spec.tool_registry)
     if spec.kind == "tool":
         assert registry is not None
         return ToolWorker(
@@ -141,6 +149,7 @@ def build_fleet_worker(spec: FleetWorkerSpec):
         max_retries=spec.max_retries,
         max_output_tokens=spec.max_output_tokens,
         thinking_mode=spec.thinking_mode,
+        response_format=spec.response_format,
         capabilities=frozenset(spec.provider_capabilities),
         tool_definitions=(
             provider_tool_definitions(registry) if registry is not None else None
@@ -173,6 +182,7 @@ def _worker_spec(raw: object) -> FleetWorkerSpec:
         "max_retries",
         "max_output_tokens",
         "thinking_mode",
+        "response_format",
         "effect_capabilities",
         "version",
     }
@@ -213,6 +223,7 @@ def _worker_spec(raw: object) -> FleetWorkerSpec:
         max_retries=max_retries,
         max_output_tokens=max_output_tokens,
         thinking_mode=_strict_string(raw, "thinking_mode", ""),
+        response_format=_strict_string(raw, "response_format", ""),
         effect_capabilities=tuple(raw.get("effect_capabilities", ())),
         version=_strict_string(raw, "version", "1"),
     )

@@ -2,18 +2,27 @@
 
 from __future__ import annotations
 
+import math
+import shlex
+
 import click
 
-from aigineering.agent.tool_registry_loader import load_tool_registry
 from aigineering.cli._common import _output_json
-from aigineering.cli.run import _publish_tool_descriptors
-from aigineering.core.sqlite_store import SQLiteStore
-from aigineering.fleet_config import build_fleet_worker, load_fleet_config
-from aigineering.local_fleet import FleetHost, run_local_fleet
-from aigineering.local_identity import (
-    ensure_local_runtime_publishers,
-    ensure_local_worker_host,
+from aigineering.cli._cycle_result import configured_cycle_payload
+from aigineering.run_failure_diagnostics import (
+    format_worker_failure_detail,
 )
+from aigineering.configured_run import run_configured
+from aigineering.run_config import prepare_configured_run
+from aigineering.adapters.redis_query import QueryProjectionUnavailable
+from aigineering.fleet_service import (
+    FleetServiceError,
+    restart_service,
+    start_service,
+    status_service,
+    stop_service,
+)
+from pathlib import Path
 
 
 @click.group("fleet")
@@ -37,61 +46,187 @@ def fleet_group() -> None:
     show_default=True,
     help="Maximum seconds to run the bounded fleet.",
 )
+@click.option(
+    "--once",
+    "run_once",
+    is_flag=True,
+    help="Run one bounded cycle with at most one package claim and invocation.",
+)
 @click.option("--json", "as_json", is_flag=True, help="Output JSON.")
 def fleet_run(
     config_path: str,
     target_contract_id: str,
     wait_timeout: float,
+    run_once: bool,
     as_json: bool,
 ) -> None:
     """Run a local fleet through independent pull/claim/submit loops."""
-    try:
-        config = load_fleet_config(config_path)
-        store = SQLiteStore(config.db_path)
-        try:
-            ensure_local_runtime_publishers(store)
-            fleet_hosts: list[FleetHost] = []
-            published_registries: set[str] = set()
-            for spec in config.workers:
-                if (
-                    spec.tool_registry
-                    and spec.tool_registry not in published_registries
-                ):
-                    registry = load_tool_registry(spec.tool_registry)
-                    _publish_tool_descriptors(store, registry)
-                    published_registries.add(spec.tool_registry)
-                worker = build_fleet_worker(spec)
-                host = ensure_local_worker_host(
-                    store,
-                    worker,
-                    effect_capabilities=spec.effect_capabilities,
-                )
-                fleet_hosts.append(FleetHost(host=host, capacity=spec.capacity))
-        finally:
-            store.close()
-
-        result = run_local_fleet(
-            config.db_path,
-            tuple(fleet_hosts),
-            target_contract_id=target_contract_id,
-            timeout=wait_timeout,
-            poll_interval=config.poll_interval,
+    if not math.isfinite(wait_timeout) or wait_timeout <= 0:
+        raise click.BadParameter(
+            "must be a finite positive number", param_hint="--wait-timeout"
         )
+    try:
+        prepared = prepare_configured_run(
+            config_path, resume_task_id=target_contract_id
+        )
+        result = (
+            run_configured(prepared, timeout=wait_timeout, once=True)
+            if run_once
+            else run_configured(prepared, timeout=wait_timeout)
+        )
+    except QueryProjectionUnavailable:
+        raise
     except (OSError, RuntimeError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
 
-    payload = {
-        "contract_id": result.contract_id,
-        "status": result.status,
-        "completed": result.completed,
-        "timed_out": result.timed_out,
-        "worker_errors": list(result.worker_errors),
-    }
+    payload = configured_cycle_payload(
+        result,
+        resume_command=shlex.join(
+            [
+                "aig",
+                "fleet",
+                "run",
+                "--config",
+                str(Path(config_path).resolve()),
+                "--task",
+                result.contract_id,
+                *(["--once"] if run_once else []),
+                "--json",
+            ]
+        ),
+    )
     if as_json:
         _output_json(payload)
     else:
         click.echo(f"fleet {result.status}: {result.contract_id}")
-        for error in result.worker_errors:
-            click.echo(f"worker recovery: {error}")
+        click.echo(f"stop_reason: {payload['stop_reason']}")
+        for blocker in payload.get("blockers", ()):
+            click.echo(f"blocker: {blocker}")
+        for error in payload.get("worker_errors", ()):
+            click.echo(f"worker error: {error}")
+        for detail in payload.get("worker_failure_details", ()):
+            click.echo("worker failure detail: " + format_worker_failure_detail(detail))
+        if payload.get("next_step"):
+            click.echo(f"next_step: {payload['next_step']}")
+        for warning in result.capture_warnings:
+            click.echo(f"capture warning: {warning}")
     if not result.completed:
         raise click.exceptions.Exit(1)
+
+
+def _emit_service_result(result, *, as_json: bool) -> None:
+    data = result.as_dict()
+    if as_json:
+        _output_json({"ok": True, "data": data})
+        return
+    click.echo(f"fleet service {result.state}")
+    if result.generation:
+        click.echo(f"generation: {result.generation}")
+    if result.domain_id:
+        click.echo(f"domain_id: {result.domain_id}")
+    if result.active_slots:
+        click.echo(f"active_slots: {result.active_slots}")
+    for worker_id, version in zip(result.worker_ids, result.registration_versions):
+        click.echo(f"worker: {worker_id} registration_version={version}")
+    if result.error_code:
+        click.echo(f"error_code: {result.error_code}")
+
+
+def _service_error(exc: FleetServiceError, *, as_json: bool) -> None:
+    if as_json:
+        _output_json({"ok": False, "error": exc.code, "message": str(exc)})
+        raise click.exceptions.Exit(1) from exc
+    raise click.ClickException(str(exc)) from exc
+
+
+@fleet_group.command("start")
+@click.option(
+    "--config",
+    "config_path",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False),
+    help="TOML Worker fleet configuration.",
+)
+@click.option("--json", "as_json", is_flag=True, help="Output JSON.")
+def fleet_start(config_path: str, as_json: bool) -> None:
+    """Start one persistent local Fleet for the selected workspace."""
+    try:
+        result = start_service(Path.cwd(), config_path)
+    except FleetServiceError as exc:
+        _service_error(exc, as_json=as_json)
+        return
+    _emit_service_result(result, as_json=as_json)
+
+
+@fleet_group.command("status")
+@click.option("--json", "as_json", is_flag=True, help="Output JSON.")
+def fleet_status(as_json: bool) -> None:
+    """Inspect local Fleet process metadata without querying Redis."""
+    try:
+        result = status_service(Path.cwd())
+    except FleetServiceError as exc:
+        _service_error(exc, as_json=as_json)
+        return
+    _emit_service_result(result, as_json=as_json)
+
+
+@fleet_group.command("stop")
+@click.option(
+    "--wait-timeout",
+    type=float,
+    default=30.0,
+    show_default=True,
+    help="Maximum seconds to wait for admitted pulls to drain.",
+)
+@click.option("--json", "as_json", is_flag=True, help="Output JSON.")
+def fleet_stop(wait_timeout: float, as_json: bool) -> None:
+    """Close new pull admission and drain the selected local Fleet."""
+    if not math.isfinite(wait_timeout) or wait_timeout <= 0:
+        raise click.BadParameter(
+            "must be a finite positive number", param_hint="--wait-timeout"
+        )
+    try:
+        result = stop_service(Path.cwd(), wait_timeout=wait_timeout)
+    except FleetServiceError as exc:
+        _service_error(exc, as_json=as_json)
+        return
+    _emit_service_result(result, as_json=as_json)
+    if result.state == "stopping":
+        raise click.exceptions.Exit(1)
+
+
+@fleet_group.command("restart")
+@click.option(
+    "--config",
+    "config_path",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False),
+    help="TOML Worker fleet configuration.",
+)
+@click.option(
+    "--wait-timeout",
+    type=float,
+    default=30.0,
+    show_default=True,
+    help="Maximum seconds to drain the previous generation.",
+)
+@click.option("--json", "as_json", is_flag=True, help="Output JSON.")
+def fleet_restart(config_path: str, wait_timeout: float, as_json: bool) -> None:
+    """Drain the exact current generation, then start a newly validated one."""
+    if not math.isfinite(wait_timeout) or wait_timeout <= 0:
+        raise click.BadParameter(
+            "must be a finite positive number", param_hint="--wait-timeout"
+        )
+    try:
+        result = restart_service(Path.cwd(), config_path, wait_timeout=wait_timeout)
+    except FleetServiceError as exc:
+        _service_error(exc, as_json=as_json)
+        return
+    _emit_service_result(result, as_json=as_json)
+
+
+# Process inspection and stop requests are local controls and remain useful
+# when required Redis is unavailable. Other Fleet operations retain the shared
+# Redis preflight installed by cli.infrastructure.protect_commands.
+fleet_status.callback._redis_protected = True
+fleet_stop.callback._redis_protected = True

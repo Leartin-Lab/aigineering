@@ -158,7 +158,7 @@ def test_checks_fail_closed_for_malformed_and_oversized_input():
 
 
 def test_historical_claim_reports_preserve_original_text_only_after_initial():
-    root = Path(__file__).parents[1] / "reports/data/063-runtime-native-cases"
+    root = Path(__file__).parents[1] / "tests/fixtures/claim_reports"
     initial = json.loads((root / "claims-initial.json").read_text())
     intermediate = json.loads((root / "claims-intermediate.json").read_text())
     tightened = json.loads((root / "claims-citation-tightened.json").read_text())
@@ -170,7 +170,7 @@ def test_historical_claim_reports_preserve_original_text_only_after_initial():
 
 
 def test_historical_reports_without_bindings_fail_closed():
-    root = Path(__file__).parents[1] / "reports/data/063-runtime-native-cases"
+    root = Path(__file__).parents[1] / "tests/fixtures/claim_reports"
     for filename in ("claims-initial.json", "claims-intermediate.json"):
         report = json.loads((root / filename).read_text())["final_output"]["content"]
         result = check_evidence_bindings(SOURCE, report)

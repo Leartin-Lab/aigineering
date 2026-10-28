@@ -175,8 +175,13 @@ def continuation_contract(
     *,
     method: str,
     budget: int,
+    legacy_empty_inputs: bool = False,
 ) -> Contract:
-    """Create the immutable follow-up attempt after a completed method task."""
+    """Create a follow-up retaining input roles; recognize old empty-input wire.
+
+    ``legacy_empty_inputs`` is only for exact historical publication proofs.
+    Ordinary continuation proposals always retain their parent's input roles.
+    """
     effective_budget = max(1, budget)
     name = f"{parent.name or parent.id}.{method}.continue.{source_contract.id}"
     authority = tuple(
@@ -198,7 +203,7 @@ def continuation_contract(
     return contract_from_fields(
         name=name,
         description=parent.description,
-        inputs=[],
+        inputs=() if legacy_empty_inputs else parent.inputs,
         outputs=parent.outputs,
         activation="",
         budget=effective_budget,
@@ -424,8 +429,11 @@ def contracts_from_plan_asset(
             )
             continue
         activation = str(raw.get("activation", ""))
-        budget = _positive_int(raw.get("budget", 1), default=1)
         tool_scope = _string_list(raw.get("tool_scope", []))
+        budget = _positive_int(
+            raw.get("budget"),
+            default=2 if "budget" not in raw and tool_scope else 1,
+        )
         labels = _string_list(raw.get("labels", []))
         capability_needs = _string_list(raw.get("capability_needs", []))
         pool_needs = _string_list(raw.get("pool_needs", []))
@@ -450,7 +458,7 @@ def contracts_from_plan_asset(
             continue
         if (
             parent_contract is not None
-            and parent_contract.id.startswith("task:v5:")
+            and parent_contract.id.startswith(("task:v5:", "task:v6:"))
             and tool_scope
             and not capability_needs
         ):
@@ -469,6 +477,35 @@ def contracts_from_plan_asset(
                 }
             )
             continue
+
+        if tool_scope:
+            funding_limits = []
+            if parent_budget is not None:
+                funding_limits.append(parent_budget)
+            if parent_budget_remaining is not None:
+                funding_limits.append(
+                    max(0, parent_budget_remaining - _cumulative_budget)
+                )
+            if funding_limits and min(funding_limits) < 2:
+                available = min(funding_limits)
+                rejected.append(
+                    {
+                        "child_name": name,
+                        "field": "budget",
+                        "reason": (
+                            "planned tool task requires budget >= 2 for one tool "
+                            "task and its continuation"
+                        ),
+                        "action": "rejected",
+                        "expected": "integer >= 2 when tool_scope is non-empty",
+                        "actual": str(available),
+                        "requested": budget,
+                        "effective": 0,
+                        "remaining": available,
+                        "recoverable": True,
+                    }
+                )
+                continue
 
         try:
             validate_execution_activation(activation)
@@ -863,12 +900,12 @@ def _plan_child_scope_findings(
     parent_capability_scope = (
         set(parent_contract.delegation_capabilities)
         | set(parent_contract.worker_capabilities)
-        if parent_contract.id.startswith("task:v5:")
+        if parent_contract.id.startswith(("task:v5:", "task:v6:"))
         else set(parent_contract.worker_capabilities)
     )
     parent_pool_scope = (
         set(parent_contract.delegation_pools) | set(parent_contract.worker_pools)
-        if parent_contract.id.startswith("task:v5:")
+        if parent_contract.id.startswith(("task:v5:", "task:v6:"))
         else set(parent_contract.worker_pools)
     )
     if not set(capability_needs) <= parent_capability_scope:

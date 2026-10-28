@@ -14,9 +14,11 @@ do not have one portable byte representation.
 ## Decision
 
 Signed Candidate effect payloads and metadata use an interoperable JSON subset:
-objects have string keys; values are objects, arrays, strings, booleans, null,
-or integers within the IEEE-754 safe range. Floating-point values are rejected;
-exact decimals travel as strings.
+objects have string keys that are already NFC and remain unique after NFC
+normalization; values are objects, arrays, strings, booleans, null, or integers
+within the IEEE-754 safe range. Floating-point values are rejected; exact
+decimals travel as strings. Candidate causal parents are arrays of non-empty
+strings.
 
 Candidate v1 rejects unknown protocol versions. Typed integer fields carried in
 the signed payload, including `claim_epoch`, use the same safe-integer bound.
@@ -28,7 +30,7 @@ identity hashes those same normalized bytes with SHA-256.
 
 Versioned public vectors cover canonical JSON, fixed non-secret Ed25519 keys,
 Genesis and Contract identity, typed effects, attestation, and causal allowance.
-The Python implementation consumes the published files as tests.
+The Python and independent Node consumers use the published files as tests.
 
 ## Consequences
 

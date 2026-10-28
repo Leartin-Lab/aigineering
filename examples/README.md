@@ -1,42 +1,27 @@
-# Declarative examples
+# Examples
 
-The two new case studies below exercise signed root tasks, planner-created
-child Contracts, claimable Worker packages, and independent attestation. Their
-oracle files are human review aids and are deliberately excluded from runtime
-inputs. The linked report records their actual manual outcomes.
+Start with [CLI research](cli_research/README.md): one frozen input, dynamic
+ordinary planning, two tools, a report and policy-bound acceptance. The example
+adapter is loaded explicitly from the checkout; it is not included in the wheel.
 
-## New diagnostic case studies
+| Example | Purpose |
+| --- | --- |
+| [CLI research](cli_research/README.md) | Small measurement report with tools and a separate verifier. |
+| [Report consistency](report-consistency/README.md) | Check a report against explicit source and criteria. |
+| [Claim-evidence review](claim-evidence-review/README.md) | Review synthetic claims and evidence bindings. |
+| [Guarded claim review](guarded-claim-review/README.md) | Experimental deterministic checks plus semantic review. |
+| [Calibration](thermal_calibration/README.md) | Synthetic data, deterministic tools and exact-rational oracle. |
+| [Claim validation](claim-validation/README.md) | Original-text and explicit evidence-binding checks. |
+| [AI4S](ai4s/README.md) | Runtime-compiled literature/data-profile integration. |
+| [Method governance](method-governance/README.md) | Evaluated method packages with explicit fixture preparation. |
 
-- [`report-consistency`](report-consistency/README.md) checks a corrected sales
-  report against a separate checking standard; its recorded manual review
-  passed.
-- [`claim-evidence-review`](claim-evidence-review/README.md) reviews a
-  synthetic research summary for evidence support and causal overclaiming; four
-  protocol-completed attempts all failed a manual semantic criterion.
+Complete recipes provide `run.toml`; start with `aig -C WORKSPACE run --config
+/absolute/path/to/run.toml`, then use the returned task ID and the same config
+with `--resume TASK_ID`. Skill-only packages are resources, not standalone runs.
+See [configured runs](../docs/reference/configured-runs.md).
 
-These outcomes show the runtime boundary and the limits of LLM semantic
-verification. They do not establish reliable autonomous correctness.
-
-The experimental [`guarded-claim-review`](guarded-claim-review/README.md)
-adapter composes deterministic assessment and gating, one revision generation,
-semantic review, and dedicated acceptance.
-[Report 065](../reports/065-guarded-claim-review-2026-09-13.md) records two
-qualified live runs and six preserved development failures; the final run leaves
-no active descendant Contracts. These are development cases, not a reliability
-benchmark.
-
-## Deterministic validation methods
-
-- [`claim-validation`](claim-validation/README.md) packages exact original-text
-  and explicit evidence-binding checks with local Workers and a blocking gate.
-  These checks do not validate free-text semantic support.
-
-## Existing examples
-
-- [`ai4s`](ai4s/README.md) runs the literature retrieval and synthesis example.
-- [`method-governance`](method-governance/README.md) demonstrates evaluated
-  method package reuse with its explicit fixture/demo workflow.
-
-The same-model Worker independence limit is stated in each applicable new case
-README. The shared evidence record is
-[`reports/063-runtime-native-cases-2026-09-13.md`](../reports/063-runtime-native-cases-2026-09-13.md).
+Configuration availability is not a claim of general live reliability. Read the
+selected [case reports](../reports/README.md), including an unqualified result.
+Input fixtures are synthetic; acceptance policies and explicit tool permissions
+remain authoritative. An oracle or answer key must not be disclosed as an input
+to the Worker it is evaluating.

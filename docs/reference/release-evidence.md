@@ -25,6 +25,13 @@ canonical records determine success. Older schema versions are retained but
 rejected for verification; use their matching runtime or perform a separately
 reviewed migration first.
 
+Registration verification includes `actor_id` and `key_id` as well as routing
+fields. After upgrading to this digest correction, recompute verification
+digests; earlier strings do not cover the same fields. Display timestamps may
+normalize during SQLite materialization maintenance. This comparison verifies
+local consistency, not signature authenticity or log completeness. See
+[change 064](../../changes/064-registration-identity-materialization-digest.md).
+
 Exit codes are 0 for a passing comparison, 1 for a mismatch or recorded
 verification error, and 2 for invocation/setup errors. Preserve the full output
 directory after a failure. The snapshots contain original data, including any

@@ -1,212 +1,137 @@
 ---
 name: aigineering
-description: Use Aigineering to turn agent or LLM work into signed, claim-bound, replayable results with declared outputs and auditable failure. Use when an agent harness must migrate existing orchestration into trustworthy task/asset publication, when work needs durable completion evidence, or when integrating a custom pull Worker instead of returning an unstructured chat answer.
+description: Use Aigineering to turn agent work into signed, claim-bound task results with declared outputs, exact Asset evidence, policy acceptance, and observable recovery.
 ---
 
-# Aigineering trustworthy execution
+# Aigineering agent workflow
 
-Use Aigineering as the fact and task boundary around an agent harness. Keep the
-harness's model loop, tools, memory, and internal planning; replace its mutable
-shared state and self-declared completion with Aigineering packages and signed
-Candidates.
+Use Aigineering as the durable task and evidence boundary around an agent. Keep
+the model loop and tools in the harness; publish only work that must be
+independently claimed, budgeted, reviewed, or recovered. A committed output is
+an authorized assertion. It is not automatically true or independently
+accepted.
 
-## Choose the integration mode
+## 1. Establish explicit inputs and authority
 
-Use the built-in LLM Worker when no existing harness must be preserved. Set the
-provider once; LLM is the normal execution default:
+- Use a selected workspace and its signed domain. Redis is required for normal
+  discovery, event feeds, and Worker wakeups; SQLite remains the signed fact
+  and claim authority. There is no operational offline fallback.
+- Publish or select exact input Asset IDs. Declare input roles, output names,
+  capability requirements, labels, and budget in the task definition. Give
+  children only scope already allowed by their parent.
+- A Skill supplies instructions and context. It does not grant capability or
+  authority. Labels resolve to frozen Assets; they are not dynamic permissions.
+- MCP descriptors contain capability metadata; they do not provide an MCP
+  transport. An operator must configure the executable adapter/registry.
+- Keep credentials and undisclosed values out of prompts and task metadata.
+  Never infer missing evidence or fabricate tool observations.
 
-```bash
-export AIGINEERING_API_KEY="..."
-export AIGINEERING_MODEL="provider-model"
-export AIGINEERING_BASE_URL="https://provider.example/v1"
-aig run "produce a cited release review" --json
-```
+For local routing, use `aig board list/show/switch` or pass `--board NAME`;
+explicit `-C PATH` selects a workspace directly. See [named workspaces](docs/reference/task-board.md#named-local-workspaces).
 
-Use a custom pull Worker when an existing Codex, Claude Code, LangGraph, SDK,
-or other harness already owns orchestration. Read
-[`docs/reference/agent-harness-migration.md`](docs/reference/agent-harness-migration.md)
-before implementing that loop.
+## 2. Plan ordinary work
 
-Use mock only for deterministic boundary tests and dry runs:
+For an existing root obligation, request a plan with `/plan` (or `/replan` on
+an eligible task). The planner publishes bounded ordinary child tasks through
+the runtime. Review their exact inputs, outputs, capabilities, labels, and
+budgets before execution. Planning does not create a second scheduler or grant
+new authority. Tool use, continuation, retry, review, and recovery must also be
+ordinary runtime tasks.
 
-```bash
-aig run "exercise the boundary" --worker mock --json
-```
+Use `aig task list/board/show` to discover work, then inspect `aig task status
+ID --json` and `aig task context ID --json` before acting. Context preview is
+metadata-only by default; select an exact listed Asset and opt into content
+only when needed. Read the [task operations reference](docs/reference/task-board.md)
+for command options and specialized workflows.
 
-Never present mock output as production or acceptance evidence.
+## 3. Claim, execute, sign, and submit
 
-Use a local Fleet when independent tasks need different model or tool
-capabilities. Declare requirements on tasks and delegated scope on their
-parents, then bind operator-selected providers in TOML:
+Use a configured Worker or harness through the normal claim flow. For a
+Harness, use `HarnessCandidateAdapter`: claim the exact package, produce one
+protocol action, create the signed result Candidate, and submit that Candidate
+through the worker submission interface. Never submit raw model text as if it
+were a signed Candidate. `aig worker next` only acquires/signs a claim; it does
+not execute a model or produce task output.
 
-```bash
-aig fleet run --config /absolute/path/to/workers.toml \
-  --task <contract_id> --json
-```
+The action command envelope is distinct from provider response JSON. CLI
+`--json` controls CLI output formatting; it does not request JSON from the
+provider. Provider wire formatting is configured separately (for example,
+`--response-format json_object`). Use `/exec` only for declared outputs,
+`/tool` or `/parallel_tool` for tool work, `/plan` for bounded child work, and
+the supported lifecycle action for retry/failure. Tool observations are local
+evidence and cannot by themselves satisfy business outputs.
 
-Capabilities and pools are the routing contract. Model names and prices remain
-replaceable operator configuration. Fleet capacity creates independent
-pull/claim/submit slots; it does not bypass the Store or create a second task
-queue.
+`HarnessCandidateAdapter` is the supported harness signing bridge. Keep its
+key private and supply original signed claim provenance on submit. Never edit
+the Store directly or invent IDs, signatures, observations, or evidence. Mock
+workers are for tests/dry-runs; never present mock output as production or
+acceptance evidence. See [harness migration](docs/reference/agent-harness-migration.md).
 
-Fleet profiles may also use `kind = "local"` with an installed
-`module:factory` `worker_factory`. This is trusted operator-configured code with
-the same WorkerHost, claim, signed Candidate, and commitment path; it is never
-installed or selected by task output. Fleet configuration validates worker
-types, capacities, finite positive timeouts, and non-negative integer retry
-counts before launch. The default network LLM adapter bounds HTTP response
-reads at 4 MiB plus one byte; custom decoded Transport mappings are trusted
-adapter inputs and are outside that wire-byte bound.
+## 4. Check status and exact Asset evidence
 
-When an LLM task needs local tools, load an operator-reviewed registry
-explicitly. Aigineering publishes descriptors as Candidates, discloses only
-the current Contract's tool scope, and routes execution to a separate Worker:
+After submission, inspect `aig task status ID --json`, `aig task audit ID
+--json`, and the exact output Assets with `aig asset show --id ASSET_ID
+--json`. Match each required output to its committed Asset ID. Do not rely on
+name-only lookup when version identity matters. A successful submission is
+not the same as a completed task, and `completed` alone does not establish
+independent acceptance or semantic truth.
 
-```bash
-aig run --task <contract_id> \
-  --tool-registry /absolute/path/to/tools.py:build_registry --json
-```
+Statuses such as `ready`, `claimed`, `submitted`, `expanded`, `blocked`, or
+`stalled` are not success. Do not rerun a submitted or complete task. If a
+submitted result awaits independent acceptance, use the exact review flow;
+if changes are required, continue through the published revision successor.
+See [review and revision](docs/reference/task-board.md#request-an-exact-independent-review).
 
-Treat the registry factory as trusted local code. Never accept a registry path
-from untrusted task or model output. Declare a version, deterministic input and
-output schemas, and a bounded `max_output_bytes` on each `ToolSpec` when the
-tool returns JSON. The signed descriptor binds those fields to the registered
-handler; contract drift, invalid arguments, invalid JSON output, and oversized
-output become typed failed observations before business output can be
-published.
+## 5. Apply policy acceptance, then export
 
-## Publish one trustworthy task
-
-1. Initialize a signed domain and publish immutable inputs.
-
-```bash
-aig domain init
-aig asset add --name source --content-file evidence.md --json
-```
-
-2. Declare the exact result slot and activation facts.
-
-```bash
-aig task create \
-  --name boundary_review \
-  --description "Review the evidence and produce a grounded report." \
-  --input source \
-  --activation source \
-  --output boundary_report \
-  --json
-```
-
-3. Run the configured LLM Worker until the task reaches a terminal projection.
+When the Contract requires independent acceptance, use a distinct authorized
+reviewer and the frozen acceptance policy. Inspect the exact report and record
+an operator decision through the canonical review command. A review report is
+ordinary output, not qualification by itself. Export only the exact output
+Asset that status and policy identify as qualified:
 
 ```bash
-aig run --task <contract_id> --json
+aig task result TASK_ID --output OUTPUT_NAME --to PATH
 ```
 
-4. Verify both completion and the committed output.
+Do not substitute a later same-name Asset, reviewer recommendation, or
+unverified file for the bound evidence. Policy acceptance means the configured
+criteria accepted that assertion; it does not prove universal truth.
+
+## 6. Diagnose failure and continue with new work
+
+On a nonzero command, timeout, rejection, or blocker, preserve the exact task
+ID and inspect status, audit, runs, and (when needed) diagnostics:
 
 ```bash
-aig task status <contract_id> --json
-aig asset show boundary_report --json
-aig task audit <contract_id> --json
+aig task status TASK_ID --json
+aig task audit TASK_ID --json
+aig task runs TASK_ID --json
 ```
 
-Do not report success unless status is `completed`, every required output maps
-to an exact Asset ID, and the audit has no unexplained rejection or silent
-failure risk. The audit's `productivity` projection covers the selected task
-and its descendants, including terminal states, tool success/failure,
-continuations, recoveries, rejections, and recorded token usage.
+Use `aig task diagnostics TASK_ID --claim CLAIM_ID --json` with the exact claim
+from `task runs`; use `task logs` only for available local invocation
+observations. These views are diagnostic evidence, not authority to retry. Fix
+the reported service/configuration issue, restore Redis and synchronize when
+needed, then follow the exact `next_step` or published retry/recovery successor.
+Recovery is new ordinary work: run its returned task ID. Never reset a claim,
+rerun a submitted/complete producer, or describe a scheduled recovery as
+completed. If necessary evidence is absent, report the blocker or fail with a
+concrete reason; do not guess or fill the gap with generated evidence.
 
-## Wrap an existing agent harness
+Accepted `redis_sync_pending` means SQLite retained the signed operation.
+Keep its exact IDs/key and original arguments, restore Redis, and replay only
+through the same owner as directed. Inspect partial bulk results individually;
+an overall nonzero exit does not erase accepted members. See the [operations
+reference](docs/reference/task-board.md) for exact replay and bulk recovery.
 
-Generate and register one Ed25519 key for the harness. Keep its private key in
-the harness; register only the public key and capability profile.
+## Further references
 
-Use `HarnessCandidateAdapter` for the signed protocol operations:
-
-```python
-from aigineering.agent.harness import HarnessCandidateAdapter, candidate_dict
-
-adapter = HarnessCandidateAdapter.from_private_key_hex(
-    domain_id=domain_id,
-    actor_id="harness:codex",
-    key_id="codex-1",
-    private_key_hex=private_key,
-)
-
-claim = adapter.claim_candidate(request_id=unique_request_id)
-package = post_json("/worker/claims", candidate_dict(claim))
-
-raw_action = existing_harness(package["contract"], package["disclosed_assets"])
-result = adapter.result_candidate(package, raw_action, usage_metadata=usage)
-decision = post_json("/worker/submissions", candidate_dict(result))
-```
-
-The harness must return exactly one protocol action:
-
-- `/exec` publishes only declared outputs;
-- `/plan` or `/replan` publishes independently claimable work;
-- `/tool`, `/parallel_tool`, `/retry`, or `/fail` makes the corresponding
-  decision visible. Parallel calls become ordinary tool tasks plus an `AND`
-  activated continuation.
-
-Do not translate every internal thought, tool call, or conversational turn into
-a task. Publish only work that must be independently scheduled, budgeted,
-replayed, recovered, or accepted.
-
-## Interpret projections
-
-- `completed` is success only when declared outputs are satisfied.
-- `failed`, `cancelled`, and `unreachable` are terminal failures.
-- `expanded`, `ready`, `claimed`, `submitted`, `blocked`, and `stalled` are not
-  success.
-- A timeout is not completion; read `task status` and `task audit`.
-- Any rejection requires audit before trusting downstream results.
-- Missing usage after a provider failure does not prove zero external cost.
-- Parent completion depends on declared outputs, not on every descendant
-  reaching terminal state.
-
-For independently reviewed work, bind an acceptance policy at task creation and
-submit an attestation from a different actor. A producer cannot accept its own
-output. Use `output_shapes` when JSON fields and array/item types can be checked
-mechanically; the independent verifier cannot override a shape mismatch.
-
-For a planned, retry, or recovery task with unresolved tool scope, return only
-`/tool` or `/parallel_tool`. The committed observation creates a continuation
-that publishes the business output. Never construct tool-derived evidence in
-`/exec`, including during recovery.
-
-## Preserve the boundary
-
-- Treat every Worker result as an untrusted Candidate until commitment.
-- Bind claims and results to Contract, package, claim ID, epoch, Worker key, and
-  a non-empty idempotency key.
-- Never write `.aig/store.db` directly or reuse a signed claim command.
-- Resolve labels to exact context Asset IDs at task construction; labels grant
-  neither authority nor dynamic replay lookup.
-- Keep child inputs, labels, tools, capabilities, outputs, and allowance inside
-  parent scope.
-- Treat Redis as a disposable read projection, never as fact authority.
-- Treat content identity, signed definition identity, and their assertion as
-  separate. Similarity is advisory and cannot transfer authority.
-- Keep private keys, sealed values, and undisclosed Assets outside prompts,
-  traces, logs, and Candidate metadata.
-
-Use `aig worker next/submit` only for trusted local adapter development. Use the
-signed `/worker/claims`, `/worker/claims/{claim_id}/renew`, and
-`/worker/submissions` HTTP protocol for an independently running harness.
-
-For complete domain examples, read
-[`examples/literature-evidence/SKILL.md`](examples/literature-evidence/SKILL.md).
-It demonstrates how a scientific workflow becomes independently claimable
-retrieval, screening, extraction, synthesis, and verification tasks without
-adding domain behavior to the runtime kernel. The companion
-[`examples/scientific-data-profile/SKILL.md`](examples/scientific-data-profile/SKILL.md)
-shows how a deterministic script Worker can disclose a bounded table profile
-to later model tasks without exposing raw values.
-The executable [`examples/ai4s/`](examples/ai4s/README.md) run demonstrates a
-Skill-guided root task, capability-routed local Fleet, runtime-compiled child
-graph, tool evidence, recovery, and SQLite reconstruction.
-The experimental [`guarded-claim-review`](examples/guarded-claim-review/README.md)
-composition demonstrates deterministic assessment and structural gating around
-one revision generation, a separate semantic review, and a dedicated acceptor.
-Literal evidence binding is structural evidence; it is not semantic truth.
+- [Task operations](docs/reference/task-board.md): lifecycle, assignment,
+  review, retry, recovery, diagnostics, and exact command forms.
+- [Harness migration](docs/reference/agent-harness-migration.md): signed
+  claim/submission protocol and adapter example.
+- [Configured runs](docs/reference/configured-runs.md): explicit Worker/Fleet
+  profiles and resumable configured execution.
+- [Task attachments](docs/reference/task-attachments.md): signed attachment
+  links and verified-byte export.

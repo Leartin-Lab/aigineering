@@ -17,8 +17,19 @@ from aigineering.agent.llm import (
     _extract_usage,
 )
 from aigineering.agent.worker import Worker, WorkerExecutionError
+from aigineering.core.control_plane import (
+    build_control_plane_asset,
+    build_control_plane_contract,
+)
+from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.protocol.actions import parse_action
 from aigineering.protocol.types import Asset, Contract
+from conftest import candidate_runtime, hosted_worker
+from aigineering.runtime import (
+    WorkerInvocationError,
+    claim_next_package,
+    execute_claimed_package,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -417,6 +428,143 @@ def test_usage_metadata_present_when_usage_absent():
     metadata = dict(candidate.metadata)
     assert metadata["model"] == "test-model"
     assert "provider" in metadata
+
+
+def test_truncated_completion_is_rejected_even_when_content_is_a_valid_action():
+    worker = LLMWorker(
+        model="deepseek-flash",
+        base_url="https://api.deepseek.com/v1",
+        transport=lambda *_args: {
+            "choices": [
+                {
+                    "finish_reason": "length",
+                    "message": {"content": '/exec {"outputs":{"report":"partial"}}'},
+                }
+            ],
+            "usage": {
+                "prompt_tokens": 17,
+                "completion_tokens": 2048,
+                "total_tokens": 2065,
+            },
+        },
+        max_retries=0,
+    )
+
+    with pytest.raises(WorkerExecutionError) as raised:
+        worker.invoke(_min_contract(), [])
+
+    assert raised.value.code == "output_truncated"
+    assert dict(raised.value.usage_metadata or {}) == {
+        "prompt_tokens": 17,
+        "completion_tokens": 2048,
+        "total_tokens": 2065,
+        "model": "deepseek-flash",
+        "provider": "api.deepseek.com",
+        "worker_profile": "openai-compatible-v1",
+    }
+
+
+@pytest.mark.parametrize(
+    "content", ["", "   ", None, "<think>internal reasoning only</think>"]
+)
+def test_empty_provider_content_is_not_replaced_by_reasoning_content(content):
+    worker = LLMWorker(
+        model="deepseek-flash",
+        base_url="https://api.deepseek.com/v1",
+        transport=lambda *_args: {
+            "choices": [
+                {
+                    "finish_reason": "stop",
+                    "message": {
+                        "content": content,
+                        "reasoning_content": "/exec {}",
+                    },
+                }
+            ],
+            "usage": {"completion_tokens": 4},
+        },
+        max_retries=0,
+    )
+
+    with pytest.raises(WorkerExecutionError) as raised:
+        worker.invoke(_min_contract(), [])
+
+    assert raised.value.code == "empty_response"
+    assert dict(raised.value.usage_metadata or {})["completion_tokens"] == 4
+
+
+def test_truncated_provider_failure_is_durable_with_reported_usage(tmp_path):
+    store = SQLiteStore(str(tmp_path / "truncated-worker.db"))
+    ingress = candidate_runtime(store)
+    ingress.accept_asset(
+        build_control_plane_asset(name="evidence", content="source evidence")
+    )
+    contract = ingress.accept_contract(
+        build_control_plane_contract(
+            name="truncated_report",
+            inputs=("evidence",),
+            outputs=("report",),
+            activation="evidence",
+            budget=2,
+        )
+    )
+    worker = LLMWorker(
+        model="deepseek-flash",
+        base_url="https://api.deepseek.com/v1",
+        transport=lambda *_args: {
+            "choices": [
+                {
+                    "finish_reason": "length",
+                    "message": {"content": '/exec {"outputs":{"report":"partial"}}'},
+                }
+            ],
+            "usage": {"completion_tokens": 2048, "total_tokens": 2048},
+        },
+        max_retries=0,
+    )
+    host = hosted_worker(
+        store,
+        worker,
+        genesis=ingress.genesis,
+        authority_key=ingress.actor_key,
+        authority_signer=ingress.signer,
+    )
+
+    claimed = claim_next_package(
+        store, worker_id=host.worker_id, contract_id=contract.id
+    )
+    assert claimed is not None
+    with pytest.raises(WorkerInvocationError):
+        execute_claimed_package(claimed, host, store)
+
+    failures = [
+        record
+        for _, record in store.scan_runtime_records(
+            record_type="worker.invocation_failed"
+        )
+    ]
+    assert len(failures) == 1
+    assert failures[0].payload["category"] == "worker_error:output_truncated"
+    assert failures[0].payload["usage_metadata"]["completion_tokens"] == 2048
+    assert store.get_claim(contract.id)["status"] != "active"
+    assert store.get_assets_by_name("report") == []
+    digest_before_rebuild = store.runtime_materialization_digest()
+    store.close()
+
+    reopened = SQLiteStore(str(tmp_path / "truncated-worker.db"))
+    reopened_failures = [
+        record
+        for _, record in reopened.scan_runtime_records(
+            record_type="worker.invocation_failed"
+        )
+    ]
+    assert len(reopened_failures) == 1
+    assert reopened_failures[0].payload["category"] == "worker_error:output_truncated"
+    assert reopened_failures[0].payload["usage_metadata"]["completion_tokens"] == 2048
+    assert reopened.get_claim(contract.id)["status"] != "active"
+    assert reopened.get_assets_by_name("report") == []
+    assert reopened.rebuild_runtime_materializations() == digest_before_rebuild
+    reopened.close()
 
 
 def test_usage_metadata_partial_tokens():
@@ -1264,3 +1412,283 @@ def test_no_api_key_leaked_in_error_messages():
         worker4.invoke(_min_contract(), [])
     assert api_key not in str(exc.value)
     assert api_key not in str(exc.value.__cause__ or "")
+
+
+def test_json_object_mode_requests_strict_wire_and_normalizes_exec_values():
+    seen = {}
+
+    def transport(_url, _headers, payload):
+        seen.update(payload)
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "content": json.dumps(
+                            {
+                                "type": "exec",
+                                "outputs": {
+                                    "report": "first line\n**second line**",
+                                    "structured": {"items": [1, 2]},
+                                },
+                            }
+                        )
+                    }
+                }
+            ]
+        }
+
+    cfg = LLMConfig(model="test-model", response_format="json_object")
+    worker = LLMWorker(model="ignored", config=cfg, transport=transport)
+    candidate = worker.invoke(Contract(id="json", outputs=["report", "structured"]), [])
+    assert seen["response_format"] == {"type": "json_object"}
+    assert "Do not return slash commands" in seen["messages"][0]["content"]
+    action = parse_action(candidate.raw_output)
+    assert action.type == "exec"
+    assert action.outputs["report"] == "first line\n**second line**"
+    assert action.outputs["structured"] == '{"items":[1,2]}'
+
+
+@pytest.mark.parametrize("action_type", ["plan", "replan"])
+def test_json_object_mode_maps_method_actions_through_canonical_parser(action_type):
+    worker = LLMWorker(
+        model="test-model",
+        response_format="json_object",
+        transport=lambda *_args: {
+            "choices": [
+                {
+                    "message": {
+                        "content": json.dumps(
+                            {"type": action_type, "payload": {"reason": "because"}}
+                        )
+                    }
+                }
+            ]
+        },
+    )
+    candidate = worker.invoke(_min_contract(), [])
+    action = parse_action(candidate.raw_output)
+    assert action.type == action_type
+    assert action.payload["reason"] == "because"
+
+
+@pytest.mark.parametrize(
+    ("action_type", "payload"),
+    [
+        (
+            "attest",
+            {
+                "contract_id": "task:target",
+                "output_name": "report",
+                "asset_id": "asset:report",
+                "verdict": "accepted",
+                "outputs": {
+                    "receipt": "verified",
+                    "details": {"evidence_ids": ["asset:a", "asset:b"]},
+                },
+            },
+        ),
+        (
+            "tool",
+            {
+                "name": "lookup",
+                "args": {
+                    "query": {"text": "candidates", "filters": [{"kind": "paper"}]},
+                    "limit": 3,
+                },
+            },
+        ),
+        (
+            "parallel_tool",
+            {
+                "calls": [
+                    {
+                        "id": "a",
+                        "name": "lookup",
+                        "args": {"query": {"term": "first"}},
+                    },
+                    {
+                        "id": "b",
+                        "name": "lookup",
+                        "args": {"query": {"term": "second"}},
+                    },
+                ],
+                "join": "all",
+            },
+        ),
+    ],
+)
+def test_json_object_mode_roundtrips_nested_non_exec_payloads(action_type, payload):
+    wire = json.dumps({"type": action_type, "payload": payload})
+    worker = LLMWorker(
+        model="test-model",
+        response_format="json_object",
+        transport=lambda *_args: {
+            "choices": [{"message": {"content": wire}}],
+        },
+    )
+
+    candidate = worker.invoke(_min_contract(), [])
+    action = parse_action(candidate.raw_output)
+
+    assert action.type == action_type
+    assert json.loads(candidate.raw_output.partition(" ")[2]) == payload
+
+
+@pytest.mark.parametrize(
+    "wire",
+    [
+        "[]",
+        '{"type":"exec","outputs":{"report":"ok"},"extra":true}',
+        '{"type":"exec","outputs":[]}',
+        '{"type":"exec","outputs":{"report":"ok"}} {"type":"fail","payload":{}}',
+        '{"type":"exec","outputs":{"report":"ok","report":"again"}}',
+        '{"type":"unknown","payload":{}}',
+        '{"type":"plan","payload":{"ratio":1e309}}',
+    ],
+)
+def test_json_object_mode_rejects_noncanonical_wire(wire):
+    worker = LLMWorker(
+        model="test-model",
+        response_format="json_object",
+        max_retries=0,
+        transport=lambda *_args: {
+            "choices": [{"message": {"content": wire}}],
+            "usage": {"completion_tokens": 13},
+        },
+    )
+    with pytest.raises(WorkerExecutionError) as raised:
+        worker.invoke(_min_contract(), [])
+    assert raised.value.code == "malformed_json_action"
+    assert dict(raised.value.usage_metadata or {})["completion_tokens"] == 13
+
+
+def test_json_object_mode_empty_body_keeps_empty_response_diagnostic():
+    worker = LLMWorker(
+        model="test-model",
+        response_format="json_object",
+        transport=lambda *_args: {
+            "choices": [{"message": {"content": "  "}}],
+            "usage": {"completion_tokens": 2},
+        },
+    )
+    with pytest.raises(WorkerExecutionError) as raised:
+        worker.invoke(_min_contract(), [])
+    assert raised.value.code == "empty_response"
+    assert dict(raised.value.usage_metadata or {})["completion_tokens"] == 2
+
+
+def test_json_object_mode_rejects_unsolicited_tool_calls():
+    worker = LLMWorker(
+        model="test-model",
+        response_format="json_object",
+        transport=lambda *_args: {
+            "choices": [
+                {
+                    "message": {
+                        "tool_calls": [
+                            {
+                                "id": "call-1",
+                                "type": "function",
+                                "function": {"name": "lookup", "arguments": "{}"},
+                            }
+                        ]
+                    }
+                }
+            ],
+            "usage": {"completion_tokens": 3},
+        },
+    )
+    with pytest.raises(WorkerExecutionError) as raised:
+        worker.invoke(_min_contract(), [])
+    assert raised.value.code == "json_object_tool_call_response"
+    assert dict(raised.value.usage_metadata or {})["completion_tokens"] == 3
+
+
+def test_json_object_mode_rejects_native_tools_before_network_call():
+    called = False
+
+    def transport(*_args):
+        nonlocal called
+        called = True
+        return {}
+
+    worker = LLMWorker(
+        model="test-model",
+        response_format="json_object",
+        capabilities=frozenset({"tool_calling"}),
+        tool_definitions=[{"type": "function", "function": {"name": "lookup"}}],
+        transport=transport,
+    )
+    contract = Contract(id="tool-contract", tool_scope=["lookup"])
+    with pytest.raises(WorkerExecutionError) as raised:
+        worker.invoke(contract, [])
+    assert raised.value.code == "json_object_with_tools_unsupported"
+    assert called is False
+
+
+def test_malformed_json_action_failure_is_durable_with_usage_and_rebuild(tmp_path):
+    store = SQLiteStore(str(tmp_path / "malformed-json-worker.db"))
+    ingress = candidate_runtime(store)
+    ingress.accept_asset(
+        build_control_plane_asset(name="malformed_trigger", content="trigger")
+    )
+    contract = ingress.accept_contract(
+        build_control_plane_contract(
+            name="malformed_json_report",
+            inputs=(),
+            outputs=("report",),
+            activation="malformed_trigger",
+            budget=2,
+        )
+    )
+    worker = LLMWorker(
+        model="deepseek-flash",
+        response_format="json_object",
+        max_retries=0,
+        transport=lambda *_args: {
+            "choices": [{"finish_reason": "stop", "message": {"content": '{"type":'}}],
+            "usage": {"completion_tokens": 9, "total_tokens": 9},
+        },
+    )
+    host = hosted_worker(
+        store,
+        worker,
+        genesis=ingress.genesis,
+        authority_key=ingress.actor_key,
+        authority_signer=ingress.signer,
+    )
+    claimed = claim_next_package(
+        store, worker_id=host.worker_id, contract_id=contract.id
+    )
+    assert claimed is not None
+    with pytest.raises(WorkerInvocationError):
+        execute_claimed_package(claimed, host, store)
+
+    failures = [
+        record
+        for _, record in store.scan_runtime_records(
+            record_type="worker.invocation_failed"
+        )
+    ]
+    assert len(failures) == 1
+    failure = failures[0]
+    assert failure.payload["category"] == "worker_error:malformed_json_action"
+    assert failure.payload["usage_metadata"]["completion_tokens"] == 9
+    assert store.get_claim(contract.id)["status"] != "active"
+    assert store.get_assets_by_name("report") == []
+    digest = store.runtime_materialization_digest()
+    store.close()
+
+    reopened = SQLiteStore(str(tmp_path / "malformed-json-worker.db"))
+    reopened_failures = [
+        record
+        for _, record in reopened.scan_runtime_records(
+            record_type="worker.invocation_failed"
+        )
+    ]
+    assert len(reopened_failures) == 1
+    assert reopened_failures[0].payload == failure.payload
+    assert reopened.get_claim(contract.id)["status"] != "active"
+    assert reopened.get_assets_by_name("report") == []
+    assert reopened.rebuild_runtime_materializations() == digest
+    reopened.close()

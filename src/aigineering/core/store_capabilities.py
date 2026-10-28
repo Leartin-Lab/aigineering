@@ -2,10 +2,16 @@
 
 from __future__ import annotations
 
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from aigineering.protocol.runtime_record import RuntimeRecord
 from aigineering.protocol.types import Asset, Contract, TraceEntry
+
+if TYPE_CHECKING:
+    from aigineering.core.projection_context import (
+        ContractDeclarationProjectionInputs,
+        ContractDeclarationProjectionRequest,
+    )
 
 
 class AssetReader(Protocol):
@@ -50,6 +56,14 @@ class RuntimeRecordReader(Protocol):
         record_type: str | None = None,
     ) -> list[tuple[int, RuntimeRecord]]: ...
     def get_runtime_revision(self) -> int: ...
+
+
+class ContractDeclarationProjectionReader(Protocol):
+    """Optional exact-fact reader for built-in declaration projection."""
+
+    def read_contract_declaration_projection_inputs(
+        self, request: ContractDeclarationProjectionRequest
+    ) -> ContractDeclarationProjectionInputs: ...
 
 
 class TraceReader(Protocol):

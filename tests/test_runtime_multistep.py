@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import pytest
 from conftest import candidate_runtime, hosted_worker
 
 from aigineering.agent.mock import MockWorker
@@ -15,6 +16,7 @@ from aigineering.core.candidate_publisher import (
 from aigineering.core.capability_descriptors import create_tool_descriptor
 from aigineering.core.control_plane import build_control_plane_contract
 from aigineering.core.domain import initialize_genesis
+from aigineering.core.lifecycle_facts import commit_terminal_outcome
 from aigineering.core.runtime_projection import RuntimeProjection
 from aigineering.core.signing import Ed25519Signer
 from aigineering.core.sqlite_store import SQLiteStore
@@ -92,8 +94,12 @@ def test_plan_action_expands_to_three_independent_stage_tasks():
     store.close()
 
 
-def test_tool_completion_plugin_publishes_continuation_candidate():
-    store = SQLiteStore(":memory:")
+@pytest.mark.parametrize("parent_terminal", [False, True])
+def test_legacy_negative_tool_observation_preserves_parent_lifecycle(
+    parent_terminal, tmp_path
+):
+    db_path = tmp_path / f"legacy-tool-parent-terminal-{parent_terminal}.db"
+    store = SQLiteStore(str(db_path))
     plugin_signer = Ed25519Signer()
     worker_signer = Ed25519Signer()
     worker_key = ActorKey(
@@ -168,7 +174,7 @@ def test_tool_completion_plugin_publishes_continuation_candidate():
     tool_contract = store.get_contract(scheduled["child_contract_id"])
     assert tool_contract is not None
     observation = json.dumps(
-        {"ok": True, "tool": "lookup", "result": "value:x"},
+        {"ok": False, "tool": "lookup", "result": "", "error": "legacy"},
         sort_keys=True,
     )
     worker.set_output(
@@ -185,6 +191,9 @@ def test_tool_completion_plugin_publishes_continuation_candidate():
     )
     assert tool_claim is not None
     assert execute_claimed_package(tool_claim, host, store)["status"] == "accepted"
+    legacy_asset = store.get_assets_by_name(tool_contract.outputs[0])[0]
+    if parent_terminal:
+        assert commit_terminal_outcome(store, root, "failed") is True
 
     processed = process_task_completions(
         store,
@@ -198,29 +207,46 @@ def test_tool_completion_plugin_publishes_continuation_candidate():
         for contract in store.get_all_contracts()
         if contract.origin == "continuation"
     ]
-    assert len(continuations) == 1, (
-        [(item.origin, item.name) for item in store.get_all_contracts()],
-        [
-            dict(record.payload)
-            for _, record in store.scan_runtime_records()
-            if record.record_type.endswith("rejected")
-        ],
-    )
-    assert "lookup" not in continuations[0].tool_scope
-    scheduled_entries = [
-        entry
-        for entry in store.get_by_contract(root.id)
-        if entry.event_type == "method_continuation_scheduled"
-    ]
-    assert len(scheduled_entries) == 1
-    assert scheduled_entries[0].relation_target == continuations[0].id
+    assert len(continuations) == (0 if parent_terminal else 1)
+    assert store.get_asset(legacy_asset.id).content == observation
+    assert store.get_assets_by_name("final_report") == []
+    root_view = RuntimeProjection(store, store).contract_view(root)
+    assert root_view.terminal == ("failed" if parent_terminal else None)
+    if not parent_terminal:
+        assert "lookup" not in continuations[0].tool_scope
+        scheduled_entries = [
+            entry
+            for entry in store.get_by_contract(root.id)
+            if entry.event_type == "method_continuation_scheduled"
+        ]
+        assert len(scheduled_entries) == 1
+        assert scheduled_entries[0].relation_target == continuations[0].id
     receipts = [
         record
         for _, record in store.scan_runtime_records(record_type="candidate.received")
         if record.payload.get("actor_id") == plugin_key.actor_id
         and record.payload.get("effect_types") == ("contract.declare",)
     ]
-    assert len(receipts) == 2
+    assert len(receipts) == (1 if parent_terminal else 2)
+    before_digest = store.runtime_materialization_digest()
+    store.close()
+
+    reopened = SQLiteStore(str(db_path))
+    try:
+        assert reopened.rebuild_runtime_materializations() == before_digest
+        assert reopened.get_asset(legacy_asset.id).content == observation
+        assert len(
+            [
+                contract
+                for contract in reopened.get_all_contracts()
+                if contract.origin == "continuation"
+            ]
+        ) == (0 if parent_terminal else 1)
+        assert RuntimeProjection(reopened, reopened).contract_view(root).terminal == (
+            "failed" if parent_terminal else None
+        )
+    finally:
+        reopened.close()
 
 
 def test_fail_completion_plugin_closes_parent_and_publishes_report_candidate():

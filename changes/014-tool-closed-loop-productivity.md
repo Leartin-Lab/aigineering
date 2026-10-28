@@ -45,4 +45,3 @@ business output merely because their shape is valid.
 - `tests/test_capability_descriptors.py`
 - `tests/test_task_productivity.py`
 - `tests/test_ai4s_runtime_primitives.py`
-- `reports/056-tool-closed-loop-productivity-2026-08-23.md`

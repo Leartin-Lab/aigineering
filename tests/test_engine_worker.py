@@ -72,6 +72,72 @@ def test_engine_worker_exports_only_declared_candidate_outputs():
     store.close()
 
 
+def test_default_engine_worker_uses_unique_domain_per_actual_invocation(monkeypatch):
+    import aigineering.agent.engine_worker as engine_worker_module
+
+    store = SQLiteStore(":memory:")
+    runtime = candidate_runtime(store)
+    evidence = runtime.accept_asset(
+        Asset(id="fresh-domain:evidence", name="evidence", content="input")
+    )
+    contract = runtime.accept_contract(
+        Contract(
+            id="fresh-domain:outer",
+            name="fresh_domain_task",
+            inputs=("evidence",),
+            outputs=("report",),
+            activation="evidence",
+            budget=2,
+        )
+    )
+    domains = []
+    initialize = engine_worker_module._initialize_inner_domain
+
+    def capture_domain(inner, worker_id, signer, *, domain_scope=None):
+        result = initialize(inner, worker_id, signer, domain_scope=domain_scope)
+        domains.append(result[1].domain)
+        return result
+
+    monkeypatch.setattr(
+        engine_worker_module, "_initialize_inner_domain", capture_domain
+    )
+    worker = EngineWorker(
+        MockWorker({contract.name: '/exec {"outputs":{"report":"isolated result"}}'}),
+        worker_id="worker:engine-fresh-domain",
+    )
+    host = hosted_worker(
+        store,
+        worker,
+        genesis=runtime.genesis,
+        authority_key=runtime.actor_key,
+        authority_signer=runtime.signer,
+    )
+    preview = worker.invoke(contract, [evidence])
+    claimed = claim_next_package(
+        store, worker_id=host.worker_id, contract_id=contract.id
+    )
+    assert claimed is not None
+    binding = CandidateClaimBinding(
+        contract_id=contract.id,
+        claim_id=claimed.package.claim_id,
+        claim_epoch=claimed.package.claim_epoch,
+        package_id=claimed.package.package_id,
+    )
+    first = worker.invoke_claimed(contract, [evidence], binding)
+    second = worker.invoke_claimed(contract, [evidence], binding)
+    assert first.parsed_action == second.parsed_action == preview.parsed_action
+    assert first.raw_output == second.raw_output == preview.raw_output
+    assert len(domains) == 3
+    assert len(set(domains)) == 3
+
+    result = execute_claimed_package(claimed, host, store)
+    assert result["status"] == "accepted", result
+    assert len(domains) == 4
+    assert len(set(domains)) == 4
+    assert store.get_assets_by_name("report")[0].content == "isolated result"
+    store.close()
+
+
 def test_engine_worker_unfinished_inner_run_fails_visibly_at_outer_boundary():
     store = SQLiteStore(":memory:")
     contract = Contract(

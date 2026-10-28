@@ -14,24 +14,13 @@ From an empty working directory:
 
 ```bash
 export DEEPSEEK_API_KEY=replace-me
-aig domain init
-aig asset add --name research_result \
-  --content-file /path/to/aigineering/examples/claim-evidence-review/research-result.json --json
-aig task create --name claim_evidence_review \
-  --description-file /path/to/aigineering/examples/claim-evidence-review/task-description.txt \
-  --input research_result --activation research_result \
-  --output review_report --budget 18 \
-  --requires-capability planning --worker-pool reasoning \
-  --delegate-capability claim.review.extract \
-  --delegate-capability claim.review.check \
-  --delegate-capability claim.review.revise \
-  --delegate-capability claim.review.verify \
-  --delegate-pool economy --delegate-pool reasoning --delegate-pool verification \
-  --acceptance-policy "$(cat /path/to/aigineering/examples/claim-evidence-review/acceptance-policy.json)" \
-  --json
-aig fleet run --config /path/to/aigineering/examples/claim-evidence-review/workers.toml \
-  --task TASK_ID --wait-timeout 300 --json
-aig task audit TASK_ID --json
+mkdir -p workspaces/claim-evidence-review
+aig -C workspaces/claim-evidence-review run --config /path/to/aigineering/examples/claim-evidence-review/run.toml \
+  --wait-timeout 300 --json
+# Use the returned contract_id for continuation or audit:
+aig -C workspaces/claim-evidence-review run --config /path/to/aigineering/examples/claim-evidence-review/run.toml \
+  --resume TASK_ID --wait-timeout 300 --json
+aig -C workspaces/claim-evidence-review task audit TASK_ID --json
 ```
 
 The checked-in worker template uses `deepseek-flash` at the DeepSeek
@@ -45,7 +34,12 @@ authority and evidence checks, rather than independent model training or
 opinions.
 
 The recorded case completed the runtime protocol in four attempts, but all
-four failed at least one manual semantic criterion. See the
-[`reports/063-runtime-native-cases-2026-09-13.md`](../../reports/063-runtime-native-cases-2026-09-13.md)
-for the failure details. This is a diagnostic and boundary case, not evidence
-of reliable autonomous semantic verification.
+four failed at least one manual semantic criterion. This is a diagnostic and
+boundary case, not evidence of reliable autonomous semantic verification.
+
+The preset paths are relative to `run.toml`; its database is relative to the
+selected workspace. Use a fresh workspace for an independent run; a new start
+refuses historical outputs. Resume does not reload inputs or reset a failed root.
+See [configured runs](../../docs/reference/configured-runs.md). The entrypoint
+migration has deterministic verification; the earlier linked live reports do not
+constitute new provider execution of this preset.

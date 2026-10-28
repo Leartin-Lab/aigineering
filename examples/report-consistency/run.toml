@@ -1,0 +1,29 @@
+[run]
+fleet = "workers.toml"
+skills = ["."]
+
+[[inputs]]
+name = "report_source"
+path = "source-data.json"
+
+[[inputs]]
+name = "draft_report"
+path = "draft-report.json"
+
+[[inputs]]
+name = "check_standard"
+path = "check-standard.json"
+
+[task]
+name = "report_consistency_audit"
+description_file = "task-description.txt"
+inputs = ["report_source", "draft_report", "check_standard"]
+activation = "report_source AND draft_report AND check_standard"
+outputs = ["audit_report"]
+budget = 24
+labels = ["_skill_content_report_consistency"]
+worker_capabilities = ["planning"]
+worker_pools = ["reasoning"]
+delegation_capabilities = ["report.extract", "report.check", "report.revise", "report.replan", "report.verify"]
+delegation_pools = ["economy", "reasoning", "verification"]
+acceptance_policy_file = "acceptance-policy.json"

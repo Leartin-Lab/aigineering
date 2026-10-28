@@ -7,13 +7,13 @@ resumed, or method-scheduled process state.
 
 from __future__ import annotations
 
-import json
 from typing import TYPE_CHECKING, Protocol
 
 from aigineering.core.causal_allowance import resolve_causal_allowance
 from aigineering.core.disclosure import compute_disclosure
 from aigineering.core.output_satisfaction import all_outputs_satisfied
 from aigineering.core.lifecycle_facts import commit_terminal_outcome
+from aigineering.core.terminal_types import TERMINAL_EVENTS
 from aigineering.core.trace_manager import TraceManager
 from aigineering.core.store_capabilities import (
     AssetReader,
@@ -30,11 +30,16 @@ if TYPE_CHECKING:
     from aigineering.core.commitment import CommitmentDecision
     from aigineering.plugins.completion import CompletionRegistry
     from aigineering.protocol.candidate import CandidateEffect
+    from aigineering.plugins.recovery_history import RecoveryHistorySnapshot
     from aigineering.protocol.types import Asset, Contract
 
 
 class CompletionStoreProtocol(
-    AssetReader, ContractReader, RuntimeRecordReader, TraceReader, Protocol
+    AssetReader,
+    ContractReader,
+    RuntimeRecordReader,
+    TraceReader,
+    Protocol,
 ):
     """Store surface required by stateless completion projection."""
 
@@ -75,6 +80,44 @@ class TaskCompletionContext:
         return (
             self._candidate_publishers is not None
             and self._candidate_publishers.get(plugin_id) is not None
+        )
+
+    def capture_recovery_history(self) -> RecoveryHistorySnapshot | None:
+        """Capture exact read-only recovery facts and configured public identity."""
+        from aigineering.task_view_query import (
+            TaskViewQueryMismatch,
+            load_task_view_query_context,
+        )
+        from aigineering.plugins.recovery_history import (
+            RecoveryHistoryCaptureUnstable,
+            RecoveryHistorySnapshot,
+        )
+
+        publisher = (
+            self._candidate_publishers.get("recovery.publish.v1")
+            if self._candidate_publishers is not None
+            else None
+        )
+        if publisher is None:
+            return None
+        for _attempt in range(3):
+            before = self._store.get_runtime_revision()
+            try:
+                query_context = load_task_view_query_context(self._store)
+            except TaskViewQueryMismatch:
+                continue
+            after = self._store.get_runtime_revision()
+            if before == after:
+                return RecoveryHistorySnapshot(
+                    context=query_context.effect_projection,
+                    store_domain_id=query_context.domain_id or "",
+                    publisher_domain_id=publisher.genesis.id,
+                    publisher_actor_id=publisher.actor_key.actor_id,
+                    revision=after,
+                    query_context=query_context,
+                )
+        raise RecoveryHistoryCaptureUnstable(
+            "recovery history changed during bounded capture"
         )
 
     def publish_task_effects(
@@ -170,6 +213,9 @@ class TaskCompletionProjector:
         parent_id = contract.parent_id
         if parent_id is None:
             return False
+        parent = self._store.get_contract(parent_id)
+        if parent is not None and _has_typed_terminal(self._store, parent.id):
+            return True
         assets = [
             asset
             for asset in self._store.get_assets_by_contract(contract.id)
@@ -184,16 +230,12 @@ class TaskCompletionProjector:
             if plugin is not None and plugin.can_handle(action_type):
                 handled = plugin.handle_completion(self._context, contract, assets)
 
-        parent = self._store.get_contract(parent_id)
         if handled:
             if parent is not None and all_outputs_satisfied(parent, self._store):
                 self._complete_contract(parent)
                 self._complete_satisfied_ancestors(parent)
             elif action_type == "tool" and parent is not None:
-                if _tool_observation_succeeded(assets):
-                    self._publish_continuation(parent, contract, assets)
-                else:
-                    self._record_terminal(parent, "failed")
+                self._publish_continuation(parent, contract, assets)
             else:
                 self._complete_satisfied_ancestors(contract)
             return True
@@ -221,41 +263,133 @@ class TaskCompletionProjector:
         self, parent: Contract, source: Contract, assets: list[Asset]
     ) -> None:
         from aigineering.plugins.base import PluginRequest
+        from aigineering.plugins.continuation_history import (
+            ContinuationHistoryCaptureUnstable,
+            capture_continuation_history,
+            inspect_continuation_history,
+        )
 
         plugin = ContinuationTaskPlugin()
-        proposal = plugin.propose(
-            PluginRequest(
-                parent=parent,
-                source=source,
-                assets=tuple(assets),
-                allowance=max(1, self._context.resolve_budget(parent.id)),
-            )
-        )
-        continuation = contract_from_dict(proposal.effects[0].payload["contract"])
+        method = str(method_payload(source).get("method", "method"))
         publisher = (
             self._publishers.get(plugin.plugin_id)
             if self._publishers is not None
             else None
         )
         if publisher is None:
+            self._reject_continuation(
+                parent, source, "continuation publisher unavailable"
+            )
+            return
+        try:
+            snapshot = capture_continuation_history(self._store, publisher)
+            proof = inspect_continuation_history(
+                snapshot, parent=parent, source=source, method=method
+            )
+        except (
+            ContinuationHistoryCaptureUnstable,
+            TypeError,
+            ValueError,
+        ) as exc:
+            self._reject_continuation(
+                parent,
+                source,
+                f"continuation history unavailable: {type(exc).__name__}",
+            )
+            return
+        if proof.status == "conflict":
+            self._reject_continuation(
+                parent, source, f"continuation history conflict: {proof.reason}"
+            )
+            return
+        if proof.status == "matched":
+            continuation = proof.contract
+            if continuation is None:
+                self._reject_continuation(
+                    parent, source, "continuation history omitted its Contract"
+                )
+                return
+            selections = tuple(
+                tuple(entry.disclosed_assets)
+                for entry in self._store.get_by_relation_target(continuation.id)
+                if entry.event_type
+                in {
+                    "method_continuation_context_prepared",
+                    "method_continuation_scheduled",
+                }
+            )
+            # Recognition is not permission to expand historical disclosure.
+            # An accepted legacy child without any saved selection stays empty.
+            selected = selections[0] if selections else ()
+            if any(selection != selected for selection in selections):
+                self._reject_continuation(
+                    parent, source, "continuation historical context is inconsistent"
+                )
+                return
             self._trace.record(
                 parent.id,
-                "task_continuation_rejected",
+                "method_continuation_scheduled",
+                disclosed_assets=list(selected),
                 relation_type="tool",
                 relation_target=continuation.id,
-                authority_result="rejected",
-                rejected_fragments=["[rejected] continuation publisher unavailable"],
                 budget_remaining=self._context.resolve_budget(parent.id),
             )
-            self._record_terminal(parent, "failed")
             return
+        if proof.status != "absent":
+            self._reject_continuation(
+                parent, source, "continuation history status invalid"
+            )
+            return
+
+        from aigineering.core.causal_allowance import allowance_available
+
+        available = allowance_available(parent, proof.source_prefix)
+        proposal = plugin.propose(
+            PluginRequest(
+                parent=parent,
+                source=source,
+                assets=tuple(assets),
+                allowance=max(1, available),
+            )
+        )
+        continuation = contract_from_dict(proposal.effects[0].payload["contract"])
+        from aigineering.task_context import method_context_assets_for
+
+        prepared = tuple(
+            entry
+            for entry in self._store.get_by_relation_target(continuation.id)
+            if entry.event_type == "method_continuation_context_prepared"
+        )
+        if prepared:
+            # An interrupted publication resumes the already frozen selection.
+            context_ids = tuple(prepared[0].disclosed_assets)
+            context_assets = method_context_assets_for(continuation, self._store)
+            if any(
+                tuple(entry.disclosed_assets) != context_ids for entry in prepared
+            ) or ({asset.id for asset in context_assets} != set(context_ids)):
+                self._reject_continuation(
+                    parent, source, "continuation prepared context is inconsistent"
+                )
+                return
+        else:
+            # Carry only observations this exact parent already received and
+            # this completed method's outputs, never a Store-wide ancestor scan.
+            context_ids = tuple(
+                dict.fromkeys(
+                    asset.id
+                    for asset in (
+                        *method_context_assets_for(parent, self._store),
+                        *assets,
+                    )
+                )
+            )
         # A concurrent Worker can claim the Contract as soon as publication
         # commits. Persist its exact observations first; this preparation alone
         # neither declares work nor marks the parent as delegated.
         self._trace.record(
             parent.id,
             "method_continuation_context_prepared",
-            disclosed_assets=[asset.id for asset in assets],
+            disclosed_assets=list(context_ids),
             relation_type="tool",
             relation_target=continuation.id,
         )
@@ -265,25 +399,40 @@ class TaskCompletionProjector:
             causal_parents=(source.id,),
         )
         if not decision.accepted:
-            self._trace.record(
-                parent.id,
-                "task_continuation_rejected",
-                relation_type="tool",
+            self._reject_continuation(
+                parent,
+                source,
+                "continuation publication was rejected",
                 relation_target=continuation.id,
-                authority_result="rejected",
-                rejected_fragments=["[rejected] continuation publication was rejected"],
-                budget_remaining=self._context.resolve_budget(parent.id),
             )
-            self._record_terminal(parent, "failed")
             return
         self._trace.record(
             parent.id,
             "method_continuation_scheduled",
-            disclosed_assets=[asset.id for asset in assets],
+            disclosed_assets=list(context_ids),
             relation_type="tool",
             relation_target=continuation.id,
             budget_remaining=self._context.resolve_budget(parent.id),
         )
+
+    def _reject_continuation(
+        self,
+        parent: Contract,
+        source: Contract,
+        reason: str,
+        *,
+        relation_target: str | None = None,
+    ) -> None:
+        self._trace.record(
+            parent.id,
+            "task_continuation_rejected",
+            relation_type="tool",
+            relation_target=relation_target or source.id,
+            authority_result="rejected",
+            rejected_fragments=[f"[rejected] {reason}"],
+            budget_remaining=self._context.resolve_budget(parent.id),
+        )
+        self._record_terminal(parent, "failed")
 
     def _complete_contract(self, contract: Contract) -> None:
         self._record_terminal(contract, "complete")
@@ -301,12 +450,10 @@ class TaskCompletionProjector:
         commit_terminal_outcome(self._store, contract, event_type)
 
 
-def _tool_observation_succeeded(assets: list[Asset]) -> bool:
-    for asset in assets:
-        try:
-            payload = json.loads(asset.content)
-        except (TypeError, ValueError):
-            continue
-        if isinstance(payload, dict) and payload.get("ok") is True:
-            return True
-    return False
+def _has_typed_terminal(store: CompletionStoreProtocol, contract_id: str) -> bool:
+    return any(
+        record.record_type == "lifecycle.terminal"
+        and record.payload.get("contract_id") == contract_id
+        and record.payload.get("terminal") in TERMINAL_EVENTS
+        for _, record in store.scan_runtime_records(record_type="lifecycle.terminal")
+    )

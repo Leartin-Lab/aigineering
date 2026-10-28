@@ -1,0 +1,164 @@
+{
+  "format": "aigineering-worker-profile-promotion-v1",
+  "canonical_json": {
+    "input": {
+      "z": 1,
+      "a": "é"
+    },
+    "expected": "{\"a\":\"é\",\"z\":1}"
+  },
+  "genesis": {
+    "id": "genesis:fb5e10ac73762368a1e54e93f6aef324090607c925502a3a4245bf600fd50162",
+    "domain": "worker-profile-vector",
+    "policy_hash": "policy:worker-profile-vector-v1",
+    "root_keys": [
+      {
+        "actor_id": "human:profile-vector",
+        "capabilities": [
+          "worker.register"
+        ],
+        "key_id": "profile-vector-root",
+        "kind": "ed25519",
+        "public_key": "d04ab232742bb4ab3a1368bd4615e4e6d0224ab71a016baf8520a332c9778737",
+        "revoked": false
+      }
+    ],
+    "schema_version": 1
+  },
+  "ed25519_test_key": {
+    "public_key_hex": "d04ab232742bb4ab3a1368bd4615e4e6d0224ab71a016baf8520a332c9778737",
+    "private_key_hex": "1111111111111111111111111111111111111111111111111111111111111111"
+  },
+  "worker_key": {
+    "actor_id": "worker:profile-vector",
+    "key_id": "worker-375d096613154fbd",
+    "public_key_hex": "a09aa5f47a6759802ff955f8dc2d2a14a5c99d23be97f864127ff9383455a4f0"
+  },
+  "prior_registration": {
+    "capabilities": [],
+    "capacity": 1,
+    "enabled": true,
+    "pools": [],
+    "profile_id": "",
+    "version": "1",
+    "worker_id": "worker:profile-vector",
+    "actor_id": "worker:profile-vector",
+    "key_id": "worker-375d096613154fbd",
+    "registered_by": "human:profile-vector"
+  },
+  "candidate_vector": {
+    "candidate": {
+      "value": {
+        "id": "candidate:v1:9c4cca2a4b5a4e9bef085ceabd31c715380b559712d58dac8f44e34e93699856",
+        "signature": "ed25519:g1+t02higTyRr2OFbePV3bw6aB3w6uG/VIlweF2/CTFOL5lLLaRKlfr0doaBRWUTA8QsCCDfgUuZHYU96Ij1AA==",
+        "actor_id": "human:profile-vector",
+        "causal_parents": [],
+        "domain_id": "genesis:fb5e10ac73762368a1e54e93f6aef324090607c925502a3a4245bf600fd50162",
+        "effects": [
+          {
+            "atomic_group": "",
+            "effect_type": "worker.profile.promote",
+            "payload": {
+              "previous_registration_id": "record:7ae053c6253f05616a5d7f01e165a7d359371e891d0f8caddb5859210942ea92",
+              "registration": {
+                "capabilities": [],
+                "capacity": 1,
+                "enabled": true,
+                "pools": [],
+                "profile_id": "openai-compatible-v1",
+                "version": "2",
+                "worker_id": "worker:profile-vector",
+                "actor_id": "worker:profile-vector",
+                "key_id": "worker-375d096613154fbd"
+              }
+            }
+          },
+          {
+            "atomic_group": "",
+            "effect_type": "worker.register",
+            "payload": {
+              "registration": {
+                "capabilities": [],
+                "capacity": 1,
+                "enabled": true,
+                "pools": [],
+                "profile_id": "openai-compatible-v1",
+                "version": "2",
+                "worker_id": "worker:profile-vector",
+                "actor_id": "worker:profile-vector",
+                "key_id": "worker-375d096613154fbd"
+              }
+            }
+          }
+        ],
+        "idempotency_key": "worker-profile-promotion-vector-v1",
+        "key_id": "profile-vector-root",
+        "protocol_version": 1,
+        "signature_kind": "ed25519"
+      },
+      "expected_signing_utf8": "{\"actor_id\":\"human:profile-vector\",\"causal_parents\":[],\"domain_id\":\"genesis:fb5e10ac73762368a1e54e93f6aef324090607c925502a3a4245bf600fd50162\",\"effects\":[{\"atomic_group\":\"\",\"effect_type\":\"worker.profile.promote\",\"payload\":{\"previous_registration_id\":\"record:7ae053c6253f05616a5d7f01e165a7d359371e891d0f8caddb5859210942ea92\",\"registration\":{\"actor_id\":\"worker:profile-vector\",\"capabilities\":[],\"capacity\":1,\"enabled\":true,\"key_id\":\"worker-375d096613154fbd\",\"pools\":[],\"profile_id\":\"openai-compatible-v1\",\"version\":\"2\",\"worker_id\":\"worker:profile-vector\"}}},{\"atomic_group\":\"\",\"effect_type\":\"worker.register\",\"payload\":{\"registration\":{\"actor_id\":\"worker:profile-vector\",\"capabilities\":[],\"capacity\":1,\"enabled\":true,\"key_id\":\"worker-375d096613154fbd\",\"pools\":[],\"profile_id\":\"openai-compatible-v1\",\"version\":\"2\",\"worker_id\":\"worker:profile-vector\"}}}],\"idempotency_key\":\"worker-profile-promotion-vector-v1\",\"key_id\":\"profile-vector-root\",\"protocol_version\":1,\"signature_kind\":\"ed25519\"}"
+    },
+    "receipt": {
+      "id": "record:ed7d350353810141295763292e9f15ede75ac280fb80aceb0925825ce99b2f9b",
+      "record_type": "candidate.received",
+      "schema_version": 1,
+      "payload": {
+        "actor_id": "human:profile-vector",
+        "candidate_id": "candidate:v1:9c4cca2a4b5a4e9bef085ceabd31c715380b559712d58dac8f44e34e93699856",
+        "domain_id": "genesis:fb5e10ac73762368a1e54e93f6aef324090607c925502a3a4245bf600fd50162",
+        "effect_types": [
+          "worker.profile.promote",
+          "worker.register"
+        ],
+        "key_id": "profile-vector-root",
+        "metadata": {},
+        "signature": "ed25519:g1+t02higTyRr2OFbePV3bw6aB3w6uG/VIlweF2/CTFOL5lLLaRKlfr0doaBRWUTA8QsCCDfgUuZHYU96Ij1AA==",
+        "signature_kind": "ed25519"
+      },
+      "causal_parents": []
+    },
+    "records": [
+      {
+        "id": "record:3ac389b87a39259341dd48724c9ae8c2b75cd74077aa82598d27a39c83e1d681",
+        "record_type": "worker.profile.promoted",
+        "schema_version": 1,
+        "payload": {
+          "worker_id": "worker:profile-vector",
+          "previous_registration_id": "record:7ae053c6253f05616a5d7f01e165a7d359371e891d0f8caddb5859210942ea92",
+          "registration_id": "record:a533797258a961bf5e997e585edd96888a47af10312dbd5010b4e3165f5db159",
+          "previous_version": "1",
+          "version": "2",
+          "profile_id": "openai-compatible-v1",
+          "actor_id": "worker:profile-vector",
+          "key_id": "worker-375d096613154fbd",
+          "candidate_id": "candidate:v1:9c4cca2a4b5a4e9bef085ceabd31c715380b559712d58dac8f44e34e93699856"
+        },
+        "causal_parents": [
+          "record:ed7d350353810141295763292e9f15ede75ac280fb80aceb0925825ce99b2f9b",
+          "record:7ae053c6253f05616a5d7f01e165a7d359371e891d0f8caddb5859210942ea92",
+          "record:a533797258a961bf5e997e585edd96888a47af10312dbd5010b4e3165f5db159"
+        ]
+      },
+      {
+        "id": "record:a533797258a961bf5e997e585edd96888a47af10312dbd5010b4e3165f5db159",
+        "record_type": "worker.registered",
+        "schema_version": 1,
+        "payload": {
+          "capabilities": [],
+          "capacity": 1,
+          "enabled": true,
+          "pools": [],
+          "profile_id": "openai-compatible-v1",
+          "version": "2",
+          "worker_id": "worker:profile-vector",
+          "actor_id": "worker:profile-vector",
+          "key_id": "worker-375d096613154fbd",
+          "registered_by": "human:profile-vector"
+        },
+        "causal_parents": [
+          "record:ed7d350353810141295763292e9f15ede75ac280fb80aceb0925825ce99b2f9b"
+        ]
+      }
+    ]
+  }
+}

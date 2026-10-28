@@ -7,11 +7,15 @@ import hmac
 import json
 from collections.abc import Callable
 from typing import TYPE_CHECKING
+from uuid import uuid4
 
 from aigineering.plugins import default_completion_registry
+from aigineering.runtime_services import (
+    claim_next_application_package,
+    order_application_contract_ids,
+)
 from aigineering.runtime import (
     WorkerInvocationError,
-    claim_next_package,
     execute_claimed_package,
     process_task_completions,
     run_runtime_maintenance_step,
@@ -69,6 +73,7 @@ class EngineWorker:
         self._worker_selector = worker_selector
         self.worker_id = worker_id
         self._max_steps = max_steps
+        self._uses_ephemeral_inner_domain = inner_store_factory is None
         self._inner_store_factory = inner_store_factory or (
             lambda: SQLiteStore(":memory:")
         )
@@ -98,8 +103,11 @@ class EngineWorker:
         inner = self._inner_store_factory()
         try:
             signer = self._inner_signer
+            domain_scope = uuid4().hex if self._uses_ephemeral_inner_domain else None
             actor_key, genesis, publisher, candidate_publishers = (
-                _initialize_inner_domain(inner, self.worker_id, signer)
+                _initialize_inner_domain(
+                    inner, self.worker_id, signer, domain_scope=domain_scope
+                )
             )
             input_error = _publish_disclosed_inputs(
                 inner, disclosed_assets, genesis, actor_key, signer
@@ -197,7 +205,13 @@ class EngineWorker:
         )
 
 
-def _initialize_inner_domain(store, worker_id: str, signer: Ed25519Signer):
+def _initialize_inner_domain(
+    store,
+    worker_id: str,
+    signer: Ed25519Signer,
+    *,
+    domain_scope: str | None = None,
+):
     actor_key = ActorKey(
         f"{worker_id}:runtime",
         "inner-root",
@@ -212,8 +226,11 @@ def _initialize_inner_domain(store, worker_id: str, signer: Ed25519Signer):
             "worker.register",
         ),
     )
+    invocation_domain = f"{worker_id}:invocation"
+    if domain_scope is not None:
+        invocation_domain = f"{invocation_domain}:{domain_scope}"
     genesis = create_genesis_manifest(
-        f"{worker_id}:invocation",
+        invocation_domain,
         [actor_key],
         "policy:engine-worker-inner-v1",
     )
@@ -386,14 +403,24 @@ def _claim_inner_work(
     worker_hosts: dict[str, tuple[ActorKey, Ed25519Signer]],
     candidate_publishers: CandidatePublisherRegistry,
 ):
-    for contract in store.get_all_contracts():
+    contracts = store.get_all_contracts()
+    by_id = {contract.id: contract for contract in contracts}
+    for contract_id in order_application_contract_ids(
+        store, tuple(contract.id for contract in contracts)
+    ):
+        contract = by_id[contract_id]
         worker = selector(contract) if selector is not None else delegate
         host = _inner_worker_host(worker, publisher, genesis, root_signer, worker_hosts)
-        claimed = claim_next_package(
+        claimed = claim_next_application_package(
             store,
             worker_id=host.worker_id,
             contract_id=contract.id,
+            expected_registration_version=host.registration_version,
             candidate_publishers=candidate_publishers,
+            claim_candidate=host.claim_candidate(
+                request_id=f"engine-worker-claim:{uuid4().hex}",
+                contract_id=contract.id,
+            ),
         )
         if claimed is not None:
             return claimed, host

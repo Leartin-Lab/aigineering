@@ -141,6 +141,37 @@ def worker_registration_effect(registration: WorkerRegistrationLike) -> Candidat
     )
 
 
+def worker_profile_promotion_effect(
+    previous_registration_id: str,
+    registration: WorkerRegistrationLike,
+) -> CandidateEffect:
+    """Attest the exact old registration head for a local profile promotion.
+
+    This effect must be paired with ``worker_registration_effect(registration)``
+    in the same ordered Candidate. It never replaces or mutates the built-in
+    registration effect.
+    """
+    if not isinstance(previous_registration_id, str) or not previous_registration_id:
+        raise ValueError("profile promotion requires a prior registration fact ID")
+    return CandidateEffect(
+        "worker.profile.promote",
+        {
+            "previous_registration_id": previous_registration_id,
+            "registration": {
+                "capabilities": list(registration.capabilities),
+                "capacity": registration.capacity,
+                "enabled": registration.enabled,
+                "pools": list(registration.pools),
+                "profile_id": registration.profile_id,
+                "version": registration.version,
+                "worker_id": registration.worker_id,
+                "actor_id": registration.actor_id,
+                "key_id": registration.key_id,
+            },
+        },
+    )
+
+
 def worker_claim_effect(
     worker_id: str,
     *,
@@ -199,6 +230,183 @@ def contract_cancellation_effect(contract_id: str, reason: str) -> CandidateEffe
         "contract.cancel",
         {"contract_id": contract_id, "reason": reason},
     )
+
+
+def task_handoff_effect(
+    contract_id: str,
+    reason: str,
+    *,
+    budget: int | None = None,
+    hold_reason: str = "",
+    assignment_override: Mapping[str, str] | None = None,
+    edit: Mapping[str, object] | None = None,
+) -> CandidateEffect:
+    """Build one signed active-task handoff request."""
+    payload = {
+        "budget": budget,
+        "contract_id": contract_id,
+        "hold_reason": hold_reason,
+        "reason": reason,
+    }
+    if assignment_override is not None:
+        payload["assignment_override"] = dict(assignment_override)
+    if edit is not None:
+        payload["edit"] = dict(edit)
+    return CandidateEffect("task.handoff", payload)
+
+
+def task_assign_effect(
+    contract_id: str,
+    worker_id: str,
+    previous_assignment_id: str,
+    reason: str,
+) -> CandidateEffect:
+    """Build one signed assignment transition for an exact Contract."""
+    return CandidateEffect(
+        "task.assign",
+        {
+            "contract_id": contract_id,
+            "previous_assignment_id": previous_assignment_id,
+            "reason": reason,
+            "worker_id": worker_id,
+        },
+    )
+
+
+def task_comment_effect(
+    contract_id: str, text: str, *, reply_to: str = ""
+) -> CandidateEffect:
+    """Build a signed task-scoped comment effect."""
+    return CandidateEffect(
+        "task.comment",
+        {"contract_id": contract_id, "reply_to": reply_to, "text": text},
+    )
+
+
+def task_block_effect(contract_id: str, reason: str) -> CandidateEffect:
+    """Build a signed task hold request."""
+    return CandidateEffect("task.block", {"contract_id": contract_id, "reason": reason})
+
+
+def task_unblock_effect(contract_id: str, hold_id: str, reason: str) -> CandidateEffect:
+    """Build a signed request to release one exact task hold."""
+    return CandidateEffect(
+        "task.unblock",
+        {"contract_id": contract_id, "hold_id": hold_id, "reason": reason},
+    )
+
+
+def task_promote_effect(
+    contract_id: str, hold_ids: tuple[str, ...], reason: str
+) -> CandidateEffect:
+    """Build one signed all-holds recovery request for a task."""
+    return CandidateEffect(
+        "task.promote",
+        {
+            "contract_id": contract_id,
+            "hold_ids": list(hold_ids),
+            "reason": reason,
+        },
+    )
+
+
+def task_dependency_link_effect(
+    contract_id: str, prerequisite_contract_id: str, reason: str
+) -> CandidateEffect:
+    """Build a signed request to gate new claims on one exact prerequisite."""
+    return CandidateEffect(
+        "task.dependency.link",
+        {
+            "contract_id": contract_id,
+            "prerequisite_contract_id": prerequisite_contract_id,
+            "reason": reason,
+        },
+    )
+
+
+def task_dependency_unlink_effect(
+    contract_id: str, constraint_id: str, reason: str
+) -> CandidateEffect:
+    """Build a signed request to release one exact dependency constraint."""
+    return CandidateEffect(
+        "task.dependency.unlink",
+        {
+            "contract_id": contract_id,
+            "constraint_id": constraint_id,
+            "reason": reason,
+        },
+    )
+
+
+def task_priority_effect(
+    contract_id: str,
+    priority: int,
+    previous_priority_id: str,
+    reason: str,
+) -> CandidateEffect:
+    """Build a signed task-priority update against an exact prior head."""
+    return CandidateEffect(
+        "task.priority.set",
+        {
+            "contract_id": contract_id,
+            "priority": priority,
+            "previous_priority_id": previous_priority_id,
+            "reason": reason,
+        },
+    )
+
+
+def task_review_request_effect(
+    source_contract_id: str,
+    output_name: str,
+    asset_id: str,
+    reason: str,
+    *,
+    budget: int = 1,
+) -> CandidateEffect:
+    """Request an independent review of one exact committed output Asset."""
+    return CandidateEffect(
+        "task.review.request",
+        {
+            "source_contract_id": source_contract_id,
+            "output_name": output_name,
+            "asset_id": asset_id,
+            "reason": reason,
+            "budget": budget,
+        },
+    )
+
+
+def task_review_decision_effect(
+    request_id: str,
+    report_asset_id: str,
+    verdict: str,
+    reason: str,
+) -> CandidateEffect:
+    """Commit one decision for a previously requested independent review."""
+    return CandidateEffect(
+        "task.review.decide",
+        {
+            "request_id": request_id,
+            "report_asset_id": report_asset_id,
+            "verdict": verdict,
+            "reason": reason,
+        },
+    )
+
+
+def task_revision_effect(
+    decision_id: str,
+    reason: str,
+    *,
+    budget: int | None = None,
+    assignment_override: Mapping[str, str] | None = None,
+) -> CandidateEffect:
+    """Create signed successor work for one review decision requesting changes."""
+    payload = {"decision_id": decision_id, "reason": reason, "budget": budget}
+    if assignment_override is not None:
+        payload["assignment_override"] = dict(assignment_override)
+    return CandidateEffect("task.revise", payload)
 
 
 def actor_authorization_effect(actor_key: ActorKey) -> CandidateEffect:

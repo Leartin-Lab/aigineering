@@ -69,21 +69,27 @@ def trace(
                 _output_json({"error": f"Session '{session_id}' not found."})
             else:
                 click.echo(f"Session '{session_id}' not found.")
-            return
+            raise click.exceptions.Exit(1)
     else:
         latest = _latest_session_file()
-        if latest is not None:
-            jsonl_store = JsonLTraceStore(str(latest))
-            entries = (
-                jsonl_store.get_by_contract(contract_filter)
-                if contract_filter
-                else jsonl_store.get_all()
-            )
-        else:
-            jsonl_store = None
-            entries = []
+        if latest is None:
+            # Exit 1: no session file exists at all.
+            if json_output:
+                _output_json([])
+            else:
+                click.echo("No sessions found. Use 'aig run <goal>' or 'aig demo'.")
+            return
+        jsonl_store = JsonLTraceStore(str(latest))
+        entries = (
+            jsonl_store.get_by_contract(contract_filter)
+            if contract_filter
+            else jsonl_store.get_all()
+        )
 
-    if jsonl_store is None or not entries:
+    # Exit 2: a session exists but has zero entries (the latest-session route
+    # filters by contract before this check; the explicit-session route
+    # filters after it, below).
+    if not entries:
         if json_output:
             _output_json([])
         else:
@@ -525,7 +531,7 @@ def audit(
                 _output_json({"error": f"Session '{session_id}' not found."})
             else:
                 click.echo(f"Session '{session_id}' not found.")
-            return
+            raise click.exceptions.Exit(1)
     else:
         latest = _latest_session_file()
         if latest is not None:
@@ -560,7 +566,7 @@ def audit(
                 _output_json({"error": msg})
             else:
                 click.echo(msg)
-            return
+            raise click.exceptions.Exit(1)
     elif asset_name_filter:
         target_id, target_name = _resolve_asset_by_name(
             asset_name_filter,
@@ -572,7 +578,7 @@ def audit(
                 _output_json({"error": msg})
             else:
                 click.echo(msg)
-            return
+            raise click.exceptions.Exit(1)
     else:
         msg = "Provide --asset <id> or --asset-name <name>"
         if json_output:
@@ -587,7 +593,7 @@ def audit(
             _output_json({"error": msg})
         else:
             click.echo(msg)
-        return
+        raise click.exceptions.Exit(1)
 
     lineage_entries = jsonl_store.get_reverse_lineage(target_id)
 

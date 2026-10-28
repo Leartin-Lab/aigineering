@@ -1,0 +1,21 @@
+{
+  "schema": "thermal-calibration-case-v1",
+  "case_id": "short-interval",
+  "sensor_id": "sensor-eval-02",
+  "samples": [
+    {
+      "sample_id": "t-000",
+      "time_utc": "2026-05-01T00:00:00Z",
+      "reference_C": "0",
+      "reading": "0",
+      "unit": "C"
+    },
+    {
+      "sample_id": "t-003",
+      "time_utc": "2026-05-01T00:00:03Z",
+      "reference_C": "0",
+      "reading": "0.000001",
+      "unit": "C"
+    }
+  ]
+}

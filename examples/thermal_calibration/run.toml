@@ -1,0 +1,32 @@
+[run]
+fleet = "workers.toml"
+skills = ["."]
+
+[[inputs]]
+name = "calibration_case"
+path = "fixtures/train/mix-three-point.case.json"
+
+[[inputs]]
+name = "calibration_standard"
+path = "fixtures/train/mix-three-point.standard.json"
+
+[task]
+name = "synthetic_calibration_drift_review"
+description_file = "task-description.txt"
+inputs = ["calibration_case", "calibration_standard"]
+activation = "calibration_case AND calibration_standard"
+outputs = ["calibration_report"]
+budget = 32
+tool_scope = ["normalize_calibration", "analyze_calibration"]
+labels = ["_skill_content_thermal_calibration"]
+worker_capabilities = ["calibration.plan"]
+worker_pools = ["planning"]
+delegation_capabilities = ["calibration.research", "calibration.verify"]
+delegation_pools = ["research", "verification"]
+acceptance_evidence_inputs = ["calibration_case", "calibration_standard"]
+
+[task.acceptance_policy]
+mode = "independent"
+policy_version = "synthetic-temperature-calibration-v1"
+required_attestations = 1
+verifier_capabilities = ["calibration.verify"]

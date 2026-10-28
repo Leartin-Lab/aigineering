@@ -93,8 +93,8 @@ class TestSessionSealedConfig:
 class TestCLIRetryBypass:
     """G1: CLI must not directly mutate runtime state."""
 
-    def test_cli_retry_does_not_directly_mutate_store(self):
-        """aig retry must go through method ingress, not direct store.add_contract().
+    def test_cli_retry_does_not_directly_mutate_store(self, tmp_path, monkeypatch):
+        """aig retry must publish a signed Candidate, not directly add a Contract.
 
         Gate: G1 (Single Runtime Ingress)
         """
@@ -120,13 +120,15 @@ class TestCLIRetryBypass:
 
         assert len(add_contract_calls) == 0, (
             f"G1/D-P0.1: cli/retry.py calls add_contract() directly at line(s): "
-            f"{add_contract_calls}. Must go through method ingress "
-            f"(MethodRuntime → RetryMethodHandler)."
+            f"{add_contract_calls}. Must go through signed Candidate commitment."
         )
 
         # ── Functional test: CLI retry still creates the retry contract ──
-        from aigineering.protocol.types import Contract
         from aigineering.core.methods import retry_contract
+        from aigineering.core.control_plane import build_control_plane_contract
+        from aigineering.protocol.identity import contract_from_fields
+        from aigineering.task_publication import publish_task_contract
+        from aigineering import local_publication
         from aigineering.cli import retry as retry_module
         from click.testing import CliRunner
         from unittest.mock import patch
@@ -134,31 +136,43 @@ class TestCLIRetryBypass:
         from aigineering.core.sqlite_store import SQLiteStore
         from aigineering.cli.identity import ensure_local_domain
 
-        store = SQLiteStore(":memory:")
-        original = Contract(
-            id="c-original",
-            parent_id=None,
-            name="test-task",
-            description="Test",
-            inputs=["input1"],
-            outputs=["output1"],
-            budget=5,
-        )
-        store.add_contract(original)
-
-        expected_id = retry_contract(original).id
-        assert store.get_contract(expected_id) is None, (
-            "Precondition: retry contract must not exist before CLI runs."
-        )
+        retry_database = str(tmp_path / "retry.db")
+        store = SQLiteStore(retry_database)
+        monkeypatch.setenv("AIG_ACTOR_KEY_FILE", str(tmp_path / "root.ed25519"))
+        monkeypatch.setattr(local_publication, "require_redis", lambda: None)
+        monkeypatch.setattr(local_publication, "sync_runtime", lambda *_a, **_kw: None)
 
         runner = CliRunner()
         with runner.isolated_filesystem():
             ensure_local_domain(store)
+            parent = publish_task_contract(
+                store, build_control_plane_contract(name="retry funder", budget=10)
+            )
+            original = publish_task_contract(
+                store,
+                contract_from_fields(
+                    parent_id=parent.id,
+                    origin="human",
+                    name="test-task",
+                    description="Test",
+                    inputs=("input1",),
+                    outputs=("output1",),
+                    budget=5,
+                    activation="",
+                    tool_scope=(),
+                    labels=(),
+                ),
+            )
+            expected_id = retry_contract(original).id
+            assert store.get_contract(expected_id) is None, (
+                "Precondition: retry contract must not exist before CLI runs."
+            )
             with patch.object(retry_module, "_persistent_store", return_value=store):
-                result = runner.invoke(retry_module.retry, ["--contract", "c-original"])
+                result = runner.invoke(retry_module.retry, ["--contract", original.id])
 
         assert result.exit_code == 0, f"G1/D-P0.1: CLI retry failed: {result.output}"
 
+        store = SQLiteStore(retry_database)
         retry_contract = store.get_contract(expected_id)
         assert retry_contract is not None, (
             f"G1/D-P0.1: Retry contract '{expected_id}' not found in store. "
@@ -1143,7 +1157,9 @@ class TestPublicDocs:
             assert claim not in readme.lower(), (
                 f"G11: README makes unsupported claim: {claim!r}"
             )
-        assert "v0.5.4" in readme.lower()
+        from aigineering import __version__
+
+        assert f"v{__version__}" in readme.lower()
         assert "candidate" in readme.lower()
         assert "transaction" in readme.lower()
         assert "single-machine" in readme.lower()

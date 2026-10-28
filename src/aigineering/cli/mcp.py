@@ -69,10 +69,11 @@ def mcp_add(
     output_schema_json: str | None,
     as_json: bool,
 ) -> None:
-    """Create a trusted MCP descriptor asset.
+    """Publish MCP capability metadata as an Asset; no transport is provided.
 
     Private transport credentials must not be placed in the descriptor. Store
-    only public capability metadata and a source URI.
+    only public capability metadata and a source URI. This command does not
+    connect to the described server or execute its tools.
     """
     input_schema = _read_schema(input_schema_json)
     output_schema = _read_schema(output_schema_json)

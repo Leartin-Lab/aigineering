@@ -1,0 +1,28 @@
+{
+  "schema": "thermal-calibration-case-v1",
+  "case_id": "celsius-positive-drift",
+  "sensor_id": "sensor-synthetic-02",
+  "samples": [
+    {
+      "sample_id": "p-000",
+      "time_utc": "2026-02-01T00:00:00Z",
+      "reference_C": "20.000000",
+      "reading": "20.000000",
+      "unit": "C"
+    },
+    {
+      "sample_id": "p-030",
+      "time_utc": "2026-02-01T00:30:00Z",
+      "reference_C": "20.000000",
+      "reading": "20.100000",
+      "unit": "C"
+    },
+    {
+      "sample_id": "p-060",
+      "time_utc": "2026-02-01T01:00:00Z",
+      "reference_C": "20.000000",
+      "reading": "20.200000",
+      "unit": "C"
+    }
+  ]
+}

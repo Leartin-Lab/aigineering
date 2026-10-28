@@ -1,13 +1,18 @@
 """Tests for the CLI aig asset add/ls/show commands."""
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 from click.testing import CliRunner
 
+import aigineering.cli.asset as asset_cli
 from aigineering.cli.main import cli
+from aigineering.core.control_plane import build_control_plane_asset
+from aigineering.core.query_projection import StoreQueryProjection
 from aigineering.core.sqlite_store import SQLiteStore
+from conftest import candidate_runtime
 
 
 @pytest.fixture(autouse=True)
@@ -243,6 +248,7 @@ class TestAssetList:
         """aig asset ls on an empty store shows no assets."""
         runner = CliRunner()
         with runner.isolated_filesystem():
+            assert runner.invoke(cli, ["domain", "init"]).exit_code == 0
             result = runner.invoke(cli, ["asset", "ls"])
             assert result.exit_code == 0
             assert "No assets found" in result.output
@@ -289,6 +295,7 @@ class TestAssetShow:
         """aig asset show <missing> fails with an error."""
         runner = CliRunner()
         with runner.isolated_filesystem():
+            assert runner.invoke(cli, ["domain", "init"]).exit_code == 0
             result = runner.invoke(cli, ["asset", "show", "nope"])
             assert result.exit_code != 0
             assert "No asset named" in result.output
@@ -319,6 +326,175 @@ class TestAssetShow:
             result = runner.invoke(cli, ["asset", "show", "foo", "--json"])
             assert result.exit_code == 0
             json.loads(result.output)  # does not raise
+
+    def _use_store(self, monkeypatch, store):
+        monkeypatch.setattr(asset_cli, "_persistent_store", lambda: store)
+        monkeypatch.setattr(
+            asset_cli, "_query_projection", lambda _store: StoreQueryProjection(_store)
+        )
+        return store
+
+    def test_show_exact_id_selects_each_same_name_asset(self, monkeypatch, tmp_path):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            store = SQLiteStore(tmp_path / "store.db")
+            runtime = candidate_runtime(store)
+            first_asset = build_control_plane_asset(name="report", content="original")
+            second_asset = build_control_plane_asset(name="report", content="revision")
+            first_asset = runtime.accept_asset(first_asset)
+            second_asset = runtime.accept_asset(second_asset)
+            self._use_store(monkeypatch, store)
+            first_id = first_asset.id
+            second_id = second_asset.id
+            assert first_id != second_id
+
+            for asset_id, expected in ((first_id, "original"), (second_id, "revision")):
+                result = runner.invoke(
+                    asset_cli.asset_show, ["--id", asset_id, "--json"]
+                )
+                assert result.exit_code == 0, result.output
+                data = json.loads(result.output)
+                assert data["id"] == asset_id
+                assert data["name"] == "report"
+                assert data["content"] == expected
+
+            # The name selector remains backward-compatible with its existing
+            # first ID-sorted match behavior.
+            listed = StoreQueryProjection(store).get_assets_by_name("report")
+            assert [asset.id for asset in listed] == sorted((first_id, second_id))
+            legacy = runner.invoke(asset_cli.asset_show, ["report", "--json"])
+            assert legacy.exit_code == 0, legacy.output
+            assert json.loads(legacy.output)["id"] == listed[0].id
+
+    def test_show_unknown_exact_id_does_not_fall_back_to_name(
+        self, monkeypatch, tmp_path
+    ):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            store = SQLiteStore(tmp_path / "store.db")
+            runtime = candidate_runtime(store)
+            runtime.accept_asset(
+                build_control_plane_asset(name="report", content="must not leak")
+            )
+            self._use_store(monkeypatch, store)
+            result = runner.invoke(
+                asset_cli.asset_show, ["--id", "asset:missing", "--json"]
+            )
+            assert result.exit_code != 0
+            assert "No asset with ID 'asset:missing'" in result.output
+            assert "must not leak" not in result.output
+
+    @pytest.mark.parametrize(
+        "args",
+        [
+            ["asset", "show"],
+            ["asset", "show", "report", "--id", "asset:some-id"],
+            ["asset", "show", "--id", ""],
+        ],
+    )
+    def test_show_invalid_selector_fails_before_opening_store(self, monkeypatch, args):
+        def fail_if_opened():
+            raise AssertionError("selector validation must precede Store setup")
+
+        monkeypatch.setattr(asset_cli, "_persistent_store", fail_if_opened)
+        result = CliRunner().invoke(asset_cli.asset_show, args[2:])
+        assert result.exit_code != 0
+        assert (
+            "provide exactly one" in result.output
+            or "non-empty Asset ID" in result.output
+        )
+
+    def test_show_by_id_preserves_operator_content_and_does_not_write_facts(
+        self, monkeypatch, tmp_path
+    ):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            store = SQLiteStore(tmp_path / "store.db")
+            runtime = candidate_runtime(store)
+            asset = runtime.accept_asset(
+                build_control_plane_asset(
+                    name="local-only",
+                    content="local-only content",
+                    promptable=False,
+                )
+            )
+            self._use_store(monkeypatch, store)
+            asset_id = asset.id
+            before_revision = store.get_runtime_revision()
+            before_records = tuple(
+                record.id for _, record in store.scan_runtime_records()
+            )
+            before_digest = store.runtime_materialization_digest()
+            before_contracts = tuple(
+                contract.id for contract in store.get_all_contracts()
+            )
+
+            result = runner.invoke(asset_cli.asset_show, ["--id", asset_id, "--json"])
+            assert result.exit_code == 0, result.output
+            data = json.loads(result.output)
+            assert data["id"] == asset_id
+            assert data["promptable"] is False
+            assert data["content"] == "local-only content"
+            assert data["disclosure_view"] == "original"
+
+            after = SQLiteStore.snapshot_from_path(tmp_path / "store.db")
+            assert after.get_runtime_revision() == before_revision
+            assert (
+                tuple(record.id for _, record in after.scan_runtime_records())
+                == before_records
+            )
+            assert after.runtime_materialization_digest() == before_digest
+            assert (
+                tuple(contract.id for contract in after.get_all_contracts())
+                == before_contracts
+            )
+
+    @pytest.mark.parametrize("disclosure_view", ["redacted", "transformed"])
+    def test_show_redacts_non_original_body_for_name_and_id(
+        self, monkeypatch, tmp_path, disclosure_view
+    ):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            store = SQLiteStore(tmp_path / "store.db")
+            runtime = candidate_runtime(store)
+            original = build_control_plane_asset(
+                name="sealed-review", content=f"private-{disclosure_view}-marker"
+            )
+            stored = runtime.accept_asset(
+                replace(original, disclosure_view=disclosure_view)
+            )
+            self._use_store(monkeypatch, store)
+            monkeypatch.setattr(
+                "aigineering.cli.infrastructure.require_redis", lambda: None
+            )
+            assert asset_cli._persistent_store() is store
+            assert isinstance(asset_cli._query_projection(store), StoreQueryProjection)
+            before_revision = store.get_runtime_revision()
+            before = store.get_asset(stored.id)
+
+            for selector in (["--id", stored.id], ["sealed-review"]):
+                for json_output in (False, True):
+                    callback_args = (
+                        {"name": "sealed-review", "asset_id": None}
+                        if selector[0] == "sealed-review"
+                        else {"name": None, "asset_id": stored.id}
+                    )
+                    with runner.isolation() as (stdout, _stderr, _):
+                        asset_cli.asset_show.callback.__wrapped__(
+                            **callback_args, as_json=json_output
+                        )
+                    output = stdout.getvalue().decode()
+                    assert f"private-{disclosure_view}-marker" not in output
+                    assert "[redacted]" in output
+                    if json_output:
+                        data = json.loads(output)
+                        assert data["disclosure_view"] == disclosure_view
+                        assert data["content"] == "[redacted]"
+
+            after = store.get_asset(stored.id)
+            assert store.get_runtime_revision() == before_revision
+            assert after == before
+            assert after.content == f"private-{disclosure_view}-marker"
 
 
 class TestAssetVersionWorkflow:

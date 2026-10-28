@@ -1,0 +1,251 @@
+{
+  "format": "aigineering-task-hold-v1",
+  "canonical_json": {
+    "input": {
+      "": "BMP",
+      "𐀀": "supplementary",
+      "text": "中文 café",
+      "values": [
+        null,
+        true,
+        9007199254740991
+      ]
+    },
+    "expected": "{\"text\":\"中文 café\",\"values\":[null,true,9007199254740991],\"\":\"BMP\",\"𐀀\":\"supplementary\"}"
+  },
+  "ed25519_test_key": {
+    "private_key_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+    "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8"
+  },
+  "genesis": {
+    "id": "genesis:3a0b0eb28406f91133f34dcff40b17f75b1e227ab7075ed3115e1a16379d5a63",
+    "domain": "hold-conformance",
+    "policy_hash": "policy:vector",
+    "root_keys": [
+      {
+        "actor_id": "human:hold-vector",
+        "capabilities": [
+          "task.block",
+          "task.unblock"
+        ],
+        "key_id": "hold-vector-key",
+        "kind": "ed25519",
+        "public_key": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+        "revoked": false
+      }
+    ],
+    "schema_version": 1
+  },
+  "contract": {
+    "value": {
+      "id": "task:v3:5b259aed9159ef10971770e2213e962af1923ecb4d8704210f94289ded064bf5",
+      "parent_id": null,
+      "name": "hold target",
+      "description": "Immutable hold target",
+      "inputs": [],
+      "outputs": [],
+      "activation": "",
+      "budget": 5,
+      "tool_scope": [],
+      "labels": [],
+      "context_asset_ids": [],
+      "worker_capabilities": [],
+      "worker_pools": [],
+      "delegation_capabilities": [],
+      "delegation_pools": [],
+      "origin": "human",
+      "minting_authority": [],
+      "sensitive_input_policy": null,
+      "acceptance_policy": null
+    },
+    "expected_id": "task:v3:5b259aed9159ef10971770e2213e962af1923ecb4d8704210f94289ded064bf5"
+  },
+  "effect_vectors": [
+    {
+      "name": "task.block",
+      "candidate": {
+        "value": {
+          "id": "candidate:v1:6939eeecdb12358ec4c94408ed152ea31571d2cf64cdbe48434ddaf58da0e652",
+          "signature": "ed25519:YJ5T9ndqYfh03pYNjtcFrlK2uV0D/zvhhTUnHvolzEBUwHTebpowh5OVnWPiW9J+jFMxuy9tYQAaCBiy8UCvCw==",
+          "actor_id": "human:hold-vector",
+          "causal_parents": [],
+          "domain_id": "genesis:3a0b0eb28406f91133f34dcff40b17f75b1e227ab7075ed3115e1a16379d5a63",
+          "effects": [
+            {
+              "atomic_group": "",
+              "effect_type": "task.block",
+              "payload": {
+                "contract_id": "task:v3:5b259aed9159ef10971770e2213e962af1923ecb4d8704210f94289ded064bf5",
+                "reason": "检查 café / café — hold 1"
+              }
+            }
+          ],
+          "idempotency_key": "hold-vector-1",
+          "key_id": "hold-vector-key",
+          "protocol_version": 1,
+          "signature_kind": "ed25519"
+        },
+        "expected_signing_utf8": "{\"actor_id\":\"human:hold-vector\",\"causal_parents\":[],\"domain_id\":\"genesis:3a0b0eb28406f91133f34dcff40b17f75b1e227ab7075ed3115e1a16379d5a63\",\"effects\":[{\"atomic_group\":\"\",\"effect_type\":\"task.block\",\"payload\":{\"contract_id\":\"task:v3:5b259aed9159ef10971770e2213e962af1923ecb4d8704210f94289ded064bf5\",\"reason\":\"检查 café / café — hold 1\"}}],\"idempotency_key\":\"hold-vector-1\",\"key_id\":\"hold-vector-key\",\"protocol_version\":1,\"signature_kind\":\"ed25519\"}"
+      },
+      "records": [
+        {
+          "id": "record:637e7ef2291ea89dad4c0ca08b3ec21102ffd3f3f7a94882b5e7ad720a04b8cc",
+          "record_type": "claim.hold.placed",
+          "payload": {
+            "actor_id": "human:hold-vector",
+            "candidate_id": "candidate:v1:6939eeecdb12358ec4c94408ed152ea31571d2cf64cdbe48434ddaf58da0e652",
+            "contract_id": "task:v3:5b259aed9159ef10971770e2213e962af1923ecb4d8704210f94289ded064bf5",
+            "key_id": "hold-vector-key",
+            "reason": "检查 café / café — hold 1"
+          },
+          "causal_parents": [
+            "record:4817849c106fbb0816793ae45996d3aab45d377a05fd21b9c6667b8d6f583dc2"
+          ],
+          "schema_version": 1
+        }
+      ]
+    },
+    {
+      "name": "task.block",
+      "candidate": {
+        "value": {
+          "id": "candidate:v1:10d8a1b3a4a1bfe4b121d2f631d921e84d4c5e45a22aca5563ad48ee69e0b03a",
+          "signature": "ed25519:2rmEjtxg4l3EITzhwwVC73KJ++TBX1Q65irGwJ6qv77XnFSdXuoUAtaKLXT4Pjy76nU6wdjwKRfU3MMnEItRBA==",
+          "actor_id": "human:hold-vector",
+          "causal_parents": [],
+          "domain_id": "genesis:3a0b0eb28406f91133f34dcff40b17f75b1e227ab7075ed3115e1a16379d5a63",
+          "effects": [
+            {
+              "atomic_group": "",
+              "effect_type": "task.block",
+              "payload": {
+                "contract_id": "task:v3:5b259aed9159ef10971770e2213e962af1923ecb4d8704210f94289ded064bf5",
+                "reason": "检查 café / café — hold 2"
+              }
+            }
+          ],
+          "idempotency_key": "hold-vector-2",
+          "key_id": "hold-vector-key",
+          "protocol_version": 1,
+          "signature_kind": "ed25519"
+        },
+        "expected_signing_utf8": "{\"actor_id\":\"human:hold-vector\",\"causal_parents\":[],\"domain_id\":\"genesis:3a0b0eb28406f91133f34dcff40b17f75b1e227ab7075ed3115e1a16379d5a63\",\"effects\":[{\"atomic_group\":\"\",\"effect_type\":\"task.block\",\"payload\":{\"contract_id\":\"task:v3:5b259aed9159ef10971770e2213e962af1923ecb4d8704210f94289ded064bf5\",\"reason\":\"检查 café / café — hold 2\"}}],\"idempotency_key\":\"hold-vector-2\",\"key_id\":\"hold-vector-key\",\"protocol_version\":1,\"signature_kind\":\"ed25519\"}"
+      },
+      "records": [
+        {
+          "id": "record:70ee55a093bc3d4a38e0279a64e56e72f81e75207f617f00e7f890b07323a126",
+          "record_type": "claim.hold.placed",
+          "payload": {
+            "actor_id": "human:hold-vector",
+            "candidate_id": "candidate:v1:10d8a1b3a4a1bfe4b121d2f631d921e84d4c5e45a22aca5563ad48ee69e0b03a",
+            "contract_id": "task:v3:5b259aed9159ef10971770e2213e962af1923ecb4d8704210f94289ded064bf5",
+            "key_id": "hold-vector-key",
+            "reason": "检查 café / café — hold 2"
+          },
+          "causal_parents": [
+            "record:0b35cf0334f4a38ff070b260c9570904693758d1995a04a0aea75b942206ad54"
+          ],
+          "schema_version": 1
+        }
+      ]
+    },
+    {
+      "name": "task.unblock",
+      "candidate": {
+        "value": {
+          "id": "candidate:v1:c3296892ef6b1e2762d927a8ebd7c160fbe880302e100becd53427c1f504cebf",
+          "signature": "ed25519:1J7+2Fhip3J23LCgS1q1/RBUR1GMGA0vWOysaaQv0wIJzNChZRVeKbMlYhhvIYXgITpuVOzFdWg4M8F9agHwBw==",
+          "actor_id": "human:hold-vector",
+          "causal_parents": [
+            "record:637e7ef2291ea89dad4c0ca08b3ec21102ffd3f3f7a94882b5e7ad720a04b8cc"
+          ],
+          "domain_id": "genesis:3a0b0eb28406f91133f34dcff40b17f75b1e227ab7075ed3115e1a16379d5a63",
+          "effects": [
+            {
+              "atomic_group": "",
+              "effect_type": "task.unblock",
+              "payload": {
+                "contract_id": "task:v3:5b259aed9159ef10971770e2213e962af1923ecb4d8704210f94289ded064bf5",
+                "hold_id": "record:637e7ef2291ea89dad4c0ca08b3ec21102ffd3f3f7a94882b5e7ad720a04b8cc",
+                "reason": "已确认 — release 1"
+              }
+            }
+          ],
+          "idempotency_key": "hold-vector-3",
+          "key_id": "hold-vector-key",
+          "protocol_version": 1,
+          "signature_kind": "ed25519"
+        },
+        "expected_signing_utf8": "{\"actor_id\":\"human:hold-vector\",\"causal_parents\":[\"record:637e7ef2291ea89dad4c0ca08b3ec21102ffd3f3f7a94882b5e7ad720a04b8cc\"],\"domain_id\":\"genesis:3a0b0eb28406f91133f34dcff40b17f75b1e227ab7075ed3115e1a16379d5a63\",\"effects\":[{\"atomic_group\":\"\",\"effect_type\":\"task.unblock\",\"payload\":{\"contract_id\":\"task:v3:5b259aed9159ef10971770e2213e962af1923ecb4d8704210f94289ded064bf5\",\"hold_id\":\"record:637e7ef2291ea89dad4c0ca08b3ec21102ffd3f3f7a94882b5e7ad720a04b8cc\",\"reason\":\"已确认 — release 1\"}}],\"idempotency_key\":\"hold-vector-3\",\"key_id\":\"hold-vector-key\",\"protocol_version\":1,\"signature_kind\":\"ed25519\"}"
+      },
+      "records": [
+        {
+          "id": "record:277a20a416c5b7326298050a6b146b1a83b3fa7b31c8fcdd5f5d83d32f297c21",
+          "record_type": "claim.hold.released",
+          "payload": {
+            "actor_id": "human:hold-vector",
+            "candidate_id": "candidate:v1:c3296892ef6b1e2762d927a8ebd7c160fbe880302e100becd53427c1f504cebf",
+            "contract_id": "task:v3:5b259aed9159ef10971770e2213e962af1923ecb4d8704210f94289ded064bf5",
+            "hold_id": "record:637e7ef2291ea89dad4c0ca08b3ec21102ffd3f3f7a94882b5e7ad720a04b8cc",
+            "key_id": "hold-vector-key",
+            "reason": "已确认 — release 1"
+          },
+          "causal_parents": [
+            "record:69a8df4514543dae3392fe4dfca09c5164572a5e418f0693a68a9d34b93c0e38",
+            "record:637e7ef2291ea89dad4c0ca08b3ec21102ffd3f3f7a94882b5e7ad720a04b8cc"
+          ],
+          "schema_version": 1
+        }
+      ]
+    },
+    {
+      "name": "task.unblock",
+      "candidate": {
+        "value": {
+          "id": "candidate:v1:02c02df1c89a5ff1805609761be0ff3d2d38e01ef6a490f8eb87f768f1b8d4f6",
+          "signature": "ed25519:xfugaktofpZ/MJus28S/JZ2I/X0LsBlSNPhrvsF980bLTtiHCMDzxeyhWG5QPlGkizvNOPdbNBAPk2R6fKv4Aw==",
+          "actor_id": "human:hold-vector",
+          "causal_parents": [
+            "record:70ee55a093bc3d4a38e0279a64e56e72f81e75207f617f00e7f890b07323a126"
+          ],
+          "domain_id": "genesis:3a0b0eb28406f91133f34dcff40b17f75b1e227ab7075ed3115e1a16379d5a63",
+          "effects": [
+            {
+              "atomic_group": "",
+              "effect_type": "task.unblock",
+              "payload": {
+                "contract_id": "task:v3:5b259aed9159ef10971770e2213e962af1923ecb4d8704210f94289ded064bf5",
+                "hold_id": "record:70ee55a093bc3d4a38e0279a64e56e72f81e75207f617f00e7f890b07323a126",
+                "reason": "已确认 — release 2"
+              }
+            }
+          ],
+          "idempotency_key": "hold-vector-4",
+          "key_id": "hold-vector-key",
+          "protocol_version": 1,
+          "signature_kind": "ed25519"
+        },
+        "expected_signing_utf8": "{\"actor_id\":\"human:hold-vector\",\"causal_parents\":[\"record:70ee55a093bc3d4a38e0279a64e56e72f81e75207f617f00e7f890b07323a126\"],\"domain_id\":\"genesis:3a0b0eb28406f91133f34dcff40b17f75b1e227ab7075ed3115e1a16379d5a63\",\"effects\":[{\"atomic_group\":\"\",\"effect_type\":\"task.unblock\",\"payload\":{\"contract_id\":\"task:v3:5b259aed9159ef10971770e2213e962af1923ecb4d8704210f94289ded064bf5\",\"hold_id\":\"record:70ee55a093bc3d4a38e0279a64e56e72f81e75207f617f00e7f890b07323a126\",\"reason\":\"已确认 — release 2\"}}],\"idempotency_key\":\"hold-vector-4\",\"key_id\":\"hold-vector-key\",\"protocol_version\":1,\"signature_kind\":\"ed25519\"}"
+      },
+      "records": [
+        {
+          "id": "record:a71c23a1464c17f0c226c6386e9391ad0eadced9511975dea3d25a930e914f74",
+          "record_type": "claim.hold.released",
+          "payload": {
+            "actor_id": "human:hold-vector",
+            "candidate_id": "candidate:v1:02c02df1c89a5ff1805609761be0ff3d2d38e01ef6a490f8eb87f768f1b8d4f6",
+            "contract_id": "task:v3:5b259aed9159ef10971770e2213e962af1923ecb4d8704210f94289ded064bf5",
+            "hold_id": "record:70ee55a093bc3d4a38e0279a64e56e72f81e75207f617f00e7f890b07323a126",
+            "key_id": "hold-vector-key",
+            "reason": "已确认 — release 2"
+          },
+          "causal_parents": [
+            "record:37f2dcef86176befb91ac1aa765e26472f25aa9f9e61824125ff682a374b5093",
+            "record:70ee55a093bc3d4a38e0279a64e56e72f81e75207f617f00e7f890b07323a126"
+          ],
+          "schema_version": 1
+        }
+      ]
+    }
+  ]
+}

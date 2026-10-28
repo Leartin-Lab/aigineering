@@ -1,0 +1,45 @@
+[fleet]
+db_path = ".aig/store.db"
+poll_interval = 0.05
+
+[[workers]]
+id = "calibration-planner"
+kind = "llm"
+model = "deepseek-flash"
+base_url = "https://api.deepseek.com/v1"
+api_key_env = "AIGINEERING_API_KEY"
+capabilities = ["calibration.plan"]
+pools = ["planning"]
+response_format = "json_object"
+max_output_tokens = 8192
+thinking_mode = "disabled"
+timeout = 60
+max_retries = 1
+
+[[workers]]
+id = "calibration-researcher"
+kind = "llm"
+model = "deepseek-flash"
+base_url = "https://api.deepseek.com/v1"
+api_key_env = "AIGINEERING_API_KEY"
+capabilities = ["calibration.research"]
+pools = ["research"]
+provider_capabilities = ["tool_calling"]
+tool_registry = "examples.thermal_calibration.tools:build_registry"
+max_output_tokens = 8192
+thinking_mode = "enabled"
+timeout = 60
+max_retries = 1
+
+[[workers]]
+id = "calibration-tools"
+kind = "tool"
+tool_registry = "examples.thermal_calibration.tools:build_registry"
+
+[[workers]]
+id = "calibration-verifier"
+kind = "local"
+worker_factory = "examples.thermal_calibration.workers:build_verifier_worker"
+capabilities = ["calibration.verify"]
+pools = ["verification"]
+effect_capabilities = ["asset.attest", "calibration.verify"]

@@ -6,20 +6,103 @@ represented by append-only allowance records and never credited to a Worker.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from collections import defaultdict
 from collections.abc import Iterable, Sequence
+from decimal import Decimal
 from typing import TYPE_CHECKING
 
 from aigineering.core.ids import canonical_json, compute_content_hash
-from aigineering.protocol.runtime_record import RuntimeRecord, create_runtime_record
+from aigineering.protocol.runtime_record import (
+    RuntimeRecord,
+    create_runtime_record,
+    runtime_record_effective_payload,
+    validate_runtime_record,
+)
 from aigineering.protocol.types import Contract
+from aigineering.core.allowance_returns import (
+    CausalAllowanceConflict,
+    allowance_return_id,
+    project_causal_allowance_returns,
+    validate_allowance_grants,
+    validate_causal_allowance_returns,
+)
+from aigineering.core.terminal_types import TERMINAL_EVENTS
+from aigineering.core.allowance_publication_index import AllowanceBalanceInput
+
+__all__ = [
+    "CausalAllowanceConflict",
+    "allowance_available",
+    "RawAllowanceTotals",
+    "fold_raw_allowance_records",
+    "allowance_is_recorded",
+    "allowance_purpose",
+    "allowance_reservation_id",
+    "allowance_return_id",
+    "project_causal_allowance_returns",
+    "project_contract_allowance_records",
+    "materialize_terminal_allowance",
+    "terminal_allowance_records",
+    "resolve_causal_allowance",
+    "validate_allowance_commit",
+    "validate_allowance_grants",
+    "validate_causal_allowance_returns",
+]
+
+
+@dataclass(frozen=True)
+class RawAllowanceTotals:
+    grant_count: int
+    granted_total: int
+    reserved_total: int
+    returned_in_total: int
+    returned_out_total: int
+    extinguished_total: int
+
+
+def _raw_integer_text(value: int) -> str:
+    """Encode arbitrary-size Python integers without sys' decimal digit cap."""
+    return format(Decimal(value), "f")
+
+
+def fold_raw_allowance_records(
+    contract_id: str, records: Iterable[RuntimeRecord]
+) -> RawAllowanceTotals | None:
+    """Fold raw allowance components, or return None when history is opaque."""
+    by_id = {record.id: record for record in records}
+    totals = {
+        "grant_count": 0,
+        "granted_total": 0,
+        "reserved_total": 0,
+        "returned_in_total": 0,
+        "returned_out_total": 0,
+        "extinguished_total": 0,
+    }
+    try:
+        groups = (
+            ("allowance.granted", "contract_id", "grant_count", "granted_total"),
+            ("allowance.reserved", "source_contract_id", None, "reserved_total"),
+            ("allowance.returned", "source_contract_id", None, "returned_in_total"),
+            ("allowance.returned", "from_contract_id", None, "returned_out_total"),
+            ("allowance.extinguished", "contract_id", None, "extinguished_total"),
+        )
+        for record_type, field, count_field, amount_field in groups:
+            for record in by_id.values():
+                if (
+                    record.record_type != record_type
+                    or record.payload.get(field) != contract_id
+                ):
+                    continue
+                if count_field is not None:
+                    totals[count_field] += 1
+                totals[amount_field] += int(record.payload.get("amount", 0))
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return RawAllowanceTotals(**totals)
+
 
 if TYPE_CHECKING:
     from aigineering.core.store import StoreProtocol
-
-
-class CausalAllowanceConflict(ValueError):
-    """A projected reservation no longer fits the committed causal balance."""
 
 
 def project_contract_allowance_records(
@@ -28,6 +111,7 @@ def project_contract_allowance_records(
     records: Sequence[RuntimeRecord],
     *,
     causal_parent: str,
+    balance_inputs: tuple[AllowanceBalanceInput, ...] | None = None,
 ) -> tuple[RuntimeRecord, ...]:
     """Grant roots and atomically reserve contained child publication."""
     if not contracts:
@@ -45,8 +129,21 @@ def project_contract_allowance_records(
                     "child allowance references an unknown parent Contract"
                 )
             requested[contract.parent_id] += contract.budget
+    indexed_balances = _index_allowance_balance_inputs(balance_inputs)
     for source_id, amount in requested.items():
-        available = allowance_available(known[source_id], records)
+        balance = (
+            indexed_balances.get(source_id) if indexed_balances is not None else None
+        )
+        if balance_inputs is not None and balance is None:
+            raise RuntimeError("allowance balance input is missing a requested source")
+        available = (
+            allowance_available_from_totals(known[source_id], balance.totals)
+            if balance is not None and balance.totals is not None
+            else allowance_available(
+                known[source_id],
+                balance.reference_records if balance is not None else records,
+            )
+        )
         if amount > available:
             raise ValueError(
                 f"causal allowance exceeded for {source_id!r}: "
@@ -56,6 +153,14 @@ def project_contract_allowance_records(
     projected: list[RuntimeRecord] = []
     for contract in new_contracts:
         if contract.parent_id is None:
+            if contract.origin == "retry":
+                # A retry retains its source's containment parent. A root retry
+                # therefore has no debit to fund a new grant. Existing Contracts
+                # were excluded above so historical replay keeps its facts.
+                raise ValueError(
+                    "retry Contract cannot mint an unfunded root grant: "
+                    f"{contract.id!r} has no containment parent to fund it"
+                )
             projected.append(
                 create_runtime_record(
                     "allowance.granted",
@@ -102,14 +207,13 @@ def project_contract_allowance_records(
 
 
 def allowance_available(contract: Contract, records: Iterable[RuntimeRecord]) -> int:
-    relevant = tuple(records)
+    relevant = tuple({record.id: record for record in records}.values())
     grants = [
         int(record.payload.get("amount", 0))
         for record in relevant
         if record.record_type == "allowance.granted"
         and record.payload.get("contract_id") == contract.id
     ]
-    granted = sum(grants) if grants else contract.budget
     reserved = sum(
         int(record.payload.get("amount", 0))
         for record in relevant
@@ -122,13 +226,75 @@ def allowance_available(contract: Contract, records: Iterable[RuntimeRecord]) ->
         if record.record_type == "allowance.returned"
         and record.payload.get("source_contract_id") == contract.id
     )
+    returned_out = sum(
+        int(record.payload.get("amount", 0))
+        for record in relevant
+        if record.record_type == "allowance.returned"
+        and record.payload.get("from_contract_id") == contract.id
+    )
     extinguished = sum(
         int(record.payload.get("amount", 0))
         for record in relevant
         if record.record_type == "allowance.extinguished"
         and record.payload.get("contract_id") == contract.id
     )
-    return max(0, granted - reserved + returned - extinguished)
+    return _allowance_available_from_components(
+        contract,
+        len(grants),
+        sum(grants),
+        reserved,
+        returned,
+        returned_out,
+        extinguished,
+    )
+
+
+def _allowance_available_from_components(
+    contract: Contract,
+    grant_count: int,
+    granted_total: int,
+    reserved_total: int,
+    returned_in_total: int,
+    returned_out_total: int,
+    extinguished_total: int,
+) -> int:
+    granted = granted_total if grant_count else contract.budget
+    return max(
+        0,
+        granted
+        - reserved_total
+        + returned_in_total
+        - returned_out_total
+        - extinguished_total,
+    )
+
+
+def _index_allowance_balance_inputs(
+    balance_inputs: tuple[AllowanceBalanceInput, ...] | None,
+) -> dict[str, AllowanceBalanceInput] | None:
+    if balance_inputs is None:
+        return None
+    indexed: dict[str, AllowanceBalanceInput] = {}
+    for item in balance_inputs:
+        if item.contract_id in indexed:
+            raise RuntimeError("allowance balance input contains duplicate sources")
+        indexed[item.contract_id] = item
+    return indexed
+
+
+def allowance_available_from_totals(
+    contract: Contract, totals: RawAllowanceTotals
+) -> int:
+    """Apply the original allowance formula to exact indexed raw totals."""
+    return _allowance_available_from_components(
+        contract,
+        totals.grant_count,
+        totals.granted_total,
+        totals.reserved_total,
+        totals.returned_in_total,
+        totals.returned_out_total,
+        totals.extinguished_total,
+    )
 
 
 def allowance_purpose(contract: Contract) -> str:
@@ -164,6 +330,12 @@ def terminal_allowance_records(
 ) -> tuple[RuntimeRecord, ...]:
     """Extinguish the remaining allowance of newly terminal Contracts."""
     by_id = {contract.id: contract for contract in contracts}
+    existing_ids = {record.id for record in existing_records}
+    pending_extinguished = {
+        str(record.payload.get("contract_id", ""))
+        for record in pending_records
+        if record.record_type == "allowance.extinguished"
+    }
     all_records = tuple(existing_records) + tuple(pending_records)
     terminals = {
         str(record.payload.get("contract_id", "")): record
@@ -172,6 +344,8 @@ def terminal_allowance_records(
     }
     consequences: list[RuntimeRecord] = []
     for contract_id, terminal in sorted(terminals.items()):
+        if terminal.id in existing_ids or contract_id in pending_extinguished:
+            continue
         contract = by_id.get(contract_id)
         if contract is None:
             continue
@@ -204,6 +378,10 @@ def materialize_terminal_allowance(
     pending_records: Sequence[RuntimeRecord],
 ) -> tuple[RuntimeRecord, ...]:
     """Load the append-only snapshot needed by terminal allowance projection."""
+    if not any(
+        record.record_type == "lifecycle.terminal" for record in pending_records
+    ):
+        return ()
     existing_records = tuple(record for _, record in store.scan_runtime_records())
     return terminal_allowance_records(
         tuple(store.get_all_contracts()) + tuple(contracts),
@@ -216,20 +394,95 @@ def validate_allowance_commit(
     contracts: Sequence[Contract],
     existing_records: Sequence[RuntimeRecord],
     pending_records: Sequence[RuntimeRecord],
+    *,
+    candidate_id: str | None = None,
+    balance_inputs: tuple[AllowanceBalanceInput, ...] | None = None,
 ) -> None:
     """Recheck allowance consequences against the commit-time fact snapshot."""
     by_id = {contract.id: contract for contract in contracts}
-    requested: dict[str, int] = defaultdict(int)
+    existing_by_id = {record.id: record for record in existing_records}
+    pending_by_id: dict[str, RuntimeRecord] = {}
     for record in pending_records:
+        existing = existing_by_id.get(record.id)
+        if existing is not None:
+            if runtime_record_effective_payload(
+                existing
+            ) != runtime_record_effective_payload(record):
+                raise CausalAllowanceConflict("allowance fact replay payload differs")
+            continue
+        prior = pending_by_id.get(record.id)
+        if prior is not None:
+            if runtime_record_effective_payload(
+                prior
+            ) != runtime_record_effective_payload(record):
+                raise CausalAllowanceConflict(
+                    "duplicate allowance fact payload differs"
+                )
+            continue
+        pending_by_id[record.id] = record
+    new_pending = tuple(pending_by_id.values())
+    validate_allowance_grants(contracts, existing_records, new_pending)
+    for record in new_pending:
+        if record.record_type != "allowance.granted":
+            continue
+        contract = by_id[record.payload["contract_id"]]
+        if contract.parent_id is None and contract.origin == "retry":
+            raise CausalAllowanceConflict(
+                "retry Contract cannot mint an unfunded root grant"
+            )
+    if (
+        any(record.record_type == "allowance.returned" for record in new_pending)
+        and not candidate_id
+    ):
+        raise CausalAllowanceConflict("allowance return requires a Candidate ID")
+    validate_causal_allowance_returns(
+        contracts,
+        existing_records,
+        new_pending,
+        candidate_id=candidate_id,
+        require_committed_head=True,
+    )
+    validated_returns = tuple(
+        record for record in new_pending if record.record_type == "allowance.returned"
+    )
+    records_with_returns = tuple(existing_records) + validated_returns
+    terminal_source_ids = {
+        str(record.payload.get("contract_id", ""))
+        for record in existing_records
+        if record.record_type == "lifecycle.terminal"
+    }
+    requested: dict[str, int] = defaultdict(int)
+    for record in new_pending:
         if record.record_type != "allowance.reserved":
             continue
         source_id = str(record.payload.get("source_contract_id", ""))
         requested[source_id] += int(record.payload.get("amount", 0))
+    indexed_balances = _index_allowance_balance_inputs(balance_inputs)
     for source_id, amount in requested.items():
         source = by_id.get(source_id)
         if source is None:
             raise ValueError("allowance reservation references an unknown Contract")
-        available = allowance_available(source, existing_records)
+        if source_id in terminal_source_ids:
+            raise CausalAllowanceConflict(
+                "cannot reserve allowance from a terminal Contract"
+            )
+        balance = (
+            indexed_balances.get(source_id) if indexed_balances is not None else None
+        )
+        if balance_inputs is not None and balance is None:
+            raise RuntimeError("allowance balance input is missing a requested source")
+        available = (
+            allowance_available_from_totals(source, balance.totals)
+            if balance is not None and balance.totals is not None
+            else allowance_available(
+                source,
+                (
+                    (*balance.reference_records, *validated_returns)
+                    if balance is not None
+                    else records_with_returns
+                ),
+            )
+        )
         if amount > available:
             raise CausalAllowanceConflict(
                 f"causal allowance changed before commit for {source_id!r}: "
@@ -237,17 +490,73 @@ def validate_allowance_commit(
             )
     without_extinguishment = tuple(existing_records) + tuple(
         record
-        for record in pending_records
+        for record in new_pending
         if record.record_type != "allowance.extinguished"
     )
-    for record in pending_records:
+    for record in new_pending:
         if record.record_type != "allowance.extinguished":
             continue
-        contract_id = str(record.payload.get("contract_id", ""))
+        raw_contract_id = record.payload.get("contract_id")
+        if not isinstance(raw_contract_id, str) or not raw_contract_id:
+            raise CausalAllowanceConflict(
+                "allowance extinguishment requires a nonempty Contract ID"
+            )
+        contract_id = raw_contract_id
         contract = by_id.get(contract_id)
         if contract is None:
             raise ValueError("allowance extinguishment references an unknown Contract")
-        projected = int(record.payload.get("amount", 0))
+        raw_amount = record.payload.get("amount")
+        if type(raw_amount) is not int or raw_amount <= 0:
+            raise CausalAllowanceConflict(
+                "allowance extinguishment amount must be a positive integer"
+            )
+        validate_runtime_record(record)
+        ext_ids = {
+            existing.id
+            for existing in existing_records
+            if existing.record_type == "allowance.extinguished"
+            and existing.payload.get("contract_id") == contract_id
+        }
+        ext_ids.update(
+            pending.id
+            for pending in new_pending
+            if pending.record_type == "allowance.extinguished"
+            and pending.payload.get("contract_id") == contract_id
+        )
+        if len(ext_ids) != 1:
+            raise CausalAllowanceConflict(
+                "Contract allowance may be extinguished only once"
+            )
+        terminal_records = {
+            item.id: item
+            for item in (*existing_records, *new_pending)
+            if item.record_type == "lifecycle.terminal"
+            and item.payload.get("contract_id") == contract_id
+        }
+        if len(terminal_records) != 1:
+            raise CausalAllowanceConflict(
+                "allowance extinguishment requires one matching contract terminal fact"
+            )
+        terminal = next(iter(terminal_records.values()))
+        terminal_value = terminal.payload.get("terminal")
+        try:
+            validate_runtime_record(terminal)
+        except ValueError as exc:
+            raise CausalAllowanceConflict(
+                "allowance extinguishment requires a canonical terminal fact"
+            ) from exc
+        if not isinstance(terminal_value, str) or terminal_value not in TERMINAL_EVENTS:
+            raise CausalAllowanceConflict(
+                "allowance extinguishment requires a valid terminal event"
+            )
+        if (
+            record.causal_parents != (terminal.id,)
+            or record.payload.get("reason") != terminal_value
+        ):
+            raise CausalAllowanceConflict(
+                "allowance extinguishment must name its exact terminal parent and reason"
+            )
+        projected = raw_amount
         available = allowance_available(contract, without_extinguishment)
         if projected != available:
             raise CausalAllowanceConflict(

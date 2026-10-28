@@ -1,0 +1,103 @@
+{
+  "format": "aigineering-task-comment-v1",
+  "canonical_json": {
+    "input": {
+      "": "BMP",
+      "𐀀": "supplementary",
+      "text": "中文 café",
+      "values": [
+        null,
+        true,
+        9007199254740991
+      ]
+    },
+    "expected": "{\"text\":\"中文 café\",\"values\":[null,true,9007199254740991],\"\":\"BMP\",\"𐀀\":\"supplementary\"}"
+  },
+  "ed25519_test_key": {
+    "private_key_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+    "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8"
+  },
+  "genesis": {
+    "id": "genesis:f4e7fed0ee4b010afbbd389a68ee7721dc62c6586a999b02049d4cbd1dec09ce",
+    "domain": "comment-conformance",
+    "policy_hash": "policy:vector",
+    "root_keys": [
+      {
+        "actor_id": "human:vector",
+        "capabilities": [
+          "task.comment"
+        ],
+        "key_id": "comment-vector-key",
+        "kind": "ed25519",
+        "public_key": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+        "revoked": false
+      }
+    ],
+    "schema_version": 1
+  },
+  "contract": {
+    "value": {
+      "id": "task:v3:952e0dfff2340ca7c965a20b1744e93ceef295af6ec22073730e8200e8b0ecff",
+      "parent_id": null,
+      "name": "comment target",
+      "description": "Immutable comment target",
+      "inputs": [],
+      "outputs": [],
+      "activation": "",
+      "budget": 5,
+      "tool_scope": [],
+      "labels": [],
+      "context_asset_ids": [],
+      "worker_capabilities": [],
+      "worker_pools": [],
+      "delegation_capabilities": [],
+      "delegation_pools": [],
+      "origin": "human",
+      "minting_authority": [],
+      "sensitive_input_policy": null,
+      "acceptance_policy": null
+    },
+    "expected_id": "task:v3:952e0dfff2340ca7c965a20b1744e93ceef295af6ec22073730e8200e8b0ecff"
+  },
+  "comment_candidate": {
+    "value": {
+      "id": "candidate:v1:8fa0f42f84744999272baf23cc432c53e44e845998bca081f78d57d79426feb4",
+      "signature": "ed25519:MX7Zvf0llZ+b//3nBJvfEffkgKxwr+fUIlzSp59uijvdP62AqT4rSFAO6CvHnWd0ANxEUxpU2fheShRRGalLCg==",
+      "actor_id": "human:vector",
+      "causal_parents": [],
+      "domain_id": "genesis:f4e7fed0ee4b010afbbd389a68ee7721dc62c6586a999b02049d4cbd1dec09ce",
+      "effects": [
+        {
+          "atomic_group": "",
+          "effect_type": "task.comment",
+          "payload": {
+            "contract_id": "task:v3:952e0dfff2340ca7c965a20b1744e93ceef295af6ec22073730e8200e8b0ecff",
+            "reply_to": "",
+            "text": "检查 café / café\nReply remains task-scoped."
+          }
+        }
+      ],
+      "idempotency_key": "comment-vector-1",
+      "key_id": "comment-vector-key",
+      "protocol_version": 1,
+      "signature_kind": "ed25519"
+    },
+    "expected_signing_utf8": "{\"actor_id\":\"human:vector\",\"causal_parents\":[],\"domain_id\":\"genesis:f4e7fed0ee4b010afbbd389a68ee7721dc62c6586a999b02049d4cbd1dec09ce\",\"effects\":[{\"atomic_group\":\"\",\"effect_type\":\"task.comment\",\"payload\":{\"contract_id\":\"task:v3:952e0dfff2340ca7c965a20b1744e93ceef295af6ec22073730e8200e8b0ecff\",\"reply_to\":\"\",\"text\":\"检查 café / café\\nReply remains task-scoped.\"}}],\"idempotency_key\":\"comment-vector-1\",\"key_id\":\"comment-vector-key\",\"protocol_version\":1,\"signature_kind\":\"ed25519\"}"
+  },
+  "comment_record": {
+    "id": "record:25c0d0fbe73eb31c48214d239bb5bf61aacad96f1091971776af4583c756920e",
+    "record_type": "task.commented",
+    "payload": {
+      "actor_id": "human:vector",
+      "candidate_id": "candidate:v1:8fa0f42f84744999272baf23cc432c53e44e845998bca081f78d57d79426feb4",
+      "contract_id": "task:v3:952e0dfff2340ca7c965a20b1744e93ceef295af6ec22073730e8200e8b0ecff",
+      "key_id": "comment-vector-key",
+      "reply_to": "",
+      "text": "检查 café / café\nReply remains task-scoped."
+    },
+    "causal_parents": [
+      "record:e0e82f8c9a55b1140658b7e3ea576035c73fae6a9e09088273855bcee67c127e"
+    ],
+    "schema_version": 1
+  }
+}

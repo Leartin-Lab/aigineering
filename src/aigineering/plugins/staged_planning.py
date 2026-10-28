@@ -15,6 +15,7 @@ from aigineering.core.ids import (
     contract_from_fields,
 )
 from aigineering.plugins.base import PluginProposal, PluginRequest
+from aigineering.plugins.planning_roles import without_planning_stage_labels
 from aigineering.protocol.effect_builders import contract_declaration_effect
 from aigineering.protocol.immutability import deep_thaw
 from aigineering.protocol.types import Contract
@@ -181,11 +182,18 @@ def _stage_contract(
     tool_scope: tuple[str, ...] = (),
 ) -> Contract:
     name = f"{parent.name or parent.id}.{mode}.{stage}.{invocation}"
-    labels = tuple(dict.fromkeys((*parent.labels, f"plugin:{mode}.{stage}")))
+    labels = tuple(
+        dict.fromkeys(
+            (*without_planning_stage_labels(parent.labels), f"plugin:{mode}.{stage}")
+        )
+    )
+    stage_description = {"mode": mode, **description}
     authority_templates = outputs if minting_authority is None else minting_authority
     fields = {
         "name": name,
-        "description": json.dumps(description, sort_keys=True, ensure_ascii=False),
+        "description": json.dumps(
+            stage_description, sort_keys=True, ensure_ascii=False
+        ),
         "inputs": inputs,
         "outputs": outputs,
         "activation": activation,

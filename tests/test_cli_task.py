@@ -140,7 +140,7 @@ def test_timed_out_task_wait_states_integrity_was_not_checked():
             ["task", "wait", contract_id, "--timeout", "0", "--json"],
         )
 
-        assert result.exit_code == 0, result.output
+        assert result.exit_code == 1, result.output
         payload = json.loads(result.output)
         assert payload["timed_out"] is True
         assert payload["integrity"]["status"] == "not_checked"
@@ -151,6 +151,26 @@ def test_run_once_executes_next_ready_task():
     runner = CliRunner()
     with runner.isolated_filesystem():
         contract_id = _seed_build_report_task(runner)
+        second = runner.invoke(
+            cli,
+            [
+                "task",
+                "create",
+                "--name",
+                "second_report",
+                "--input",
+                "data_file",
+                "--input",
+                "citation_db",
+                "--output",
+                "second_report_output",
+                "--activation",
+                "data_file AND citation_db",
+                "--json",
+            ],
+        )
+        assert second.exit_code == 0, second.output
+        second_contract_id = json.loads(second.output)["contract_id"]
 
         result = runner.invoke(cli, ["run", "--once", "--worker", "mock", "--json"])
 
@@ -172,6 +192,18 @@ def test_run_once_executes_next_ready_task():
         assert "claim.granted" in record_types
         assert "candidate.received" in record_types
         assert "claim.submitted" in record_types
+        grants = [
+            record.payload["contract_id"]
+            for _revision, record in store.scan_runtime_records(
+                record_type="claim.granted"
+            )
+        ]
+        assert len(grants) == 1
+        assert grants[0] in {contract_id, second_contract_id}
+        pending_contract = (
+            second_contract_id if grants[0] == contract_id else contract_id
+        )
+        assert store.get_claim(pending_contract) is None
 
 
 def test_run_once_idle_is_visible_and_nonzero():
@@ -574,7 +606,7 @@ def test_run_task_rejected_output_closes_failed_and_publishes_new_recovery():
                 "--mock-preset",
                 "write_report=wrong_output: nope",
                 "--wait-timeout",
-                "0",
+                "0.01",
                 "--json",
             ],
         )

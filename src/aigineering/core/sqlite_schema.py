@@ -196,6 +196,40 @@ CREATE TABLE IF NOT EXISTS runtime_records (
 )
 """
 
+DDL_CREATE_ALLOWANCE_CHECKPOINTS = """
+CREATE TABLE IF NOT EXISTS allowance_checkpoints (
+    contract_id TEXT PRIMARY KEY,
+    format_version INTEGER NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('valid', 'opaque')),
+    through_revision INTEGER NOT NULL,
+    basis_record_id TEXT NOT NULL,
+    grant_count TEXT,
+    granted_total TEXT,
+    reserved_total TEXT,
+    returned_in_total TEXT,
+    returned_out_total TEXT,
+    extinguished_total TEXT
+)
+"""
+
+DDL_CREATE_PUBLICATION_HEAD_MEMBERS = """
+CREATE TABLE IF NOT EXISTS publication_head_members (
+    head_record_id TEXT NOT NULL,
+    member_id TEXT NOT NULL,
+    PRIMARY KEY (head_record_id, member_id)
+)
+"""
+
+DDL_CREATE_PUBLICATION_INDEX_STATE = """
+CREATE TABLE IF NOT EXISTS publication_index_state (
+    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+    format_version INTEGER NOT NULL,
+    through_revision INTEGER NOT NULL,
+    basis_record_id TEXT NOT NULL,
+    has_opaque_heads INTEGER NOT NULL CHECK (has_opaque_heads IN (0, 1))
+)
+"""
+
 DDL_CREATE_ASSET_CONTENTS = """
 CREATE TABLE IF NOT EXISTS asset_contents (
     content_id TEXT PRIMARY KEY,
@@ -244,6 +278,15 @@ DDL_INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_declared_outputs_name ON contract_declared_outputs(output_name)",
     "CREATE INDEX IF NOT EXISTS idx_worker_registrations_enabled ON worker_registrations(enabled)",
     "CREATE INDEX IF NOT EXISTS idx_runtime_records_type_revision ON runtime_records(record_type, revision)",
+    "CREATE INDEX IF NOT EXISTS idx_publication_head_members_member ON publication_head_members(member_id, head_record_id)",
+    "CREATE INDEX IF NOT EXISTS idx_runtime_records_declaration_pair ON runtime_records(json_extract(payload_json, '$.candidate_id'), json_extract(payload_json, '$.contract.id')) WHERE record_type = 'contract.declared' AND json_type(payload_json, '$.candidate_id') = 'text' AND json_extract(payload_json, '$.candidate_id') <> '' AND json_type(payload_json, '$.contract') = 'object' AND json_type(payload_json, '$.contract.id') = 'text' AND json_extract(payload_json, '$.contract.id') <> ''",
+    "CREATE INDEX IF NOT EXISTS idx_runtime_records_committed_candidate ON runtime_records(json_extract(payload_json, '$.candidate_id')) WHERE record_type = 'candidate.committed'",
+    "CREATE INDEX IF NOT EXISTS idx_runtime_records_received_candidate ON runtime_records(json_extract(payload_json, '$.candidate_id')) WHERE record_type = 'candidate.received'",
+    "CREATE INDEX IF NOT EXISTS idx_runtime_records_allowance_granted_contract ON runtime_records(json_extract(payload_json, '$.contract_id')) WHERE record_type = 'allowance.granted'",
+    "CREATE INDEX IF NOT EXISTS idx_runtime_records_allowance_reserved_source ON runtime_records(json_extract(payload_json, '$.source_contract_id')) WHERE record_type = 'allowance.reserved'",
+    "CREATE INDEX IF NOT EXISTS idx_runtime_records_allowance_returned_source ON runtime_records(json_extract(payload_json, '$.source_contract_id')) WHERE record_type = 'allowance.returned'",
+    "CREATE INDEX IF NOT EXISTS idx_runtime_records_allowance_returned_from ON runtime_records(json_extract(payload_json, '$.from_contract_id')) WHERE record_type = 'allowance.returned'",
+    "CREATE INDEX IF NOT EXISTS idx_runtime_records_allowance_extinguished_contract ON runtime_records(json_extract(payload_json, '$.contract_id')) WHERE record_type = 'allowance.extinguished'",
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_runtime_records_one_genesis ON runtime_records(record_type) WHERE record_type = 'domain.genesis'",
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_runtime_records_one_terminal_per_contract ON runtime_records(json_extract(payload_json, '$.contract_id')) WHERE record_type = 'lifecycle.terminal'",
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_runtime_records_one_actor_key ON runtime_records(json_extract(payload_json, '$.actor_id'), json_extract(payload_json, '$.key_id')) WHERE record_type = 'actor.authorized'",
@@ -266,6 +309,9 @@ TABLE_DDL = (
     DDL_CREATE_RUNTIME_LIFECYCLE,
     DDL_CREATE_WORKER_REGISTRATIONS,
     DDL_CREATE_RUNTIME_RECORDS,
+    DDL_CREATE_ALLOWANCE_CHECKPOINTS,
+    DDL_CREATE_PUBLICATION_HEAD_MEMBERS,
+    DDL_CREATE_PUBLICATION_INDEX_STATE,
     DDL_CREATE_ASSET_CONTENTS,
     DDL_CREATE_ASSET_DEFINITIONS,
     DDL_CREATE_DEFINITION_CONTENT_ASSERTIONS,

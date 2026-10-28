@@ -1,0 +1,30 @@
+{
+  "cases": [
+    {
+      "case_file": "celsius-positive-drift.case.json",
+      "case_id": "celsius-positive-drift",
+      "case_sha256": "acfb844815c9d7c159442f2ccf1e3868f0ed33de5e85f0edd5e9caf441f26be8",
+      "standard_file": "celsius-positive-drift.standard.json",
+      "standard_id": "synthetic-temperature-calibration-v1-equal-200mC",
+      "standard_sha256": "f98345053e9e8d6375c12d5369505202791398ef9548f228068930851f968ee4"
+    },
+    {
+      "case_file": "mix-three-point.case.json",
+      "case_id": "mix-three-point",
+      "case_sha256": "1c579deae48082dc6517584a7c801eeb268dc54d01ee8e3b503f9c469ab00825",
+      "standard_file": "mix-three-point.standard.json",
+      "standard_id": "synthetic-temperature-calibration-v1-equal-200mC",
+      "standard_sha256": "f98345053e9e8d6375c12d5369505202791398ef9548f228068930851f968ee4"
+    },
+    {
+      "case_file": "negative-zero.case.json",
+      "case_id": "negative-zero",
+      "case_sha256": "d6fdac5b4f685fbfe8a5eb5e5bce80e9bde3ac65af6ef9d6f08f56fc9cbf5e6b",
+      "standard_file": "negative-zero.standard.json",
+      "standard_id": "synthetic-temperature-calibration-v1-equal-200mC",
+      "standard_sha256": "f98345053e9e8d6375c12d5369505202791398ef9548f228068930851f968ee4"
+    }
+  ],
+  "partition": "train",
+  "schema": "thermal-calibration-fixture-manifest-v1"
+}

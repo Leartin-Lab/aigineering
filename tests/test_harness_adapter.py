@@ -96,6 +96,7 @@ def _claim(store, contract, adapter):
         worker_id=adapter.worker_id,
         contract_id=contract.id,
         claim_runtime_records=command.runtime_records,
+        claim_candidate=command.candidate,
     )
     assert claimed is not None
     return claimed

@@ -8,6 +8,11 @@ from aigineering.core.trace import create_entry, trace_record_from_entry
 from aigineering.protocol.candidate import CandidateProposal, candidate_usage_metadata
 from aigineering.protocol.runtime_record import RuntimeRecord, create_runtime_record
 from aigineering.protocol.types import Asset, Contract, TraceEntry
+from aigineering.core.claim_assignments import (
+    AssignmentIntent,
+    EffectFactOwner,
+    SuccessorAssignmentWitness,
+)
 
 
 @dataclass(frozen=True)
@@ -20,6 +25,9 @@ class CommitmentDecision:
     trace_entries: tuple[TraceEntry, ...]
     contracts: tuple[Contract, ...] = ()
     assets: tuple[Asset, ...] = ()
+    effect_fact_owners: tuple[EffectFactOwner, ...] = ()
+    assignment_intents: tuple[AssignmentIntent, ...] = ()
+    successor_assignment_witnesses: tuple[SuccessorAssignmentWitness, ...] = ()
 
     @property
     def contract(self) -> Contract | None:

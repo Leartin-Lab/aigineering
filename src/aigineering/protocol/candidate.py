@@ -32,9 +32,16 @@ def _validate_signed_json(value: Any, *, path: str) -> None:
             raise ValueError(f"{path} integer exceeds the interoperable JSON range")
         return
     if isinstance(value, Mapping):
+        normalized_keys: set[str] = set()
         for key, item in value.items():
             if not isinstance(key, str):
                 raise ValueError(f"{path} object keys must be strings")
+            normalized_key = unicodedata.normalize("NFC", key)
+            if normalized_key != key:
+                raise ValueError(f"{path} object keys must already be NFC")
+            if normalized_key in normalized_keys:
+                raise ValueError(f"{path} object keys must be unique after NFC")
+            normalized_keys.add(normalized_key)
             _validate_signed_json(item, path=f"{path}.{key}")
         return
     if isinstance(value, (list, tuple)):
@@ -48,6 +55,14 @@ def _validate_signed_json(value: Any, *, path: str) -> None:
     raise ValueError(
         f"{path} contains unsupported signed JSON value {type(value).__name__}"
     )
+
+
+def _validate_causal_parents(value: Any, *, path: str) -> tuple[str, ...]:
+    if not isinstance(value, (list, tuple)):
+        raise ValueError(f"{path} must be an array of non-empty strings")
+    if any(not isinstance(parent, str) or not parent for parent in value):
+        raise ValueError(f"{path} must contain only non-empty strings")
+    return tuple(value)
 
 
 @dataclass(frozen=True)
@@ -252,7 +267,13 @@ class CandidateProposal:
             )
         _validate_signed_json(self.metadata, path="CandidateProposal.metadata")
         object.__setattr__(self, "effects", tuple(self.effects))
-        object.__setattr__(self, "causal_parents", tuple(self.causal_parents))
+        object.__setattr__(
+            self,
+            "causal_parents",
+            _validate_causal_parents(
+                self.causal_parents, path="CandidateProposal.causal_parents"
+            ),
+        )
         object.__setattr__(self, "metadata", deep_freeze(dict(self.metadata)))
 
 
@@ -335,7 +356,7 @@ def candidate_proposal_from_dict(data: Mapping[str, Any]) -> CandidateProposal:
         signature_kind=str(data.get("signature_kind", "")),
         signature=str(data.get("signature", "")),
         effects=effects,
-        causal_parents=tuple(data.get("causal_parents", ())),
+        causal_parents=data.get("causal_parents", ()),
         idempotency_key=str(data.get("idempotency_key", "")),
         claim_binding=claim_binding,
         metadata=data.get("metadata", {}),
@@ -363,7 +384,7 @@ def create_candidate_proposal(
         signature_kind=signer.kind,
         signature="pending",
         effects=tuple(effects),
-        causal_parents=tuple(causal_parents),
+        causal_parents=causal_parents,
         idempotency_key=idempotency_key,
         claim_binding=claim_binding,
         metadata=metadata or {},

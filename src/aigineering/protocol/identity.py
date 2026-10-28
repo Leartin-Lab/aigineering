@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import unicodedata
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Optional
 
@@ -34,6 +35,7 @@ __all__ = [
     "hash_contract_v3",
     "hash_contract_v4",
     "hash_contract_v5",
+    "hash_contract_v6",
     "hash_event",
     "hash_lineage",
     "hash_retry",
@@ -149,7 +151,6 @@ def hash_contract_v2(
     the identity computation.  Two identical child definitions under
     different parents will produce different contract IDs.
 
-    This is required by ADR-002 and the 050 runtime boundary plan.
     Legacy ``hash_contract`` is preserved for backward compatibility.
     """
     fields: dict[str, object] = {
@@ -273,11 +274,36 @@ def hash_contract_v5(
     return f"task:v5:{compute_content_hash(canonical_json(values))}"
 
 
+def hash_contract_v6(
+    *,
+    context_asset_ids: list[str] | tuple[str, ...] = (),
+    delegation_capabilities: list[str] | tuple[str, ...] = (),
+    delegation_pools: list[str] | tuple[str, ...] = (),
+    **fields: Any,
+) -> str:
+    """Contract identity that marks support for exact input Asset bindings."""
+    v5_identity = hash_contract_v5(
+        context_asset_ids=context_asset_ids,
+        delegation_capabilities=delegation_capabilities,
+        delegation_pools=delegation_pools,
+        **fields,
+    )
+    return "task:v6:" + v5_identity.removeprefix("task:v5:")
+
+
 def hash_contract_current(**fields: Any) -> str:
     """Select the newest identity required by the supplied Contract fields."""
     context_asset_ids = fields.pop("context_asset_ids", ())
     delegation_capabilities = fields.pop("delegation_capabilities", ())
     delegation_pools = fields.pop("delegation_pools", ())
+    policy = fields.get("sensitive_input_policy")
+    if isinstance(policy, Mapping) and "input_asset_bindings" in policy:
+        return hash_contract_v6(
+            **fields,
+            context_asset_ids=context_asset_ids,
+            delegation_capabilities=delegation_capabilities,
+            delegation_pools=delegation_pools,
+        )
     if delegation_capabilities or delegation_pools:
         return hash_contract_v5(
             **fields,
@@ -346,6 +372,48 @@ def contract_identity_v3(contract) -> str:
 
 def validate_contract_identity(contract) -> None:
     """Fail closed when a v3 ID does not bind its complete effective entity."""
+    policy = (
+        deep_thaw(contract.sensitive_input_policy)
+        if contract.sensitive_input_policy is not None
+        else None
+    )
+    has_input_bindings = isinstance(policy, dict) and "input_asset_bindings" in policy
+    if contract.id.startswith("task:v6:"):
+        if not has_input_bindings:
+            raise ValueError("task:v6 Contract requires input_asset_bindings marker")
+        normalized_authority = [
+            value.replace(contract.id, CONTRACT_SELF_REFERENCE)
+            for value in contract.minting_authority
+        ]
+        expected = hash_contract_v6(
+            name=contract.name,
+            description=contract.description,
+            inputs=contract.inputs,
+            outputs=contract.outputs,
+            activation=contract.activation,
+            budget=contract.budget,
+            tool_scope=contract.tool_scope,
+            labels=contract.labels,
+            origin=contract.origin,
+            parent_id=contract.parent_id,
+            worker_capabilities=contract.worker_capabilities,
+            worker_pools=contract.worker_pools,
+            delegation_capabilities=contract.delegation_capabilities,
+            delegation_pools=contract.delegation_pools,
+            minting_authority=normalized_authority,
+            sensitive_input_policy=policy,
+            acceptance_policy=contract.acceptance_policy,
+            context_asset_ids=contract.context_asset_ids,
+        )
+        if contract.id != expected:
+            raise ValueError(
+                f"Contract '{contract.id}' does not match canonical v6 identity"
+            )
+        return
+    if has_input_bindings:
+        raise ValueError(
+            "Contracts with input_asset_bindings require a task:v6 identity"
+        )
     if contract.id.startswith("task:v5:"):
         normalized_authority = [
             value.replace(contract.id, CONTRACT_SELF_REFERENCE)

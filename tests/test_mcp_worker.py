@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import json
 
+import pytest
 
 from aigineering.agent.mcp_executor import MCPExecutor
+from aigineering.agent.mcp_worker import MCPWorker
+from aigineering.agent.worker import WorkerExecutionError
 from aigineering.core.capability_descriptors import create_mcp_descriptor
 from aigineering.core.provenance import verify_asset_seal
 from aigineering.core.store import MemoryStore
 from aigineering.protocol.types import Asset, Candidate
+from aigineering.protocol.types import Contract
 
 
 # ---------------------------------------------------------------------------
@@ -256,34 +260,58 @@ def test_mcp_worker_multi_server():
     assert calls["database"][0] == ("database.query", {"sql": "SELECT 1"})
 
 
-def test_mcp_worker_handles_error_unknown_server():
-    """MCPExecutor.invoke() returns an error Candidate when the server is unknown."""
+def test_mcp_worker_raises_safe_error_when_server_is_unknown():
     worker = MCPExecutor(mcp_servers={})
-    candidate = worker.invoke("nonexistent.tool", {}, "contract_1")
-
-    assert isinstance(candidate, Candidate)
-    obs = json.loads(candidate.raw_output)
-    assert obs["ok"] is False
-    assert obs["tool"] == "nonexistent.tool"
-    assert obs["result"] == ""
-    assert "unknown mcp server" in obs["error"]
+    with pytest.raises(WorkerExecutionError) as error:
+        worker.invoke("nonexistent.tool", {}, "contract_1")
+    assert error.value.code == "mcp_server_unavailable"
 
 
-def test_mcp_worker_handles_error_tool_failure():
-    """MCPExecutor.invoke() returns an error Candidate when the server raises."""
+def test_mcp_worker_raises_safe_error_on_callable_failure():
+    """Callable exceptions remain local causes and do not become observations."""
 
     def failing_server(_tool_name: str, _args: dict) -> str:
-        raise RuntimeError("connection refused")
+        raise KeyError("secret callable detail")
 
     worker = MCPExecutor(mcp_servers={"broken": failing_server})
-    candidate = worker.invoke("broken.ping", {}, "contract_1")
+    with pytest.raises(WorkerExecutionError) as error:
+        worker.invoke("broken.ping", {}, "contract_1")
+    assert error.value.code == "mcp_call_failed"
+    assert str(error.value) == "MCP call failed."
+    assert isinstance(error.value.__cause__, KeyError)
 
-    assert isinstance(candidate, Candidate)
-    obs = json.loads(candidate.raw_output)
-    assert obs["ok"] is False
-    assert obs["tool"] == "broken.ping"
-    assert obs["result"] == ""
-    assert obs["error"] == "connection refused"
+
+def test_mcp_worker_rejects_non_object_arguments_before_callable():
+    called = False
+
+    def server(_tool_name: str, _args: dict) -> str:
+        nonlocal called
+        called = True
+        return "unexpected"
+
+    descriptor = create_mcp_descriptor(
+        name="search",
+        source_uri="mcp://search",
+        trust_tier="verified",
+        tool_name="search.query",
+    )
+    contract = Contract(
+        id="contract:bad-mcp-arguments",
+        description=json.dumps(
+            {
+                "method": "tool",
+                "payload": {"name": "mcp:search.query", "args": ["bad"]},
+            }
+        ),
+        outputs=("_mcp_obs_contract:bad-mcp-arguments",),
+        tool_scope=("mcp:search.query",),
+    )
+
+    with pytest.raises(WorkerExecutionError) as error:
+        MCPWorker({"search": server}).invoke(contract, [descriptor])
+
+    assert error.value.code == "mcp_arguments_invalid"
+    assert called is False
 
 
 def test_mcp_worker_candidate_not_committed_directly():
@@ -377,3 +405,21 @@ def test_mcp_worker_arguments_preserved():
     assert len(received) == 1
     assert received[0][0] == "rec.action"
     assert received[0][1] == {"key1": "val1", "key2": 42, "nested": {"a": 1}}
+
+
+def test_mcp_handler_type_error_is_call_failure_and_non_string_is_result_failure():
+    def type_error(_tool, _args):
+        raise TypeError("private MCP handler detail")
+
+    with pytest.raises(WorkerExecutionError) as call_error:
+        MCPExecutor({"search": type_error}).invoke("search.query", {}, "contract_1")
+    assert call_error.value.code == "mcp_call_failed"
+    assert str(call_error.value) == "MCP call failed."
+    assert "private MCP handler detail" not in str(call_error.value)
+
+    with pytest.raises(WorkerExecutionError) as result_error:
+        MCPExecutor({"search": lambda _tool, _args: {"bad": "shape"}}).invoke(
+            "search.query", {}, "contract_1"
+        )
+    assert result_error.value.code == "mcp_result_invalid"
+    assert str(result_error.value) == "MCP server returned an invalid result."

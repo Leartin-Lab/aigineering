@@ -1,0 +1,54 @@
+{
+  "format": "aigineering-signed-json-boundary-v1",
+  "valid": {
+    "parents": ["record:alpha", "record:beta"],
+    "object": {"café": {"nested": ["café", 12, true, null]}}
+  },
+  "candidate_vector": {
+    "candidate": {
+      "id": "candidate:v1:42fd47d86307370b1f9f0cd25ceb6887112b2940cf323b9d0afd9ab4024223ed",
+      "signature": "ed25519:mNVm7zOD9PYuBhX4m5eiQ3YTi0JeeN4hZn90SpGCxqkknQBP+yftMhH1AerNchpsph9fi9euRrABYkxbRwZVDw==",
+      "actor_id": "worker:signed-json-boundary",
+      "causal_parents": ["record:alpha", "record:beta"],
+      "domain_id": "genesis:signed-json-boundary",
+      "effects": [
+        {
+          "atomic_group": "",
+          "effect_type": "test.vector",
+          "payload": {
+            "café": {"nested": ["café", 12, true, null]}
+          }
+        }
+      ],
+      "idempotency_key": "candidate-boundary-vector-v1",
+      "key_id": "boundary-vector-key",
+      "protocol_version": 1,
+      "signature_kind": "ed25519"
+    },
+    "expected_signing_utf8": "{\"actor_id\":\"worker:signed-json-boundary\",\"causal_parents\":[\"record:alpha\",\"record:beta\"],\"domain_id\":\"genesis:signed-json-boundary\",\"effects\":[{\"atomic_group\":\"\",\"effect_type\":\"test.vector\",\"payload\":{\"café\":{\"nested\":[\"café\",12,true,null]}}}],\"idempotency_key\":\"candidate-boundary-vector-v1\",\"key_id\":\"boundary-vector-key\",\"protocol_version\":1,\"signature_kind\":\"ed25519\"}",
+    "expected_id": "candidate:v1:42fd47d86307370b1f9f0cd25ceb6887112b2940cf323b9d0afd9ab4024223ed",
+    "expected_signature": "ed25519:mNVm7zOD9PYuBhX4m5eiQ3YTi0JeeN4hZn90SpGCxqkknQBP+yftMhH1AerNchpsph9fi9euRrABYkxbRwZVDw==",
+    "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+    "test_key_vector": "conformance/v0.5.0/protocol-vectors.json#ed25519_test_key"
+  },
+  "invalid_parents": [
+    {"name": "number", "value": [1]},
+    {"name": "boolean", "value": [true]},
+    {"name": "null", "value": [null]},
+    {"name": "empty", "value": [""]},
+    {"name": "mapping", "value": [{"parent": "record:one"}]},
+    {"name": "unsafe-integer", "value": [9007199254740992]},
+    {"name": "non-finite-raw-json", "raw_json": "[NaN]"}
+  ],
+  "invalid_parent_containers": ["scalar-string", "bytes", "mapping", "integer"],
+  "invalid_object_keys": [
+    {"name": "non-nfc", "entries": [["café", "value"]]},
+    {"name": "normalized-collision", "entries": [["café", 1], ["café", 2]]},
+    {"name": "nested-non-nfc", "entries": [["outer", {"entries": [["café", 1]]}]]}
+  ],
+  "invalid_signed_values": [
+    {"name": "unsafe-integer", "value": 9007199254740992},
+    {"name": "float", "value": 12.5},
+    {"name": "non-finite-raw-json", "raw_json": "NaN"}
+  ]
+}

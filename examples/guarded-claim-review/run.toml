@@ -1,0 +1,38 @@
+[run]
+fleet = "workers.toml"
+
+[[inputs]]
+name = "research_result"
+path = "research-result.json"
+
+[[inputs]]
+name = "draft_report"
+path = "draft-report.json"
+
+[[inputs]]
+name = "review_policy"
+path = "review-policy.json"
+
+[[inputs]]
+name = "review_instructions"
+path = "review-instructions.txt"
+
+[task]
+name = "guarded_claim_review"
+description_file = "task-description.txt"
+inputs = ["research_result", "draft_report", "review_policy", "review_instructions"]
+activation = "research_result AND draft_report AND review_policy"
+labels = ["research_result", "draft_report", "review_policy", "review_instructions"]
+outputs = ["review_report"]
+budget = 30
+worker_capabilities = ["planning"]
+worker_pools = ["planning"]
+delegation_capabilities = ["claim.review.assess", "claim.review.revise", "claim.review.gate", "claim.review.semantic", "claim.review.accept"]
+delegation_pools = ["validation", "reasoning", "verification"]
+acceptance_evidence_inputs = ["research_result", "draft_report", "review_policy"]
+
+[task.acceptance_policy]
+mode = "independent"
+policy_version = "claim-review-closure-v1"
+required_attestations = 1
+verifier_capabilities = ["claim.review.accept"]

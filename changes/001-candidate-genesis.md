@@ -54,5 +54,4 @@ in the wheel or sdist.
 ## Closure
 
 The change is complete in v0.5.0. Current runtime truth is documented in
-`DESIGN.md`; release evidence is documented in
-`reports/050-post-review-boundary-hardening-2026-07-19.md`.
+`DESIGN.md`; this historical change is not qualification of a later artifact.
