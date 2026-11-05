@@ -124,7 +124,7 @@ class TestCLIRetryBypass:
         )
 
         # ── Functional test: CLI retry still creates the retry contract ──
-        from aigineering.core.methods import retry_contract
+        from aigineering.plugins.task_semantics import retry_contract
         from aigineering.core.control_plane import build_control_plane_contract
         from aigineering.protocol.identity import contract_from_fields
         from aigineering.task_publication import publish_task_contract
@@ -201,7 +201,7 @@ class TestAuthorityClamp:
         Gate: G6 (Deny-By-Default Capability Containment)
         """
         # Behavior: rejects child (action="rejected"), child skipped entirely
-        from aigineering.core.methods import contracts_from_plan_asset
+        from aigineering.plugins.task_semantics import contracts_from_plan_asset
 
         parent = Contract(
             id="parent-scope",
@@ -257,7 +257,7 @@ class TestAuthorityClamp:
         """
         # Budget containment: child is accepted with reduced budget, but the trace
         # MUST record requested, effective, and remaining budget fields.
-        from aigineering.core.methods import contracts_from_plan_asset
+        from aigineering.plugins.task_semantics import contracts_from_plan_asset
 
         parent = Contract(
             id="parent-budget",
@@ -939,7 +939,7 @@ class TestPlanContainment:
 
         Gate: G6
         """
-        from aigineering.core.methods import contracts_from_plan_asset
+        from aigineering.plugins.task_semantics import contracts_from_plan_asset
         from aigineering.protocol.types import Asset, Contract
 
         parent = Contract(
@@ -975,7 +975,7 @@ class TestPlanContainment:
 
         Gate: G6
         """
-        from aigineering.core.methods import contracts_from_plan_asset
+        from aigineering.plugins.task_semantics import contracts_from_plan_asset
         from aigineering.protocol.types import Asset, Contract
 
         parent = Contract(

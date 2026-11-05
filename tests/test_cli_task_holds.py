@@ -515,7 +515,6 @@ def test_claim_wins_after_frozen_projection_relays_durable_rejection(
     from aigineering.core.projection_context import load_effect_projection_context
     from aigineering.runtime_services import RedisSyncPending
 
-    import aigineering.core.commit_snapshot as commit_snapshot
     import aigineering.core.commitment as commitment
 
     store = SQLiteStore(database)
@@ -565,7 +564,7 @@ def test_claim_wins_after_frozen_projection_relays_durable_rejection(
 
     monkeypatch.setattr(commitment, "reduce_candidate", observe_reduce)
     monkeypatch.setattr(
-        commit_snapshot,
+        commitment.context_inputs,
         "load_effect_projection_context",
         lambda *_args, **_kwargs: stale_context,
     )

@@ -25,14 +25,6 @@ _FORBIDDEN_PREFIXES = (
     "aigineering.worker_hosting",
 )
 
-# These are source-compatibility shims with deliberately exact owners and
-# targets.  They are kept separate from the forbidden list so a new core
-# module cannot inherit an accidental exemption.
-_ALLOWED_COMPATIBILITY_IMPORTS = {
-    "methods.py": frozenset({"aigineering.plugins.task_semantics"}),
-    "provider_config.py": frozenset({"aigineering.fleet_config"}),
-}
-
 
 def _resolve_from_import(module: str, node: ast.ImportFrom, imported: str) -> str:
     """Resolve an ``ImportFrom`` node to the imported qualified name."""
@@ -102,7 +94,7 @@ def _is_forbidden(import_name: str) -> bool:
                 )
                 """
             ),
-            "aigineering.core.methods",
+            "aigineering.core.runtime_projection",
             {"aigineering.plugins.task_semantics"},
         ),
         (
@@ -128,20 +120,14 @@ def test_collect_imports_is_ast_based_and_resolves_aliases_and_relatives(
     assert collect_imports(source, module=module) == frozenset(expected)
 
 
-def test_core_dependency_boundaries_have_only_documented_compatibility_shims() -> None:
+def test_core_dependency_boundaries_have_no_compatibility_shim_exemptions() -> None:
     violations: list[str] = []
     for path in sorted(CORE_ROOT.rglob("*.py")):
         relative = path.relative_to(CORE_ROOT)
         module = "aigineering.core." + ".".join(relative.with_suffix("").parts)
         imports = collect_imports(path.read_text(encoding="utf-8"), module=module)
-        allowed = _ALLOWED_COMPATIBILITY_IMPORTS.get(relative.as_posix(), frozenset())
         for imported in sorted(imports):
             if not _is_forbidden(imported):
-                continue
-            if any(
-                imported == target or imported.startswith(f"{target}.")
-                for target in allowed
-            ):
                 continue
             violations.append(f"{path.relative_to(ROOT)} imports {imported}")
 

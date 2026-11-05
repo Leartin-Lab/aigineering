@@ -1859,7 +1859,13 @@ def test_recovery_source_binding_capture_races_with_second_sqlite_writer(
 
     def source_binding(*args, **kwargs):
         if kwargs.get("query_context") is not None:
-            source_store_ids.append((args[0], kwargs["query_context"]))
+            from aigineering.task_view_query import TaskViewQueryMismatch
+
+            query = kwargs["query_context"]
+            query.require_match(args[0])
+            with pytest.raises(TaskViewQueryMismatch, match="different Store"):
+                query.require_match(env.store)
+            source_store_ids.append((args[0], query))
         return original_source_binding(*args, **kwargs)
 
     def ancestor_bindings(*args, **kwargs):
@@ -1900,7 +1906,7 @@ def test_recovery_source_binding_capture_races_with_second_sqlite_writer(
         assert len(source_store_ids) == len(ancestor_store_ids) == 1
         assert source_store_ids[0] == (proof_stores[0], proof_queries[0])
         assert ancestor_store_ids[0] == (proof_stores[0], proof_queries[0])
-        assert proof_queries[0].source_store is proof_stores[0]
+        assert not hasattr(proof_queries[0], "source_store")
         assert proof_queries[0].revision < env.store.get_runtime_revision()
 
         failure = next(

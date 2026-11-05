@@ -129,17 +129,9 @@ def test_recovery_source_proof_stays_read_only_and_publishes_through_runtime():
         for node in query_context.body
         if isinstance(node, ast.FunctionDef) and node.name == "require_match"
     )
-    comparisons = [
-        node for node in ast.walk(require_match) if isinstance(node, ast.Compare)
-    ]
-    assert any(
-        isinstance(node.left, ast.Name)
-        and node.left.id == "store"
-        and any(
-            isinstance(comparator, ast.Attribute) and comparator.attr == "source_store"
-            for comparator in node.comparators
-        )
-        for node in comparisons
+    assert not any(
+        isinstance(node, ast.ClassDef) and node.name == "TaskViewReadFacade"
+        for node in query_tree.body
     )
     assert any(
         isinstance(node, ast.Call)

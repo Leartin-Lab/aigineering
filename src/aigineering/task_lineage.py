@@ -272,6 +272,7 @@ def task_lineage(store, selected_contract_id: str) -> dict:
                     schedules=schedules_by_contract.get(source_id, ()),
                     grants=grants_by_contract.get(source_id, ()),
                     query=query,
+                    store=store,
                     by_id=by_id,
                     proof_cache=claim_proof_cache,
                     observed_at=observation_time,
@@ -364,6 +365,7 @@ def task_lineage(store, selected_contract_id: str) -> dict:
                     schedules=schedules_by_contract.get(source_id, ()),
                     grants=grants_by_contract.get(source_id, ()),
                     query=query,
+                    store=store,
                     by_id=by_id,
                     proof_cache=claim_proof_cache,
                     observed_at=observation_time,
@@ -660,6 +662,7 @@ def task_lineage(store, selected_contract_id: str) -> dict:
         component_ids,
         query,
         component_edges,
+        store=store,
         proof_cache=claim_proof_cache,
         observed_at=observation_time,
     )
@@ -718,7 +721,7 @@ def _issue_touches_component(issue, component):
     return not references or any(reference in component for reference in references)
 
 
-def _source_diagnostics(contract_ids, query, edges, *, proof_cache, observed_at):
+def _source_diagnostics(contract_ids, query, edges, *, store, proof_cache, observed_at):
     result = []
     issues = []
     recovery_targets = {
@@ -755,6 +758,7 @@ def _source_diagnostics(contract_ids, query, edges, *, proof_cache, observed_at)
                 schedules=schedule_rows,
                 grants=grants,
                 query=query,
+                store=store,
                 by_id=by_id,
                 proof_cache=proof_cache,
                 observed_at=observed_at,
@@ -815,6 +819,7 @@ def _source_diagnostics(contract_ids, query, edges, *, proof_cache, observed_at)
                 contract_id,
                 unavailable_rows,
                 query=query,
+                store=store,
                 by_id=by_id,
                 proof_cache=proof_cache,
                 observed_at=observed_at,
@@ -833,7 +838,7 @@ def _source_diagnostics(contract_ids, query, edges, *, proof_cache, observed_at)
                 "relation_type": entry.relation_type,
                 "relation_target": entry.relation_target,
             }
-            for entry in query.read_store.get_by_contract(contract_id)
+            for entry in query.get_by_contract(contract_id)
             if entry.relation_target in recovery_targets
             and entry.event_type
             in {"recovery_scheduled", "method_recovery_scheduled", "failed"}
@@ -850,7 +855,7 @@ def _source_diagnostics(contract_ids, query, edges, *, proof_cache, observed_at)
             payload = grant.payload
             try:
                 binding = _task_invocation_failure_binding(
-                    query.source_store,
+                    store,
                     contract_id,
                     payload.get("claim_id"),
                     payload.get("package_id"),
@@ -877,6 +882,7 @@ def _verified_source_schedules(
     schedules,
     grants,
     query,
+    store,
     by_id,
     proof_cache,
     observed_at,
@@ -967,7 +973,7 @@ def _verified_source_schedules(
                 continue
             try:
                 binding = task_recovery_source_binding(
-                    query.source_store,
+                    store,
                     source_id,
                     grant.payload.get("claim_id"),
                     source_record_id,
@@ -986,7 +992,7 @@ def _verified_source_schedules(
         else:
             try:
                 binding = task_recovery_source_binding(
-                    query.source_store,
+                    store,
                     source_id,
                     claim_id,
                     source_record_id,
@@ -1010,7 +1016,7 @@ def _verified_source_schedules(
 
 
 def _verified_unavailable_observations(
-    source_id, rows, *, query, by_id, proof_cache, observed_at
+    source_id, rows, *, query, store, by_id, proof_cache, observed_at
 ):
     """Expose claim-proven unavailable outcomes as observations, never edges."""
     source_shapes = {
@@ -1077,7 +1083,7 @@ def _verified_unavailable_observations(
             continue
         try:
             binding = task_recovery_source_binding(
-                query.source_store,
+                store,
                 source_id,
                 claim_id,
                 source_record_id,
@@ -1103,11 +1109,7 @@ def _verified_unavailable_observations(
         else:
             observation["reason"] = reason
         target_id = payload.get("recovery_contract_id")
-        target = (
-            query.read_store.get_contract(target_id)
-            if isinstance(target_id, str)
-            else None
-        )
+        target = query.get_contract(target_id) if isinstance(target_id, str) else None
         if target is not None:
             observation["reported_recovery_contract_id"] = target.id
             observation["target_verification"] = "unverified_observation"

@@ -5,16 +5,21 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def test_allowance_returns_are_generic_consequences_and_writer_validated():
+def test_causal_allowance_is_the_single_generic_conservation_owner():
     allowance = (ROOT / "src/aigineering/core/causal_allowance.py").read_text()
-    returns = (ROOT / "src/aigineering/core/allowance_returns.py").read_text()
+    retired_returns = ROOT / "src/aigineering/core/allowance_returns.py"
     projection = (ROOT / "src/aigineering/core/effect_projection.py").read_text()
     store = (ROOT / "src/aigineering/core/sqlite_store.py").read_text()
     migration = (ROOT / "src/aigineering/core/sqlite_migrations.py").read_text()
 
-    assert "def project_causal_allowance_returns(" in returns
-    assert "def validate_causal_allowance_returns(" in returns
-    assert "from aigineering.plugins" not in allowance + returns + projection + store
+    assert not retired_returns.exists()
+    assert "def project_causal_allowance_returns(" in allowance
+    assert "def validate_causal_allowance_returns(" in allowance
+    assert "def validate_allowance_grants(" in allowance
+    assert "from aigineering.plugins" not in allowance + projection + store
+    assert (
+        "from aigineering.core.allowance_returns" not in allowance + projection + store
+    )
     assert "validate_causal_allowance_returns(" in projection
     assert projection.index("validate_causal_allowance_returns(") < projection.rindex(
         "project_contract_allowance_records("
@@ -27,7 +32,6 @@ def test_allowance_returns_are_generic_consequences_and_writer_validated():
         "allowance.extinguished",
     ):
         assert f'"{record_type}"' in store
-    assert "validate_allowance_grants(" in returns
     assert "validate_allowance_grants(" in allowance
     assert "require_committed_head=True" in allowance
     assert "CURRENT_SCHEMA_VERSION = 21" in migration
@@ -60,9 +64,22 @@ def test_only_reviewed_handoff_feature_requests_new_return_consequences():
             ):
                 constructors.add(path.relative_to(ROOT).as_posix())
     assert callers == {"src/aigineering/plugins/handoff.py"}
-    assert constructors == {"src/aigineering/core/allowance_returns.py"}
+    assert constructors == {"src/aigineering/core/causal_allowance.py"}
     core = "\n".join(
         path.read_text() for path in (ROOT / "src/aigineering/core").glob("*.py")
     )
     assert "task.handoff" not in core
     assert "task.handed_off" not in core
+
+
+def test_only_canonical_allowance_owner_defines_return_semantics():
+    owner = (ROOT / "src/aigineering/core/causal_allowance.py").read_text()
+    assert owner.count("def _fold_raw_allowance_totals(") == 1
+    assert owner.count("def _validate_candidate_head(") == 1
+    assert owner.count("def _validate_funding_edge(") == 1
+    assert owner.count("def _is_canonical_root_allowance_grant(") == 1
+    attachments = (ROOT / "src/aigineering/plugins/task_attachments.py").read_text()
+    assert (
+        "from aigineering.core.causal_allowance import validate_allowance_grants"
+        in attachments
+    )

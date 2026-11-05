@@ -1,6 +1,6 @@
 # Roadmap
 
-The current source is **v0.5.14**, scoped to bounded local single-machine CLI
+The current source is **v0.5.15.dev0**, scoped to bounded local single-machine CLI
 workflows. Version metadata does not establish delivery qualification; claims
 depend on evidence for the applicable case and release scope. See
 [current support](docs/reference/development-status.md).

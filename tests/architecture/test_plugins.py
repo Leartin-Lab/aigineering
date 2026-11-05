@@ -21,7 +21,7 @@ from aigineering.core.ids import (
 from aigineering.core.signing import Ed25519Signer
 from aigineering.core.store import MemoryStore
 from aigineering.core.trace import MemoryTraceStore
-from aigineering.core.methods import method_contract
+from aigineering.plugins.task_semantics import method_contract
 from aigineering.plugins import (
     ContinuationTaskPlugin,
     PlanningExpansionPlugin,

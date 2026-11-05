@@ -1,23 +1,26 @@
-"""Tests for StoreProtocol implementations — parametrized across MemoryStore and JsonLStore."""
+"""Tests for StoreProtocol implementations across reference and durable Stores."""
 
 import pytest
 
 from aigineering.core.authority import ReservedNamespaceError
 from aigineering.core.provenance import sign_asset
 from aigineering.core.record_conflict import ImmutableRecordConflict
-from aigineering.core.store import JsonLStore, MemoryStore
+from aigineering.core.sqlite_store import SQLiteStore
+from aigineering.core.store import MemoryStore
 from aigineering.protocol.types import Asset, Contract
 
 
-@pytest.fixture(params=["memory", "jsonl"])
+@pytest.fixture(params=["memory", "sqlite"])
 def store(request, tmp_path):
-    """Parametrized: runs each test on both Memory and JSONL stores."""
+    """Run Store behavior against the reference adapter and SQLite."""
     if request.param == "memory":
-        return MemoryStore()
+        yield MemoryStore()
     else:
-        return JsonLStore(
-            str(tmp_path / "assets.jsonl"), str(tmp_path / "contracts.jsonl")
-        )
+        sqlite_store = SQLiteStore(str(tmp_path / "store.sqlite"))
+        try:
+            yield sqlite_store
+        finally:
+            sqlite_store.close()
 
 
 def test_add_and_get_asset(store):
@@ -109,10 +112,11 @@ def test_projection_indexes_rebuild_from_contract_facts(store):
     assert set(store.get_contracts_waiting_for("input_a")) == {"indexed-c"}
     assert set(store.get_contracts_declaring_output("report")) == {"indexed-c"}
 
-    store._activation_index.clear()
-    store._reverse_activation_index.clear()
-    store._declared_outputs_index.clear()
-    assert store.projection_index_digest() != expected_digest
+    if isinstance(store, MemoryStore):
+        store._activation_index.clear()
+        store._reverse_activation_index.clear()
+        store._declared_outputs_index.clear()
+        assert store.projection_index_digest() != expected_digest
 
     store.rebuild_projection_indexes()
     assert store.projection_index_digest() == expected_digest

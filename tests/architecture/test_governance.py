@@ -1,5 +1,6 @@
 """Executable constraints for the 0.5 design/change/evidence workflow."""
 
+import ast
 from pathlib import Path
 import re
 
@@ -179,7 +180,7 @@ def test_redis_adapter_cannot_enter_correctness_owners():
         "src/aigineering/core/commitment.py",
         "src/aigineering/core/authority.py",
         "src/aigineering/core/causal_allowance.py",
-        "src/aigineering/core/claims.py",
+        "src/aigineering/core/sqlite_store.py",
         "src/aigineering/core/acceptance.py",
         "src/aigineering/core/lifecycle_facts.py",
         "src/aigineering/core/fact_reducer.py",
@@ -458,13 +459,44 @@ def test_engine_worker_bootstraps_inner_domain_through_candidate_publication():
 def test_commitment_coordinator_does_not_own_effect_semantics():
     path = ROOT / "src/aigineering/core/commitment.py"
     source = path.read_text(encoding="utf-8")
+    tree = ast.parse(source)
 
     assert "asset.propose" not in source
     assert "contract.declare" not in source
     assert "worker_registration" not in source
     assert "scan_runtime_records" not in source
     assert "project_effect_batch" in source
-    assert len(source.splitlines()) < 300
+
+    imported_decision_helpers = {
+        alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom)
+        and node.module == "aigineering.core.candidate_decision"
+        for alias in node.names
+    }
+    defined_functions = {
+        node.name
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+    imported_modules = {
+        node.module
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.module
+    } | {
+        alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Import)
+        for alias in node.names
+    }
+
+    assert "require_same_projection" in imported_decision_helpers
+    assert "require_same_projection" not in defined_functions
+    assert "decision_projection_fingerprint" not in defined_functions
+    assert not any(
+        module == "aigineering.plugins" or module.startswith("aigineering.plugins.")
+        for module in imported_modules
+    )
 
 
 def test_worker_submission_uses_shared_fact_reduction_without_runtime_ingress():
@@ -702,9 +734,7 @@ def test_engine_worker_composes_authenticated_worker_and_completion_plugins():
 
 
 def test_task_projection_semantics_live_with_plugins_not_core_compatibility():
-    compatibility = (ROOT / "src/aigineering/core/methods.py").read_text(
-        encoding="utf-8"
-    )
+    assert not (ROOT / "src/aigineering/core/methods.py").exists()
     semantics = (ROOT / "src/aigineering/plugins/task_semantics.py").read_text(
         encoding="utf-8"
     )
@@ -718,13 +748,10 @@ def test_task_projection_semantics_live_with_plugins_not_core_compatibility():
     assert "def method_contract" in semantics
     assert "def continuation_contract" in semantics
     assert "aigineering.core.methods" not in production
-    assert len(compatibility.splitlines()) < 30
-
     core_plugin_imports = {
         path.name
         for path in (ROOT / "src/aigineering/core").glob("*.py")
-        if path.name != "methods.py"
-        and "aigineering.plugins" in path.read_text(encoding="utf-8")
+        if "aigineering.plugins" in path.read_text(encoding="utf-8")
     }
     assert core_plugin_imports == set()
 
@@ -732,12 +759,25 @@ def test_task_projection_semantics_live_with_plugins_not_core_compatibility():
 def test_production_code_does_not_import_core_methods_compatibility_module():
     offenders = []
     for path in (ROOT / "src/aigineering").rglob("*.py"):
-        if path.as_posix().endswith("/core/methods.py"):
-            continue
         if "aigineering.core.methods" in path.read_text(encoding="utf-8"):
             offenders.append(path.relative_to(ROOT).as_posix())
 
     assert offenders == []
+
+
+def test_retired_core_compatibility_modules_have_no_sources_or_imports():
+    core = ROOT / "src/aigineering/core"
+    retired = {"claims.py", "heartbeat.py", "methods.py", "provider_config.py"}
+    assert not (retired & {path.name for path in core.glob("*.py")})
+    for path in (ROOT / "src/aigineering").rglob("*.py"):
+        source = path.read_text(encoding="utf-8")
+        for module in (
+            "core.claims",
+            "core.heartbeat",
+            "core.methods",
+            "core.provider_config",
+        ):
+            assert f"aigineering.{module}" not in source, path
 
 
 def test_retry_delegation_does_not_ship_as_completion_registry_semantics():

@@ -52,12 +52,50 @@ def test_authentication_rejection_returns_through_audit_owner_before_commit_path
         node.lineno
         for node in ast.walk(function)
         if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Name)
-        and node.func.id == "commit_ingress_arguments"
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "commit_ingress_batch"
     ]
     assert attempt_calls and writer_argument_calls
     assert audit_call.lineno < min(attempt_calls)
     assert audit_call.lineno < min(writer_argument_calls)
+
+    writer_call = next(
+        node
+        for node in ast.walk(function)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "commit_ingress_batch"
+    )
+    writer_keywords = {keyword.arg for keyword in writer_call.keywords}
+    assert {
+        "accepted_assets",
+        "trace_entries",
+        "contracts",
+        "runtime_records",
+        "candidate_proposal",
+        "effect_fact_owners",
+        "assignment_intents",
+        "successor_assignment_witnesses",
+        "validate_snapshot",
+    } <= writer_keywords
+    admitted_assignment = next(
+        node
+        for node in ast.walk(function)
+        if isinstance(node, ast.Assign)
+        and any(
+            isinstance(target, ast.Name) and target.id == "admitted_decision"
+            for target in node.targets
+        )
+    )
+    close_call = next(
+        node
+        for node in ast.walk(function)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "close_claim_attempt"
+    )
+    assert admitted_assignment.lineno < close_call.lineno < writer_call.lineno
+    assert "validate_snapshot" in source
 
     auth_owner = ast.parse(
         textwrap.dedent(inspect.getsource(record_unreceipted_authentication_rejection))

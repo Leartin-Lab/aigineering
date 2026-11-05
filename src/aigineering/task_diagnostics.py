@@ -313,7 +313,7 @@ def _snapshot(store, contract_id: str, *, query_context=None):
     store = require_operational_store(store)
     if query_context is not None:
         query_context.require_match(store)
-        contract = query_context.read_store.get_contract(contract_id)
+        contract = query_context.get_contract(contract_id)
         if contract is None:
             raise TaskDiagnosticError("task_not_found")
         indexed = list(query_context.runtime_records)
@@ -1658,7 +1658,7 @@ def task_recovery_ancestor_source_bindings(
         if target_id in visited:
             raise TaskDiagnosticError("recovery_source_history_cycle")
         visited.add(target_id)
-        target = query_context.read_store.get_contract(target_id)
+        target = query_context.get_contract(target_id)
         if target is None:
             raise TaskDiagnosticError("recovery_source_contract_missing")
         payload = method_payload(target)
@@ -1768,7 +1768,7 @@ def task_recovery_ancestor_source_bindings(
                 raise TaskDiagnosticError("recovery_source_context_unverified")
         bindings[source_id] = binding
         target_id = source_id
-    target = query_context.read_store.get_contract(target_id)
+    target = query_context.get_contract(target_id)
     if (
         target is not None
         and method_payload(target).get("recovery_intent_version") == 1

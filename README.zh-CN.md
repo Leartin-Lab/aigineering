@@ -19,7 +19,7 @@ Aigineering 面向已有 Agent Harness，提供可持久、可检查的外派执
 - 审查精确输出 Asset，导出满足任务接受政策的结果。
 - 保留已有 Harness 的模型和工具循环，通过签名 Worker 接口接入。
 
-当前源码为 **v0.5.14**，面向有界本地单机 CLI 工作流。
+当前源码为 **v0.5.15.dev0**，面向有界本地单机 CLI 工作流。
 SQLite 保存事实与领取；应用发现、事件和唤醒**需要 Redis**。版本元数据本身
 不构成交付资格，相关结论须有适用场景的证据。一般无人值守交付、生产 MCP
 transport 和分布式部署不在当前支持范围内。参见[支持范围与限制](docs/reference/development-status.md)。

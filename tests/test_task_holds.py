@@ -533,7 +533,6 @@ def test_claim_that_wins_after_plugin_snapshot_rejects_block_transaction(
     )
     stale_context = load_effect_projection_context(store)
     import aigineering.core.commitment as commitment
-    import aigineering.core.commit_snapshot as commit_snapshot
 
     projection_context_module = commitment.context_inputs
     original_loader = projection_context_module.load_candidate_projection_context
@@ -560,7 +559,7 @@ def test_claim_that_wins_after_plugin_snapshot_rejects_block_transaction(
 
     monkeypatch.setattr(commitment, "reduce_candidate", observe_reduce)
     monkeypatch.setattr(
-        commit_snapshot,
+        commitment.context_inputs,
         "load_effect_projection_context",
         lambda *_args, **_kwargs: stale_context,
     )

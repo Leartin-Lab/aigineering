@@ -1,8 +1,8 @@
 # Aigineering Design
 
-Status: implemented truth for v0.5.14
+Status: implemented truth for v0.5.15.dev0
 
-This document describes the v0.5.14 implementation in this source tree.
+This document describes the v0.5.15.dev0 implementation in this source tree.
 It is an implementation reference; delivery qualification depends on evidence
 for the applicable case and scope.
 Future designs do not belong here until their implementation, tests, migration

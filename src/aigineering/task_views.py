@@ -93,9 +93,9 @@ def project_task_status(
     original_store = store
     if query_context is not None:
         query_context.require_match(store, projection_context=projection_context)
-        if query_context.read_store.get_contract(contract.id) != contract:
+        if query_context.get_contract(contract.id) != contract:
             raise ValueError("task-view Contract does not belong to its query snapshot")
-        store = query_context.read_store
+        store = query_context
     entries = _trace_entries(store, contract.id)
     view = (
         query_context.runtime_projection.contract_view(contract)

@@ -43,7 +43,7 @@ from aigineering.protocol.runtime_record import (
 from aigineering.protocol.types import Asset, Contract
 from aigineering.protocol.wire import contract_to_dict
 from aigineering.core.candidate_publisher import publish_effect, publish_effects
-import aigineering.core.allowance_returns as allowance_returns
+import aigineering.core.causal_allowance as allowance_owner
 
 
 def _contract(name: str, *, budget: int, parent_id: str | None = None) -> Contract:
@@ -941,8 +941,8 @@ def test_signed_one_batch_child_grants_validate_shared_proofs_once(
         for record in decision.runtime_records
     )
 
-    original_validate_record = allowance_returns.validate_runtime_record
-    original_validate_head = allowance_returns._validate_candidate_head
+    original_validate_record = allowance_owner.validate_runtime_record
+    original_validate_head = allowance_owner._validate_candidate_head
     envelope_counts = {}
     envelope_bytes = {}
     head_structure_counts = {}
@@ -961,12 +961,12 @@ def test_signed_one_batch_child_grants_validate_shared_proofs_once(
         return original_validate_head(head, records_by_id, proof_context=proof_context)
 
     monkeypatch.setattr(
-        allowance_returns, "validate_runtime_record", count_record_validation
+        allowance_owner, "validate_runtime_record", count_record_validation
     )
     monkeypatch.setattr(
-        allowance_returns, "_validate_candidate_head", count_head_validation
+        allowance_owner, "_validate_candidate_head", count_head_validation
     )
-    allowance_returns.validate_allowance_grants(
+    allowance_owner.validate_allowance_grants(
         (*prior_contracts, *decision.contracts),
         prior_records,
         pending_records,
@@ -993,12 +993,12 @@ def test_allowance_proof_index_preserves_duplicate_and_opaque_history_predicates
         },
         causal_parents=("member:x",),
     )
-    duplicate_context = allowance_returns._AllowanceGrantProofContext(
+    duplicate_context = allowance_owner._AllowanceGrantProofContext(
         {duplicate_member.id: duplicate_member}, (), ()
     )
     assert duplicate_context.matching_heads("member:x") == (duplicate_member,)
     with pytest.raises(ValueError, match="duplicate record IDs"):
-        allowance_returns._validate_candidate_head(
+        allowance_owner._validate_candidate_head(
             duplicate_member, {duplicate_member.id: duplicate_member}
         )
 
@@ -1010,7 +1010,7 @@ def test_allowance_proof_index_preserves_duplicate_and_opaque_history_predicates
             "source_contract_id": "task:parent",
         },
     )
-    reservation_context = allowance_returns._AllowanceGrantProofContext(
+    reservation_context = allowance_owner._AllowanceGrantProofContext(
         {}, (duplicate_reservation, duplicate_reservation), ()
     )
     assert reservation_context.reservations_for(
@@ -1026,7 +1026,7 @@ def test_allowance_proof_index_preserves_duplicate_and_opaque_history_predicates
             {"candidate_id": "opaque", "committed_record_ids": members},
             causal_parents=("member:x",),
         )
-        context = allowance_returns._AllowanceGrantProofContext(
+        context = allowance_owner._AllowanceGrantProofContext(
             {opaque_head.id: opaque_head}, (), ()
         )
         assert context.has_opaque_heads
@@ -1037,7 +1037,7 @@ def test_allowance_proof_index_preserves_duplicate_and_opaque_history_predicates
         {"candidate_id": "opaque-none", "committed_record_ids": None},
         causal_parents=("member:x",),
     )
-    none_context = allowance_returns._AllowanceGrantProofContext(
+    none_context = allowance_owner._AllowanceGrantProofContext(
         {none_head.id: none_head}, (), ()
     )
     with pytest.raises(TypeError):

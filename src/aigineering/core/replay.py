@@ -19,7 +19,7 @@ from aigineering.core.provenance import verify_asset_seal
 from aigineering.core.integrity import check_store_integrity
 from aigineering.core.session import SessionStore, session_trace_path
 from aigineering.core.sqlite_store import SQLiteStore
-from aigineering.core.store import JsonLStore
+from aigineering.adapters.legacy_jsonl import load_legacy_jsonl_assets
 from aigineering.core.trace import JsonLTraceStore, trace_effective_payload
 from aigineering.protocol.types import Session, TraceEntry
 
@@ -184,9 +184,9 @@ def replay_session(
     assets_path = store_path / "assets.jsonl"
     contracts_path = store_path / "contracts.jsonl"
     if assets_path.exists():
-        asset_store = JsonLStore(str(assets_path), str(contracts_path))
+        legacy_assets = load_legacy_jsonl_assets(str(assets_path), str(contracts_path))
         for aid in sorted(seen):
-            asset = asset_store.get_asset(aid)
+            asset = legacy_assets.get(aid)
             if asset is not None and not verify_asset_seal(asset):
                 seal_mismatches.append(aid)
 

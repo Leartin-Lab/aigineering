@@ -21,9 +21,11 @@ from aigineering.core.actor_facts import (
 from aigineering.core.attempt_projection import close_claim_attempt
 from aigineering.core.candidate_decision import (
     CommitmentDecision,
+    ProjectionSnapshotConflict,
     authentication_rejection_decision,
     candidate_rejection_decision,
     candidate_trace,
+    require_same_projection,
     trace_record,
 )
 from aigineering.core.causal_allowance import (
@@ -38,12 +40,6 @@ from aigineering.core.candidate_rejection import (
 from aigineering.core.claim_holds import ClaimHoldConflict
 from aigineering.core.claim_assignments import AssignmentConflict
 from aigineering.core.claim_constraints import ClaimConstraintConflict
-from aigineering.core.commit_snapshot import (
-    ProjectionSnapshotConflict,
-    build_candidate_projection_snapshot_validator,
-    commit_ingress_arguments,
-    record_projection_snapshot_rejection,
-)
 from aigineering.core.effect_projection import (
     freeze_additional_effects,
     project_effect_batch,
@@ -221,14 +217,31 @@ class CandidateCommitter:
             if self._trace_exporter is not None:
                 self._trace_exporter.export(rejected.trace_entries)
             return rejected
-        validate_snapshot = build_candidate_projection_snapshot_validator(
-            candidate,
-            genesis,
-            decision,
-            self._store,
-            verifier_factory,
-            self._additional_effects,
-        )
+        admitted_decision = decision
+        validate_snapshot = None
+        if (
+            admitted_decision.accepted
+            and self._additional_effects
+            and any(
+                effect.effect_type in self._additional_effects
+                for effect in candidate.effects
+            )
+        ):
+
+            def validate_snapshot(admitted=admitted_decision) -> None:
+                current_actor_keys = load_effective_actor_keys(self._store, genesis)
+                current_decision = reduce_candidate(
+                    candidate,
+                    genesis,
+                    verifier_factory=verifier_factory,
+                    actor_keys=current_actor_keys,
+                    projection_context=context_inputs.load_effect_projection_context(
+                        self._store, actor_keys=current_actor_keys
+                    ),
+                    additional_effects=self._additional_effects,
+                )
+                require_same_projection(admitted, current_decision)
+
         decision = close_claim_attempt(candidate, decision)
         if decision.assets:
             reducer_traces, reducer_records = reduce_asset_facts(
@@ -262,7 +275,19 @@ class CandidateCommitter:
         )
         try:
             derived_traces, derived_records = self._store.commit_ingress_batch(
-                **commit_ingress_arguments(decision, candidate, validate_snapshot),
+                accepted_assets=list(decision.assets),
+                trace_entries=list(decision.trace_entries),
+                contracts=decision.contracts,
+                runtime_records=decision.runtime_records,
+                claim_binding=candidate.claim_binding,
+                candidate_actor_id=candidate.actor_id,
+                candidate_key_id=candidate.key_id,
+                candidate_id=candidate.id,
+                candidate_proposal=candidate,
+                effect_fact_owners=decision.effect_fact_owners,
+                assignment_intents=decision.assignment_intents,
+                successor_assignment_witnesses=decision.successor_assignment_witnesses,
+                validate_snapshot=validate_snapshot,
             )
             if derived_traces or derived_records:
                 decision = replace(
@@ -281,8 +306,12 @@ class CandidateCommitter:
             )
             raise CandidateCommitRejected(str(exc), rejection) from exc
         except ProjectionSnapshotConflict as exc:
-            return record_projection_snapshot_rejection(
-                candidate, decision, exc, self._store, self._trace
+            if exc.authentication_rejected:
+                return record_candidate_rejection(
+                    candidate, str(exc), self._store, self._trace, receipt=None
+                )
+            return record_authenticated_candidate_rejection(
+                candidate, admitted_decision, str(exc), self._store, self._trace
             )
         except (
             CausalAllowanceConflict,

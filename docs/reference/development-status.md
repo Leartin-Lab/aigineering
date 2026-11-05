@@ -1,8 +1,10 @@
 # Support and limits
 
-The current source is **v0.5.14**, scoped to bounded local single-machine CLI
+The current source is **v0.5.15.dev0**, scoped to bounded local single-machine CLI
 workflows. Version metadata does not establish qualification; each delivery
-claim depends on evidence for the applicable case and scope.
+claim depends on evidence for the applicable case and scope. This is an
+unreleased development snapshot; existing Python integrations should consult
+the [import migration notes](../../changes/133-cli-guidance-and-runtime-contraction.md#python-import-migration).
 
 | Area | Current scope |
 | --- | --- |

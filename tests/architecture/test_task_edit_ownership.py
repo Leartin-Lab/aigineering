@@ -16,7 +16,7 @@ def test_task_edit_remains_inside_the_existing_handoff_effect_owner():
         (ROOT / "src/aigineering/core" / name).read_text(encoding="utf-8")
         for name in (
             "commitment.py",
-            "commit_snapshot.py",
+            "candidate_decision.py",
             "effect_projection.py",
             "sqlite_store.py",
         )

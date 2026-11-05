@@ -27,7 +27,7 @@ def test_generic_core_does_not_know_profile_promotion_effect_or_fact_names():
         "src/aigineering/core/effect_projection.py",
         "src/aigineering/core/effect_projectors.py",
         "src/aigineering/core/commitment.py",
-        "src/aigineering/core/commit_snapshot.py",
+        "src/aigineering/core/candidate_decision.py",
         "src/aigineering/core/sqlite_store.py",
         "src/aigineering/core/worker_coordination.py",
     )

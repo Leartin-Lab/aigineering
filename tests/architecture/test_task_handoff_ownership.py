@@ -8,7 +8,7 @@ def test_handoff_semantics_live_in_plugin_and_core_has_only_generic_snapshot_gua
     plugin = (ROOT / "src/aigineering/plugins/handoff.py").read_text()
     core = "\n".join(
         (ROOT / f"src/aigineering/core/{name}").read_text()
-        for name in ("commitment.py", "commit_snapshot.py", "sqlite_store.py")
+        for name in ("commitment.py", "candidate_decision.py", "sqlite_store.py")
     )
     assert '"task.handoff": EffectHandler(' in plugin
     assert 'capability="task.handoff"' in plugin
@@ -21,7 +21,9 @@ def test_handoff_semantics_live_in_plugin_and_core_has_only_generic_snapshot_gua
     assert "task.handoff" not in core
     assert "from aigineering.plugins" not in core
     assert "validate_snapshot" in core
-    assert "class ProjectionSnapshotConflict" in core
+    decision = (ROOT / "src/aigineering/core/candidate_decision.py").read_text()
+    assert "class ProjectionSnapshotConflict" in decision
+    assert "def require_same_projection" in decision
 
 
 def test_link_is_an_immutable_runtime_fact_and_does_not_add_mutable_handoff_state():

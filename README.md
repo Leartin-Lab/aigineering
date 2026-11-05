@@ -22,7 +22,7 @@ model's private reasoning. Content correctness still needs appropriate checks.
 - Review exact output Assets and export results that satisfy the task's policy.
 - Keep an existing Harness's model and tool loop behind the signed Worker API.
 
-Current source: **v0.5.14**, for bounded local single-machine CLI workflows.
+Current source: **v0.5.15.dev0**, for bounded local single-machine CLI workflows.
 SQLite owns facts and claims; **Redis is required** for application discovery,
 event feeds and wakeups. Version metadata alone does not qualify a delivery:
 claims depend on evidence for the applicable case. General unattended delivery,

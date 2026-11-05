@@ -11,11 +11,11 @@ from aigineering.cli.main import cli
 from aigineering.core.replay import replay_session
 from aigineering.core.session import SessionStore
 from aigineering.core.sqlite_store import SQLiteStore
-from aigineering.core.store import JsonLStore
+from aigineering.adapters.legacy_jsonl import load_legacy_jsonl_assets
 from aigineering.core.provenance import sign_asset, verify_asset_seal
 from aigineering.protocol.types import Asset
 from aigineering.protocol.types import Session, TraceEntry
-from aigineering.protocol.wire import trace_entry_to_dict
+from aigineering.protocol.wire import asset_to_dict, trace_entry_to_dict
 
 
 def _write_trace(path: Path, entries: list[TraceEntry]) -> None:
@@ -345,12 +345,33 @@ def test_replay_detects_asset_signature_mismatch(tmp_path):
 
     SessionStore(str(sessions_dir)).create_session(session)
     _write_trace(traces_dir / "session_test.jsonl", [entry])
-    # Store rejects tampered assets at write time (G3 enforcement)
     assert not verify_asset_seal(tampered), (
         "Tampered asset must fail signature verification"
     )
-    with pytest.raises(ValueError, match="missing or invalid canonical seal"):
-        JsonLStore(
-            str(store_dir / "assets.jsonl"),
-            str(store_dir / "contracts.jsonl"),
-        ).add_asset(tampered)
+    store_dir.mkdir(parents=True)
+    (store_dir / "assets.jsonl").write_text(
+        json.dumps(asset_to_dict(tampered)) + "\n",
+        encoding="utf-8",
+    )
+    (store_dir / "contracts.jsonl").write_text("", encoding="utf-8")
+    decoded = load_legacy_jsonl_assets(
+        str(store_dir / "assets.jsonl"), str(store_dir / "contracts.jsonl")
+    )
+    assert decoded[tampered.id] == tampered
+    before = {
+        path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in store_dir.iterdir()
+    }
+    replay_result = replay_session(
+        session.id,
+        sessions_dir=str(sessions_dir),
+        traces_dir=str(traces_dir),
+        store_dir=str(store_dir),
+        sqlite_path=str(tmp_path / "missing.sqlite"),
+    )
+    assert replay_result["consistent"] is False
+    assert replay_result["seal_mismatches"] == [tampered.id]
+    assert {
+        path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in store_dir.iterdir()
+    } == before

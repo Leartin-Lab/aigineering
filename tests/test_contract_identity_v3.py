@@ -11,7 +11,7 @@ from aigineering.core.ids import (
     contract_identity_v3,
     hash_contract_v3,
 )
-from aigineering.core.methods import method_contract
+from aigineering.plugins.task_semantics import method_contract
 from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.protocol.actions import parse_action
 from aigineering.protocol.types import Contract

@@ -509,7 +509,7 @@ def validate_contract_declaration_member(
 def _validate_declaration_allowance_bundle(
     rows, receipt, head, committed, declarations
 ):
-    from aigineering.core.allowance_returns import validate_allowance_grants
+    from aigineering.core.causal_allowance import validate_allowance_grants
     from aigineering.protocol.wire import contract_from_dict
 
     needed = {record.id: record for record in declarations}
