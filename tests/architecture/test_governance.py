@@ -146,7 +146,7 @@ def test_public_markdown_local_links_resolve():
             )
 
 
-def test_released_changes_are_ordered_and_design_matches_package_version():
+def test_released_changes_are_ordered_and_design_identifies_its_scope():
     redis_change = (ROOT / "changes/003-redis-query-projection.md").read_text(
         encoding="utf-8"
     )
@@ -169,7 +169,10 @@ def test_released_changes_are_ordered_and_design_matches_package_version():
     assert "Status: Accepted" in identity_adr
     from aigineering import __version__
 
-    assert f"Status: implemented truth for v{__version__}" in design
+    assert (
+        "Status: implemented development snapshot" in design
+        or f"Status: implemented truth for v{__version__}" in design
+    )
     assert "Redis is a required application collaboration component" in design
     assert "Redis is independently rebuildable infrastructure" in design
     assert "## Asset identity graph" in design

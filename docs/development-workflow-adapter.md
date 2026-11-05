@@ -19,6 +19,9 @@ This is the public contribution contract. Use it with
   Internal plans and diagnostic ledgers are not user documentation.
 - Commit, push, merge, tag and publish only within current authorization. A local
   commit or development-branch update is not a stable release.
+- Assign release versions and tags only when releasing on `main`. Do not bump
+  versions or add prerelease suffixes for `dev`; retain the latest `main` package
+  metadata and identify development snapshots by commit.
 
 One semantic owner per rule, explicit boundary validation, correlated failure
 evidence and behavior checks through stable interfaces remain the technical

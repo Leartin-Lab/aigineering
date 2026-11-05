@@ -1,6 +1,6 @@
 # Change 133: CLI guidance and runtime contraction
 
-Status: Implemented in the 0.5.15 development line. Stable release qualification
+Status: Implemented on dev. Stable release qualification
 is separate from this source change.
 
 Review requests now check available allowance before publication and explain

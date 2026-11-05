@@ -1,7 +1,7 @@
 # Roadmap
 
-The current source is **v0.5.15.dev0**, scoped to bounded local single-machine CLI
-workflows. Version metadata does not establish delivery qualification; claims
+The **dev** branch supports bounded local single-machine CLI workflows.
+Development snapshots are identified by commit. Delivery claims
 depend on evidence for the applicable case and release scope. See
 [current support](docs/reference/development-status.md).
 The implemented boundary is actor-signed Candidate commitment in a single-machine

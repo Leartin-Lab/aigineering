@@ -1,8 +1,8 @@
 # Aigineering Design
 
-Status: implemented truth for v0.5.15.dev0
+Status: implemented development snapshot
 
-This document describes the v0.5.15.dev0 implementation in this source tree.
+This document describes the implementation on the `dev` branch.
 It is an implementation reference; delivery qualification depends on evidence
 for the applicable case and scope.
 Future designs do not belong here until their implementation, tests, migration
@@ -1601,7 +1601,7 @@ terminal, or replay owner.
 
 ## Release limits
 
-The v0.5.14 source describes a bounded local single-machine CLI runtime. It does
+The current source describes a bounded local single-machine CLI runtime. It does
 not provide:
 
 - a cross-machine distributed Store;
@@ -1614,7 +1614,7 @@ not provide:
 The version alone does not qualify a delivery. Each case claim depends on its
 tested artifact and evidence; broader release qualification also requires the
 applicable verification gates. Historical reports remain tied to their original
-artifacts and do not establish v0.5.14 provider qualification.
+artifacts and do not establish provider qualification for the current source.
 
 Planning compile stages retain the original parent's full acceptance policy.
 Independent qualification and ordinary output completion share unfinished-child
