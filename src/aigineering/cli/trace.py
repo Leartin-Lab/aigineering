@@ -14,6 +14,7 @@ from aigineering.cli._common import (
     _latest_session_file,
     _output_json,
     _parse_rejected_fragment,
+    _persistent_snapshot,
 )
 from aigineering.core.trace import JsonLTraceStore, TraceStoreProtocol
 from aigineering.core.store import StoreProtocol
@@ -61,8 +62,30 @@ def trace(
     tree_output: bool,
     dag_output: bool,
 ) -> None:
-    """Show the trace timeline from the latest session."""
-    if session_id is not None:
+    """Show session events, or durable Store trace for an explicit contract."""
+    if contract_filter is not None and session_id is None:
+        try:
+            store = _persistent_snapshot()
+        except FileNotFoundError:
+            message = f"No durable trace found for contract '{contract_filter}'."
+            if json_output:
+                _output_json({"error": message})
+            else:
+                click.echo(message)
+            raise click.exceptions.Exit(1)
+        try:
+            entries = store.get_by_contract(contract_filter)
+        finally:
+            store.close()
+        if not entries:
+            message = f"No durable trace found for contract '{contract_filter}'."
+            if json_output:
+                _output_json({"error": message})
+            else:
+                click.echo(message)
+            raise click.exceptions.Exit(1)
+        trace_store = store
+    elif session_id is not None:
         jsonl_store, entries = _find_trace_for_session(session_id)
         if jsonl_store is None:
             if json_output:
@@ -70,21 +93,32 @@ def trace(
             else:
                 click.echo(f"Session '{session_id}' not found.")
             raise click.exceptions.Exit(1)
+        trace_store = jsonl_store
     else:
         latest = _latest_session_file()
         if latest is None:
             # Exit 1: no session file exists at all.
             if json_output:
-                _output_json([])
+                if _has_durable_trace_entries():
+                    _output_json(
+                        {
+                            "error": "No session trace found.",
+                            "hint": "Use 'aig trace --contract <contract_id>' to read durable task trace.",
+                        }
+                    )
+                else:
+                    _output_json([])
             else:
-                click.echo("No sessions found. Use 'aig run <goal>' or 'aig demo'.")
+                if _has_durable_trace_entries():
+                    click.echo(
+                        "No session trace found. Use 'aig trace --contract <contract_id>' "
+                        "to read durable task trace."
+                    )
+                else:
+                    click.echo("No sessions found. Use 'aig run <goal>' or 'aig demo'.")
             return
-        jsonl_store = JsonLTraceStore(str(latest))
-        entries = (
-            jsonl_store.get_by_contract(contract_filter)
-            if contract_filter
-            else jsonl_store.get_all()
-        )
+        trace_store = JsonLTraceStore(str(latest))
+        entries = trace_store.get_all()
 
     # Exit 2: a session exists but has zero entries (the latest-session route
     # filters by contract before this check; the explicit-session route
@@ -96,8 +130,8 @@ def trace(
             click.echo("No sessions found. Use 'aig run <goal>' or 'aig demo'.")
         return
 
-    if contract_filter:
-        entries = jsonl_store.get_by_contract(contract_filter)
+    if contract_filter and session_id is not None:
+        entries = trace_store.get_by_contract(contract_filter)
 
     if json_output:
         _output_trace_json(entries)
@@ -123,6 +157,18 @@ def trace(
 def _output_trace_json(entries: list[TraceEntry]) -> None:
     payload = [trace_entry_to_dict(e) for e in entries]
     _output_json(payload)
+
+
+def _has_durable_trace_entries() -> bool:
+    """Whether a read-only Store snapshot contains any durable trace entries."""
+    try:
+        store = _persistent_snapshot()
+    except FileNotFoundError:
+        return False
+    try:
+        return bool(store.get_all())
+    finally:
+        store.close()
 
 
 def _print_timeline_entry(entry: TraceEntry) -> None:
@@ -542,7 +588,7 @@ def audit(
                 _output_json({"error": "No sessions found."})
             else:
                 click.echo("No sessions found. Use 'aig run <goal>' or 'aig demo'.")
-            return
+            raise click.exceptions.Exit(1)
 
     name_map = _build_asset_name_map(all_entries)
 

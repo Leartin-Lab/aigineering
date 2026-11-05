@@ -13,6 +13,7 @@ from aigineering.core.acceptance import (
     validate_claim_bound_output,
     validate_output_shape,
 )
+from aigineering.core.causal_allowance import allowance_available
 from aigineering.core.projection_context import load_effect_projection_context
 from aigineering.core.candidate_publisher import CandidatePublisher
 from aigineering.core.commitment import CandidateCommitRejected
@@ -31,12 +32,13 @@ from aigineering.plugins.task_review import (
     is_task_review_source_eligible,
     project_task_reviews,
 )
+from aigineering.protocol.candidate import CandidateProposal, candidate_content_id
 from aigineering.protocol.effect_builders import (
     task_review_decision_effect,
     task_review_request_effect,
 )
 from aigineering.protocol.immutability import deep_thaw
-from aigineering.runtime_services import sync_runtime
+from aigineering.runtime_services import RedisSyncPending, sync_runtime
 
 _REQUEST_PLUGIN = "task.review.request.operator.v1"
 _REQUEST_CAPABILITIES = ("contract.publish", "task.review.request")
@@ -161,6 +163,69 @@ def _source_asset_scope(store, source, output_name: str, asset_id: str):
     return asset, policy, tuple(capabilities)
 
 
+def _accepted_request_candidate_exists(
+    store,
+    *,
+    source_contract_id: str,
+    output_name: str,
+    asset_id: str,
+    reason: str,
+    budget: int,
+    idempotency_key: str | None,
+) -> bool:
+    """Recognize an accepted exact request only to skip mutable balance preflight.
+
+    The publisher still authenticates the current actor and the normal
+    commitment/replay path remains the authority for the submitted Candidate.
+    """
+    if idempotency_key is None:
+        return False
+    genesis = load_genesis(store)
+    effect = task_review_request_effect(
+        source_contract_id, output_name, asset_id, reason, budget=budget
+    )
+    parents = (source_contract_id, asset_id)
+    request_candidate_ids = {
+        record.payload.get("candidate_id")
+        for _revision, record in store.scan_runtime_records(
+            record_type="task.review.requested"
+        )
+        if record.payload.get("contract_id") == source_contract_id
+        and record.payload.get("output_name") == output_name
+        and record.payload.get("asset_id") == asset_id
+        and record.payload.get("reason") == reason
+        and record.payload.get("budget") == budget
+    }
+    if not request_candidate_ids:
+        return False
+    for _revision, receipt in store.scan_runtime_records(
+        record_type="candidate.received"
+    ):
+        if (
+            receipt.payload.get("actor_id") != f"plugin:{_REQUEST_PLUGIN}"
+            or receipt.payload.get("effect_types") != ("task.review.request",)
+            or receipt.causal_parents != parents
+        ):
+            continue
+        probe = CandidateProposal(
+            id="preflight",
+            domain_id=genesis.id,
+            actor_id=str(receipt.payload["actor_id"]),
+            key_id=str(receipt.payload["key_id"]),
+            signature_kind=str(receipt.payload["signature_kind"]),
+            signature="preflight",
+            effects=(effect,),
+            causal_parents=parents,
+            idempotency_key=idempotency_key,
+        )
+        if (
+            receipt.payload.get("candidate_id") == candidate_content_id(probe)
+            and receipt.payload.get("candidate_id") in request_candidate_ids
+        ):
+            return True
+    return False
+
+
 def validate_task_review_request(
     store,
     source_contract_id: str,
@@ -185,6 +250,27 @@ def validate_task_review_request(
     if source is None:
         raise LookupError(f"unknown Contract {source_contract_id!r}")
     _source_asset_scope(store, source, output_name, asset_id)
+    if not _accepted_request_candidate_exists(
+        store,
+        source_contract_id=source_contract_id,
+        output_name=output_name,
+        asset_id=asset_id,
+        reason=reason,
+        budget=budget,
+        idempotency_key=idempotency_key,
+    ):
+        remaining = allowance_available(
+            source,
+            (record for _revision, record in store.scan_runtime_records()),
+        )
+        if remaining < budget:
+            raise ValueError(
+                "review request budget exceeds current source allowance "
+                f"(remaining={remaining}, required={budget}); no review request was published "
+                "and no allowance was consumed. Inspect the source with "
+                f"`aig task audit {source_contract_id} --json`; only continue through "
+                "an authorized task transition that preserves the original obligation and budget."
+            )
 
 
 def _request_payload(store, request_id: str) -> tuple[object, object, object]:
@@ -246,7 +332,11 @@ def _validate_decision_target(
         )
     if report.signed_by == target.signed_by:
         raise ValueError(
-            "review report must be produced by an actor distinct from the source output producer"
+            "review report must be produced by an actor distinct from the source output producer; "
+            "this report cannot be rewritten or reattributed. Request a new bounded review and "
+            "run its reviewer task with a distinct --worker-id; then decide with the default "
+            "operator only when the source policy is supported by verify.human, or use an "
+            "already-authorized custom actor for the policy's required capabilities"
         )
     if not _asset_has_committed_fact(store, target.id) or not _asset_has_committed_fact(
         store, report.id
@@ -401,6 +491,7 @@ def _publish(store, publisher, effect, *, key: str, parents: tuple[str, ...]):
     # The authorizer and any previous facts must be relayed before provisioning
     # or publication. That keeps a Redis outage from creating a local-only key.
     sync_runtime(store)
+    decision = None
     try:
         decision = publisher.publish(
             (effect,), idempotency_key=key, causal_parents=parents
@@ -409,7 +500,11 @@ def _publish(store, publisher, effect, *, key: str, parents: tuple[str, ...]):
         sync_runtime(store, accepted=False)
         raise
     if not decision.accepted:
-        sync_runtime(store, accepted=False)
+        try:
+            sync_runtime(store, accepted=False)
+        except RedisSyncPending as exc:
+            exc.decision = decision
+            raise
         rejected = next(
             (
                 record
@@ -423,7 +518,11 @@ def _publish(store, publisher, effect, *, key: str, parents: tuple[str, ...]):
             if rejected is not None
             else "Candidate was not accepted"
         )
-    sync_runtime(store, accepted=True)
+    try:
+        sync_runtime(store, accepted=True)
+    except RedisSyncPending as exc:
+        exc.decision = decision
+        raise
     return decision
 
 

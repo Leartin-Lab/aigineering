@@ -3,11 +3,12 @@
 import json
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 
 from aigineering.cli.main import cli
 from aigineering.core.control_plane import build_control_plane_contract
-from aigineering.core.methods import retry_contract
+from aigineering.plugins.task_semantics import retry_contract
 from aigineering.core.session import SessionStore
 from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.protocol.identity import contract_from_fields
@@ -289,6 +290,26 @@ def test_trace_no_sessions_shows_error():
 
         assert result.exit_code == 0
         assert "No sessions found" in result.output
+
+
+@pytest.mark.parametrize("json_output", [False, True])
+def test_audit_no_sessions_exits_nonzero(json_output):
+    """Missing top-level audit source is an error in text and JSON modes."""
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        args = ["--offline", "audit"]
+        if json_output:
+            args.append("--json")
+        result = runner.invoke(cli, args)
+
+        assert result.exit_code == 1
+        if json_output:
+            assert json.loads(result.output) == {"error": "No sessions found."}
+        else:
+            assert (
+                result.output
+                == "No sessions found. Use 'aig run <goal>' or 'aig demo'.\n"
+            )
 
 
 def test_trace_session_manifest_missing_text_rc1():

@@ -2,15 +2,19 @@
 
 import json
 import sqlite3
+from pathlib import Path
 from types import SimpleNamespace
 
 from click.testing import CliRunner
 
 from aigineering.cli.main import cli
+from aigineering.core.session import SessionStore
 from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.task_views import project_task_status
 from aigineering.core.control_plane import build_control_plane_contract
 from aigineering.protocol.identity import contract_from_fields
+from aigineering.protocol.types import Session, TraceEntry
+from aigineering.protocol.wire import trace_entry_to_dict
 
 
 def _create_task(runner, name, output, *extra):
@@ -51,6 +55,66 @@ def test_target_run_leaves_unrelated_ready_contract_unclaimed(tmp_path):
             assert store.get_claim(unrelated_id) is None
         finally:
             store.close()
+
+
+def test_target_trace_reads_durable_store_and_never_uses_old_session(tmp_path):
+    runner = CliRunner()
+    with runner.isolated_filesystem(temp_dir=str(tmp_path)):
+        initialized = runner.invoke(cli, ["domain", "init"])
+        assert initialized.exit_code == 0, initialized.output
+        target_id = _create_task(runner, "target-trace", "target-trace-output")
+        result = runner.invoke(
+            cli, ["run", "--task", target_id, "--worker", "mock", "--json"]
+        )
+        assert result.exit_code == 0, result.output
+        resumed = runner.invoke(
+            cli, ["run", "--resume", target_id, "--worker", "mock", "--json"]
+        )
+        assert resumed.exit_code == 0, resumed.output
+        assert json.loads(resumed.output)["stop_reason"] == "terminal"
+
+        discovery = runner.invoke(cli, ["trace", "--json"])
+        assert discovery.exit_code == 0, discovery.output
+        discovery_payload = json.loads(discovery.output)
+        assert "aig trace --contract <contract_id>" in discovery_payload["hint"]
+
+        old_session = TraceEntry(
+            id="old-session-entry",
+            contract_id="old-unrelated-task",
+            event_type="activation",
+            timestamp="2025-01-01T00:00:00",
+        )
+        old_path = Path(".aig/traces/session_old.jsonl")
+        old_path.parent.mkdir(parents=True, exist_ok=True)
+        old_path.write_text(json.dumps(trace_entry_to_dict(old_session)) + "\n")
+        SessionStore().create_session(
+            Session(id="session_old", trace_ids=(old_session.id,))
+        )
+
+        before = SQLiteStore(".aig/store.db")
+        revision_before = before.get_runtime_revision()
+        before.close()
+        selected = runner.invoke(cli, ["trace", "--contract", target_id, "--json"])
+        assert selected.exit_code == 0, selected.output
+        selected_entries = json.loads(selected.output)
+        assert selected_entries
+        assert {entry["contract_id"] for entry in selected_entries} == {target_id}
+        assert all(
+            entry["contract_id"] != old_session.contract_id
+            for entry in selected_entries
+        )
+        after = SQLiteStore(".aig/store.db")
+        assert after.get_runtime_revision() == revision_before
+        after.close()
+
+        # Existing session selectors retain their JSONL source semantics.
+        session_selected = runner.invoke(
+            cli, ["trace", "--session", "session_old", "--json"]
+        )
+        assert session_selected.exit_code == 0, session_selected.output
+        assert json.loads(session_selected.output)[0]["contract_id"] == (
+            "old-unrelated-task"
+        )
 
 
 def test_terminal_target_is_checked_before_claiming_other_work(tmp_path):

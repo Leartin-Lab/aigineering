@@ -53,6 +53,12 @@ its signed child description. Native planning inserts a compile stage, so
 the immediate parent is not necessarily the original root. The runtime still
 checks target policy, evidence, producer independence and actor authority.
 
+For the general operator flow for requesting an exact independent review, see
+[the task-board review procedure](../../docs/reference/task-board.md#request-an-exact-independent-review).
+Its default decision command supports `verify.human` policies; this preset's
+custom acceptance policy and configured acceptor are not interchangeable with
+that operator identity.
+
 
 
 The preset paths are relative to `run.toml`; its database is relative to the

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from typing import Any
 
 from aigineering.task_diagnostics import task_invocation_failure_binding
@@ -37,14 +38,67 @@ def format_worker_failure_detail(detail: dict[str, Any]) -> str:
         status_code = detail.get("status_code")
         task_id = json.dumps(detail.get("contract_id"), ensure_ascii=True)
         claim_id = json.dumps(detail.get("claim_id"), ensure_ascii=True)
-        return (
+        message = (
             f"worker invocation failed for task {task_id} claim {claim_id}; "
             "claim was released; inspect task runs/diagnostics "
             f"(category={category}, status_code={status_code})"
         )
+        output_limit = detail.get("output_limit")
+        truncation_next_step = detail.get("truncation_next_step")
+        if _is_output_limit(output_limit) and isinstance(truncation_next_step, str):
+            message += (
+                f"; provider response reached max_output_tokens={output_limit}; "
+                f"{truncation_next_step}"
+            )
+        return message
     if detail.get("kind") == "slot_error":
         return "worker slot failed unexpectedly; no claim binding is available"
     return "worker invocation failed; exact claim diagnostics are unavailable"
+
+
+def add_output_limit_guidance(
+    details: object,
+    *,
+    max_output_tokens: int | Mapping[str, int] | None,
+    configured: bool = False,
+) -> list[dict[str, Any]]:
+    """Attach mode-specific guidance only to exact current truncation failures."""
+    if not isinstance(details, (list, tuple)):
+        return []
+    output: list[dict[str, Any]] = []
+    for value in details:
+        if not isinstance(value, dict):
+            continue
+        detail = dict(value)
+        category = detail.get("category")
+        worker_id = detail.get("worker_id")
+        limit = max_output_tokens
+        if isinstance(max_output_tokens, Mapping):
+            limit = (
+                max_output_tokens.get(worker_id) if isinstance(worker_id, str) else None
+            )
+        if (
+            detail.get("status") == "invocation_failed"
+            and isinstance(category, str)
+            and category in {"output_truncated", "worker_error:output_truncated"}
+            and _is_output_limit(limit)
+        ):
+            detail["output_limit"] = limit
+            detail["truncation_next_step"] = (
+                "increase max_output_tokens in the configured Worker, inspect "
+                f"aig task audit {detail.get('contract_id')} --json, then run a "
+                "listed recovery with `aig run --config PATH --resume <recovery_id>`"
+                if configured
+                else "increase the limit with --max-output-tokens N, inspect "
+                f"aig task audit {detail.get('contract_id')} --json, then run a "
+                "listed recovery with `aig run --task <recovery_id>`"
+            )
+        output.append(detail)
+    return output
+
+
+def _is_output_limit(value: object) -> bool:
+    return type(value) is int and value > 0
 
 
 def safe_worker_error_messages(

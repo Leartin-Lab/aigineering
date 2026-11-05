@@ -543,6 +543,25 @@ def test_workspace_relative_config_runs_real_local_worker(tmp_path, monkeypatch)
     assert payload["completed"] is True
     assert Path.cwd() == original
 
+    resumed = CliRunner().invoke(
+        cli,
+        [
+            "-C",
+            str(workspace),
+            "run",
+            "--config",
+            "run.toml",
+            "--resume",
+            payload["contract_id"],
+            "--once",
+            "--json",
+        ],
+    )
+    assert resumed.exit_code == 0, resumed.output
+    resumed_payload = json.loads(resumed.output)
+    assert resumed_payload["contract_id"] == payload["contract_id"]
+    assert resumed_payload["completed"] is True
+
 
 def test_workspace_is_restored_when_subcommand_validation_fails(tmp_path):
     workspace = tmp_path / "workspace"

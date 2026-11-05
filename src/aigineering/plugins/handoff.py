@@ -182,7 +182,10 @@ def validate_task_edit_request(edit: object, source: Contract) -> TaskEditIntent
     ) and unicodedata.normalize("NFC", effective_body) == unicodedata.normalize(
         "NFC", source.description
     ):
-        raise ValueError("task.handoff edit is a canonical no-op")
+        raise ValueError(
+            "task edit is a no-op: the supplied title and body match the current task; "
+            "change at least one field before publishing a successor"
+        )
 
     assignment_id = edit["source_assignment_id"]
     if not isinstance(assignment_id, str) or (

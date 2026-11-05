@@ -177,6 +177,24 @@ remains unknown rather than zero. The default Worker is `llm`; set `--model` or
 OpenAI-compatible endpoint. Supply credentials through `AIGINEERING_API_KEY`
 or `OPENAI_API_KEY`; never put a real key in a command example or report.
 
+When an exact current invocation reports output truncation, its failure detail
+includes the effective `max_output_tokens` and a mode-specific next step. For a
+plain run, set the limit on the exact retry/recovery/successor task, for example
+`aig run --task <recovery_or_successor_id> --max-output-tokens 4096`. Increasing
+the limit does not reset a claim or reopen a terminal source task. For a
+configured run, edit `max_output_tokens` on the responsible `[[workers]]` entry
+and resume the exact executable target with that config; resume does not reset
+the original root. A historical failure without exact truncation evidence does
+not report a guessed limit. This limit controls response length, not causal
+allowance or provider billing.
+
+Read durable task trace explicitly with `aig trace --contract <contract_id> --json`.
+With `--session`, trace continues to read the selected session's JSONL
+events; adding `--contract` filters that session and does not switch to the
+durable task trace. With neither selector, `trace` keeps its latest-session
+behavior; if no session exists but durable task traces do, it points to the
+explicit `--contract` query.
+
 `--worker mock` is an explicit test or dry-run choice, not the production default.
 
 ## Named local workspaces
@@ -1041,6 +1059,10 @@ selects an execution identity for quick, pool and task/resume runs; use a
 different ID from the producer. It does not grant verifier capabilities.
 Configured fleets use their configured identities and reject this override.
 Distinct signing identities do not prove distinct people or independent models.
+The successful `request-review` response includes a `next_step` hint for running
+the exact reviewer child with a distinct Worker ID and then deciding from its
+report. The default operator decision supports `verify.human` policies only;
+custom policy decisions require an existing authorized actor and its signing key.
 
 The source must be a live independent-policy business task with an eligible
 committed output and available allowance. Review reserves source allowance;

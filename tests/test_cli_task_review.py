@@ -217,7 +217,220 @@ def _request_review(runner, source, target, *, key="review-request-1"):
         ],
     )
     assert result.exit_code == 0, result.output
-    return json.loads(result.output)["data"]
+    payload = json.loads(result.output)
+    assert (
+        f"aig run --task {payload['data']['child_contract_id']} --worker-id reviewer:"
+        in payload["next_step"]
+    )
+    return payload["data"]
+
+
+def test_review_decide_help_explains_default_operator_scope():
+    result = CliRunner().invoke(_app(), ["task", "review", "decide", "--help"])
+    assert result.exit_code == 0, result.output
+    assert "verify.human" in result.output
+    assert "capabilities required by the source policy" in result.output
+
+
+def test_same_producer_report_refusal_explains_new_review_recovery(
+    tmp_path, monkeypatch
+):
+    database, root_key_path, source, _policy = _workspace(tmp_path, monkeypatch)
+    target, _source_worker = _create_target(database, root_key_path, source)
+    runner = CliRunner()
+    request = _request_review(runner, source, target.id, key="same-producer-request")
+    store = SQLiteStore.snapshot_from_path(database)
+    reviewer = store.get_contract(request["child_contract_id"])
+    store.close()
+    assert reviewer is not None
+    same_actor_worker = _OutputWorker(
+        "worker:source-producer", request["report_output"], "Independent review report"
+    )
+    assert (
+        _run_worker(database, root_key_path, reviewer, same_actor_worker)["status"]
+        == "accepted"
+    )
+    store = SQLiteStore.snapshot_from_path(database)
+    report = store.get_assets_by_name(request["report_output"])[0]
+    before_revision = store.get_runtime_revision()
+    assert report.signed_by == target.signed_by
+    store.close()
+
+    refused = runner.invoke(
+        _app(),
+        [
+            "task",
+            "review",
+            "decide",
+            request["record_id"],
+            "--report",
+            report.id,
+            "--verdict",
+            "accept",
+            "--reason",
+            "The producer cannot review its own output.",
+            "--json",
+        ],
+    )
+    assert refused.exit_code == 1
+    payload = json.loads(refused.output)
+    assert "new bounded review" in payload["error"]["message"]
+    assert "new reviewer Contract" in payload["next_step"]
+    after = SQLiteStore.snapshot_from_path(database)
+    assert after.get_runtime_revision() == before_revision
+    assert not after.scan_runtime_records(record_type="task.review.decided")
+    after.close()
+
+
+def test_request_review_budget_preflight_preserves_exact_accepted_replay(
+    tmp_path, monkeypatch
+):
+    database, _root_key_path, source, _policy = _workspace(tmp_path, monkeypatch)
+    target, _producer = _create_target(database, _root_key_path, source)
+    runner = CliRunner()
+    first = _request_review(runner, source, target.id, key="exact-budget-replay")
+    consume_rest = runner.invoke(
+        _app(),
+        [
+            "task",
+            "request-review",
+            source.id,
+            "--output",
+            "research_summary",
+            "--asset",
+            target.id,
+            "--reason",
+            "Reserve the remaining source allowance.",
+            "--budget",
+            "4",
+            "--idempotency-key",
+            "consume-rest",
+            "--json",
+        ],
+    )
+    assert consume_rest.exit_code == 0, consume_rest.output
+    after_consumption = SQLiteStore.snapshot_from_path(database)
+    exhausted_revision = after_consumption.get_runtime_revision()
+    assert not after_consumption.scan_runtime_records(record_type="candidate.rejected")
+    after_consumption.close()
+
+    replay = _request_review(runner, source, target.id, key="exact-budget-replay")
+    assert replay == first
+    after_replay = SQLiteStore.snapshot_from_path(database)
+    assert after_replay.get_runtime_revision() == exhausted_revision
+    after_replay.close()
+
+    for reason, key in (
+        ("A changed reason is a different Candidate.", "exact-budget-replay"),
+        ("Check the claims against evidence.", "different-key"),
+    ):
+        changed = runner.invoke(
+            _app(),
+            [
+                "task",
+                "request-review",
+                source.id,
+                "--output",
+                "research_summary",
+                "--asset",
+                target.id,
+                "--reason",
+                reason,
+                "--budget",
+                "1",
+                "--idempotency-key",
+                key,
+                "--json",
+            ],
+        )
+        assert changed.exit_code == 1
+        failure = json.loads(changed.output)
+        assert failure["error"]["code"] == "insufficient_allowance"
+        assert "remaining=0, required=1" in failure["error"]["message"]
+        assert "next_step" in failure
+    unchanged = SQLiteStore.snapshot_from_path(database)
+    assert unchanged.get_runtime_revision() == exhausted_revision
+    assert not unchanged.scan_runtime_records(record_type="candidate.rejected")
+    unchanged.close()
+
+
+def test_exact_request_replay_after_operator_revocation_does_not_bypass_auth(
+    tmp_path, monkeypatch
+):
+    from aigineering.core.ids import compute_content_hash
+    from aigineering.local_identity import _local_root_publisher
+    from aigineering.protocol.effect_builders import actor_revocation_effect
+
+    database, root_key_path, source, _policy = _workspace(tmp_path, monkeypatch)
+    target, _producer = _create_target(database, root_key_path, source)
+    runner = CliRunner()
+    _request_review(runner, source, target.id, key="revoke-after-accept")
+    consume_rest = runner.invoke(
+        _app(),
+        [
+            "task",
+            "request-review",
+            source.id,
+            "--output",
+            "research_summary",
+            "--asset",
+            target.id,
+            "--reason",
+            "Consume allowance before revocation.",
+            "--budget",
+            "4",
+            "--idempotency-key",
+            "consume-before-revoke",
+            "--json",
+        ],
+    )
+    assert consume_rest.exit_code == 0, consume_rest.output
+    store = SQLiteStore(database)
+    _genesis, root_publisher = _local_root_publisher(store)
+    actor_id = "plugin:task.review.request.operator.v1"
+    key_id = "plugin-" + compute_content_hash(actor_id)[:16]
+    revoked = root_publisher.publish(
+        (actor_revocation_effect(actor_id, key_id, "retire review requester"),),
+        idempotency_key="revoke-review-requester",
+    )
+    assert revoked.accepted
+    store.close()
+
+    replay = runner.invoke(
+        _app(),
+        [
+            "task",
+            "request-review",
+            source.id,
+            "--output",
+            "research_summary",
+            "--asset",
+            target.id,
+            "--reason",
+            "Check the claims against evidence.",
+            "--idempotency-key",
+            "revoke-after-accept",
+            "--json",
+        ],
+    )
+    assert replay.exit_code == 1
+    failure = json.loads(replay.output)
+    assert failure["error"]["code"] == "rejected"
+    assert "cannot be rebound" in failure["error"]["message"]
+    after = SQLiteStore.snapshot_from_path(database)
+    assert len(after.scan_runtime_records(record_type="task.review.requested")) == 2
+    assert (
+        len(
+            [
+                contract
+                for contract in after.get_all_contracts()
+                if contract.parent_id == source.id
+                and contract.name.startswith("Review source-study")
+            ]
+        )
+        == 2
+    )
+    after.close()
 
 
 def _plugin_key_path(root_key_path: Path, actor_id: str) -> Path:
@@ -691,23 +904,14 @@ def test_postcommit_redis_pending_marks_durable_request_and_replays(
     assert data["candidate_id"] == links[0][1].payload["candidate_id"]
 
 
-def test_rejected_candidate_redis_pending_is_not_reported_as_accepted(
+def test_budget_preflight_rejects_without_publication_or_rejection_audit(
     tmp_path, monkeypatch
 ):
-    database, _root_key_path, source, _policy = _workspace(tmp_path, monkeypatch)
-    target, _producer = _create_target(database, _root_key_path, source)
-    from aigineering.cli.main import cli
-    from aigineering.runtime_services import RedisSyncPending
-    import aigineering.cli.infrastructure as infrastructure
-    import aigineering.task_policy_review as app_review
-
-    monkeypatch.setattr(infrastructure, "require_redis", lambda: None)
-
-    def pending_after_rejection(_store, *, accepted=None):
-        if accepted is False:
-            raise RedisSyncPending(accepted=False)
-
-    monkeypatch.setattr(app_review, "sync_runtime", pending_after_rejection)
+    database, root_key_path, source, _policy = _workspace(tmp_path, monkeypatch)
+    target, _producer = _create_target(database, root_key_path, source)
+    store = SQLiteStore.snapshot_from_path(database)
+    revision = store.get_runtime_revision()
+    store.close()
     args = [
         "task",
         "request-review",
@@ -721,29 +925,101 @@ def test_rejected_candidate_redis_pending_is_not_reported_as_accepted(
         "--budget",
         "99",
         "--idempotency-key",
-        "review-rejected-pending",
+        "review-preflight-rejected",
         "--json",
     ]
-    result = CliRunner().invoke(cli, args)
+    result = CliRunner().invoke(_app(), args)
+    assert result.exit_code == 1, result.output
+    rejected = json.loads(result.output)
+    assert rejected["error"]["code"] == "insufficient_allowance"
+    assert "remaining=5, required=99" in rejected["error"]["message"]
+    assert "no allowance was consumed" in rejected["error"]["message"]
+    assert "next_step" in rejected
+    store = SQLiteStore.snapshot_from_path(database)
+    assert store.get_runtime_revision() == revision
+    assert not store.scan_runtime_records(record_type="candidate.rejected")
+    assert not store.scan_runtime_records(record_type="task.review.requested")
+    store.close()
+    assert not _plugin_key_path(
+        root_key_path, "plugin:task.review.request.operator.v1"
+    ).exists()
+
+
+def test_late_projector_rejection_pending_keeps_rejected_result_separate(
+    tmp_path, monkeypatch
+):
+    from aigineering.cli.main import cli
+    from aigineering.runtime_services import RedisSyncPending
+    import aigineering.cli.infrastructure as infrastructure
+    import aigineering.cli.task_policy_review as cli_review
+    import aigineering.task_policy_review as app_review
+
+    database, _root_key_path, source, _policy = _workspace(tmp_path, monkeypatch)
+    target, _producer = _create_target(database, _root_key_path, source)
+    monkeypatch.setattr(infrastructure, "require_redis", lambda: None)
+    original_validate = app_review.validate_task_review_request
+
+    def bypass_only_balance_preflight(
+        store,
+        source_contract_id,
+        output_name,
+        asset_id,
+        reason,
+        *,
+        budget=1,
+        idempotency_key=None,
+    ):
+        # Force the request through the canonical projector so this covers a
+        # late rejection transport path, not the normal budget preflight.
+        return original_validate(
+            store,
+            source_contract_id,
+            output_name,
+            asset_id,
+            reason,
+            budget=1,
+            idempotency_key=idempotency_key,
+        )
+
+    monkeypatch.setattr(
+        app_review, "validate_task_review_request", bypass_only_balance_preflight
+    )
+    monkeypatch.setattr(
+        cli_review, "validate_task_review_request", bypass_only_balance_preflight
+    )
+
+    def pending_after_rejection(_store, *, accepted=None):
+        if accepted is False:
+            raise RedisSyncPending(accepted=False)
+
+    monkeypatch.setattr(app_review, "sync_runtime", pending_after_rejection)
+    result = CliRunner().invoke(
+        cli,
+        [
+            "task",
+            "request-review",
+            source.id,
+            "--output",
+            "research_summary",
+            "--asset",
+            target.id,
+            "--reason",
+            "The canonical projector will reject the oversized budget.",
+            "--budget",
+            "99",
+            "--idempotency-key",
+            "late-projector-rejection",
+            "--json",
+        ],
+    )
     assert result.exit_code == 1, result.output
     pending = json.loads(result.output)
     assert pending["error"] == "redis_sync_pending"
-    assert pending["facts_retained"] is True
     assert pending["candidate_accepted"] is False
-
-    monkeypatch.setattr(app_review, "sync_runtime", lambda *_args, **_kwargs: None)
-    replay = CliRunner().invoke(cli, args)
-    assert replay.exit_code == 1, replay.output
-    rejected = json.loads(replay.output)
-    assert rejected["error"]["code"] == "rejected"
+    assert pending["facts_retained"] is True
     store = SQLiteStore.snapshot_from_path(database)
     assert len(store.scan_runtime_records(record_type="candidate.rejected")) == 1
     assert not store.scan_runtime_records(record_type="task.review.requested")
-    assert not any(
-        contract.parent_id == source.id
-        and contract.name.startswith("Review source-study")
-        for contract in store.get_all_contracts()
-    )
     store.close()
 
 

@@ -33,6 +33,16 @@ class _OutputWorker:
         return Candidate(worker_id=self.worker_id, raw_output=raw)
 
 
+class _TruncatedWorker:
+    worker_id = "quick-goal-truncated-worker"
+
+    def invoke(self, contract, disclosed_assets):
+        from aigineering.agent.worker import WorkerExecutionError
+
+        del contract, disclosed_assets
+        raise WorkerExecutionError("output_truncated", "private marker")
+
+
 @pytest.mark.parametrize("option", ["--wait-timeout", "--interval"])
 def test_quick_goal_rejects_unused_wait_options_before_setup(
     monkeypatch, tmp_path, option
@@ -390,3 +400,35 @@ def test_application_worker_preserves_fractional_timeout_and_response_options():
     assert worker._max_output_tokens == 8192
     assert worker._thinking_mode == "disabled"
     assert worker._response_format == "json_object"
+
+
+def test_quick_goal_truncation_reports_current_limit_and_new_task_path(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(
+        "aigineering.cli._common.build_worker",
+        lambda *_args, **_kwargs: _TruncatedWorker(),
+    )
+    runner = CliRunner()
+    with runner.isolated_filesystem(temp_dir=str(tmp_path)):
+        result = runner.invoke(
+            cli,
+            [
+                "run",
+                "Write a report",
+                "--worker",
+                "llm",
+                "--model",
+                "fixture",
+                "--max-output-tokens",
+                "333",
+                "--json",
+            ],
+        )
+
+    assert result.exit_code == 1, result.output
+    payload = json.loads(result.output)
+    assert payload["output_limit"] == 333
+    assert "max_output_tokens=333" in payload["next_step"]
+    assert "rerun this goal as a new task" in payload["next_step"]
+    assert "private marker" not in result.output

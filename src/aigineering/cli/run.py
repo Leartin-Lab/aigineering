@@ -61,6 +61,7 @@ from aigineering.runtime import (
 )
 from aigineering.task_logs import execute_captured_package
 from aigineering.run_failure_diagnostics import (
+    add_output_limit_guidance,
     format_worker_failure_detail,
     invocation_failure_detail,
     safe_task_rejections,
@@ -115,6 +116,7 @@ def _output_run_json(
             "rejections": task_status.get("rejections", []),
             "recoveries": task_status.get("recoveries", []),
             "failure_details": task_status.get("failure_details", []),
+            "output_limit": task_status.get("output_limit"),
             "capture_warnings": task_status.get("capture_warnings", []),
             "next_step": (
                 None
@@ -124,9 +126,12 @@ def _output_run_json(
                     "aig asset show <output_slot> --json and retry with a new --output path."
                     if task_status["ok"]
                     else (
-                        f"Inspect with: aig task audit {contract_id} --json; "
-                        "run a listed recovery explicitly with "
-                        "aig run --task <contract_id>."
+                        task_status.get("truncation_next_step")
+                        or (
+                            f"Inspect with: aig task audit {contract_id} --json; "
+                            "run a listed recovery explicitly with "
+                            "aig run --task <contract_id>."
+                        )
                     )
                 )
             ),
@@ -141,6 +146,134 @@ def _quick_output_exportable(asset) -> bool:
         and asset.disclosure_view == "original"
         and not asset.tombstoned
     )
+
+
+def _validate_run_options(ctx: click.Context, params: dict) -> None:
+    """Validate run's dependency-free option semantics before Redis preflight."""
+    worker_id = params["worker_id"]
+    wait_timeout = params["wait_timeout"]
+    interval = params["interval"]
+    timeout = params["timeout"]
+    config_path = params["config_path"]
+    run_once = params["run_once"]
+    target_task_id = params["target_task_id"]
+    resume_task_id = params["resume_task_id"]
+    goal = params["goal"]
+
+    if worker_id is not None:
+        try:
+            validate_worker_id(worker_id)
+        except ValueError as exc:
+            raise click.BadParameter(str(exc), param_hint="--worker-id") from exc
+    if not math.isfinite(wait_timeout) or wait_timeout <= 0:
+        raise click.BadParameter(
+            "must be a finite positive number", param_hint="--wait-timeout"
+        )
+    if not math.isfinite(interval) or interval <= 0:
+        raise click.BadParameter(
+            "must be a finite positive number", param_hint="--interval"
+        )
+    if not math.isfinite(timeout) or timeout <= 0:
+        raise click.BadParameter(
+            "must be a finite positive number", param_hint="--timeout"
+        )
+    if resume_task_id is not None and target_task_id is not None:
+        raise click.UsageError("Choose only one of --task and --resume.")
+    if target_task_id is not None and not target_task_id.strip():
+        raise click.BadParameter("must not be empty or whitespace", param_hint="--task")
+    if resume_task_id is not None and not resume_task_id.strip():
+        raise click.BadParameter(
+            "must not be empty or whitespace", param_hint="--resume"
+        )
+    if config_path is not None:
+        allowed_with_config = {
+            "config_path",
+            "target_task_id",
+            "resume_task_id",
+            "wait_timeout",
+            "json_output",
+            "run_once",
+        }
+        explicit = [
+            name
+            for name in ctx.params
+            if name not in allowed_with_config
+            and ctx.get_parameter_source(name) == click.core.ParameterSource.COMMANDLINE
+        ]
+        if explicit:
+            display = {
+                "goal": "GOAL",
+                "run_once": "--once",
+                "interval": "--interval",
+                "input_specs": "--input",
+                "output_path": "--output",
+                "mock_output": "--mock-output",
+                "mock_presets": "--mock-preset",
+                "worker_kind": "--worker",
+                "worker_id": "--worker-id",
+                "model": "--model",
+                "base_url": "--base-url",
+                "timeout": "--timeout",
+                "max_retries": "--max-retries",
+                "max_output_tokens": "--max-output-tokens",
+                "thinking_mode": "--thinking-mode",
+                "response_format": "--response-format",
+                "capabilities_str": "--capability",
+                "tool_registry": "--tool-registry",
+                "behavior_labels": "--behavior-label",
+                "save_config": "--save-config",
+            }
+            raise click.UsageError(
+                "--config cannot be combined with "
+                + ", ".join(
+                    display.get(name, f"--{name.replace('_', '-')}")
+                    for name in explicit
+                )
+                + "."
+            )
+        return
+
+    if resume_task_id is not None:
+        target_task_id = resume_task_id
+    modes = int(goal is not None) + int(run_once) + int(target_task_id is not None)
+    if modes != 1:
+        raise click.UsageError(
+            "Choose exactly one of GOAL, --once, or --task <contract_id>."
+        )
+    if goal is not None and not goal.strip():
+        raise click.BadParameter("must not be empty or whitespace", param_hint="GOAL")
+    if goal is not None:
+        quick_wait_options = {
+            "wait_timeout": ("--wait-timeout", "--task, --resume, or --config"),
+            "interval": ("--interval", "--task or --resume"),
+        }
+        for name, (option, modes) in quick_wait_options.items():
+            if ctx.get_parameter_source(name) == click.core.ParameterSource.COMMANDLINE:
+                raise click.UsageError(
+                    f"{option} requires {modes}; for quick GOAL request limits "
+                    "use --timeout and --max-retries."
+                )
+    if params["response_format"] is not None and params["worker_kind"] != "llm":
+        raise click.UsageError("--response-format requires --worker llm.")
+    if params["response_format"] is not None and params["tool_registry"] is not None:
+        raise click.UsageError(
+            "--response-format cannot be combined with --tool-registry."
+        )
+    if (params["input_specs"] or params["output_path"] is not None) and goal is None:
+        raise click.UsageError("--input and --output can only be used with GOAL.")
+    if goal is not None and (
+        params["tool_registry"]
+        or params["mock_output"] is not None
+        or params["mock_presets"]
+    ):
+        raise click.UsageError(
+            "--tool-registry, --mock-output, and --mock-preset are task-pool options; "
+            "quick GOAL runs do not execute operator tools or accept mock overrides."
+        )
+    if goal is None and (params["behavior_labels"] or params["save_config"]):
+        raise click.UsageError(
+            "--behavior-label and --save-config can only be used with GOAL."
+        )
 
 
 @click.command("run")
@@ -332,78 +465,9 @@ def run(
     output_path: Path | None,
 ) -> None:
     """Run a packaged scenario, resume a task, or run a quick goal/task cycle."""
-    if worker_id is not None:
-        try:
-            validate_worker_id(worker_id)
-        except ValueError as exc:
-            raise click.BadParameter(str(exc), param_hint="--worker-id") from exc
-    if not math.isfinite(wait_timeout) or wait_timeout <= 0:
-        raise click.BadParameter(
-            "must be a finite positive number", param_hint="--wait-timeout"
-        )
-    if not math.isfinite(interval) or interval <= 0:
-        raise click.BadParameter(
-            "must be a finite positive number", param_hint="--interval"
-        )
-    if not math.isfinite(timeout) or timeout <= 0:
-        raise click.BadParameter(
-            "must be a finite positive number", param_hint="--timeout"
-        )
-    if resume_task_id is not None and target_task_id is not None:
-        raise click.UsageError("Choose only one of --task and --resume.")
-    if target_task_id is not None and not target_task_id.strip():
-        raise click.BadParameter("must not be empty or whitespace", param_hint="--task")
-    if resume_task_id is not None and not resume_task_id.strip():
-        raise click.BadParameter(
-            "must not be empty or whitespace", param_hint="--resume"
-        )
+    _validate_run_options(ctx, ctx.params)
     selected_resume = resume_task_id if resume_task_id is not None else target_task_id
     if config_path is not None:
-        allowed_with_config = {
-            "config_path",
-            "target_task_id",
-            "resume_task_id",
-            "wait_timeout",
-            "json_output",
-            "run_once",
-        }
-        explicit = [
-            name
-            for name in ctx.params
-            if name not in allowed_with_config
-            and ctx.get_parameter_source(name) == click.core.ParameterSource.COMMANDLINE
-        ]
-        if explicit:
-            display = {
-                "goal": "GOAL",
-                "run_once": "--once",
-                "interval": "--interval",
-                "input_specs": "--input",
-                "output_path": "--output",
-                "mock_output": "--mock-output",
-                "mock_presets": "--mock-preset",
-                "worker_kind": "--worker",
-                "worker_id": "--worker-id",
-                "model": "--model",
-                "base_url": "--base-url",
-                "timeout": "--timeout",
-                "max_retries": "--max-retries",
-                "max_output_tokens": "--max-output-tokens",
-                "thinking_mode": "--thinking-mode",
-                "response_format": "--response-format",
-                "capabilities_str": "--capability",
-                "tool_registry": "--tool-registry",
-                "behavior_labels": "--behavior-label",
-                "save_config": "--save-config",
-            }
-            raise click.UsageError(
-                "--config cannot be combined with "
-                + ", ".join(
-                    display.get(name, f"--{name.replace('_', '-')}")
-                    for name in explicit
-                )
-                + "."
-            )
         try:
             prepared = prepare_configured_run(
                 config_path, resume_task_id=selected_resume
@@ -432,6 +496,20 @@ def run(
                 ]
             ),
         )
+        configured_limits = {
+            spec.worker_id: spec.max_output_tokens
+            for spec, _worker in getattr(prepared, "workers", ())
+            if spec.kind == "llm"
+        }
+        guided_failures = add_output_limit_guidance(
+            result.worker_failure_details,
+            max_output_tokens=configured_limits,
+            configured=True,
+        )
+        payload["worker_failure_details"] = guided_failures
+        payload["worker_errors"] = safe_worker_error_messages(
+            result.worker_errors, guided_failures
+        )
         if json_output:
             _output_json(payload)
         else:
@@ -445,41 +523,6 @@ def run(
         return
     if resume_task_id is not None:
         target_task_id = resume_task_id
-    modes = int(goal is not None) + int(run_once) + int(target_task_id is not None)
-    if modes != 1:
-        raise click.UsageError(
-            "Choose exactly one of GOAL, --once, or --task <contract_id>."
-        )
-    if goal is not None and not goal.strip():
-        raise click.BadParameter("must not be empty or whitespace", param_hint="GOAL")
-    if goal is not None:
-        quick_wait_options = {
-            "wait_timeout": ("--wait-timeout", "--task, --resume, or --config"),
-            "interval": ("--interval", "--task or --resume"),
-        }
-        for name, (option, modes) in quick_wait_options.items():
-            if ctx.get_parameter_source(name) == click.core.ParameterSource.COMMANDLINE:
-                raise click.UsageError(
-                    f"{option} requires {modes}; for quick GOAL request limits "
-                    "use --timeout and --max-retries."
-                )
-    if response_format is not None and worker_kind != "llm":
-        raise click.UsageError("--response-format requires --worker llm.")
-    if response_format is not None and tool_registry is not None:
-        raise click.UsageError(
-            "--response-format cannot be combined with --tool-registry."
-        )
-    if (input_specs or output_path is not None) and goal is None:
-        raise click.UsageError("--input and --output can only be used with GOAL.")
-    if goal is not None and (tool_registry or mock_output is not None or mock_presets):
-        raise click.UsageError(
-            "--tool-registry, --mock-output, and --mock-preset are task-pool options; "
-            "quick GOAL runs do not execute operator tools or accept mock overrides."
-        )
-    if goal is None and (behavior_labels or save_config):
-        raise click.UsageError(
-            "--behavior-label and --save-config can only be used with GOAL."
-        )
     capabilities = _parse_capabilities(capabilities_str)
     if run_once or target_task_id:
         _run_task_pool(
@@ -561,7 +604,20 @@ def run(
     session_store = SessionStore()
     session_store.create_session(session)
     task_status = project_task_status(contract, store)
+    task_status["rejections"] = safe_task_rejections(task_status.get("rejections", ()))
     task_status["capture_warnings"] = list(scope.capture_warnings)
+    if not task_status["ok"]:
+        categories = _worker_failure_categories(store, {contract.id})
+        if any(
+            category in {"output_truncated", "worker_error:output_truncated"}
+            for category in categories
+        ):
+            task_status["output_limit"] = max_output_tokens
+            task_status["truncation_next_step"] = (
+                f"Provider response reached max_output_tokens={max_output_tokens}; "
+                "increase it with `aig run GOAL --max-output-tokens N` and rerun "
+                "this goal as a new task."
+            )
     outputs: list[dict] = []
     markdown_content: str | None = None
     for slot, asset_id in task_status["outputs"].items():
@@ -638,7 +694,10 @@ def run(
             click.echo(f"Rejected output: {task_status['rejections']}")
         if task_status["recoveries"]:
             click.echo(f"Recovery successors: {task_status['recoveries']}")
-        click.echo(f"Inspect with: aig task audit {contract.id} --json")
+        if task_status.get("output_limit"):
+            click.echo(f"next_step: {task_status['truncation_next_step']}")
+        else:
+            click.echo(f"Inspect with: aig task audit {contract.id} --json")
         raise click.exceptions.Exit(1)
     if delivery_error:
         click.echo(f"Run completed, but result export failed: {delivery_error}")
@@ -646,6 +705,9 @@ def run(
     click.echo(f"Markdown output saved to {written_output_path}")
     for output in outputs:
         click.echo(f"Output {output['slot']}: {output['asset_id']}")
+
+
+run.callback._preflight_validator = _validate_run_options
 
 
 def _run_task_pool(
@@ -748,6 +810,10 @@ def _run_task_pool(
                 )
                 raise click.exceptions.Exit(1)
             status = result.projection
+            guided_failures = add_output_limit_guidance(
+                result.worker_failure_details,
+                max_output_tokens=max_output_tokens,
+            )
             status.update(
                 ok=result.completed,
                 cycles=(
@@ -756,9 +822,9 @@ def _run_task_pool(
                     else list(result.cycles)
                 ),
                 capture_warnings=list(result.capture_warnings),
-                worker_failure_details=list(result.worker_failure_details),
+                worker_failure_details=guided_failures,
                 worker_errors=safe_worker_error_messages(
-                    result.worker_errors, result.worker_failure_details
+                    result.worker_errors, guided_failures
                 ),
                 stop_reason=result.stop_reason,
             )
@@ -792,6 +858,9 @@ def _run_task_pool(
         )
     except WorkerInvocationError:
         sync_runtime(store)
+        worker_failure_details = add_output_limit_guidance(
+            worker_failure_details, max_output_tokens=max_output_tokens
+        )
         failure_message = (
             "; ".join(
                 format_worker_failure_detail(detail)

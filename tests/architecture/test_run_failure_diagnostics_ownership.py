@@ -35,6 +35,8 @@ def test_run_and_fleet_reuse_shared_exact_claim_diagnostics_owner():
         "format_worker_failure_detail",
         "safe_worker_error_messages",
         "safe_task_rejections",
+        "add_output_limit_guidance",
+        "_is_output_limit",
     }
     assert not _calls(owner) & {
         "commit_local_effect",
@@ -71,6 +73,7 @@ def test_run_and_fleet_reuse_shared_exact_claim_diagnostics_owner():
     assert run_imports == {
         "format_worker_failure_detail",
         "invocation_failure_detail",
+        "add_output_limit_guidance",
         "safe_task_rejections",
         "safe_worker_error_messages",
     }
@@ -87,4 +90,5 @@ def test_run_and_fleet_reuse_shared_exact_claim_diagnostics_owner():
     assert "format_worker_failure_detail" in run_calls
     assert "safe_worker_error_messages" in run_calls
     assert "safe_task_rejections" in run_calls
+    assert "add_output_limit_guidance" in run_calls
     assert "task_invocation_failure_binding" not in run_calls

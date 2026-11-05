@@ -548,6 +548,12 @@ def validate_task_edit(
         )
     if not replay:
         context = load_effect_projection_context(store)
+        if idempotency_key is None and any(
+            record.record_type == "lifecycle.terminal"
+            and record.payload.get("contract_id") == contract_id
+            for record in context.runtime_records
+        ):
+            raise ValueError("task.handoff source Contract is already terminal")
         actual_assignment, actual_holds = task_edit_snapshot(source, context)
         validate_task_edit_snapshot(
             intent,

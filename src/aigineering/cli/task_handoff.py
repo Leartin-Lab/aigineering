@@ -24,10 +24,17 @@ from aigineering.task_handoff import (
 )
 
 
-def _failure(code: str, message: str, as_json: bool) -> None:
+def _failure(
+    code: str, message: str, as_json: bool, *, next_step: str | None = None
+) -> None:
     if as_json:
-        _output_json({"ok": False, "error": {"code": code, "message": message}})
+        payload = {"ok": False, "error": {"code": code, "message": message}}
+        if next_step:
+            payload["next_step"] = next_step
+        _output_json(payload)
         raise click.exceptions.Exit(1)
+    if next_step:
+        message += f" Next step: {next_step}"
     raise click.ClickException(message)
 
 
@@ -316,7 +323,36 @@ def _human_edit(item: dict) -> str:
             f"    {row['source_hold_id']} -> {row['successor_hold_id']}"
             for row in mapping
         )
+    lines.append(f"  next step: {_edit_next_step(item)}")
     return "\n".join(lines)
+
+
+def _edit_next_step(item: dict) -> str:
+    successor = str(item["successor_id"])
+    mapping = item.get("edit", {}).get("hold_mapping", ())
+    if mapping:
+        commands = "; then ".join(
+            f"aig task unblock {successor} --hold {row['successor_hold_id']} "
+            "--reason 'ready to continue'"
+            for row in mapping
+        )
+        return (
+            f"Inspect copied holds with `aig task holds {successor} --json`; "
+            f"only if each hold's reason is resolved, release exact IDs with {commands}; "
+            f"then run `aig run --task {successor}`."
+        )
+    return str(item.get("run_command") or f"aig run --task {successor}")
+
+
+def _edit_error_next_step(message: str, source: str) -> str | None:
+    if "already terminal" in message:
+        return (
+            f"Inspect verified task lineage with `aig task lineage {source} --json`; "
+            "edit only a task that is currently open and otherwise eligible."
+        )
+    if "task edit is a no-op" in message:
+        return "Change --title or --body so at least one supplied value differs from the current task."
+    return None
 
 
 def _human_edit_history(items: list[dict], source: str) -> str:
@@ -382,7 +418,8 @@ def task_edit(
         if len(source_hold_ids) != len(set(source_hold_ids)):
             raise ValueError("source hold IDs must not be repeated")
     except ValueError as exc:
-        _failure("invalid_input", str(exc), as_json)
+        next_step = _edit_error_next_step(str(exc), source)
+        _failure("invalid_input", str(exc), as_json, next_step=next_step)
 
     require_redis()
     try:
@@ -415,7 +452,8 @@ def task_edit(
     except RedisSyncPending as exc:
         _redis_pending(exc, as_json)
     except ValueError as exc:
-        _failure("invalid_input", str(exc), as_json)
+        next_step = _edit_error_next_step(str(exc), source)
+        _failure("invalid_input", str(exc), as_json, next_step=next_step)
     finally:
         snapshot.close()
 
@@ -436,9 +474,11 @@ def task_edit(
     except RedisSyncPending as exc:
         _redis_pending(exc, as_json)
     except ValueError as exc:
-        _failure("rejected", str(exc), as_json)
+        next_step = _edit_error_next_step(str(exc), source)
+        _failure("rejected", str(exc), as_json, next_step=next_step)
     finally:
         store.close()
+    item["next_step"] = _edit_next_step(item)
     _success(as_json, item, revision, _human_edit(item))
 
 

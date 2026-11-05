@@ -1,6 +1,7 @@
 """Run command reports exact, proven invocation failures without raw errors."""
 
 import json
+from types import SimpleNamespace
 
 import pytest
 from click.testing import CliRunner
@@ -9,6 +10,7 @@ from aigineering.cli.main import cli
 from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.protocol.identity import contract_from_fields
 from aigineering.run_failure_diagnostics import (
+    add_output_limit_guidance,
     format_worker_failure_detail,
     invocation_failure_detail,
     safe_task_rejections,
@@ -98,6 +100,54 @@ class _BudgetFailingWorker:
         raise WorkerExecutionError(
             "provider_request_budget_exhausted", "PRIVATE_BUDGET_FAILURE_MARKER"
         )
+
+
+class _TruncatedWorker:
+    worker_id = "fixture-truncated-worker"
+
+    def invoke(self, contract, disclosed_assets):
+        from aigineering.agent.worker import WorkerExecutionError
+
+        del contract, disclosed_assets
+        raise WorkerExecutionError(
+            "output_truncated", "PRIVATE_TRUNCATION_FAILURE_MARKER"
+        )
+
+
+def test_output_truncation_guidance_uses_exact_effective_worker_limit():
+    detail = {
+        "kind": "invocation_failure",
+        "status": "invocation_failed",
+        "contract_id": "task:v3:" + "a" * 64,
+        "claim_id": "lease:" + "b" * 64,
+        "worker_id": "worker:configured",
+        "category": "worker_error:output_truncated",
+        "status_code": 0,
+    }
+
+    configured = add_output_limit_guidance(
+        [detail],
+        max_output_tokens={"worker:configured": 8192},
+        configured=True,
+    )[0]
+    assert configured["output_limit"] == 8192
+    assert (
+        "max_output_tokens in the configured Worker"
+        in configured["truncation_next_step"]
+    )
+    assert "--resume <recovery_id>" in configured["truncation_next_step"]
+    assert "--resume task:v3:" not in configured["truncation_next_step"]
+
+    unknown_worker = add_output_limit_guidance(
+        [detail],
+        max_output_tokens={"worker:other": 4096},
+        configured=True,
+    )[0]
+    assert "output_limit" not in unknown_worker
+
+    non_truncated = {**detail, "category": "worker_error:fixture_provider_failure"}
+    unchanged = add_output_limit_guidance([non_truncated], max_output_tokens=1234)[0]
+    assert "output_limit" not in unchanged
 
 
 @pytest.mark.parametrize("target_mode", [False, True], ids=["pool", "target-child"])
@@ -328,6 +378,127 @@ def test_run_failure_with_unavailable_proof_returns_no_claim_identifiers(
         assert "PRIVATE_DIAGNOSTIC_READ_MARKER" not in result.output
         assert "claim_id" not in detail
         assert "contract_id" not in detail
+
+
+def test_output_truncation_cli_reports_current_limit_and_recovery_guidance(
+    monkeypatch, tmp_path
+):
+    runner = CliRunner()
+    monkeypatch.setattr(
+        "aigineering.cli.run.build_worker",
+        lambda *_args, **_kwargs: _TruncatedWorker(),
+    )
+    with runner.isolated_filesystem(temp_dir=str(tmp_path)):
+        initialized = runner.invoke(cli, ["domain", "init"])
+        assert initialized.exit_code == 0, initialized.output
+        contract_id = _create_task(runner, "truncated", "truncated-output")
+
+        result = runner.invoke(
+            cli,
+            [
+                "run",
+                "--task",
+                contract_id,
+                "--worker",
+                "llm",
+                "--model",
+                "fixture",
+                "--max-output-tokens",
+                "321",
+                "--json",
+            ],
+        )
+
+        assert result.exit_code == 1, result.output
+        payload = json.loads(result.output)
+        detail = payload["worker_failure_details"][0]
+        assert detail["category"] in {
+            "output_truncated",
+            "worker_error:output_truncated",
+        }
+        assert detail["output_limit"] == 321
+        assert "--max-output-tokens N" in detail["truncation_next_step"]
+        assert "task audit" in detail["truncation_next_step"]
+        assert "--task <recovery_id>" in detail["truncation_next_step"]
+        assert "PRIVATE_TRUNCATION_FAILURE_MARKER" not in result.output
+
+        human_contract_id = _create_task(
+            runner, "truncated-human", "truncated-human-output"
+        )
+        human = runner.invoke(
+            cli,
+            [
+                "run",
+                "--task",
+                human_contract_id,
+                "--worker",
+                "llm",
+                "--model",
+                "fixture",
+                "--max-output-tokens",
+                "654",
+            ],
+        )
+        assert human.exit_code == 1
+        assert "max_output_tokens=654" in human.output
+        assert "--task <recovery_id>" in human.output
+        assert "PRIVATE_TRUNCATION_FAILURE_MARKER" not in human.output
+
+
+def test_configured_truncation_reports_only_matching_current_worker_limit(
+    _offline_collaboration, tmp_path, monkeypatch
+):
+    config = tmp_path / "workers.toml"
+    config.write_text("", encoding="utf-8")
+    worker_spec = SimpleNamespace(
+        worker_id="configured-worker",
+        kind="llm",
+        max_output_tokens=8192,
+    )
+    prepared = SimpleNamespace(workers=((worker_spec, object()),))
+    failure = {
+        "kind": "invocation_failure",
+        "status": "invocation_failed",
+        "contract_id": "task:failed",
+        "claim_id": "lease:" + "d" * 64,
+        "worker_id": "configured-worker",
+        "category": "output_truncated",
+        "status_code": 0,
+    }
+    result = SimpleNamespace(
+        contract_id="task:failed",
+        status="failed",
+        completed=False,
+        timed_out=False,
+        worker_errors=("PRIVATE_TRUNCATION_FAILURE_MARKER",),
+        worker_failure_details=(failure,),
+        capture_warnings=(),
+        stop_reason="worker_failure",
+        cycles=(),
+        submission_status=None,
+        projection={"status": "failed", "blockers": ["terminal:failed"]},
+    )
+    monkeypatch.setattr(
+        "aigineering.cli.run.prepare_configured_run",
+        lambda *_args, **_kwargs: prepared,
+    )
+    monkeypatch.setattr(
+        "aigineering.cli.run.run_configured",
+        lambda *_args, **_kwargs: result,
+    )
+
+    invocation = CliRunner().invoke(
+        cli,
+        ["run", "--config", str(config), "--resume", "task:failed", "--json"],
+    )
+
+    assert invocation.exit_code == 1, invocation.output
+    payload = json.loads(invocation.output)
+    detail = payload["worker_failure_details"][0]
+    assert detail["output_limit"] == 8192
+    assert "configured Worker" in detail["truncation_next_step"]
+    assert "--config PATH --resume <recovery_id>" in detail["truncation_next_step"]
+    assert "PRIVATE_TRUNCATION_FAILURE_MARKER" not in invocation.output
 
 
 def test_configured_failure_rendering_uses_exact_safe_details_only():

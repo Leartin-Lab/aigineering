@@ -99,6 +99,87 @@ def _invoke_json(runner, args):
     return data
 
 
+def test_task_edit_noop_reports_a_concrete_cli_next_step(tmp_path, monkeypatch):
+    _database, _root_key_path, source = _workspace(tmp_path, monkeypatch)
+    result = CliRunner().invoke(
+        _app(),
+        [
+            "task",
+            "edit",
+            source.id,
+            "--title",
+            source.name,
+            "--reason",
+            "No actual text change.",
+            "--json",
+        ],
+    )
+    assert result.exit_code == 1
+    payload = json.loads(result.output)
+    assert payload["error"]["code"] == "invalid_input"
+    assert "no-op" in payload["error"]["message"]
+    assert "Change --title or --body" in payload["next_step"]
+    human = CliRunner().invoke(
+        _app(),
+        [
+            "task",
+            "edit",
+            source.id,
+            "--title",
+            source.name,
+            "--reason",
+            "No actual text change.",
+        ],
+    )
+    assert human.exit_code == 1
+    assert "Next step: Change --title or --body" in human.output
+
+
+def test_terminal_task_edit_points_to_verified_lineage_query(tmp_path, monkeypatch):
+    _database, _root_key_path, source = _workspace(tmp_path, monkeypatch)
+    runner = CliRunner()
+    handoff = _invoke_json(
+        runner,
+        ["task", "handoff", source.id, "--reason", "Continue the open work", "--json"],
+    )
+    assert handoff["data"]["successor_id"]
+    result = runner.invoke(
+        _app(),
+        [
+            "task",
+            "edit",
+            source.id,
+            "--title",
+            "Try editing the terminal source",
+            "--reason",
+            "The terminal source is not editable.",
+            "--json",
+        ],
+    )
+    assert result.exit_code == 1
+    payload = json.loads(result.output)
+    assert "already terminal" in payload["error"]["message"]
+    assert f"aig task lineage {source.id} --json" in payload["next_step"]
+    assert "edit only a task that is currently open" in payload["next_step"]
+    human = runner.invoke(
+        _app(),
+        [
+            "task",
+            "edit",
+            source.id,
+            "--title",
+            "Try editing the terminal source",
+            "--reason",
+            "The terminal source is not editable.",
+        ],
+    )
+    assert human.exit_code == 1
+    assert (
+        f"Next step: Inspect verified task lineage with `aig task lineage {source.id} --json`"
+        in human.output
+    )
+
+
 def test_handoff_signed_atomic_successor_optional_hold_and_history(
     tmp_path, monkeypatch
 ):

@@ -49,6 +49,11 @@ def protect_commands(group: click.Group, path: tuple[str, ...] = ()) -> None:
                         "session show/ls and domain show; execution and mutation require Redis."
                     )
                 try:
+                    preflight_validator = getattr(
+                        callback, "_preflight_validator", None
+                    )
+                    if callable(preflight_validator):
+                        preflight_validator(ctx, kwargs)
                     if not offline and operation[0] not in {"redis", "cache"}:
                         require_redis()
                     return callback(*args, **kwargs)
