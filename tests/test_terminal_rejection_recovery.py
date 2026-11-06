@@ -15,12 +15,14 @@ from aigineering.core.commitment import CandidateCommitRejected
 from aigineering.core.commitment import CandidateCommitter
 from aigineering.core.control_plane import build_control_plane_contract
 from aigineering.core.domain import initialize_genesis
+from aigineering.core.ids import contract_identity_v3
 from aigineering.core.runtime_projection import RuntimeProjection
 from aigineering.core.signing import Ed25519Signer
 from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.plugins.handoff import HANDOFF_EFFECTS, project_task_handoffs
 from aigineering.protocol.candidate import (
     ActorKey,
+    CandidateClaimBinding,
     CandidateEffect,
     create_candidate_proposal,
     create_genesis_manifest,
@@ -319,7 +321,13 @@ def test_handoff_snapshot_race_is_durably_rejected(tmp_path, race):
         "admin-key",
         signer.kind,
         signer.signer_id,
-        ("actor.revoke", "contract.publish", "asset.publish"),
+        (
+            "actor.authorize",
+            "actor.revoke",
+            "contract.publish",
+            "asset.publish",
+            "worker.register",
+        ),
     )
     genesis = create_genesis_manifest(
         f"snapshot-{race}", (handoff_actor, admin), "policy:test"
@@ -340,6 +348,51 @@ def test_handoff_snapshot_race_is_durably_rejected(tmp_path, race):
         contract_declaration_effect(source),
         idempotency_key=f"declare-{race}",
     ).accepted
+
+    partial_producer = None
+    partial_claim = None
+    partial_host = None
+    if race == "partial-output":
+        from dataclasses import replace
+
+        from aigineering.agent.mock import MockWorker
+
+        partial_producer = replace(
+            build_control_plane_contract(
+                name=f"snapshot {race} draft producer",
+                outputs=("draft",),
+                budget=1,
+            ),
+            parent_id=source.id,
+            id="",
+        )
+        partial_producer = replace(
+            partial_producer, id=contract_identity_v3(partial_producer)
+        )
+        assert publish_effect(
+            store,
+            store,
+            genesis,
+            admin,
+            signer,
+            contract_declaration_effect(partial_producer),
+            idempotency_key="declare-partial-output-producer",
+        ).accepted
+        producer = MockWorker(worker_id="worker:partial-output")
+        partial_host = hosted_worker(
+            store,
+            producer,
+            genesis=genesis,
+            authority_key=admin,
+            authority_signer=signer,
+        )
+        assert store.get_worker_registration(producer.worker_id) is not None
+        partial_claim = claim_next_package(
+            store,
+            worker_id=partial_host.worker_id,
+            contract_id=partial_producer.id,
+        )
+        assert partial_claim is not None
 
     reached = Event()
     release = Event()
@@ -376,7 +429,9 @@ def test_handoff_snapshot_race_is_durably_rejected(tmp_path, race):
 
     thread = Thread(target=publish_handoff)
     thread.start()
-    assert reached.wait(10), "handoff did not reach its transactional snapshot check"
+    assert reached.wait(10), (
+        f"handoff did not reach its transactional snapshot check: {errors!r}"
+    )
     try:
         if race == "revocation":
             concurrent_decision = publish_effect(
@@ -396,16 +451,35 @@ def test_handoff_snapshot_race_is_durably_rejected(tmp_path, race):
                 idempotency_key="revoke-handoff-actor",
             )
         else:
-            concurrent_decision = publish_effect(
-                concurrent,
-                concurrent,
-                genesis,
-                admin,
-                signer,
-                asset_proposal_effect(
-                    Asset(id="asset:snapshot-draft", name="draft", content="draft")
+            assert partial_producer is not None
+            assert partial_claim is not None
+            assert partial_host is not None
+            proposal = create_candidate_proposal(
+                domain_id=genesis.id,
+                actor_id=partial_host.actor_key.actor_id,
+                key_id=partial_host.actor_key.key_id,
+                effects=(
+                    asset_proposal_effect(
+                        Asset(
+                            id="asset:snapshot-draft",
+                            name="draft",
+                            content="draft",
+                            origin="worker",
+                            created_by=partial_producer.id,
+                        )
+                    ),
+                ),
+                signer=partial_host.signer,
+                claim_binding=CandidateClaimBinding(
+                    contract_id=partial_producer.id,
+                    claim_id=partial_claim.package.claim_id,
+                    claim_epoch=partial_claim.package.claim_epoch,
+                    package_id=partial_claim.package.package_id,
                 ),
                 idempotency_key="publish-partial-output",
+            )
+            concurrent_decision = CandidateCommitter(concurrent, concurrent).commit(
+                proposal, genesis
             )
         assert concurrent_decision.accepted
     finally:

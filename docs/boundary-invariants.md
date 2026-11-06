@@ -179,6 +179,16 @@ permanently unprocessed on every restart.
 
 ## 11. Assertion and independent acceptance are distinct
 
+Mechanical policies may require `output_source="contract_tree"`. This binds
+output satisfaction and exact retained-ID selection to the declared Contract
+or its immutable descendants, including pending Assets. A pending name alone
+cannot satisfy that policy. New application roots explicitly select it;
+historical `None` or mechanical policies without the field retain their original
+rules. System and recovery outputs retain their own-producer checks.
+SQLite schema22 fences older readers that would ignore the new policy field;
+stop already-open old Workers and back up before upgrading. The version gate
+does not fence an older process that already holds a connection.
+
 An output Asset is an authorized assertion, not automatic semantic truth. A
 Contract whose identity binds `acceptance_policy.mode=independent` remains
 unsatisfied until a different actor with every required verifier capability
@@ -287,7 +297,7 @@ Missing, tombstoned and wrong-role active references fail closed. Original trust
 signer, derivation and redaction checks still apply to selected inputs. Empty maps
 or unused bindings grant neither new input roles nor capabilities. Guard-bearing
 Contracts require task:v6; older identity domains cannot carry the guard. This
-reader gate began with schema18; the current floor is schema21. It is a normal reopen
+reader gate began with schema18; the current floor is schema22. It is a normal reopen
 compatibility gate, not protection for old connections
 that were already open.
 

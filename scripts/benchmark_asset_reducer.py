@@ -654,6 +654,7 @@ def _microcases(root: Path, imports) -> dict[str, Any]:
                 outputs=("overlay_output",),
                 activation="overlay_signal",
                 budget=1,
+                acceptance_policy={"mode": "mechanical"},
             )
             result, twin, _candidate = _publish_twinned(
                 store,
@@ -689,7 +690,7 @@ def _microcases(root: Path, imports) -> dict[str, Any]:
                     for entry in result.trace_entries
                 ),
                 "contract_terminal": terminal.get(contract.id),
-                "assertion_scope": "default-policy human-origin output assertion, not independent truth",
+                "assertion_scope": "legacy mechanical name-domain assertion, not independent truth",
                 "twins": twin,
             }
         elif case == "same_batch_declaration_before_satisfying_asset":
@@ -711,6 +712,7 @@ def _microcases(root: Path, imports) -> dict[str, Any]:
                 outputs=("overlay_output_reverse",),
                 activation="overlay_signal_reverse",
                 budget=1,
+                acceptance_policy={"mode": "mechanical"},
             )
             result, twin, _candidate = _publish_twinned(
                 store,
@@ -837,7 +839,10 @@ def _microcases(root: Path, imports) -> dict[str, Any]:
             }
         else:
             parent = imports["build_control_plane_contract"](
-                name="cancel_parent", outputs=("parent_output",), budget=3
+                name="cancel_parent",
+                outputs=("parent_output",),
+                budget=3,
+                acceptance_policy={"mode": "mechanical"},
             )
             child = imports["contract_from_fields"](
                 name="cancel_intermediate",

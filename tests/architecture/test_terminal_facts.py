@@ -72,6 +72,13 @@ def _materialized_ids(events, assets):
     return tuple(entry.id for entry in traces), tuple(record.id for record in records)
 
 
+def _legacy_mechanical_contract(**fields):
+    """Use the pre-output-source name-domain protocol in legacy reducer probes."""
+    return build_control_plane_contract(
+        **fields, acceptance_policy={"mode": "mechanical"}
+    )
+
+
 def _install_fact_reducer_observer(monkeypatch, store):
     """Observe real reducer calls while separately computing the old reference."""
     state = {"windows": [], "active": False, "stage": "idle"}
@@ -429,7 +436,7 @@ def _signed_dispatch_fixture(runtime, history_count, matched_count):
     for index in range(history_count):
         name = f"d1b2-history-{index}"
         contract = runtime.accept_contract(
-            build_control_plane_contract(
+            _legacy_mechanical_contract(
                 name=name, outputs=(name,), activation="", budget=1
             )
         )
@@ -456,7 +463,7 @@ def _signed_dispatch_fixture(runtime, history_count, matched_count):
         )
         contracts.append(
             runtime.accept_contract(
-                build_control_plane_contract(
+                _legacy_mechanical_contract(
                     name=f"dispatch-{index}",
                     outputs=outputs,
                     activation=activation,
@@ -859,7 +866,7 @@ def test_signed_wide_sibling_completion_uses_fifo_linear_queue_operations(
     store = SQLiteStore(":memory:")
     runtime = candidate_runtime(store)
     root = runtime.accept_contract(
-        build_control_plane_contract(
+        _legacy_mechanical_contract(
             name=f"wide-root-{sibling_count}",
             outputs=("wide-root-result",),
             budget=sibling_count + 2,
@@ -1166,6 +1173,7 @@ def test_signed_same_batch_outputs_retain_provenance_through_reopen_and_rebuild(
             outputs=("business_result", "auxiliary_result"),
             activation="",
             budget=1,
+            acceptance_policy={"mode": "mechanical"},
         )
     )
     decision = runtime.publisher.publish(
@@ -1340,7 +1348,10 @@ def test_signed_completion_output_bucket_keeps_full_descendant_overlay(
     compiler = runtime.accept_contract(
         replace(
             build_control_plane_contract(
-                name="d1b2-compiler", outputs=("d1b2-report",), budget=6
+                name="d1b2-compiler",
+                outputs=("d1b2-report",),
+                budget=6,
+                acceptance_policy={"mode": "mechanical"},
             ),
             parent_id=root.id,
             id="",

@@ -31,7 +31,7 @@ def test_assignment_fact_reader_floor_and_shared_projection_store_view():
     migrations = (ROOT / "src/aigineering/core/sqlite_migrations.py").read_text()
     view = (ROOT / "src/aigineering/core/projection_store_view.py").read_text()
     successor = (ROOT / "src/aigineering/plugins/task_successors.py").read_text()
-    assert "CURRENT_SCHEMA_VERSION = 21" in migrations
+    assert "CURRENT_SCHEMA_VERSION = 22" in migrations
     assert "_migrate_to_v21" in migrations
     assert "claim.assignment.changed" in migrations
     assert "class ProjectionStoreView" in view

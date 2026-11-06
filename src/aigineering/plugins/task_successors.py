@@ -10,9 +10,8 @@ from aigineering.core.input_bindings import (
     read_contract_input_assets,
 )
 from aigineering.core.output_satisfaction import (
-    _is_contract_or_descendant,
     all_outputs_satisfied,
-    is_business_output,
+    output_asset_is_eligible,
 )
 from aigineering.core.projection_store_view import ProjectionStoreView
 from aigineering.core.projection_context import EffectProjectionContext
@@ -50,28 +49,17 @@ def satisfied_output_slots(
             and record.payload.get("contract_id") == contract.id
             and record.payload.get("output_name") == name
         }
-        selected: set[str] = set()
-        for asset in context.assets:
-            if asset.name != name:
-                continue
-            if (
-                contract.acceptance_policy is not None
-                and contract.acceptance_policy.get("mode") == "independent"
-            ):
-                if (
-                    not is_business_output(asset, name)
-                    or asset.id not in qualified
-                    or not _is_contract_or_descendant(
-                        asset.created_by, contract.id, view
-                    )
-                ):
-                    continue
-            elif contract.origin in {"system", "recovery"}:
-                if asset.created_by != contract.id:
-                    continue
-            elif not is_business_output(asset, name):
-                continue
-            selected.add(asset.id)
+        selected = {
+            asset.id
+            for asset in context.assets
+            if output_asset_is_eligible(
+                contract,
+                name,
+                asset,
+                view,
+                qualified_asset_ids=qualified,
+            )
+        }
         ids = tuple(sorted(selected))
         if ids:
             slots.append((name, ids))

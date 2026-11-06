@@ -58,6 +58,10 @@ def actor_key_path() -> Path:
     return Path(os.environ.get("AIG_ACTOR_KEY_FILE", ".aig/identity/root.ed25519"))
 
 
+def _identity_directory(key_path: Path | None = None) -> Path:
+    return (key_path or actor_key_path()).parent
+
+
 def write_actor_key(path: Path, signer: Ed25519Signer) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     descriptor, temporary_name = tempfile.mkstemp(
@@ -112,12 +116,12 @@ def _load_or_create_signer(path: Path) -> Ed25519Signer:
     return signer
 
 
-def ensure_local_domain(store) -> GenesisManifest:
+def ensure_local_domain(store, *, key_path: Path | None = None) -> GenesisManifest:
     """Create the sole local bootstrap on first use, otherwise load it."""
     try:
         return load_genesis(store)
     except LookupError:
-        path = actor_key_path()
+        path = key_path or actor_key_path()
         signer = _load_or_create_signer(path)
         manifest = create_genesis_manifest(
             "local",
@@ -136,10 +140,10 @@ def ensure_local_domain(store) -> GenesisManifest:
 
 
 def _local_root_publisher(
-    store, *, additional_effects=None
+    store, *, additional_effects=None, key_path: Path | None = None
 ) -> tuple[GenesisManifest, CandidatePublisher]:
-    genesis = ensure_local_domain(store)
-    signer = load_actor_signer()
+    genesis = ensure_local_domain(store, key_path=key_path)
+    signer = load_actor_signer(key_path)
     try:
         actor_key = next(
             key
@@ -164,13 +168,16 @@ def ensure_local_worker_host(
     *,
     effect_capabilities: tuple[str, ...] = (),
     pull_only: bool = False,
+    key_path: Path | None = None,
 ):
     """Bind one local Worker adapter to its immutable registration history."""
     from aigineering.application import require_redis
 
     require_redis()
     genesis, authority = _local_root_publisher(
-        store, additional_effects=WORKER_PROFILE_PROMOTION_EFFECTS
+        store,
+        additional_effects=WORKER_PROFILE_PROMOTION_EFFECTS,
+        key_path=key_path,
     )
     worker_id = str(worker.worker_id)
     effect_capabilities = tuple(sorted(set(effect_capabilities)))
@@ -181,7 +188,7 @@ def ensure_local_worker_host(
     )
     key_suffix = compute_content_hash(key_identity)[:16]
     key_id = f"worker-{key_suffix}"
-    path = actor_key_path().parent / f"{key_id}.ed25519"
+    path = _identity_directory(key_path) / f"{key_id}.ed25519"
     current = store.get_worker_registration(worker_id)
     registration_factory = getattr(worker, "registration", None)
     requested = (
@@ -219,7 +226,10 @@ def ensure_local_worker_host(
     # Existing registrations must prove their local signer before any new key
     # can be written. This also refuses disabled and externally owned workers.
     existing_host = load_existing_local_worker_host(
-        store, worker, effect_capabilities=effect_capabilities
+        store,
+        worker,
+        effect_capabilities=effect_capabilities,
+        key_path=key_path,
     )
     requested = replace(
         requested,
@@ -297,7 +307,11 @@ def ensure_local_worker_host(
 
 
 def load_existing_local_worker_host(
-    store, worker, *, effect_capabilities: tuple[str, ...] = ()
+    store,
+    worker,
+    *,
+    effect_capabilities: tuple[str, ...] = (),
+    key_path: Path | None = None,
 ):
     """Load an already registered local Worker signer without provisioning."""
     genesis = load_genesis(store)
@@ -317,7 +331,7 @@ def load_existing_local_worker_host(
             "registered Worker identity is not the canonical local signer; "
             "provide a signed Worker Candidate"
         )
-    path = actor_key_path().parent / f"{key_id}.ed25519"
+    path = _identity_directory(key_path) / f"{key_id}.ed25519"
     if not path.is_file():
         raise ValueError(
             "registered Worker signer is not available locally; "
@@ -351,13 +365,15 @@ def ensure_local_plugin_publisher(
     store,
     plugin_id: str,
     capabilities: tuple[str, ...],
+    *,
+    key_path: Path | None = None,
 ) -> CandidatePublisher:
     """Provision one durable plugin actor and return its explicit publisher."""
-    genesis, authority = _local_root_publisher(store)
+    genesis, authority = _local_root_publisher(store, key_path=key_path)
     actor_id = f"plugin:{plugin_id}"
     key_suffix = compute_content_hash(actor_id)[:16]
     key_id = f"plugin-{key_suffix}"
-    path = actor_key_path().parent / f"{key_id}.ed25519"
+    path = _identity_directory(key_path) / f"{key_id}.ed25519"
     signer = _load_or_create_signer(path)
     actor_key = ActorKey(
         actor_id,
@@ -386,7 +402,9 @@ def ensure_local_plugin_publisher(
     return CandidatePublisher(store, store, genesis, actor_key, signer)
 
 
-def ensure_local_runtime_publishers(store) -> CandidatePublisherRegistry:
+def ensure_local_runtime_publishers(
+    store, *, key_path: Path | None = None
+) -> CandidatePublisherRegistry:
     """Provision the fixed plugin actors used by local completion/recovery."""
     specifications = (
         ("planning.expand.v1", ("contract.publish",)),
@@ -409,7 +427,9 @@ def ensure_local_runtime_publishers(store) -> CandidatePublisherRegistry:
         tuple(
             (
                 plugin_id,
-                ensure_local_plugin_publisher(store, plugin_id, capabilities),
+                ensure_local_plugin_publisher(
+                    store, plugin_id, capabilities, key_path=key_path
+                ),
             )
             for plugin_id, capabilities in specifications
         )

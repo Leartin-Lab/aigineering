@@ -1025,21 +1025,29 @@ def _build_plan_contract(
     sensitive_policy = (
         parent_contract.sensitive_input_policy if parent_contract is not None else None
     )
+    parent_policy = (
+        parent_contract.acceptance_policy if parent_contract is not None else None
+    )
     parent_shapes = (
-        parent_contract.acceptance_policy.get("output_shapes", {})
-        if parent_contract is not None and parent_contract.acceptance_policy is not None
-        else {}
+        parent_policy.get("output_shapes", {}) if parent_policy is not None else {}
     )
     output_shapes = {
         output: deep_thaw(parent_shapes[output])
         for output in outputs
         if output in parent_shapes
     }
-    acceptance_policy = (
-        {"mode": "mechanical", "output_shapes": output_shapes}
-        if output_shapes
-        else None
+    strict_output_source = (
+        parent_policy is not None
+        and parent_policy.get("mode") == "mechanical"
+        and parent_policy.get("output_source") == "contract_tree"
     )
+    acceptance_policy: dict[str, object] | None = None
+    if output_shapes or strict_output_source:
+        acceptance_policy = {"mode": "mechanical"}
+        if output_shapes:
+            acceptance_policy["output_shapes"] = output_shapes
+        if strict_output_source:
+            acceptance_policy["output_source"] = "contract_tree"
     context_asset_ids = (
         tuple(sorted(asset.id for asset in context_assets if asset.name in labels))
         if context_assets

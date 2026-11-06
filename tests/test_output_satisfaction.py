@@ -102,6 +102,88 @@ def test_legacy_extra_output_names_keep_their_existing_name_only_behavior():
     )
 
 
+def test_contract_tree_policy_rejects_unrelated_same_name_committed_asset():
+    root = Contract(
+        id="root-b",
+        outputs=("report",),
+        acceptance_policy={"mode": "mechanical", "output_source": "contract_tree"},
+    )
+    unrelated = Asset(
+        id="report-a",
+        name="report",
+        content="from another root",
+        created_by="root-a",
+        origin="human",
+    )
+    own = Asset(
+        id="report-b",
+        name="report",
+        content="from this root",
+        created_by="root-b",
+        origin="human",
+    )
+
+    assert not all_outputs_satisfied(root, _AssetLookup((unrelated,)))
+    assert all_outputs_satisfied(root, _AssetLookup((unrelated, own)))
+
+
+def test_contract_tree_policy_rejects_extra_names_and_foreign_pending_assets():
+    root = Contract(
+        id="root-b",
+        outputs=("report",),
+        acceptance_policy={"mode": "mechanical", "output_source": "contract_tree"},
+    )
+    foreign_pending = Asset(
+        id="pending-a",
+        name="report",
+        content="foreign",
+        created_by="root-a",
+        origin="human",
+    )
+
+    assert not all_outputs_satisfied(
+        root,
+        _AssetLookup(()),
+        extra_output_names={"report"},
+        pending_assets=(foreign_pending,),
+    )
+
+
+def test_contract_tree_policy_accepts_pending_descendant_output():
+    root = Contract(
+        id="root-b",
+        outputs=("report",),
+        acceptance_policy={"mode": "mechanical", "output_source": "contract_tree"},
+    )
+    child = Contract(id="child-b", parent_id="root-b")
+    output = Asset(
+        id="report-child",
+        name="report",
+        content="child result",
+        created_by=child.id,
+        origin="human",
+    )
+
+    class _TreeLookup(_AssetLookup):
+        def get_contract(self, contract_id: str):
+            return child if contract_id == child.id else None
+
+    assert all_outputs_satisfied(root, _TreeLookup(()), pending_assets=(output,))
+
+
+def test_legacy_policy_none_keeps_same_name_compatibility():
+    root = Contract(id="root-b", outputs=("report",))
+    unrelated = Asset(
+        id="report-a",
+        name="report",
+        content="legacy reusable result",
+        created_by="root-a",
+        origin="human",
+    )
+
+    assert all_outputs_satisfied(root, _AssetLookup((unrelated,)))
+
+
 @pytest.mark.parametrize("prefix", NON_OUTPUT_PREFIXES)
 def test_pending_observation_prefixes_do_not_satisfy_business_outputs(prefix):
     output = f"{prefix}result"
@@ -143,6 +225,19 @@ def test_pending_system_and_recovery_outputs_require_their_own_creator(contract_
     assert all_outputs_satisfied(contract, _AssetLookup(()), pending_assets=(own,))
     assert not all_outputs_satisfied(
         contract, _AssetLookup(()), pending_assets=(foreign,)
+    )
+    assert all_outputs_satisfied(
+        contract, _AssetLookup(()), extra_output_names={output}
+    )
+    strict = Contract(
+        id="strict-owner",
+        name="strict-output",
+        outputs=(output,),
+        origin=contract_origin,
+        acceptance_policy={"mode": "mechanical", "output_source": "contract_tree"},
+    )
+    assert not all_outputs_satisfied(
+        strict, _AssetLookup(()), extra_output_names={output}
     )
 
 

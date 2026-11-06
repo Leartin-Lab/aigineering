@@ -86,6 +86,11 @@ class WorkerHost:
             raise ValueError("WorkerHost registration_version must be a string")
         if self.actor_key.actor_id != self.worker.worker_id:
             raise ValueError("WorkerHost actor_id must equal worker.worker_id")
+        expected_domain_id = getattr(self.worker, "expected_domain_id", None)
+        if expected_domain_id is not None and expected_domain_id != self.genesis.id:
+            raise ValueError(
+                "WorkerHost Genesis does not match the Worker's expected domain"
+            )
         if (
             self.actor_key.kind != self.signer.kind
             or self.actor_key.public_key != self.signer.signer_id

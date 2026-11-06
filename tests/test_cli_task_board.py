@@ -96,7 +96,14 @@ def _unwrapped_command(command):
     return local
 
 
-def _signed_fixture(tmp_path, monkeypatch, *, output_content=None, promptable=True):
+def _signed_fixture(
+    tmp_path,
+    monkeypatch,
+    *,
+    output_content=None,
+    promptable=True,
+    legacy_output_semantics=False,
+):
     db_path = tmp_path / "board.sqlite"
     setup = SQLiteStore(db_path=str(db_path))
     publisher = candidate_runtime(setup)
@@ -109,6 +116,11 @@ def _signed_fixture(tmp_path, monkeypatch, *, output_content=None, promptable=Tr
             description="Write a report.",
             outputs=("report",),
             budget=3,
+            **(
+                {"acceptance_policy": {"mode": "mechanical"}}
+                if legacy_output_semantics
+                else {}
+            ),
         )
     )
     if output_content is not None:
@@ -643,7 +655,10 @@ def test_postcommit_redis_sync_pending_is_left_for_outer_cli_handler(
 def test_result_exports_exact_utf8_bytes_and_never_overwrites(tmp_path, monkeypatch):
     content = "first\r\nsecond\n終"
     _root, contract, _services, _open_store = _signed_fixture(
-        tmp_path, monkeypatch, output_content=content
+        tmp_path,
+        monkeypatch,
+        output_content=content,
+        legacy_output_semantics=True,
     )
 
     destination = tmp_path / "report.txt"
@@ -663,7 +678,10 @@ def test_result_exports_exact_utf8_bytes_and_never_overwrites(tmp_path, monkeypa
 
 def test_result_checks_fact_and_view_integrity(tmp_path, monkeypatch):
     _root, contract, _services, _open_store = _signed_fixture(
-        tmp_path, monkeypatch, output_content="grounded report"
+        tmp_path,
+        monkeypatch,
+        output_content="grounded report",
+        legacy_output_semantics=True,
     )
     real_project = board.project_task_status
     checks = []
@@ -684,6 +702,7 @@ def test_result_refuses_nonpromptable_assets(tmp_path, monkeypatch):
         monkeypatch,
         output_content="sealed provider configuration",
         promptable=False,
+        legacy_output_semantics=True,
     )
     path = tmp_path / "must-not-exist.txt"
     result = _invoke(["result", contract.id, "--to", str(path), "--json"])

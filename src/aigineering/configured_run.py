@@ -36,13 +36,14 @@ __all__ = [
     "PreparedConfiguredRun",
     "prepare_configured_run",
     "run_configured",
+    "tool_descriptor_assets",
     "publish_tool_descriptors",
 ]
 
 
-def publish_tool_descriptors(store, registry) -> None:
-    """Publish descriptors for a configured operator ToolRegistry by Candidate."""
-    descriptors = tuple(
+def tool_descriptor_assets(registry) -> tuple:
+    """Build the exact signed-publication descriptors for a ToolRegistry."""
+    return tuple(
         create_tool_descriptor(
             spec.name,
             spec.description,
@@ -54,6 +55,11 @@ def publish_tool_descriptors(store, registry) -> None:
         )
         for spec in registry.list_specs()
     )
+
+
+def publish_tool_descriptors(store, registry, *, key_path: Path | None = None) -> None:
+    """Publish descriptors for a configured operator ToolRegistry by Candidate."""
+    descriptors = tool_descriptor_assets(registry)
     effects = tuple(asset_proposal_effect(item) for item in descriptors)
     require_accepted(
         commit_local_effects(
@@ -61,6 +67,7 @@ def publish_tool_descriptors(store, registry) -> None:
             effects,
             idempotency_key="tool-registry:"
             + ",".join(sorted(item.id for item in descriptors)),
+            key_path=key_path,
         )
     )
 
@@ -127,14 +134,10 @@ def run_configured(
 
         ensure_local_runtime_publishers(store)
         hosts = []
-        registries = dict(prepared.tool_registries)
-        published_registries: set[str] = set()
+        for _reference, registry in prepared.tool_registries:
+            publish_tool_descriptors(store, registry)
         for spec, prepared_worker in prepared.workers:
             worker = prepared_worker
-            if spec.tool_registry and spec.tool_registry not in published_registries:
-                registry = registries[spec.tool_registry]
-                publish_tool_descriptors(store, registry)
-                published_registries.add(spec.tool_registry)
             host = ensure_local_worker_host(
                 store,
                 worker,

@@ -1236,6 +1236,19 @@ def _target_next_step(status: dict, stop_reason: str) -> str:
             "or reuse this claim."
         )
     if task_status in {"stalled", "failed", "cancelled", "unreachable"}:
+        risks = status.get("silent_failure_risks") or ()
+        if task_status == "stalled" and any(
+            isinstance(risk, dict) and risk.get("code") == "blocked_capability"
+            for risk in risks
+        ):
+            return (
+                "No registered Worker currently satisfies this task's routing "
+                "capabilities. Check the Fleet configuration's Worker "
+                "`capabilities` and run with a Fleet that registers a matching "
+                "Worker (for example, `aig fleet run --config <PATH> --task "
+                "<CONTRACT_ID>`). The `aig run --capability` option configures "
+                "provider features; it does not change Worker routing."
+            )
         return (
             "Inspect aig task audit; run a recovery successor explicitly if one "
             "was published."

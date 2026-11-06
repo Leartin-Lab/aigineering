@@ -359,6 +359,36 @@ def test_successor_output_selection_preserves_entry_compatibility():
     assert satisfied_asset_ids(source, "", context) == ("asset:empty-name",)
 
 
+def test_successor_retained_ids_exclude_foreign_same_name_asset():
+    source = _contract(
+        "source",
+        outputs=("report",),
+        acceptance_policy={"mode": "mechanical", "output_source": "contract_tree"},
+    )
+    unrelated = _contract("unrelated")
+    assets = (
+        Asset(
+            id="asset:owned-report",
+            name="report",
+            content="owned",
+            created_by=source.id,
+            origin="human",
+        ),
+        Asset(
+            id="asset:foreign-report",
+            name="report",
+            content="foreign",
+            created_by=unrelated.id,
+            origin="human",
+        ),
+    )
+    context = EffectProjectionContext(contracts=(source, unrelated), assets=assets)
+
+    assert satisfied_output_slots(source, context) == (
+        ("report", ("asset:owned-report",)),
+    )
+
+
 def test_human_expanded_handoff_shows_copyable_exact_decisions():
     rendered = _human_handoff(
         {

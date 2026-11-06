@@ -7,6 +7,7 @@ from aigineering.core.control_plane import (
     build_control_plane_asset,
     build_control_plane_contract,
 )
+from aigineering.core.contract_admission import validate_acceptance_policy
 from aigineering.core.ids import hash_asset_content, hash_asset_definition
 
 
@@ -74,6 +75,10 @@ def test_contract_builder_creates_canonical_human_proposal():
     assert contract.origin == "human"
     assert contract.inputs == ("data_file",)
     assert contract.outputs == ("final_report",)
+    assert contract.acceptance_policy == {
+        "mode": "mechanical",
+        "output_source": "contract_tree",
+    }
     assert contract.labels == ("reviewed",)
     assert contract.tool_scope == ("lookup",)
 
@@ -94,3 +99,36 @@ def test_contract_identity_is_deterministic():
     second = build_control_plane_contract(name="task", outputs=("out",), budget=3)
 
     assert first == second
+
+
+def test_explicit_legacy_mechanical_policy_is_preserved():
+    contract = build_control_plane_contract(
+        name="legacy compatibility",
+        outputs=("out",),
+        acceptance_policy={"mode": "mechanical"},
+    )
+
+    assert contract.acceptance_policy == {"mode": "mechanical"}
+
+
+@pytest.mark.parametrize(
+    "policy",
+    (
+        {"mode": "mechanical", "output_source": "other"},
+        {"mode": "mechanical", "output_source": 1},
+        {
+            "mode": "independent",
+            "policy_version": "review-v1",
+            "output_source": "contract_tree",
+        },
+    ),
+)
+def test_acceptance_policy_rejects_unknown_or_incompatible_output_source(policy):
+    contract = build_control_plane_contract(
+        name="invalid policy",
+        outputs=("out",),
+        acceptance_policy=policy,
+    )
+
+    with pytest.raises(ValueError, match="output_source"):
+        validate_acceptance_policy(contract)

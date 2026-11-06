@@ -139,6 +139,11 @@ def build_control_plane_contract(
         )
 
     policy = sensitive_input_policy if sensitive_input_policy is not None else None
+    output_policy = (
+        acceptance_policy
+        if acceptance_policy is not None
+        else {"mode": "mechanical", "output_source": "contract_tree"}
+    )
     identity_fields = dict(
         name=name,
         description=description,
@@ -150,7 +155,7 @@ def build_control_plane_contract(
         labels=labels,
         origin="human",
         sensitive_input_policy=policy,
-        acceptance_policy=acceptance_policy,
+        acceptance_policy=output_policy,
         worker_capabilities=worker_capabilities,
         worker_pools=worker_pools,
         delegation_capabilities=delegation_capabilities,

@@ -536,7 +536,8 @@ def task_assignment_smoke(
         raise RuntimeError("Redis rebuild changed assignment event references")
     if command("task", "assignments", successor)["data"] != histories_before:
         raise RuntimeError("reopen/rebuild changed assignment history")
-    if snapshot()["schema_version"] != 21:
+    schema_version = snapshot()["schema_version"]
+    if schema_version < 21:
         raise RuntimeError("installed assignment is missing its schema21 reader gate")
     expected_facts = {
         item["assignment_id"]: {
@@ -569,7 +570,7 @@ def task_assignment_smoke(
     return {
         "classification": "installed_explicit_fixture",
         "provider_calls": 0,
-        "schema_version": 21,
+        "schema_version": schema_version,
         "set_replace_clear_set": True,
         "invalid_and_claimed_preflight_no_facts": True,
         "signed_and_trusted_wrong_worker_claims_blocked": True,

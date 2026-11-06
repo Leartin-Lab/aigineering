@@ -136,9 +136,10 @@ classes; operator-owned Worker registrations map them to concrete providers.
 Contracts with `sensitive_input_policy.input_asset_bindings` use v6. It reuses
 the complete v5 canonical field owner while marking exact input-selection support.
 Guard-bearing older identities are rejected; historical no-key identities stay
-unchanged. This reader gate began with schema18; the current floor is schema21,
+unchanged. This reader gate began with schema18; the current floor is schema22,
 which also protects paired causal-allowance returns, task claim constraints and
-Worker assignments. It prevents older readers
+Worker assignments, and prevents older readers from ignoring mechanical
+output-source constraints. It prevents older readers
 from reopening an upgraded Store,
 without changing historical facts or adding columns. Stop old Workers and use
 `domain upgrade` to back up before migration; ordinary writable opens also migrate.
@@ -295,7 +296,8 @@ no-work null-target scan records no request and can be retried. Local WorkerHost
 Fleet, Engine, method, CLI, harness and HTTP paths share this authentication
 boundary. Recordless trusted Store compatibility calls are internal seams, not
 operational authentication evidence. Coordination itself did not change fact
-types or the reader floor; task assignments now require schema21. Expired claims, invocation failures,
+types or the reader floor; task assignments introduced schema21 and the current
+reader floor is schema22. Expired claims, invocation failures,
 malformed Worker results, and Contract terminal facts close visibly. A terminal
 fact releases an unrelated active claim in the same transaction and records an
 immutable transition that rebuilds to the same claim view. A stale Candidate
@@ -617,6 +619,15 @@ compatibility.
 
 ## Independent acceptance
 
+New application Contracts default to a mechanical policy with
+`output_source="contract_tree"`. A business output must come from that Contract
+or its immutable descendants. The same shared predicate selects exact retained
+Asset IDs for handoff and revision; a matching name or pending name alone is
+insufficient. Planning and parallel continuation preserve this constraint.
+Historical Contracts without the field retain their original same-name rules.
+Reopening does not add a policy or rewrite terminal facts. Explicit mechanical
+policies without the field remain the legacy opt-in compatibility path.
+
 An authorized output assertion is not automatically semantic truth. A Contract
 may bind an independent acceptance policy.
 
@@ -755,11 +766,27 @@ fixed Store revision; unavailable proof carries no claimed identifiers.
 Coordinator exceptions discovered after joining bounded slots are reported as
 unbound safe errors. Neither path creates task state or exposes exception text.
 
-EngineWorker applies the same rule across nested fact domains. It receives an
-outer claim context, executes against an isolated inner Store, persists bridge
-operations, and exports only authorized output effects. A restarted
-EngineWorker can reopen the inner Store and reuse committed work; an expired
-outer claim cannot submit a late result.
+EngineWorker applies the same rule across fact domains. It can use a private
+inner Store or an explicitly pinned, already initialized local workspace.
+Bridge operations bind the source and target domains, exact outer claim,
+receiver configuration and inner root. New operations get distinct roots with
+contract-tree output provenance; exact replay can reuse that operation's work.
+Disclosed input IDs are remapped to their signed imports in the receiving
+domain. The outer acceptance policy remains authoritative for exported effects;
+an expired outer claim cannot submit a late result.
+
+The existing-workspace mode is trusted same-operator composition: its Fleet
+profile supplies the receiving workspace, Genesis pin, root key file and Fleet
+configuration. It reuses canonical registration, claim, invocation and runtime
+maintenance owners. Invocation is root-scoped; maintenance retains its ordinary
+domain scope. Receiver Fleets cannot contain Engine adapters. This is bounded
+local delegation, not recursive federation, process isolation or a shared
+cross-domain budget. Receiver configuration must stay frozen across bridge
+processes: recorded intent conflicts fail visibly, but the history precheck does
+not arbitrate concurrent first publications with different configurations.
+The fingerprint pins declarative Fleet/tool metadata, not Python implementation
+bytes; the trusted operator must keep referenced code and dependencies fixed.
+See [configuration](docs/reference/configured-runs.md#delegate-to-an-existing-local-workspace).
 
 ## Query and interface surfaces
 
@@ -1399,8 +1426,10 @@ invocation. It uses the goal and only the UTF-8 files explicitly supplied with
 network sources, or load operator tools. Successful exportable text is saved as
 Markdown to `--output PATH`, defaulting to `.aig/outputs/<session>.md`; existing
 destinations are not overwritten. Each quick run claims only its root Contract
-or current descendants. Ordinary task outputs still use domain-wide same-name
-satisfaction, so explicitly shared Assets remain reusable. Runtime maintenance
+or current descendants. Newly prepared application roots use contract-tree
+output provenance; historical policies can retain domain-wide same-name
+satisfaction. Existing content can be disclosed as an explicit input without
+being treated as a new task's completed output. Runtime maintenance
 and expired-claim processing remain domain-wide; quick-run claim selection does
 not isolate every Store side effect. A failed root remains terminal; its
 recovery successor is a separate task and must be run explicitly with

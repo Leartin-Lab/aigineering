@@ -32,7 +32,7 @@ from aigineering.protocol.wire import (
     trace_entry_to_dict,
 )
 
-CURRENT_SCHEMA_VERSION = 21
+CURRENT_SCHEMA_VERSION = 22
 
 
 class SQLiteMigrator:
@@ -166,6 +166,9 @@ class SQLiteMigrator:
             if current < 21:
                 self._migrate_to_v21()
                 self._record_schema_version(21)
+            if current < 22:
+                self._migrate_to_v22()
+                self._record_schema_version(22)
 
     def _migrate_to_v17(self) -> None:
         """Separate Contract execution requirements from delegation scope."""
@@ -216,6 +219,9 @@ class SQLiteMigrator:
             raise ValueError(
                 "schema 21 upgrade refuses pre-existing task assignment facts"
             )
+
+    def _migrate_to_v22(self) -> None:
+        """Fence readers that ignore mechanical output-source policy fields."""
 
     def _migrate_to_v2(self) -> None:
         """Add 040 transactional worker state and contract authority metadata."""

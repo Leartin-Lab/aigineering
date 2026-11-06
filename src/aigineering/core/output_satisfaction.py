@@ -46,6 +46,47 @@ def is_business_output(asset: object, declared_output_name: str) -> bool:
     return not any(name.startswith(prefix) for prefix in NON_OUTPUT_PREFIXES)
 
 
+def output_asset_is_eligible(
+    contract: Contract,
+    output_name: str,
+    asset: Asset,
+    store: StoreProtocol,
+    *,
+    qualified_asset_ids: set[str] | frozenset[str] = frozenset(),
+) -> bool:
+    """Return whether one exact Asset can satisfy this Contract output slot."""
+    if getattr(asset, "name", None) != output_name:
+        return False
+
+    policy = contract.acceptance_policy
+    if policy is not None and policy.get("mode") == "independent":
+        return (
+            asset.id in qualified_asset_ids
+            and is_business_output(asset, output_name)
+            and _is_contract_or_descendant(asset.created_by, contract.id, store)
+        )
+
+    if (
+        policy is not None
+        and policy.get("mode") == "mechanical"
+        and "output_source" in policy
+        and policy.get("output_source") != "contract_tree"
+    ):
+        return False
+
+    if contract.origin in {"system", "recovery"}:
+        return asset.created_by == contract.id
+    if not is_business_output(asset, output_name):
+        return False
+    if (
+        policy is not None
+        and policy.get("mode") == "mechanical"
+        and policy.get("output_source") == "contract_tree"
+    ):
+        return _is_contract_or_descendant(asset.created_by, contract.id, store)
+    return True
+
+
 def all_outputs_satisfied(
     contract: Contract,
     store: StoreProtocol,
@@ -87,14 +128,23 @@ def all_outputs_satisfied(
                 return False
             matching = store.get_assets_by_name(output_name)
             if not any(
-                asset.id in qualified_ids
-                and _is_contract_or_descendant(asset.created_by, contract.id, store)
-                and is_business_output(asset, output_name)
+                output_asset_is_eligible(
+                    contract,
+                    output_name,
+                    asset,
+                    store,
+                    qualified_asset_ids=qualified_ids,
+                )
                 for asset in matching
             ):
                 return False
             continue
-        if output_name in extra_output_names:
+        has_source_constraint = (
+            policy is not None
+            and policy.get("mode") == "mechanical"
+            and "output_source" in policy
+        )
+        if output_name in extra_output_names and not has_source_constraint:
             continue
         matching = (
             *store.get_assets_by_name(output_name),
@@ -102,13 +152,10 @@ def all_outputs_satisfied(
         )
         if not matching:
             return False
-        if contract.origin in {"system", "recovery"}:
-            if not any(
-                getattr(asset, "created_by", "") == contract.id for asset in matching
-            ):
-                return False
-            continue
-        if not any(is_business_output(asset, output_name) for asset in matching):
+        if not any(
+            output_asset_is_eligible(contract, output_name, asset, store)
+            for asset in matching
+        ):
             return False
     return True
 

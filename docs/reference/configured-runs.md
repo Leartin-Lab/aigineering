@@ -22,6 +22,11 @@ and `worker_errors`. Completion satisfies the Contract policy; it does not prove
 general semantic correctness. `--json` emits one result object, not a streaming
 format shared with another harness.
 
+Without an explicit acceptance policy, new tasks require outputs from their own
+Contract tree. An explicit mechanical policy without `output_source` retains
+legacy same-name semantics; include `output_source = "contract_tree"` when
+specifying a mechanical policy that should keep the new default's source rule.
+
 Add `--once` to traverse the configured Worker slots until one eligible
 package is claimed, invoke at most that one package, and return the current
 projection at the cycle boundary. This supports ordinary task planning and
@@ -81,6 +86,61 @@ Keep an existing Harness's MCP client behind its
 tool/Worker adapter. A configured tool registry selects an importable factory;
 it does not discover arbitrary MCP transports. Staged `/plan` expansion uses
 ordinary runtime tasks and must remain within the root's frozen scope.
+
+## Delegate to an existing local workspace
+
+Initialize two distinct workspaces with `aig -C PATH domain init`. Obtain the
+receiving domain's Genesis ID with `aig -C PATH domain show --json`. Both
+workspaces retain their own history; switching directories does not reset it.
+The operator must control both domains and explicitly provide the receiver's
+root key. This is a local trust arrangement, not a remote security boundary.
+
+Add an Engine adapter to the source Fleet:
+
+```toml
+[fleet]
+db_path = ".aig/store.db"
+
+[[workers]]
+id = "engine:analysis"
+kind = "engine"
+capabilities = ["analysis"]
+target_workspace = "/absolute/path/to/receiver"
+target_domain_id = "GENESIS_ID"
+receiver_fleet = "/absolute/path/to/receiver-workers.toml"
+receiver_key_file = ".aig/identity/root.ed25519"
+```
+
+Use the receiver's actual existing key filename. `target_workspace` is relative
+to the source workspace; `receiver_key_file` and the receiver Fleet's `db_path`
+are relative to the target workspace. The receiving database must be
+`.aig/store.db`. `receiver_fleet` is relative to the source Fleet TOML directory.
+Tool registry resources inside the receiver Fleet are relative to the receiver
+Fleet TOML directory. The receiver Fleet declares ordinary
+`llm`, `local` or `tool` Workers with the capabilities needed by the delegated
+Contract. It cannot contain `engine` Workers. The source domain must already
+exist before preparing this configuration.
+
+Run the source through the existing `aig fleet run --config PATH --task ID`
+or configured-run entrypoint. The bridge imports only disclosed inputs, binds
+their receiving-domain IDs, and uses normal signed registration and task
+execution. New operations have distinct inner roots; exact-claim replay reuses
+the original operation. Changing receiver configuration cannot refresh that
+claim's recorded intent. Use one frozen receiver configuration at a time: the
+history check is not a transactional uniqueness fence against concurrent first
+invocations with different configurations. Stop bridge processes before changing
+that configuration. The configuration fingerprint covers Fleet contents and
+declared tool descriptor metadata. Keep referenced Python factories, handlers
+and their dependencies immutable for the operation; profile/version metadata
+does not attest implementation bytes. Inner mechanical completion does not satisfy an outer
+independent-acceptance policy. Unsupported protected outputs or policy
+translations fail explicitly.
+
+Invocation stays within the inner root tree; ordinary receiver-domain runtime
+maintenance still runs. Stopping the source does not cancel all receiver work,
+and registry archive does not stop either Fleet. The reverse direction requires
+a separate explicit profile. There is no shared budget, recursive federation,
+or external-effect exactly-once guarantee.
 
 ## Preset format
 

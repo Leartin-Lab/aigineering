@@ -684,7 +684,8 @@ recovery path. Handoff events are scoped to both source and successor. Event
 reads are paginated: continue from `next_revision` rather than assume the first
 default page contains the full task history.
 
-Current workspaces use schema21. Stop old Workers and use
+Current workspaces use schema22, including the mechanical output-source reader
+gate. Stop old Workers and use
 `aig domain upgrade --json` before other writable commands to retain the upgrade
 backup. Ordinary writable opens also migrate automatically. Schema18 has no
 supported return producer; any preexisting returned row blocks migration with

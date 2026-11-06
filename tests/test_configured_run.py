@@ -110,6 +110,93 @@ def test_configured_run_publishes_signed_inputs_root_and_runs(tmp_path, monkeypa
         run_configured(prepared, timeout=1)
 
 
+def test_configured_run_publishes_relative_file_registry_outside_workspace(
+    tmp_path, monkeypatch
+):
+    import sys
+    from types import ModuleType
+
+    from aigineering.agent.tool_worker import ToolWorker
+    from aigineering.local_fleet import FleetRunResult
+
+    workspace = tmp_path / "workspace"
+    config_dir = tmp_path / "configs"
+    workspace.mkdir()
+    config_dir.mkdir()
+    monkeypatch.chdir(workspace)
+    monkeypatch.setenv(
+        "AIG_ACTOR_KEY_FILE", str(workspace / "identity" / "root.ed25519")
+    )
+    monkeypatch.setattr("aigineering.configured_run.require_redis", lambda: None)
+    monkeypatch.setattr("aigineering.application.require_redis", lambda *_a, **_k: None)
+    monkeypatch.setattr("aigineering.local_publication.require_redis", lambda: None)
+    monkeypatch.setattr(
+        "aigineering.runtime_services.sync_runtime", lambda *_a, **_k: None
+    )
+    monkeypatch.setattr(
+        "aigineering.configured_run.sync_runtime", lambda *_a, **_k: None
+    )
+    monkeypatch.setattr(
+        "aigineering.local_publication.sync_runtime", lambda *_a, **_k: None
+    )
+
+    module = ModuleType("configured_run_test_worker")
+    monkeypatch.setitem(sys.modules, module.__name__, module)
+    monkeypatch.setattr(
+        "aigineering.fleet_config.build_fleet_worker",
+        lambda spec, **kwargs: (
+            _WritingWorker()
+            if spec.kind == "local"
+            else ToolWorker(kwargs["registry"], worker_id=spec.worker_id)
+        ),
+    )
+    registry_path = config_dir / "registry.py"
+    registry_path.write_text(
+        "from aigineering.core.tools import ToolRegistry\n"
+        "from aigineering.protocol.types import ToolSpec\n"
+        "def build_registry():\n"
+        "    registry = ToolRegistry()\n"
+        "    registry.register(ToolSpec(name='configured_lookup', version='1.0'), lambda _args: 'ok')\n"
+        "    return registry\n",
+        encoding="utf-8",
+    )
+    (config_dir / "input.txt").write_text("configured input", encoding="utf-8")
+    (config_dir / "workers.toml").write_text(
+        '[fleet]\ndb_path=".aig/store.db"\n'
+        '[[workers]]\nid="configured-test-worker"\nkind="local"\n'
+        'worker_factory="configured_run_test_worker:build_worker"\n'
+        '[[workers]]\nid="configured-tool-worker"\nkind="tool"\n'
+        'tool_registry="./registry.py:build_registry"\n',
+        encoding="utf-8",
+    )
+    run_config = config_dir / "run.toml"
+    run_config.write_text(
+        '[run]\nfleet="workers.toml"\n'
+        '[[inputs]]\nname="source"\npath="input.txt"\n'
+        '[task]\nname="configured-root"\ninputs=["source"]\n'
+        'activation="source"\noutputs=["result"]\n',
+        encoding="utf-8",
+    )
+
+    def inspect_published_registry(db_path, hosts, **kwargs):
+        del hosts, kwargs
+        store = SQLiteStore(db_path)
+        try:
+            descriptors = store.get_assets_by_name("_tool_capability_configured_lookup")
+            assert len(descriptors) == 1
+        finally:
+            store.close()
+        return FleetRunResult("configured-root", "complete", True, False)
+
+    monkeypatch.setattr(
+        "aigineering.configured_run.run_local_fleet", inspect_published_registry
+    )
+    prepared = prepare_configured_run(run_config)
+    assert prepared.tool_registries[0][0] == f"{registry_path.resolve()}:build_registry"
+    result = run_configured(prepared, timeout=2)
+    assert result.completed
+
+
 def test_response_format_reaches_fleet_llm_worker(tmp_path):
     from aigineering.fleet_config import build_fleet_worker
 

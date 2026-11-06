@@ -27,7 +27,7 @@ def test_constraint_facts_require_candidate_ingress_and_reader_floor():
     assert '"claim.constraint.placed"' in store
     assert '"claim.constraint.released"' in store
     assert "claim constraint facts require Candidate ingress commitment" in memory
-    assert "CURRENT_SCHEMA_VERSION = 21" in migration
+    assert "CURRENT_SCHEMA_VERSION = 22" in migration
     assert "def _migrate_to_v20(self)" in migration
     assert "pre-existing claim constraint facts" in migration
 

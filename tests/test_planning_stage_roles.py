@@ -33,7 +33,11 @@ from aigineering.plugins.planning_roles import (
 )
 from aigineering.plugins.staged_planning import StagedPlanningPlugin
 from aigineering.plugins.base import PluginRequest
-from aigineering.plugins.task_semantics import method_contract, retry_contract
+from aigineering.plugins.task_semantics import (
+    _build_plan_contract,
+    method_contract,
+    retry_contract,
+)
 from aigineering.protocol.actions import WorkerAction
 from aigineering.protocol.envelope import CandidateEnvelope
 from aigineering.protocol.candidate import ActorKey, create_genesis_manifest
@@ -502,3 +506,105 @@ def test_parallel_tool_items_drop_stage_labels_while_join_retains_stage():
     assert all(active_planning_stage(item) is None for item in items)
     assert "plugin:plan.compile" in continuation.labels
     assert active_planning_stage(continuation) == "plugin:plan.compile"
+    assert continuation.acceptance_policy == parent.acceptance_policy
+
+
+@pytest.mark.parametrize(
+    "parent_policy",
+    (
+        {"mode": "mechanical"},
+        {"mode": "independent", "policy_version": "review-v1"},
+    ),
+)
+def test_parallel_continuation_preserves_legacy_policy_identity(parent_policy):
+    parent = build_control_plane_contract(
+        name="legacy-parallel-parent",
+        outputs=("final_report",),
+        budget=8,
+        tool_scope=("lookup", "lookup2"),
+        acceptance_policy=parent_policy,
+    )
+    action = WorkerAction(
+        type="parallel_tool",
+        payload={
+            "calls": [
+                {"id": "first", "name": "lookup", "args": {}},
+                {"id": "second", "name": "lookup2", "args": {}},
+            ]
+        },
+    )
+
+    continuation = _parallel_tool_contracts(parent, action, allowance=8)[-1]
+
+    assert continuation.acceptance_policy is None
+
+
+def test_planned_child_inherits_only_strict_mechanical_output_source():
+    parent = build_control_plane_contract(
+        name="strict-planning-parent",
+        outputs=("report",),
+        budget=4,
+        acceptance_policy={
+            "mode": "mechanical",
+            "output_source": "contract_tree",
+            "output_shapes": {"report": {"type": "string"}},
+        },
+    )
+    child = _build_plan_contract(
+        parent_id=parent.id,
+        parent_contract=parent,
+        name="planned-report",
+        description="Publish the report.",
+        inputs=[],
+        outputs=["report"],
+        activation="",
+        budget=1,
+        tool_scope=[],
+        labels=[],
+        capability_needs=[],
+        pool_needs=[],
+        delegation_capabilities=[],
+        delegation_pools=[],
+        context_assets=(),
+    )
+
+    assert child.acceptance_policy == {
+        "mode": "mechanical",
+        "output_shapes": {"report": {"type": "string"}},
+        "output_source": "contract_tree",
+    }
+
+
+def test_planned_child_does_not_copy_independent_acceptance_source_scope():
+    parent = build_control_plane_contract(
+        name="independent-planning-parent",
+        outputs=("report",),
+        budget=4,
+        acceptance_policy={
+            "mode": "independent",
+            "policy_version": "review-v1",
+            "output_shapes": {"report": {"type": "string"}},
+        },
+    )
+    child = _build_plan_contract(
+        parent_id=parent.id,
+        parent_contract=parent,
+        name="planned-report",
+        description="Publish the report.",
+        inputs=[],
+        outputs=["report"],
+        activation="",
+        budget=1,
+        tool_scope=[],
+        labels=[],
+        capability_needs=[],
+        pool_needs=[],
+        delegation_capabilities=[],
+        delegation_pools=[],
+        context_assets=(),
+    )
+
+    assert child.acceptance_policy == {
+        "mode": "mechanical",
+        "output_shapes": {"report": {"type": "string"}},
+    }

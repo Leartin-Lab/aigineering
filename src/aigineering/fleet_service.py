@@ -203,7 +203,7 @@ def start_service(
             "workspace_uninitialized",
             "Workspace Store is missing; initialize its domain first",
         )
-    _prevalidate_fleet_adapters(fleet, config.parent)
+    _prevalidate_fleet_adapters(fleet, config.parent, workspace_dir=root)
 
     # Read the exact existing domain and test operational Redis before creating
     # a generation or publishing local Worker setup.
@@ -460,7 +460,9 @@ def _serve_from_environment() -> int:
                 state_path, initial, state="failed", error_code="invalid_store_path"
             )
             return 1
-        resources = prepare_fleet_resources(fleet, base_dir=config.parent)
+        resources = prepare_fleet_resources(
+            fleet, base_dir=config.parent, workspace_dir=root
+        )
         with SQLiteStore(db_path) as store:
             genesis = load_genesis(store)
             if genesis.id != initial.get("domain_id"):
@@ -606,14 +608,14 @@ def _require_llm_credentials(fleet) -> None:
         )
 
 
-def _prevalidate_fleet_adapters(fleet, base_dir: Path) -> None:
+def _prevalidate_fleet_adapters(fleet, base_dir: Path, *, workspace_dir: Path) -> None:
     """Use the shared resource owner to validate constructibility before Popen.
 
     The child constructs its own process-local adapters again after launch.
     Worker factories retain their strict existing module:callable semantics.
     """
     try:
-        prepare_fleet_resources(fleet, base_dir=base_dir)
+        prepare_fleet_resources(fleet, base_dir=base_dir, workspace_dir=workspace_dir)
     except Exception as exc:
         raise FleetServiceError(
             "worker_adapter_invalid", "Configured Fleet adapters are invalid"

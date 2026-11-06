@@ -299,6 +299,59 @@ def test_schema_version(store):
     assert store.schema_version == CURRENT_SCHEMA_VERSION
 
 
+def test_schema21_upgrade_to22_changes_only_reader_floor(tmp_path):
+    database = str(tmp_path / "schema21.db")
+    store = SQLiteStore(database)
+    before_tables = {
+        row["name"]
+        for row in store._conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table'"
+        )
+    }
+    before_columns = {
+        table: tuple(
+            row["name"] for row in store._conn.execute(f"PRAGMA table_info({table})")
+        )
+        for table in before_tables
+    }
+    store._conn.execute("UPDATE schema_version SET version = 21")
+    store.close()
+
+    upgraded = SQLiteStore(database)
+    try:
+        assert upgraded.schema_version == 22
+        after_tables = {
+            row["name"]
+            for row in upgraded._conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            )
+        }
+        after_columns = {
+            table: tuple(
+                row["name"]
+                for row in upgraded._conn.execute(f"PRAGMA table_info({table})")
+            )
+            for table in after_tables
+        }
+        assert after_tables == before_tables
+        assert after_columns == before_columns
+    finally:
+        upgraded.close()
+
+
+def test_schema22_store_is_refused_by_schema21_reader(tmp_path, monkeypatch):
+    import aigineering.core.sqlite_migrations as migrations
+
+    database = str(tmp_path / "schema22.db")
+    current = SQLiteStore(database)
+    assert current.schema_version == 22
+    current.close()
+
+    monkeypatch.setattr(migrations, "CURRENT_SCHEMA_VERSION", 21)
+    with pytest.raises(RuntimeError, match="newer than supported version 21"):
+        SQLiteStore(database)
+
+
 def test_v1_schema_migrates_to_v2(tmp_path):
     """A v1 database gains 040 worker/idempotency tables and contract metadata."""
     db_path = str(tmp_path / "v1.db")

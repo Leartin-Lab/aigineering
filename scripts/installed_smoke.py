@@ -725,6 +725,10 @@ def task_handoff_smoke(
             "installed-handoff-done",
             "--output",
             "installed-handoff-next",
+            # This fixture retains an operator-published partial output under
+            # the supported legacy mechanical policy, without a Worker debit.
+            "--acceptance-policy",
+            '{"mode":"mechanical"}',
         ],
         cwd=cwd,
         env=env,

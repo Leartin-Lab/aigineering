@@ -134,6 +134,10 @@ def test_run_persists_assets_contracts_and_session_manifest():
         assert len(contracts) == 1, "quick run root Contract must exist"
         root = contracts[0]
         assert len(root.outputs) == 1
+        assert root.acceptance_policy == {
+            "mode": "mechanical",
+            "output_source": "contract_tree",
+        }
         assert root.outputs[0].startswith("final_report_")
         assert len(root.inputs) == 1
         assert root.inputs[0].startswith("aig_input_")

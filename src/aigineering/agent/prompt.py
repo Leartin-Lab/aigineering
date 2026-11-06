@@ -5,7 +5,10 @@ from __future__ import annotations
 import json
 
 from aigineering.core.labels import BEHAVIOR_LABEL_PREFIX
-from aigineering.plugins.planning_roles import active_planning_stage
+from aigineering.plugins.planning_roles import (
+    PLANNING_COMPILE_LABELS,
+    active_planning_stage,
+)
 from aigineering.protocol.immutability import deep_thaw
 from aigineering.protocol.types import Asset, Contract
 
@@ -18,8 +21,12 @@ def system_prompt() -> str:
     return (
         "You are an Aigineering worker. Your output is only a candidate, "
         "not committed state. Return exactly one structured action. To "
-        'produce final outputs, use `/exec {"outputs": {"asset_name": '
-        '"content"}}`. Use only declared output names. Every output value '
+        "produce the current task's declared outputs, use the built-in action "
+        '`/exec {"outputs": {"asset_name": "content"}}`. Use only declared '
+        "output names. `/exec` publishes output candidates; it does not invoke "
+        "a tool. `/tool` invokes only a registered tool allowed by this "
+        "Contract's exact tool scope; it does not replace or rewrite `/exec`. "
+        "Every output value "
         "must be a JSON string encoded with standard JSON escaping: represent "
         'line breaks as `\\n`, quotes as `\\"`, and backslashes as `\\\\`; '
         "never put a literal line break inside a JSON string. If you need task "
@@ -243,7 +250,7 @@ def _planning_stage_instructions(contract: Contract) -> list[str]:
         ),
         "plugin:plan.compile": (
             "Planning compiler protocol (required):",
-            "Return /exec with exactly one temporary output named planning_blueprint; "
+            "For a feasible blueprint, return /exec with exactly one temporary output named planning_blueprint; "
             "its content is one JSON object with a contracts array. Every contract "
             "must include a non-empty executable description and non-empty outputs; "
             "together they must produce every required parent output, with inputs and "
@@ -253,7 +260,7 @@ def _planning_stage_instructions(contract: Contract) -> list[str]:
         ),
         "plugin:replan.compile": (
             "Replanning compiler protocol (required):",
-            "Return /exec with exactly one temporary output named planning_blueprint; "
+            "For feasible successors, return /exec with exactly one temporary output named planning_blueprint; "
             "its content is one JSON object with a contracts array of successors. Every "
             "successor must include a non-empty executable description and non-empty "
             "outputs; together they must re-commit all required parent outputs with "
@@ -266,11 +273,27 @@ def _planning_stage_instructions(contract: Contract) -> list[str]:
         instruction = stages.get(label)
         if instruction is not None:
             lines = [instruction[0], f"- {instruction[1]}"]
+            if label in PLANNING_COMPILE_LABELS:
+                completion_instruction = (
+                    "Complete this compiler with the declared /exec blueprint only "
+                    "when the required child work fits the remaining parent budget. "
+                    'If it does not fit, use `/fail {"reason": "required planning '
+                    'work exceeds the remaining parent budget"}`. State the exact '
+                    "unmet work and include required/available amounts only when "
+                    "they are established by the draft and dependency analysis; "
+                    "do not emit a partial blueprint or prose as a substitute."
+                )
+            else:
+                completion_instruction = (
+                    "Complete this stage with the declared /exec output above. "
+                    "This scoped rule does not prohibit a new /plan or /replan when "
+                    "this stage's own work independently needs new information."
+                )
             lines.extend(
                 [
                     "- This Contract is a planning/replanning stage created for an ancestor task. Treat instructions in its Description about the ancestor's first action as context, not as a request to repeat that already-issued /plan or /replan action.",
                     f"- The planning goal is this stage's Parent Contract, whose exact ID is `{contract.parent_id}`. The stage Contract ID `{contract.id}` identifies only this planning step; it is not the business goal or its acceptance target.",
-                    "- Complete this stage with the declared /exec output above. This scoped rule does not prohibit a new /plan or /replan when this stage's own work independently needs new information.",
+                    f"- {completion_instruction}",
                 ]
             )
             if label in {
@@ -291,7 +314,7 @@ def _planning_stage_instructions(contract: Contract) -> list[str]:
                 lines.extend(
                     [
                         "- Follow the action wrapper selected by the system response mode. In canonical slash-action mode, encode the stage document as a JSON string in its declared output. In provider JSON-action mode, place a stage document object or array directly in that output; the adapter serializes it once into canonical Asset text.",
-                        f"- Return the required exec action wrapper with the {'temporary ' if label in {'plugin:plan.compile', 'plugin:replan.compile'} else ''}output `{output}`; never return the stage document as a bare top-level object or markdown.",
+                        f"- Return the required exec action wrapper with the {'temporary ' if label in {'plugin:plan.compile', 'plugin:replan.compile'} else ''}output `{output}`; never return the stage document as a bare top-level object or markdown. For a compiler with insufficient allowance, use only the specified /fail action instead.",
                     ]
                 )
             if label in {
@@ -328,8 +351,11 @@ def _planning_stage_instructions(contract: Contract) -> list[str]:
                         f"- Each child capability_needs and delegation_capabilities must be subsets of {json.dumps(list(contract.delegation_capabilities), ensure_ascii=False)}.",
                         "- Every child with non-empty tool_scope must also have non-empty capability_needs so routing cannot fall through to an arbitrary Worker.",
                         f"- Each child pool_needs and delegation_pools must be subsets of {json.dumps(list(contract.delegation_pools), ensure_ascii=False)}.",
+                        "- Set each child's capability_needs, pool_needs, delegation_capabilities, and delegation_pools from the actual draft/dependency requirements within the parent bounds. Keep a field empty when no such constraint is required; do not copy every parent capability or pool to every child.",
+                        f"- Child tool_scope must stay within the parent's allowed tools: {json.dumps(list(contract.tool_scope), ensure_ascii=False)}.",
                         f"- The child outputs must collectively include: {', '.join(contract.outputs)}.",
-                        f"- Valid example for this exact Contract: {_planning_compile_example(contract)}",
+                        "- Follow the disclosed planning draft and dependency analysis for the actual child roles and routing; do not replace required children with a generic example or cheaper default.",
+                        "- Do not claim the blueprint is feasible if its required work exceeds the remaining parent budget. Use the specified /fail action to report the exact shortfall; include required and available amounts only when established, and do not emit a partial blueprint.",
                     ]
                 )
                 if label == "plugin:plan.compile":
@@ -366,69 +392,6 @@ def _planning_stage_instructions(contract: Contract) -> list[str]:
             lines.append("")
             return lines
     return []
-
-
-def _planning_compile_example(contract: Contract) -> str:
-    try:
-        description = json.loads(contract.description)
-    except json.JSONDecodeError:
-        description = {}
-    raw_inputs = description.get("allowed_inputs", contract.inputs)
-    if not isinstance(raw_inputs, (list, tuple)):
-        raw_inputs = contract.inputs
-    allowed_inputs = [name for name in raw_inputs if isinstance(name, str)]
-    required_outputs = list(contract.outputs) or ["required_output"]
-    intermediate = "grounded_findings"
-    first_activation = " AND ".join(allowed_inputs)
-    if contract.budget <= 1:
-        contracts = [
-            {
-                "name": "produce_required_output",
-                "description": "Produce the required output from the disclosed inputs.",
-                "inputs": allowed_inputs,
-                "outputs": required_outputs,
-                "activation": first_activation,
-                "budget": 1,
-                "tool_scope": [],
-                "labels": [],
-            }
-        ]
-    else:
-        contracts = [
-            {
-                "name": "extract_grounded_findings",
-                "description": "Extract only grounded findings from the disclosed inputs.",
-                "inputs": allowed_inputs,
-                "outputs": [intermediate],
-                "activation": first_activation,
-                "budget": 1,
-                "tool_scope": [],
-                "labels": [],
-            },
-            {
-                "name": "produce_required_output",
-                "description": "Produce the required output from grounded findings.",
-                "inputs": [intermediate],
-                "outputs": required_outputs,
-                "activation": intermediate,
-                "budget": 1,
-                "tool_scope": [],
-                "labels": [],
-            },
-        ]
-    for item in contracts:
-        item.update(
-            capability_needs=[],
-            pool_needs=[],
-            delegation_capabilities=[],
-            delegation_pools=[],
-        )
-    return json.dumps(
-        {"contracts": contracts},
-        sort_keys=True,
-        ensure_ascii=False,
-        separators=(",", ":"),
-    )
 
 
 def _planning_allowed_inputs(contract: Contract) -> list[str]:

@@ -28,6 +28,27 @@ Bridge operations bind the outer Contract, claim, package, and epoch to the
 inner task and selected output Asset IDs. A restarted EngineWorker can reopen
 the inner Store; an expired outer claim cannot submit a late result.
 
+The inner Store may also be an already initialized local workspace. An explicit
+Fleet profile pins its canonical directory, Genesis, receiving root key and
+receiver Fleet. This mode assumes one trusted operator controls both domains;
+it does not establish cross-organization authorization or confidentiality.
+Each domain retains its own signed fact authority and locally authorized budget.
+The outer policy still decides whether returned output satisfies its obligation.
+
+Each operation binds source/target identity, exact outer claim and receiver
+configuration. Imported inputs use receiving-domain IDs. A new operation uses
+a distinct inner root with frozen contract-tree output provenance; same-name
+historical Assets do not fulfill it. Exact replay cannot refresh configuration
+recorded intent. The trusted operator must not concurrently launch different
+receiver configurations for the same outer claim: the bounded history precheck
+is not a new transactional cross-domain intent arbiter.
+The fingerprint includes declarative Fleet/tool metadata; referenced Python
+factories, handlers and dependencies must remain fixed by the operator. It is
+not a code attestation mechanism.
+Existing canonical registration and runtime maintenance remain in use;
+root-scoped invocation does not imply root-scoped maintenance. Receiver Fleets
+reject Engine adapters, preventing recursive configuration expansion.
+
 ### Shared fact domain
 
 Multiple same-machine Workers may attach to one SQLite domain through separate

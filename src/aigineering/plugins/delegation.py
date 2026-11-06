@@ -167,6 +167,12 @@ def _build_parallel_tool_contracts(
         ),
         "context_asset_ids": parent.context_asset_ids,
     }
+    if (
+        parent.acceptance_policy is not None
+        and parent.acceptance_policy.get("mode") == "mechanical"
+        and parent.acceptance_policy.get("output_source") == "contract_tree"
+    ):
+        continuation_fields["acceptance_policy"] = deep_thaw(parent.acceptance_policy)
     continuation = contract_from_fields(**continuation_fields)
     return (*tool_tasks, continuation)
 

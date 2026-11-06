@@ -25,6 +25,10 @@ def test_system_prompt_preserves_candidate_boundary():
     assert "/retry" in prompt
     assert "/fail" in prompt
     assert "declared output names" in prompt
+    assert "built-in action" in prompt
+    assert "does not invoke a tool" in prompt
+    assert "registered tool allowed by this" in prompt
+    assert "does not replace or rewrite `/exec`" in prompt
 
 
 def test_system_prompt_preserves_plan_replan_boundary():
@@ -143,8 +147,13 @@ def test_prompt_omits_markdown_example_for_planning_control_stages():
         assert "JSON-encode every output string" in prompt
         assert "Valid multiline Markdown example" not in prompt
         assert "already-issued /plan or /replan action" in prompt
-        assert "Complete this stage with the declared /exec output" in prompt
-        assert "does not prohibit a new /plan or /replan" in prompt
+        if label in {"plugin:plan.compile", "plugin:replan.compile"}:
+            assert "Complete this compiler with the declared /exec blueprint" in prompt
+            assert "use `/fail" in prompt
+            assert "do not emit a partial blueprint or prose" in prompt
+        else:
+            assert "Complete this stage with the declared /exec output" in prompt
+            assert "does not prohibit a new /plan or /replan" in prompt
 
 
 def test_ordinary_task_can_still_plan_recursively():
@@ -375,12 +384,14 @@ def test_compile_prompt_exposes_schema_output_coverage_and_allowance():
     assert "non-empty executable description" in prompt
     assert "Sum of child budgets must be at most 3" in prompt
     assert "child outputs must collectively include: final_report" in prompt
-    assert '"outputs":["final_report"]' in prompt
-    assert '"inputs":["source"]' in prompt
     assert "Never copy their names into child inputs" in prompt
     assert '["source"]' in prompt
     assert "labels list must be a subset of []" in prompt
     assert "never invent labels or copy plugin:* labels" in prompt
+    assert "Child inputs may use only these parent input names" in prompt
+    assert "actual draft/dependency requirements" in prompt
+    assert "do not copy every parent capability or pool" in prompt
+    assert "Valid example for this exact Contract" not in prompt
 
 
 def test_plan_compile_preserves_explicit_direct_child_and_future_replan_scope():
@@ -434,6 +445,8 @@ def test_plan_compile_preserves_explicit_direct_child_and_future_replan_scope():
     assert '"budget":8' in prompt
     assert '"reconcile_revision":1' in prompt
     assert "required direct child names and count" in prompt
+    assert "do not replace required children with a generic example" in prompt
+    assert "Valid example for this exact Contract" not in prompt
 
 
 def test_replan_compile_keeps_direct_successor_compilation_available():
@@ -480,7 +493,7 @@ def test_planning_stage_action_wire_instructions_cover_all_stage_types():
             assert "output `stage_output`" in prompt
 
 
-def test_compile_prompt_example_never_exceeds_one_remaining_allowance():
+def test_compile_prompt_uses_draft_allowance_without_a_synthetic_blueprint():
     contract = Contract(
         id="compile-task",
         name="root.plan.compile",
@@ -492,8 +505,62 @@ def test_compile_prompt_example_never_exceeds_one_remaining_allowance():
     prompt = contract_prompt(contract, [])
 
     assert "Sum of child budgets must be at most 1" in prompt
-    assert prompt.count('"budget":1') == 1
-    assert '"outputs":["summary","appendix"]' in prompt
+    assert "Treat explicit child budgets and allowance_needs" in prompt
+    assert "Do not claim the blueprint is feasible" in prompt
+    assert (
+        '`/fail {"reason": "required planning work exceeds the remaining parent budget"}`'
+        in prompt
+    )
+    assert "do not emit a partial blueprint" in prompt
+    assert "Use the specified /fail action to report the exact shortfall" in prompt
+    assert "include required/available amounts only when" in prompt
+    assert "Valid example for this exact Contract" not in prompt
+
+
+def test_independent_acceptance_prompt_has_verifier_constraints_not_fake_example():
+    contract = Contract(
+        id="compile-stage",
+        parent_id="parent-contract-exact",
+        name="root.plan.compile",
+        outputs=("final_report",),
+        labels=("plugin:plan.compile",),
+        budget=2,
+        description=(
+            '{"parent_acceptance_policy":{"mode":"independent",'
+            '"verifier_capabilities":["review.verify"]}}'
+        ),
+    )
+
+    prompt = contract_prompt(contract, [])
+
+    assert (
+        "Include a verifier child that consumes every required parent output" in prompt
+    )
+    assert "produces its own receipt output" in prompt
+    assert "exact Parent Contract ID and the exact disclosed output Asset ID" in prompt
+    assert "parent-contract-exact" in prompt
+    assert '"review.verify"' in prompt
+    assert "Do not claim the blueprint is feasible" in prompt
+    assert (
+        '`/fail {"reason": "required planning work exceeds the remaining parent budget"}`'
+        in prompt
+    )
+    assert "Valid example for this exact Contract" not in prompt
+
+
+def test_tool_named_exec_remains_an_allowed_tool_name_when_in_scope():
+    contract = Contract(
+        id="tool-exec-task",
+        name="tool-call",
+        outputs=("result",),
+        tool_scope=("exec",),
+    )
+
+    prompt = contract_prompt(contract, [])
+
+    assert "Allowed tools: exec" in prompt
+    assert '/tool {"name": "tool_name", "args": {}}' in prompt
+    assert "exec is not an allowed tool" not in prompt
 
 
 def test_draft_stage_prompt_requires_exec_with_exact_output_name():

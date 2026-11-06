@@ -16,11 +16,17 @@ the [import migration notes](../../changes/133-cli-guidance-and-runtime-contract
 | MCP | Capability metadata and callable adapters; `mcp add` does not connect a server. General production transport is not supplied. |
 | Evidence | Exact Asset versions and recorded lineage; business truth and complete semantic dependencies are not inferred automatically. |
 | Acceptance | Frozen task policies can require distinct authorized verifiers; different identities can still share model and source biases. |
+| Workspace delegation | Explicit Engine Fleet profiles can delegate to another initialized local domain under the same trusted operator; receiver Fleets cannot contain Engine adapters. |
 
 ## Operational boundaries
 
 - Use a fresh workspace for an independent configured run. Resume freezes the
   committed task and inputs; it does not replace them with current local files.
+- New application Contracts default to contract-tree output provenance.
+  Explicit policies and historical Contracts retain their stated semantics;
+  a mechanical policy without `output_source` uses legacy same-name behavior.
+  Schema22 prevents old readers from reopening these workspaces; stop older
+  Workers and back up before upgrading.
 - Submission and invocation finish do not establish business completion.
   Scheduled recovery must be claimed and completed as new work.
 - Provider request timeout, run wait timeout, retries, causal allowance and

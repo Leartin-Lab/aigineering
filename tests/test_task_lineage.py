@@ -2216,13 +2216,42 @@ def test_compound_retry_cached_as_source_cannot_bypass_target_effect_check(
     tmp_path, monkeypatch
 ):
     import aigineering.local_publication as local_publication
+    from aigineering.plugins.task_semantics import retry_contract
 
+    # Select a deterministic source whose real retry chain has the ordering
+    # needed by this regression. Hash order is not a property of retry logic.
+    source_name = None
+    for index in range(10000):
+        candidate_name = f"lineage retry order {index}"
+        funder = build_control_plane_contract(
+            name=f"{candidate_name} funder",
+            description="Funded containment parent for lineage retry chains.",
+            outputs=(),
+            budget=12,
+        )
+        source_candidate = contract_from_fields(
+            name=candidate_name,
+            description="Publish exact retry successors through the signed owner.",
+            inputs=(),
+            outputs=("answer",),
+            activation="",
+            budget=3,
+            tool_scope=(),
+            labels=(),
+            origin="human",
+            parent_id=funder.id,
+            minting_authority=(),
+        )
+        compound_candidate = retry_contract(source_candidate)
+        final_candidate = retry_contract(compound_candidate)
+        if final_candidate.id < compound_candidate.id:
+            source_name = candidate_name
+            break
+    assert source_name is not None
     store, _database, source = _signed_retry_workspace(
-        tmp_path, monkeypatch, source_name="lineage retry order 2"
+        tmp_path, monkeypatch, source_name=source_name
     )
     try:
-        from aigineering.plugins.task_semantics import retry_contract
-
         compound_target = retry_contract(source)
         decision = local_publication.commit_local_effects(
             store,

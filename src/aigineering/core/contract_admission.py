@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 from aigineering.core.activation import validate_execution_activation
 from aigineering.core.authority import matched_reserved_prefix
 from aigineering.core.ids import validate_contract_identity
@@ -16,16 +18,28 @@ def validate_acceptance_policy(contract: Contract) -> None:
     policy = contract.acceptance_policy
     if policy is None:
         return
+    if not isinstance(policy, Mapping):
+        raise ValueError("Contract acceptance_policy must be an object")
     mode = policy.get("mode")
     if mode not in {"mechanical", "independent"}:
         raise ValueError(
             "Contract acceptance_policy.mode must be 'mechanical' or 'independent'"
         )
     if mode == "independent":
+        if "output_source" in policy:
+            raise ValueError(
+                "independent acceptance_policy cannot declare output_source"
+            )
         policy_version = policy.get("policy_version")
         if not isinstance(policy_version, str) or not policy_version:
             raise ValueError(
                 "independent acceptance_policy.policy_version must be a string"
+            )
+    elif "output_source" in policy:
+        output_source = policy.get("output_source")
+        if output_source != "contract_tree" or not isinstance(output_source, str):
+            raise ValueError(
+                "mechanical acceptance_policy.output_source must be 'contract_tree'"
             )
     required = policy.get("required_attestations", 1)
     if required != 1 or isinstance(required, bool):

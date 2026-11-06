@@ -461,13 +461,13 @@ def test_second_connection_claim_wins_between_projection_and_writer(tmp_path):
     store.close()
 
 
-def test_schema19_upgrades_to21_but_old_reader_facts_block_upgrade(tmp_path):
+def test_schema19_upgrades_to22_but_old_reader_facts_block_upgrade(tmp_path):
     db = tmp_path / "schema19.db"
     store = SQLiteStore(str(db))
     store._conn.execute("UPDATE schema_version SET version = 19")
     store.close()
     reopened = SQLiteStore(str(db))
-    assert reopened.schema_version == 21
+    assert reopened.schema_version == 22
     reopened.close()
 
     unsupported = tmp_path / "constraint-import.db"

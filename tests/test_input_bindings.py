@@ -416,7 +416,7 @@ def test_schema_18_marker_preserves_schema_17_facts_and_materializations(tmp_pat
 
     reopened = SQLiteStore(path)
     try:
-        assert reopened.schema_version == CURRENT_SCHEMA_VERSION == 21
+        assert reopened.schema_version == CURRENT_SCHEMA_VERSION == 22
         assert (
             tuple(record.id for _, record in reopened.scan_runtime_records())
             == before_ids

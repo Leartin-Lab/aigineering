@@ -5,9 +5,11 @@ import sqlite3
 from pathlib import Path
 from types import SimpleNamespace
 
+import click
 from click.testing import CliRunner
 
 from aigineering.cli.main import cli
+from aigineering.cli.run import _finish_target_run, _target_next_step
 from aigineering.core.session import SessionStore
 from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.task_views import project_task_status
@@ -171,6 +173,92 @@ def test_blocked_idle_reports_status_blockers_and_next_step(tmp_path):
         assert payload["timed_out"] is False
         assert payload["blockers"]
         assert "activation" in payload["next_step"]
+
+
+def test_stalled_capability_risk_points_to_worker_routing_configuration():
+    status = {
+        "status": "stalled",
+        "silent_failure_risks": [
+            {
+                "code": "blocked_capability",
+                "message": "no registered worker currently satisfies routing constraints",
+            }
+        ],
+        "recoveries": [],
+    }
+
+    next_step = _target_next_step(status, "idle")
+
+    assert "Fleet configuration's Worker `capabilities`" in next_step
+    assert "aig fleet run --config <PATH> --task <CONTRACT_ID>" in next_step
+    assert "--capability" in next_step
+    assert "does not change Worker routing" in next_step
+    assert "recovery successor" not in next_step
+
+
+def test_stalled_capability_diagnostic_survives_json_and_human_rendering():
+    runner = CliRunner()
+    risk = {
+        "code": "blocked_capability",
+        "message": "no registered worker currently satisfies routing constraints",
+    }
+
+    json_status = {
+        "status": "stalled",
+        "contract_id": "target-contract",
+        "silent_failure_risks": [risk],
+        "recoveries": [],
+        "blockers": [],
+        "rejections": [],
+    }
+    json_result = runner.invoke(
+        click.Command(
+            "finish",
+            callback=lambda: _finish_target_run(
+                json_status, [], stop_reason="idle", json_output=True
+            ),
+        )
+    )
+
+    assert json_result.exit_code == 1
+    payload = json.loads(json_result.output)
+    assert payload["status"] == "stalled"
+    assert payload["stop_reason"] == "idle"
+    assert payload["silent_failure_risks"] == [risk]
+    assert payload["recoveries"] == []
+    assert "Fleet configuration's Worker `capabilities`" in payload["next_step"]
+
+    human_status = {
+        "status": "stalled",
+        "contract_id": "target-contract",
+        "silent_failure_risks": [risk],
+        "recoveries": [],
+        "blockers": [],
+        "rejections": [],
+    }
+    human_result = runner.invoke(
+        click.Command(
+            "finish",
+            callback=lambda: _finish_target_run(
+                human_status, [], stop_reason="idle", json_output=False
+            ),
+        )
+    )
+
+    assert human_result.exit_code == 1
+    assert "run stalled" in human_result.output
+    assert "stop_reason: idle" in human_result.output
+    assert "Worker `capabilities`" in human_result.output
+
+
+def test_other_stalled_statuses_keep_existing_recovery_guidance():
+    assert (
+        _target_next_step(
+            {"status": "stalled", "silent_failure_risks": [], "recoveries": []},
+            "idle",
+        )
+        == "Inspect aig task audit; run a recovery successor explicitly if one was published."
+    )
 
 
 def test_target_timeout_human_output_keeps_blockers_and_guidance(tmp_path):

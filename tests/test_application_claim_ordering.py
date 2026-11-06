@@ -119,17 +119,26 @@ def _world(path):
     return store, publisher, host
 
 
-def _contract(name: str, *, activation: str = "") -> Contract:
+def _contract(
+    name: str,
+    *,
+    activation: str = "",
+    parent_id: str | None = None,
+    worker_capabilities: tuple[str, ...] = (),
+    budget: int = 2,
+) -> Contract:
     fields = {
         "name": name,
         "description": f"Work for {name}.",
         "inputs": (),
         "outputs": (f"{name}-result",),
         "activation": activation,
-        "budget": 2,
+        "budget": budget,
         "tool_scope": (),
         "labels": (),
         "origin": "human",
+        "parent_id": parent_id,
+        "worker_capabilities": worker_capabilities,
     }
     return Contract(id=hash_contract_v3(**fields), **fields)
 
@@ -436,8 +445,10 @@ def test_engine_worker_selector_enumerates_by_priority(tmp_path):
     from aigineering.core.candidate_publisher import CandidatePublisherRegistry
 
     store, publisher, host = _world(tmp_path / "engine-priority.db")
-    low = _contract("engine-low")
-    high = _contract("engine-high")
+    root = _contract("engine-root", worker_capabilities=("unavailable",), budget=5)
+    low = _contract("engine-low", parent_id=root.id)
+    high = _contract("engine-high", parent_id=root.id)
+    _declare(publisher, root)
     _declare(publisher, low)
     _declare(publisher, high)
     _set_priority(publisher, high, 80)
@@ -449,8 +460,11 @@ def test_engine_worker_selector_enumerates_by_priority(tmp_path):
         publisher,
         publisher.genesis,
         publisher.signer,
-        {host.worker_id: (host.actor_key, host.signer)},
+        {host.worker_id: host},
         CandidatePublisherRegistry(),
+        root_contract_id=root.id,
+        receiver_key_path=None,
+        inner_workers=(),
     )
     assert selected is not None and selected[0].contract.id == high.id
     assert store.get_claim(high.id) is not None

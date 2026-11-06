@@ -161,6 +161,7 @@ def test_v5_context_uses_frozen_asset_ids():
         "tool_scope": list(v4.tool_scope),
         "labels": list(v4.labels),
         "origin": v4.origin,
+        "acceptance_policy": v4.acceptance_policy,
         "context_asset_ids": list(v4.context_asset_ids),
         "delegation_capabilities": [],
         "delegation_pools": [],

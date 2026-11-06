@@ -34,7 +34,7 @@ def test_causal_allowance_is_the_single_generic_conservation_owner():
         assert f'"{record_type}"' in store
     assert "validate_allowance_grants(" in allowance
     assert "require_committed_head=True" in allowance
-    assert "CURRENT_SCHEMA_VERSION = 21" in migration
+    assert "CURRENT_SCHEMA_VERSION = 22" in migration
     assert "def _migrate_to_v19(self)" in migration
     assert "pre-existing allowance.returned facts" in migration
 
