@@ -44,6 +44,7 @@ from aigineering.protocol.effect_builders import (
 )
 from aigineering.protocol.types import Asset, Contract, TraceEntry
 from aigineering.protocol.wire import trace_entry_from_dict
+from aigineering.runtime_services import RedisSyncPending
 
 _QUICK_INPUT_MAX_BYTES = 1_048_576
 _QUICK_INPUT_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_.:-]*\Z")
@@ -566,6 +567,80 @@ def _redact_sealed(data: dict) -> dict:
 def _output_json(payload: object) -> None:
     """Write *payload* as indented JSON to stdout."""
     click.echo(json.dumps(payload, ensure_ascii=False, indent=2, default=str))
+
+
+def _cli_result_success(as_json: bool, data: object, revision: int, human: str) -> None:
+    if as_json:
+        _output_json({"ok": True, "data": data, "revision": revision})
+    else:
+        click.echo(human)
+
+
+def _cli_result_failure(code: str, message: str, as_json: bool) -> None:
+    if as_json:
+        _output_json({"ok": False, "error": {"code": code, "message": message}})
+        raise click.exceptions.Exit(1)
+    raise click.ClickException(message)
+
+
+def _cli_json_object_option(value: str | None, option: str) -> dict | None:
+    if value is None:
+        return None
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError as error:
+        raise click.UsageError(f"{option} is not valid JSON: {error}") from error
+    if not isinstance(parsed, dict):
+        raise click.UsageError(f"{option} must be a JSON object")
+    return parsed
+
+
+def _cli_pending_failure(exc: RedisSyncPending, as_json: bool) -> None:
+    facts_retained = exc.accepted is True or (
+        exc.accepted is False and exc.decision is not None
+    )
+    if as_json:
+        payload = {
+            "ok": False,
+            "error": "redis_sync_pending"
+            if exc.accepted is True or exc.accepted is False
+            else "redis_unavailable",
+            "message": "Required Redis synchronization is pending.",
+            "candidate_accepted": exc.accepted,
+            "facts_retained": facts_retained,
+        }
+        if exc.data is not None:
+            payload["data"] = exc.data
+        if exc.revision is not None:
+            payload["revision"] = exc.revision
+        _output_json(payload)
+        raise click.exceptions.Exit(1) from exc
+    if exc.accepted is True and isinstance(exc.data, dict):
+        key = exc.data.get("idempotency_key")
+        record_id = exc.data.get("record_id")
+        if isinstance(key, str) and re.fullmatch(r"[A-Za-z0-9._:-]+", key):
+            suffix = f" Replay with --idempotency-key {key}."
+        else:
+            suffix = (
+                " Replay with the original --idempotency-key value; "
+                "use --json to retrieve the exact key."
+            )
+        click.echo(
+            f"Redis synchronization is pending; committed fact {record_id}.{suffix}",
+            err=True,
+        )
+        raise click.exceptions.Exit(1) from exc
+    raise click.ClickException("Required Redis synchronization is pending.") from exc
+
+
+def _cli_internal_error(exc: Exception, as_json: bool) -> None:
+    message = "Unexpected internal task command error."
+    if as_json:
+        _output_json(
+            {"ok": False, "error": {"code": "internal_error", "message": message}}
+        )
+        raise click.exceptions.Exit(1) from exc
+    raise click.ClickException(message) from exc
 
 
 def _get_idempotency_path() -> str:

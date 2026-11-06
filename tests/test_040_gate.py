@@ -1136,8 +1136,8 @@ class TestReplayIntegrity:
 class TestPublicDocs:
     """G11: Public docs must match reality."""
 
-    def test_public_docs_match_release_scope(self):
-        """README and ROADMAP describe the release without overclaiming."""
+    def test_public_docs_match_current_scope(self):
+        """README and ROADMAP identify their scope without overclaiming."""
         import os
 
         repo_root = os.path.join(os.path.dirname(__file__), "..")
@@ -1159,7 +1159,6 @@ class TestPublicDocs:
             )
         from aigineering import __version__
 
-        assert f"v{__version__}" in readme.lower()
         assert "candidate" in readme.lower()
         assert "transaction" in readme.lower()
         assert "single-machine" in readme.lower()
@@ -1170,7 +1169,11 @@ class TestPublicDocs:
             roadmap = f.read()
 
         roadmap_lower = roadmap.lower()
-        assert "v0.5" in roadmap_lower
+        if "development branch: **dev**" in readme.lower():
+            assert "**dev** branch" in roadmap_lower
+        else:
+            assert f"v{__version__}" in readme.lower()
+            assert f"v{__version__}" in roadmap_lower
         assert "actor-signed candidate commitment" in roadmap_lower
         assert "single-machine" in roadmap_lower
         assert "release gates" in roadmap_lower

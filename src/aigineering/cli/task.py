@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import math
 import time
 from pathlib import Path
@@ -12,6 +11,7 @@ import click
 
 from aigineering.application import collaboration_service
 from aigineering.cli._common import (
+    _cli_json_object_option as _parse_json_object,
     _output_json,
     _persistent_snapshot,
     _persistent_store,
@@ -353,18 +353,6 @@ def _emit_error(message: str, as_json: bool) -> None:
         raise click.exceptions.Exit(1)
     else:
         raise click.ClickException(message)
-
-
-def _parse_json_object(value: str | None, option: str) -> dict | None:
-    if value is None:
-        return None
-    try:
-        parsed = json.loads(value)
-    except json.JSONDecodeError as error:
-        raise click.UsageError(f"{option} is not valid JSON: {error}") from error
-    if not isinstance(parsed, dict):
-        raise click.UsageError(f"{option} must be a JSON object")
-    return parsed
 
 
 def _validate_wait_durations(timeout_seconds: float, interval: float) -> None:

@@ -8,7 +8,8 @@ import click
 
 from aigineering.application import collaboration_service, require_redis
 from aigineering.cli._common import (
-    _output_json,
+    _cli_result_failure as _failure,
+    _cli_result_success as _success,
     _persistent_snapshot,
     _persistent_store,
 )
@@ -18,20 +19,6 @@ from aigineering.task_revision import (
     task_revision_records,
     validate_task_revision,
 )
-
-
-def _failure(code: str, message: str, as_json: bool) -> None:
-    if as_json:
-        _output_json({"ok": False, "error": {"code": code, "message": message}})
-        raise click.exceptions.Exit(1)
-    raise click.ClickException(message)
-
-
-def _success(as_json: bool, data: object, revision: int, human: str) -> None:
-    if as_json:
-        _output_json({"ok": True, "data": data, "revision": revision})
-    else:
-        click.echo(human)
 
 
 def _snapshot(as_json: bool):

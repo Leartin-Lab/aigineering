@@ -10,6 +10,10 @@ import click
 from aigineering.adapters.redis_query import QueryProjectionUnavailable
 from aigineering.application import collaboration_service, require_redis
 from aigineering.cli._common import (
+    _cli_internal_error as _internal_error,
+    _cli_pending_failure as _pending_failure,
+    _cli_result_failure as _error,
+    _cli_result_success as _success,
     _output_json,
     _persistent_snapshot,
     _persistent_store,
@@ -32,61 +36,6 @@ from aigineering.task_priority import (
     validate_task_priority,
 )
 from aigineering.plugins.task_priority import PriorityStateRejected
-
-
-def _error(code: str, message: str, as_json: bool) -> None:
-    if as_json:
-        _output_json({"ok": False, "error": {"code": code, "message": message}})
-        raise click.exceptions.Exit(1)
-    raise click.ClickException(message)
-
-
-def _pending_failure(exc: RedisSyncPending, as_json: bool) -> None:
-    facts_retained = exc.accepted is True or (
-        exc.accepted is False and exc.decision is not None
-    )
-    if as_json:
-        payload = {
-            "ok": False,
-            "error": "redis_sync_pending"
-            if exc.accepted is True or exc.accepted is False
-            else "redis_unavailable",
-            "message": "Required Redis synchronization is pending.",
-            "candidate_accepted": exc.accepted,
-            "facts_retained": facts_retained,
-        }
-        if exc.data is not None:
-            payload["data"] = exc.data
-        if exc.revision is not None:
-            payload["revision"] = exc.revision
-        _output_json(payload)
-        raise click.exceptions.Exit(1) from exc
-    if exc.accepted is True and isinstance(exc.data, dict):
-        key = exc.data.get("idempotency_key")
-        record_id = exc.data.get("record_id")
-        if isinstance(key, str) and re.fullmatch(r"[A-Za-z0-9._:-]+", key):
-            suffix = f" Replay with --idempotency-key {key}."
-        else:
-            suffix = (
-                " Replay with the original --idempotency-key value; "
-                "use --json to retrieve the exact key."
-            )
-        click.echo(
-            f"Redis synchronization is pending; committed fact {record_id}.{suffix}",
-            err=True,
-        )
-        raise click.exceptions.Exit(1) from exc
-    raise click.ClickException("Required Redis synchronization is pending.") from exc
-
-
-def _internal_error(exc: Exception, as_json: bool) -> None:
-    message = "Unexpected internal task command error."
-    if as_json:
-        _output_json(
-            {"ok": False, "error": {"code": "internal_error", "message": message}}
-        )
-        raise click.exceptions.Exit(1) from exc
-    raise click.ClickException(message) from exc
 
 
 def _snapshot(as_json: bool):
@@ -402,13 +351,6 @@ def task_priorities(contract_id: str, as_json: bool) -> None:
     except ValueError as exc:
         _error("invalid_input", str(exc), as_json)
     _success(as_json, data, revision, _history_text(data))
-
-
-def _success(as_json: bool, data: object, revision: int, human: str) -> None:
-    if as_json:
-        _output_json({"ok": True, "data": data, "revision": revision})
-    else:
-        click.echo(human)
 
 
 def _history_text(data: dict) -> str:

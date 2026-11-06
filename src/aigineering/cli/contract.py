@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import json
-
 import click
 
 from aigineering.cli._common import (
+    _cli_json_object_option as _parse_json_object,
     _output_json,
     _persistent_snapshot,
     _persistent_store,
@@ -102,18 +101,6 @@ def contract_add(
         _output_json({"id": contract.id, "name": contract.name})
     else:
         click.echo(f"Contract injected: {contract.name} ({contract.id})")
-
-
-def _parse_json_object(value: str | None, option: str) -> dict | None:
-    if value is None:
-        return None
-    try:
-        parsed = json.loads(value)
-    except json.JSONDecodeError as error:
-        raise click.UsageError(f"{option} is not valid JSON: {error}") from error
-    if not isinstance(parsed, dict):
-        raise click.UsageError(f"{option} must be a JSON object")
-    return parsed
 
 
 @contract_group.command("ls")

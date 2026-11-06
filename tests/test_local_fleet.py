@@ -1141,6 +1141,41 @@ def test_local_cycle_skips_ineligible_slot_then_stops_after_one_claim(monkeypatc
     assert result.contract_id == "task-eligible"
 
 
+def test_local_cycle_reports_only_current_target_window_traces(tmp_path, monkeypatch):
+    worker = _CycleWorker()
+    task = build_control_plane_contract(
+        name="cycle-trace-summary",
+        outputs=("report",),
+        budget=1,
+        worker_capabilities=("text.extract",),
+    )
+    db_path, store, host = _prepare_local_cycle_case(
+        tmp_path, monkeypatch, worker, (task,)
+    )
+    try:
+        local_fleet_module.ensure_local_runtime_publishers(store)
+        initial_revision = store.get_runtime_revision()
+        result = run_local_cycle(
+            store, (FleetHost(host),), db_path=db_path, target_contract_id=task.id
+        )
+        assert result.completed is True
+        assert worker.invocations == [task.id]
+        current_traces = store.scan_runtime_records(
+            record_type="trace.recorded", after_revision=initial_revision
+        )
+        assert current_traces
+        assert len(result.cycles) == 1
+        summary = result.cycles[0]
+        assert summary["contracts"] == [task.id]
+        assert summary["unassigned_trace_ids"] == []
+        assert summary["trace_events"] == len(current_traces)
+        assert summary["submission_status"] == "accepted"
+        assert store.get_claim(task.id)["status"] == "submitted"
+        assert store.get_assets_by_name("report")
+    finally:
+        store.close()
+
+
 def test_local_cycle_uses_signed_host_and_exact_target_tree(tmp_path, monkeypatch):
     worker = _CycleWorker()
     root = build_control_plane_contract(

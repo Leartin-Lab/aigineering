@@ -8,6 +8,7 @@ import click
 
 from aigineering.application import collaboration_service, require_redis
 from aigineering.cli._common import (
+    _cli_result_success as _success,
     _output_json,
     _persistent_snapshot,
     _persistent_store,
@@ -56,13 +57,6 @@ def _redis_pending(exc: RedisSyncPending, as_json: bool) -> None:
     if exc.accepted is True:
         message += " The edit successor is committed and retained."
     raise click.ClickException(message) from exc
-
-
-def _success(as_json: bool, data: object, revision: int, human: str) -> None:
-    if as_json:
-        _output_json({"ok": True, "data": data, "revision": revision})
-    else:
-        click.echo(human)
 
 
 def _human_handoff(item: dict) -> str:

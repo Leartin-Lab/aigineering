@@ -24,7 +24,12 @@ from aigineering.configured_run import (
     publish_tool_descriptors as _publish_tool_descriptors,
     run_configured,
 )
-from aigineering.local_fleet import FleetHost, _claim_cycle_slot, run_local_cycle
+from aigineering.local_fleet import (
+    FleetHost,
+    _claim_cycle_slot,
+    _cycle_trace_scope,
+    run_local_cycle,
+)
 from aigineering.run_config import prepare_configured_run
 
 from aigineering.agent.tool_registry_loader import (
@@ -68,7 +73,6 @@ from aigineering.run_failure_diagnostics import (
     safe_worker_error_messages,
 )
 from aigineering.core.session import SessionStore
-from aigineering.core.session import runtime_record_contract_references
 from aigineering.core.trace import JsonLTraceStore
 from aigineering.protocol.types import Session
 
@@ -1252,28 +1256,6 @@ def _worker_failure_categories(store, contract_ids: set[str]) -> list[str]:
             if record.payload.get("contract_id") in contract_ids
         }
     )
-
-
-def _cycle_trace_scope(window_records) -> tuple[list[str], list[str], int]:
-    """Resolve cycle trace ownership from the complete bounded record window."""
-    records = [record for _, record in window_records]
-    records_by_id = {record.id: record for record in records}
-    trace_records = [
-        record for record in records if record.record_type == "trace.recorded"
-    ]
-    contracts: set[str] = set()
-    unassigned_trace_ids: list[str] = []
-    for record in trace_records:
-        references = runtime_record_contract_references(record, records_by_id)
-        contracts.update(references)
-        if references:
-            continue
-        trace_payload = record.payload.get("trace")
-        if isinstance(trace_payload, Mapping):
-            trace_id = trace_payload.get("id")
-            if isinstance(trace_id, str):
-                unassigned_trace_ids.append(trace_id)
-    return sorted(contracts), sorted(unassigned_trace_ids), len(trace_records)
 
 
 def _emit_run_result(payload: dict, json_output: bool) -> None:
