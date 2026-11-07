@@ -100,12 +100,12 @@ def _proposal(blueprint: str, *, allowance: int = 8, parent: Contract | None = N
 
 
 @pytest.mark.parametrize("blueprint", [_legacy_blueprint(), _scaffold_blueprint()])
-def test_omitted_tool_budget_defaults_to_two_for_both_planning_formats(blueprint):
+def test_omitted_tool_budget_defaults_to_one_for_both_planning_formats(blueprint):
     proposal = _proposal(blueprint)
 
     assert proposal.rejections == ()
     assert len(proposal.effects) == 1
-    assert proposal.effects[0].payload["contract"]["budget"] == 2
+    assert proposal.effects[0].payload["contract"]["budget"] == 1
 
 
 @pytest.mark.parametrize(
@@ -129,15 +129,11 @@ def test_omitted_non_tool_budget_remains_one(blueprint):
         _scaffold_blueprint(include_budget=True),
     ],
 )
-def test_explicit_tool_budget_one_is_still_rejected(blueprint):
+def test_explicit_tool_budget_one_is_accepted(blueprint):
     proposal = _proposal(blueprint)
 
-    assert proposal.effects == ()
-    assert any(
-        item.get("field") == "budget"
-        and "requires budget >= 2" in item.get("reason", "")
-        for item in proposal.rejections
-    )
+    assert proposal.rejections == ()
+    assert proposal.effects[0].payload["contract"]["budget"] == 1
 
 
 @pytest.mark.parametrize(
@@ -147,16 +143,11 @@ def test_explicit_tool_budget_one_is_still_rejected(blueprint):
         _scaffold_blueprint(include_budget=True, budget=0),
     ],
 )
-def test_explicit_invalid_tool_budget_keeps_existing_rejection_behavior(blueprint):
+def test_nonpositive_tool_budget_uses_single_unit_default(blueprint):
     proposal = _proposal(blueprint)
 
-    assert proposal.effects == ()
-    assert any(
-        item.get("field") == "budget"
-        and item.get("actual") == "1"
-        and "requires budget >= 2" in item.get("reason", "")
-        for item in proposal.rejections
-    )
+    assert proposal.rejections == ()
+    assert proposal.effects[0].payload["contract"]["budget"] == 1
 
 
 @pytest.mark.parametrize(
@@ -175,18 +166,14 @@ def test_explicit_tool_budget_is_contained_without_being_increased(blueprint):
 
 
 @pytest.mark.parametrize("blueprint", [_legacy_blueprint(), _scaffold_blueprint()])
-def test_tool_default_is_rejected_when_parent_has_less_than_two_allowance(blueprint):
+def test_tool_default_fits_one_parent_allowance(blueprint):
     proposal = _proposal(blueprint, allowance=1)
 
-    assert proposal.effects == ()
-    assert any(
-        item.get("field") == "budget"
-        and "requires budget >= 2" in item.get("reason", "")
-        for item in proposal.rejections
-    )
+    assert proposal.rejections == ()
+    assert proposal.effects[0].payload["contract"]["budget"] == 1
 
 
-def test_tool_child_is_rejected_when_earlier_sibling_leaves_only_one_unit():
+def test_tool_child_fits_when_earlier_sibling_leaves_one_unit():
     blueprint = json.dumps(
         {
             "contracts": [
@@ -213,33 +200,18 @@ def test_tool_child_is_rejected_when_earlier_sibling_leaves_only_one_unit():
 
     proposal = _proposal(blueprint, allowance=2)
 
-    assert proposal.effects == ()
-    matching_rejections = [
-        item
-        for item in proposal.rejections
-        if item.get("child_name") == "research"
-        and item.get("field") == "budget"
-        and item.get("action") == "rejected"
-    ]
-    assert len(matching_rejections) == 1
-    assert matching_rejections[0]["requested"] == 2
-    assert matching_rejections[0]["effective"] == 0
-    assert matching_rejections[0]["remaining"] == 1
+    assert len(proposal.effects) == 2
+    assert proposal.effects[1].payload["contract"]["budget"] == 1
 
 
-def test_tool_default_is_rejected_when_parent_contract_budget_is_one():
+def test_tool_default_fits_parent_contract_budget_one():
     proposal = _proposal(_legacy_blueprint(), allowance=8, parent=_parent(budget=1))
 
-    assert proposal.effects == ()
-    assert any(
-        item.get("field") == "budget"
-        and item.get("actual") == "1"
-        and "requires budget >= 2" in item.get("reason", "")
-        for item in proposal.rejections
-    )
+    assert proposal.rejections == ()
+    assert proposal.effects[0].payload["contract"]["budget"] == 1
 
 
-def test_v6_planning_compile_defaults_omitted_tool_budget_to_two():
+def test_v6_planning_compile_defaults_omitted_tool_budget_to_one():
     parent = build_control_plane_contract(
         name="v6-parent",
         description=json.dumps({"allowed_inputs": ["source"]}),
@@ -259,10 +231,10 @@ def test_v6_planning_compile_defaults_omitted_tool_budget_to_two():
     )
 
     assert len(effects) == 1
-    assert effects[0].payload["contract"]["budget"] == 2
+    assert effects[0].payload["contract"]["budget"] == 1
 
 
-def test_planning_compile_prompt_states_tool_and_future_work_budget_rules():
+def test_planning_compile_prompt_states_scope_and_future_work_budget_rules():
     contract = Contract(
         id="plan-compile",
         name="compile",
@@ -275,7 +247,7 @@ def test_planning_compile_prompt_states_tool_and_future_work_budget_rules():
 
     prompt = contract_prompt(contract, [])
 
-    assert "default to budget 1 only for a child with empty tool_scope" in prompt
-    assert "non-empty tool_scope requires budget >= 2" in prompt
+    assert "default to budget 1" in prompt
+    assert "non-empty tool_scope requires budget >= 2" not in prompt
     assert "A child with further tool calls" in prompt
     assert "explicitly budget" in prompt

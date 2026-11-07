@@ -174,13 +174,19 @@ def inspect_continuation_history(
         # receipt, Candidate intent, head/member and materialization proof.
         canonical = None
         if type(raw_budget) is int and raw_budget > 0:
-            for legacy in (False, True):
+            historical_shapes = (
+                (False, False),  # current input roles and current full scope
+                (False, True),  # current input roles and formerly consumed scope
+                (True, True),  # legacy empty inputs and formerly consumed scope
+            )
+            for legacy_inputs, legacy_scope in historical_shapes:
                 option = continuation_contract(
                     parent,
                     source,
                     method=method,
                     budget=raw_budget,
-                    legacy_empty_inputs=legacy,
+                    legacy_empty_inputs=legacy_inputs,
+                    legacy_consumed_tool_scope=legacy_scope,
                 )
                 if deep_thaw(contract_to_dict(option)) == deep_thaw(raw_contract):
                     canonical = option

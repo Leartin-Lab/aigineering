@@ -507,8 +507,9 @@ def _completed_tool_source(
     return database, root_key_path, root, source, store, publishers
 
 
-def test_legacy_empty_input_continuation_is_recognized_without_replacement(
-    tmp_path, monkeypatch
+@pytest.mark.parametrize("legacy_empty_inputs", [False, True])
+def test_historical_tool_scope_shape_is_recognized_without_replacement(
+    tmp_path, monkeypatch, legacy_empty_inputs
 ):
     from aigineering.plugins.task_semantics import continuation_contract
 
@@ -516,12 +517,18 @@ def test_legacy_empty_input_continuation_is_recognized_without_replacement(
         tmp_path, monkeypatch, input_names=("review_evidence",)
     )
     legacy = continuation_contract(
-        root, source, method="tool", budget=99, legacy_empty_inputs=True
+        root,
+        source,
+        method="tool",
+        budget=99,
+        legacy_empty_inputs=legacy_empty_inputs,
+        legacy_consumed_tool_scope=True,
     )
-    assert legacy.inputs == ()
-    assert continuation_contract(root, source, method="tool", budget=99).inputs == (
-        "review_evidence",
-    )
+    assert legacy.inputs == (() if legacy_empty_inputs else ("review_evidence",))
+    assert "lookup" not in legacy.tool_scope
+    current = continuation_contract(root, source, method="tool", budget=99)
+    assert current.inputs == ("review_evidence",)
+    assert current.tool_scope == root.tool_scope
     publisher = publishers.get("continuation.publish.v1")
     original_ids = tuple(
         asset.id

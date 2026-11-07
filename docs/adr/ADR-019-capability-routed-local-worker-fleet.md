@@ -30,10 +30,14 @@ recovery Contract; a failed claim is never reopened.
 
 Tool execution capabilities are exclusive: a ToolWorker cannot claim an
 ordinary reasoning continuation merely because that task has no explicit
-requirements. Planned and recovery tasks with unresolved tool scope receive a
-tool-dispatch-only prompt. A successful observation removes the used tool from
-the continuation scope. Recovery preserves the original acceptance policy and
-is bounded to three successor attempts.
+requirements. Tool scope is a permission ceiling: planned and recovery tasks
+may produce their declared outputs without a tool call, and continuations keep
+the authorized scope for further funded calls. Recovery preserves the original
+acceptance policy and remains causally funded. Method recovery checks exact
+source history; its verifier retains a bounded proof depth.
+[Change 135](../../changes/135-execution-permission-and-exact-output-eligibility.md)
+supersedes the former dispatch-only prompt, consumed tool permissions and
+name-derived three-successor limit; exact historical publications remain readable.
 
 ## Consequences
 

@@ -127,56 +127,65 @@ def _run(workspace, config, evidence_dir, *, timeout=8):
     return result
 
 
-def _budget_rejection_witness(contracts, records, root_id):
-    """Select the exact rejected continuation of this root's research task."""
+def _tool_action_failure_witness(contracts, records, root_id):
+    """Select the underfunded second tool action and its exact claim history."""
     scope = contract_tree_ids(list(contracts.values()), root_id)
     research_ids = {
         contract.id
         for contract in contracts.values()
         if contract.id in scope and contract.name == "calibration_research"
     }
-    by_id = {record.id: record for record in records}
     witnesses = []
-    for rejection in records:
-        reason = rejection.payload.get("reason")
+    for failure in records:
+        raw_output = failure.payload.get("raw_output")
         if (
-            rejection.record_type != "candidate.rejected"
-            or not isinstance(reason, str)
-            or "causal allowance exceeded" not in reason
-            or "requested 1, available 0" not in reason
-            or rejection.payload.get("effect_types") != ("contract.declare",)
-            or len(rejection.causal_parents) != 1
+            failure.record_type != "worker.invocation_failed"
+            or failure.payload.get("category")
+            != "worker_error:task_delegation_rejected"
+            or failure.payload.get("diagnostic")
+            != "tool action lacks allowance for its tool task and continuation"
+            or not isinstance(raw_output, str)
+            or not raw_output.startswith("/tool ")
+            or '"name": "analyze_calibration"' not in raw_output
         ):
             continue
-        received = by_id.get(rejection.causal_parents[0])
+        continuation = contracts.get(failure.payload.get("contract_id"))
+        research = contracts.get(continuation.parent_id) if continuation else None
         if (
-            received is None
-            or received.record_type != "candidate.received"
-            or received.payload.get("candidate_id")
-            != rejection.payload.get("candidate_id")
-            or received.payload.get("actor_id") != "plugin:continuation.publish.v1"
-            or len(received.causal_parents) != 1
+            continuation is None
+            or continuation.origin != "continuation"
+            or continuation.budget != 1
+            or research is None
+            or research.id not in research_ids
         ):
             continue
-        tool = contracts.get(received.causal_parents[0])
-        source = contracts.get(tool.parent_id) if tool is not None else None
-        if (
-            tool is not None
-            and tool.origin == "system"
-            and source is not None
-            and source.id in scope
-            and source.origin == "continuation"
-            and source.parent_id in research_ids
-            and source.budget == 1
-            and f"'{source.id}'" in reason
-        ):
-            witnesses.append((rejection.id, received.id, source.id))
+        grants = [
+            record
+            for record in records
+            if record.record_type == "claim.granted"
+            and record.payload.get("contract_id") == continuation.id
+            and record.payload.get("claim_id") == failure.payload.get("claim_id")
+            and record.payload.get("package_id") == failure.payload.get("package_id")
+            and record.payload.get("worker_id") == failure.payload.get("worker_id")
+        ]
+        terminals = [
+            record
+            for record in records
+            if record.record_type == "lifecycle.terminal"
+            and record.payload.get("contract_id") == continuation.id
+            and record.payload.get("terminal") == "failed"
+            and record.causal_parents == (failure.id,)
+        ]
+        if len(grants) == len(terminals) == 1:
+            witnesses.append(
+                (continuation.id, grants[0].id, failure.id, terminals[0].id)
+            )
     return witnesses[0] if len(witnesses) == 1 else None
 
 
 def _run_until_committed_fence(monkeypatch, workspace, config, evidence_dir, *, fence):
     """Separate functional progress from the Fleet's tested wait deadline."""
-    if fence not in {"verifier_failed", "continuation_allowance_rejected"}:
+    if fence not in {"verifier_failed", "underfunded_tool_action"}:
         raise AssertionError(f"unknown functional fence: {fence}")
     wait_timeout = 8
     real_monotonic = time.monotonic
@@ -226,7 +235,9 @@ def _run_until_committed_fence(monkeypatch, workspace, config, evidence_dir, *, 
                 for record in records
             )
         else:
-            matched = _budget_rejection_witness(contracts, records, root_id) is not None
+            matched = (
+                _tool_action_failure_witness(contracts, records, root_id) is not None
+            )
         if matched:
             observed_root[:] = [root_id]
             reached.set()
@@ -323,7 +334,9 @@ def _committed_asset_ids(store):
     }
 
 
-def _tool_observations(store):
+def _tool_observations(
+    store, *, expected_tools=("normalize_calibration", "analyze_calibration")
+):
     observations = {}
     committed_ids = _committed_asset_ids(store)
     for asset in store.get_all_assets():
@@ -339,7 +352,7 @@ def _tool_observations(store):
         }:
             continue
         observations.setdefault(value["tool"], []).append((asset, value))
-    assert set(observations) == {"normalize_calibration", "analyze_calibration"}
+    assert set(observations) == set(expected_tools)
     for tool_name, rows in observations.items():
         assert len(rows) == 1
         asset, value = rows[0]
@@ -701,9 +714,7 @@ def test_missing_copied_observation_fails_claimed_verifier_and_blocks_export(
     _assert_rejected_export_is_read_only(workspace, root_id, tmp_path, evidence_dir)
 
 
-def test_budget_two_is_spent_then_continuation_request_is_rejected(
-    tmp_path, monkeypatch
-):
+def test_budget_two_fails_second_tool_action_before_dispatch(tmp_path, monkeypatch):
     workspace, config, _workers = _configure(tmp_path, monkeypatch, "budget-exhaustion")
     evidence_dir = tmp_path / "evidence"
     result = _run_until_committed_fence(
@@ -711,7 +722,7 @@ def test_budget_two_is_spent_then_continuation_request_is_rejected(
         workspace,
         config,
         evidence_dir,
-        fence="continuation_allowance_rejected",
+        fence="underfunded_tool_action",
     )
     assert result.exit_code == 1, result.output
     payload = json.loads(result.output)
@@ -747,61 +758,64 @@ def test_budget_two_is_spent_then_continuation_request_is_rejected(
             and record.payload.get("amount") == 2
         ]
         assert len(grants) == len(reservations) == 1
-        tool_history = _tool_observations(store)
-        assert set(tool_history) == {"normalize_calibration", "analyze_calibration"}
-
         records = _all_records(store)
-        rejected = [
+        tool_history = _tool_observations(
+            store, expected_tools=("normalize_calibration",)
+        )
+        assert set(tool_history) == {"normalize_calibration"}
+        witnesses = _tool_action_failure_witness(contracts, records, root_id)
+        assert witnesses is not None
+        continuation_id, grant_id, failure_id, terminal_id = witnesses
+        continuation = contracts[continuation_id]
+        assert continuation.parent_id == research.id
+        assert continuation.budget == 1
+        continuation_grant = next(record for record in records if record.id == grant_id)
+        failure = next(record for record in records if record.id == failure_id)
+        terminal = next(record for record in records if record.id == terminal_id)
+        assert continuation_grant.payload["claim_id"] == failure.payload["claim_id"]
+        assert continuation_grant.payload["package_id"] == failure.payload["package_id"]
+        assert continuation_grant.payload["worker_id"] == "test-calibration-researcher"
+        assert failure.payload["contract_id"] == continuation.id
+        assert failure.payload["diagnostic"] == (
+            "tool action lacks allowance for its tool task and continuation"
+        )
+        assert '"name": "analyze_calibration"' in failure.payload["raw_output"]
+        assert terminal.payload["terminal"] == "failed"
+        assert terminal.causal_parents == (failure.id,)
+        releases = [
             record
             for record in records
-            if record.record_type == "candidate.rejected"
-            and isinstance(record.payload.get("reason"), str)
-            and "causal allowance exceeded" in record.payload["reason"]
-            and "requested 1, available 0" in record.payload["reason"]
+            if record.record_type == "claim.released"
+            and record.payload.get("contract_id") == continuation.id
+            and record.payload.get("claim_id") == failure.payload["claim_id"]
+            and record.payload.get("package_id") == failure.payload["package_id"]
+            and record.payload.get("worker_id") == failure.payload["worker_id"]
         ]
-        assert len(rejected) == 1
-        rejection = rejected[0]
-        assert rejection.payload.get("effect_types") == ("contract.declare",)
-        assert len(rejection.causal_parents) == 1
-        by_id = {record.id: record for record in records}
-        received = by_id[rejection.causal_parents[0]]
-        assert received.record_type == "candidate.received"
-        assert received.payload.get("candidate_id") == rejection.payload.get(
-            "candidate_id"
-        )
-        assert received.payload.get("actor_id") == "plugin:continuation.publish.v1"
-
-        reason = rejection.payload["reason"]
-        source_id = next(
-            contract_id for contract_id in contracts if f"'{contract_id}'" in reason
-        )
-        source = contracts[source_id]
-        assert source.origin == "continuation"
-        assert source.parent_id == research.id
-        assert source.budget == 1
-        assert _budget_rejection_witness(contracts, records, root_id) == (
-            rejection.id,
-            received.id,
-            source.id,
-        )
-        source_terminals = [
+        assert len(releases) == 1
+        assert failure.id in releases[0].causal_parents
+        second_action_observations = [
             record
             for record in records
-            if record.record_type == "lifecycle.terminal"
-            and record.payload.get("contract_id") == source.id
+            if record.record_type == "tool.observed"
+            and record.payload.get("tool_name") == "analyze_calibration"
         ]
-        assert len(source_terminals) == 1
-        assert source_terminals[0].payload.get("terminal") == "failed"
+        assert not second_action_observations
         continuation_claims = [
             record
             for record in records
             if record.record_type == "claim.submitted"
-            and record.payload.get("contract_id") == source.id
+            and record.payload.get("contract_id") == continuation.id
             and record.payload.get("worker_id") == "test-calibration-researcher"
         ]
-        assert len(continuation_claims) == 1
+        assert not continuation_claims
+        assert not [
+            record
+            for record in records
+            if record.record_type == "candidate.rejected"
+            and record.payload.get("actor_id") == "plugin:continuation.publish.v1"
+        ]
         assert allowance_available(research, records) == 0
-        assert allowance_available(source, records) == 0
+        assert allowance_available(continuation, records) == 0
         assert not store.get_assets_by_name("calibration_report")
         assert not [
             record

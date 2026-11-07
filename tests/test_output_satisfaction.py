@@ -63,13 +63,15 @@ def test_system_repair_requires_its_own_protected_result_asset():
     assert all_outputs_satisfied(repair, _AssetLookup((stale, corrected))) is True
 
 
-def test_recovery_task_also_requires_its_own_result_asset():
+@pytest.mark.parametrize("policy", [None, {"mode": "mechanical"}])
+def test_legacy_recovery_output_does_not_reuse_stale_same_name_asset(policy):
     output = "recovered_output"
     recovery = Contract(
         id="recovery-task",
         name="root.recover",
         outputs=(output,),
         origin="recovery",
+        acceptance_policy=policy,
     )
     stale = Asset(
         id="stale-output",
@@ -79,6 +81,20 @@ def test_recovery_task_also_requires_its_own_result_asset():
         origin="llm",
     )
     assert all_outputs_satisfied(recovery, _AssetLookup((stale,))) is False
+    own = Asset(
+        id="own-recovered-output",
+        name=output,
+        content="repaired",
+        created_by=recovery.id,
+    )
+    assert all_outputs_satisfied(recovery, _AssetLookup((stale, own)))
+    strict = Contract(
+        id=recovery.id,
+        outputs=recovery.outputs,
+        origin="recovery",
+        acceptance_policy={"mode": "mechanical", "output_source": "contract_tree"},
+    )
+    assert not all_outputs_satisfied(strict, _AssetLookup((stale,)))
 
 
 @pytest.mark.parametrize("origin", ["tool", "mcp", "label_placeholder"])
@@ -212,7 +228,7 @@ def test_same_name_pending_values_preserve_valid_and_invalid_assets(reverse):
 
 @pytest.mark.parametrize("contract_origin", ["system", "recovery"])
 def test_pending_system_and_recovery_outputs_require_their_own_creator(contract_origin):
-    output = "_plan_result_parent" if contract_origin == "system" else "result"
+    output = "_plan_result_parent"
     contract = Contract(
         id="owner",
         name="owned-output",
@@ -258,7 +274,7 @@ def test_pending_asset_does_not_replace_exact_independent_qualification():
         id="qualified-report",
         name="report",
         content="reviewed",
-        created_by=contract.id,
+        created_by="another-contract-tree",
         origin="human",
     )
     exact_qualification = create_runtime_record(

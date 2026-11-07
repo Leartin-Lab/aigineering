@@ -517,11 +517,6 @@ def _validate_claim_bound_effects(
     valid_output = output_effect_types == {"asset.propose"} or (
         output_effect_types <= graph_effects and "asset.assert" in output_effect_types
     )
-    if parent.origin == "recovery" and parent.tool_scope and valid_output:
-        raise ValueError(
-            "tool recovery cannot publish outputs before its remaining tool scope "
-            "is compiled into tool observations"
-        )
     if "asset.attest" in effect_types and "asset.attest" not in actor_capabilities:
         raise ValueError("claim-bound attestation actor lacks 'asset.attest'")
     if not valid_output and effect_types != {"contract.declare"}:

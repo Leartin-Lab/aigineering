@@ -517,12 +517,13 @@ def test_claim_bound_graph_output_can_be_attested_by_distinct_verifier(tmp_path)
     env["store"].close()
 
 
-def test_claim_bound_descendant_output_can_be_attested(tmp_path):
+@pytest.mark.parametrize("within_tree", [True, False])
+def test_claim_bound_output_can_be_attested_across_trees(tmp_path, within_tree):
     env = _workspace(tmp_path, graph_target=True)
     child = contract_from_fields(
         name="source output continuation",
         description="Produce the source output in ordinary descendant work.",
-        parent_id=env["source"].id,
+        parent_id=env["source"].id if within_tree else None,
         inputs=(),
         outputs=("final",),
         activation="",
@@ -530,6 +531,7 @@ def test_claim_bound_descendant_output_can_be_attested(tmp_path):
         tool_scope=(),
         labels=(),
         origin="continuation",
+        acceptance_policy=env["policy"],
     )
     declared = publish_effect(
         env["store"],
@@ -544,7 +546,10 @@ def test_claim_bound_descendant_output_can_be_attested(tmp_path):
     asset = _publish_unclaimed_graph(env, claimed=True, contract=child, name="final")
     context = load_effect_projection_context(env["store"])
     validate_claim_bound_output(context, asset, child)
-    assert child.parent_id == env["source"].id
+    assert (child.parent_id == env["source"].id) == within_tree
+    from aigineering.core.output_satisfaction import all_outputs_satisfied
+
+    assert not all_outputs_satisfied(env["source"], env["store"])
     verifier_candidate = create_candidate_proposal(
         domain_id=env["genesis"].id,
         actor_id=env["verifier"].actor_id,
@@ -571,7 +576,12 @@ def test_claim_bound_descendant_output_can_be_attested(tmp_path):
     assert len(qualified) == 1
     assert qualified[0][1].payload["asset_id"] == asset.id
     assert qualified[0][1].payload["contract_id"] == env["source"].id
+    assert all_outputs_satisfied(env["source"], env["store"])
     env["store"].close()
+    with SQLiteStore(env["store_path"]) as reopened:
+        digest = reopened.runtime_materialization_digest()
+        assert reopened.rebuild_runtime_materializations(strict=True) == digest
+        assert all_outputs_satisfied(reopened.get_contract(env["source"].id), reopened)
 
 
 def test_two_graph_outputs_share_one_claim_candidate_head(tmp_path):
@@ -1610,3 +1620,132 @@ def test_request_requires_exact_budget_and_review_capability(tmp_path):
         for record in rejected.runtime_records
     )
     env["store"].close()
+
+
+def test_review_request_and_decision_bind_foreign_claim_output(tmp_path):
+    from aigineering.core.output_satisfaction import all_outputs_satisfied
+    from aigineering.task_policy_review import validate_task_review_request
+
+    env = _workspace(tmp_path, graph_target=True)
+    producer = contract_from_fields(
+        name="independent source project",
+        description="Produce an independently reusable report.",
+        inputs=(),
+        outputs=("final",),
+        activation="",
+        budget=2,
+        tool_scope=(),
+        labels=(),
+        origin="human",
+        acceptance_policy=env["policy"],
+    )
+    declared = publish_effect(
+        env["store"],
+        env["store"],
+        env["genesis"],
+        env["operator"],
+        env["signer"],
+        contract_declaration_effect(producer),
+        idempotency_key="declare-foreign-producer",
+    )
+    assert declared.accepted, declared
+    target = _publish_unclaimed_graph(env, claimed=True, contract=producer)
+    env["target"] = target
+    assert not all_outputs_satisfied(env["source"], env["store"])
+    validate_task_review_request(
+        env["store"],
+        env["source"].id,
+        "final",
+        target.id,
+        "Review exact foreign output",
+    )
+    request_candidate, requested = _request(env, reason="Review exact foreign output")
+    assert requested.accepted, requested
+    request = project_task_reviews(requested.runtime_records)[0]
+    assert request.payload["asset_id"] == target.id
+    _, report = _review_report(env, request)
+    _validate_decision_target(env["store"], request.id, report.id, "accept", "Checked")
+    decision_candidate, decided = _decide(env, env["verifier"], request, report)
+    assert decided.accepted, decided
+    assert all_outputs_satisfied(env["source"], env["store"])
+    env["store"].close()
+    with SQLiteStore(env["store_path"]) as reopened:
+        digest = reopened.runtime_materialization_digest()
+        assert reopened.rebuild_runtime_materializations(strict=True) == digest
+        committer = CandidateCommitter(
+            reopened, reopened, additional_effects=TASK_REVIEW_EFFECTS
+        )
+        for candidate in (request_candidate, decision_candidate):
+            replay = committer.commit(candidate, env["genesis"])
+            assert replay.accepted, replay
+        qualified = reopened.scan_runtime_records(record_type="output.qualified")
+        assert len(qualified) == 1
+        assert qualified[0][1].payload["asset_id"] == target.id
+        assert all_outputs_satisfied(reopened.get_contract(env["source"].id), reopened)
+
+
+@pytest.mark.parametrize("explicit_tree", [False, True])
+def test_recovery_business_child_follows_frozen_source_policy(tmp_path, explicit_tree):
+    from aigineering.core.output_satisfaction import all_outputs_satisfied
+
+    env = _workspace(tmp_path, graph_target=True)
+    recovery = contract_from_fields(
+        name="ordinary business recovery",
+        description="Repair and deliver the report through ordinary delegated work.",
+        inputs=(),
+        outputs=("final",),
+        activation="",
+        budget=3,
+        tool_scope=(),
+        labels=(),
+        origin="recovery",
+        acceptance_policy=(
+            {"mode": "mechanical", "output_source": "contract_tree"}
+            if explicit_tree
+            else None
+        ),
+    )
+    child = contract_from_fields(
+        name="repair report child",
+        description="Produce the repaired report.",
+        parent_id=recovery.id,
+        inputs=(),
+        outputs=("final",),
+        activation="",
+        budget=1,
+        tool_scope=(),
+        labels=(),
+        origin="plan",
+    )
+    for contract in (recovery, child):
+        declared = publish_effect(
+            env["store"],
+            env["store"],
+            env["genesis"],
+            env["operator"],
+            env["signer"],
+            contract_declaration_effect(contract),
+            idempotency_key=f"declare:{contract.id}",
+        )
+        assert declared.accepted, declared
+    assert not all_outputs_satisfied(recovery, env["store"])
+    asset = _publish_unclaimed_graph(env, claimed=True, contract=child)
+    assert asset.created_by == child.id
+    assert all_outputs_satisfied(recovery, env["store"]) is explicit_tree
+    assert (
+        any(
+            record.payload.get("contract_id") == recovery.id
+            for _, record in env["store"].scan_runtime_records(
+                record_type="lifecycle.terminal"
+            )
+        )
+        is explicit_tree
+    )
+    env["store"].close()
+    with SQLiteStore(env["store_path"]) as reopened:
+        digest = reopened.runtime_materialization_digest()
+        assert reopened.rebuild_runtime_materializations(strict=True) == digest
+        assert (
+            all_outputs_satisfied(reopened.get_contract(recovery.id), reopened)
+            is explicit_tree
+        )

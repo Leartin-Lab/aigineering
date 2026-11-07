@@ -352,12 +352,6 @@ def compile_worker_envelope(
         else:
             if contract is None or contract.id != envelope.contract_id:
                 raise ValueError("claim-bound output requires the claimed Contract")
-            if contract.origin == "recovery" and contract.tool_scope:
-                raise WorkerExecutionError(
-                    "tool_observation_required",
-                    "tool recovery must request its remaining allowed tool before "
-                    "publishing tool-derived outputs",
-                )
             effects = _compile_claim_bound_outputs(
                 parsed_envelope,
                 contract,

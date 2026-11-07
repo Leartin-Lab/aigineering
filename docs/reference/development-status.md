@@ -27,6 +27,12 @@ the [import migration notes](../../changes/133-cli-guidance-and-runtime-contract
   a mechanical policy without `output_source` uses legacy same-name behavior.
   Schema22 prevents old readers from reopening these workspaces; stop older
   Workers and back up before upgrading.
+- Independent qualification can bind an exact claim-bound output from another
+  task tree. Same-name assets alone do not establish qualification.
+- Tool scope is permission: repeated calls remain separate funded tasks, and
+  scope alone does not require a call. Recovery names do not set a retry limit;
+  causal funding still applies. Method recovery retains exact source-history
+  checks and a bounded proof depth.
 - Submission and invocation finish do not establish business completion.
   Scheduled recovery must be claimed and completed as new work.
 - Provider request timeout, run wait timeout, retries, causal allowance and

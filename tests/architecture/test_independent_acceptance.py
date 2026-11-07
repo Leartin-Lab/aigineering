@@ -601,7 +601,10 @@ def test_signed_attestation_request_derives_policy_from_exact_contract_identity(
     )
 
 
-def test_parent_acceptance_can_bind_exact_descendant_output(acceptance_domain):
+@pytest.mark.parametrize("within_tree", [True, False])
+def test_acceptance_binds_exact_claim_output_regardless_of_tree(
+    acceptance_domain, within_tree
+):
     store, genesis, committer, owner, producer, verifier, _, _, _ = acceptance_domain
     contract, _ = _publish_contract_and_output(acceptance_domain, produce_output=False)
     fields = {
@@ -614,7 +617,7 @@ def test_parent_acceptance_can_bind_exact_descendant_output(acceptance_domain):
         "tool_scope": (),
         "labels": (),
         "origin": "continuation",
-        "parent_id": contract.id,
+        "parent_id": contract.id if within_tree else None,
     }
     child = Contract(id=hash_contract_v3(**fields), **fields)
     assert committer.commit(
@@ -629,7 +632,17 @@ def test_parent_acceptance_can_bind_exact_descendant_output(acceptance_domain):
         genesis,
     ).accepted
     claimed = claim_next_package(
-        store, worker_id="worker:producer", contract_id=child.id
+        store,
+        worker_id="worker:producer",
+        contract_id=child.id,
+        claim_candidate=_candidate(
+            genesis,
+            "worker:producer",
+            "producer-key",
+            producer,
+            worker_claim_effect("worker:producer", contract_id=child.id),
+            "claim-exact-output",
+        ),
     )
     assert claimed is not None
 
@@ -655,6 +668,7 @@ def test_parent_acceptance_can_bind_exact_descendant_output(acceptance_domain):
         for asset in store.get_assets_by_name("report")
         if asset.created_by == child.id
     )
+    assert not all_outputs_satisfied(contract, store)
     decision = committer.commit(
         _candidate(
             genesis,
@@ -703,7 +717,8 @@ def test_parent_acceptance_rejects_unrelated_same_name_asset(acceptance_domain):
         genesis,
     )
     assert not decision.accepted
-    assert "or its descendants" in str(decision.runtime_records[1].payload)
+    assert "producer-declared output" in str(decision.runtime_records[1].payload)
+    assert not all_outputs_satisfied(contract, store)
 
 
 def test_attestation_must_bind_exact_policy_rubric_and_evidence(acceptance_domain):

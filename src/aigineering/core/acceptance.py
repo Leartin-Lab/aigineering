@@ -7,10 +7,7 @@ from dataclasses import dataclass, replace
 import json
 import math
 
-from aigineering.core.output_satisfaction import (
-    _is_contract_or_descendant,
-    all_outputs_satisfied,
-)
+from aigineering.core.output_satisfaction import all_outputs_satisfied
 from aigineering.core.projection_store_view import ProjectionStoreView
 from aigineering.core.publication_history import (
     read_effect_types,
@@ -32,7 +29,11 @@ def validate_claim_bound_output(context, asset, producer) -> None:
     from aigineering.protocol.runtime_record import validate_runtime_record
     from aigineering.protocol.wire import asset_to_dict
 
-    if asset.created_by != producer.id or asset.name not in producer.outputs:
+    if (
+        producer is None
+        or asset.created_by != producer.id
+        or asset.name not in producer.outputs
+    ):
         raise ValueError("task output does not match a producer-declared output")
     rows = context.runtime_records
     committed_by_id = tuple(
@@ -229,10 +230,6 @@ def project_asset_attestation_records(
         raise ValueError(f"asset.attest references unknown Asset {asset_id!r}")
     if output_name not in contract.outputs or asset.name != output_name:
         raise ValueError("asset.attest must bind an exact declared output slot")
-    if not _is_contract_or_descendant(asset.created_by, contract.id, view):
-        raise ValueError(
-            "asset.attest target was not produced for this Contract or its descendants"
-        )
     validate_claim_bound_output(context, asset, view.get_contract(asset.created_by))
     if asset.signed_by == candidate.actor_id:
         raise ValueError("asset producer cannot attest its own output")

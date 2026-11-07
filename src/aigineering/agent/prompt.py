@@ -80,12 +80,6 @@ def contract_prompt(contract: Contract, assets: list[Asset]) -> str:
         for asset in assets
         if not asset.name.startswith((BEHAVIOR_LABEL_PREFIX, SKILL_CONTENT_PREFIX))
     ]
-    unresolved_tool_dispatch = bool(contract.tool_scope) and contract.origin in {
-        "plan",
-        "recovery",
-        "retry",
-    }
-
     lines = [
         f"Contract name: {contract.name}",
         f"Contract ID: {contract.id}",
@@ -110,14 +104,14 @@ def contract_prompt(contract: Contract, assets: list[Asset]) -> str:
         "Decision boundary:",
         *(
             [
-                "- REQUIRED NEXT ACTION: this task has unresolved allowed tools. Return /tool for one required call or /parallel_tool for 2-8 independent required calls; do not return /exec yet.",
-                f"- Choose only from these exact tool names: {', '.join(contract.tool_scope)}. The continuation after committed observations will publish declared outputs.",
+                f"- These tools are permitted when useful: {', '.join(contract.tool_scope)}. You may make no call, one call, or multiple calls, subject to the task's causal allowance.",
+                "- An actual /tool call needs at least 2 available allowance units for its tool task and continuation; permission scope alone reserves no allowance.",
             ]
-            if unresolved_tool_dispatch
+            if contract.tool_scope
             else []
         ),
         "- Every asset listed under Disclosed assets includes its exact readable content; treat that content as directly available evidence, not as a path or handle requiring another tool.",
-        "- A successful tool observation is completed evidence. Satisfy the declared output from it; the same tool is removed from the continuation scope. Publish separate tasks when repeated calls are required.",
+        "- Tool observations are local evidence, not declared business outputs. Use them when relevant, and publish each declared output through the normal output path. A permitted tool remains available to continuations within the same scope.",
         "- Use /plan when disclosed information is insufficient.",
         "- /plan and /replan create three planning-stage tasks and therefore require at least 3 causal allowance units.",
         "- Use /replan only after an assumption, path, or result is invalid.",
@@ -215,7 +209,6 @@ def _method_result_instructions(contract: Contract) -> list[str]:
         "- Its content must be one JSON object with a `contracts` array.",
         "- Each child may contain only: name, description, inputs, outputs, activation, budget, tool_scope, labels, capability_needs, pool_needs, delegation_capabilities, delegation_pools.",
         "- Use only disclosed input names, declared parent tools, and simple unqualified asset names in activation.",
-        "- Any child with non-empty tool_scope needs budget at least 2: one for the tool task and one for its continuation.",
         "- Activation is a boolean expression: join multiple required inputs with uppercase AND (for example `input_a AND input_b`); never use commas, JSON lists, or whitespace as an operator.",
         "- The method description lists parent_outputs. At least one child must produce every parent output; use intermediate outputs only when a later child consumes them.",
         "- Do not emit origin, trust_tier, created_by, minting_authority, worker_capabilities, worker_pools, or prose outside the action.",
@@ -339,9 +332,8 @@ def _planning_stage_instructions(contract: Contract) -> list[str]:
                     [
                         "- Each contract object must contain name, description, inputs, outputs, activation, budget, tool_scope, labels, capability_needs, pool_needs, delegation_capabilities, and delegation_pools.",
                         "- name and description must be non-empty; outputs must contain at least one asset name.",
-                        f"- Sum of child budgets must be at most {contract.budget}. Treat explicit child budgets and allowance_needs in the draft/dependency analysis as requirements. When no allowance requirement is stated, default to budget 1 only for a child with empty tool_scope; a child with non-empty tool_scope needs at least budget 2.",
+                        f"- Sum of child budgets must be at most {contract.budget}. Treat explicit child budgets and allowance_needs in the draft/dependency analysis as requirements. When no allowance requirement is stated, default to budget 1.",
                         "- Preserve explicit current-stage obligations from the draft and dependency analysis: required direct child names and count, inputs, outputs, activation, budgets, and allowance_needs. Do not replace a stated value with a cheaper default.",
-                        "- Every child with non-empty tool_scope requires budget >= 2 for the tool task and its continuation.",
                         "- A child with further tool calls or /plan or /replan stages must explicitly budget enough allowance for that work. Required allowance depends on the actual serial and fan-out work; there is no universal N+1 formula.",
                         "- A child expected to issue /plan or /replan needs at least the three allowance units for its planning stages, plus the allowance required for its declared downstream work.",
                         f"- Child inputs may use only these parent input names or outputs promised by another child: {json.dumps(_planning_allowed_inputs(contract), ensure_ascii=False)}.",

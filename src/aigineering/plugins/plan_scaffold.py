@@ -166,7 +166,7 @@ def _dict_to_scaffold(d: dict, has_final_contracts: bool) -> PlanScaffold:
     def task_budget(task: dict) -> int:
         if "budget" in task:
             return _positive_int(task["budget"], 1)
-        return 2 if _string_list(task.get("tool_scope")) else 1
+        return 1
 
     tasks = tuple(
         ScaffoldTask(

@@ -1,5 +1,7 @@
 """Tests for worker prompt construction."""
 
+import pytest
+
 from aigineering.agent.prompt import contract_prompt, system_prompt
 from aigineering.agent.worker import compile_worker_envelope
 from aigineering.core.control_plane import build_control_plane_contract
@@ -285,20 +287,27 @@ def test_contract_prompt_does_not_teach_single_call_parallel_tool():
     assert '"name": "tool_b"' in prompt
 
 
-def test_planned_tool_task_requires_dispatch_before_exec_output():
+@pytest.mark.parametrize("origin", ["plan", "recovery", "retry"])
+def test_scoped_tools_are_optional_for_task_outputs(origin):
     prompt = contract_prompt(
         Contract(
             id="retrieve",
-            origin="plan",
+            origin=origin,
             outputs=("manifest",),
             tool_scope=("openalex_search",),
         ),
         [],
     )
 
-    assert "REQUIRED NEXT ACTION" in prompt
-    assert "do not return /exec yet" in prompt
+    assert "REQUIRED NEXT ACTION" not in prompt
+    assert "do not return /exec yet" not in prompt
     assert "openalex_search" in prompt
+    assert "You may make no call" in prompt
+    assert "needs at least 2 available allowance units" in prompt
+    assert "permission scope alone reserves no allowance" in prompt
+    assert (
+        "Tool observations are local evidence, not declared business outputs" in prompt
+    )
 
 
 def test_human_root_with_delegable_tool_scope_can_still_plan():

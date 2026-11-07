@@ -103,11 +103,8 @@ def _source_asset_scope(store, source, output_name: str, asset_id: str):
         or not asset.promptable
         or asset.disclosure_view != "original"
         or not is_business_output(asset, output_name)
-        or not _is_contract_or_descendant(asset.created_by, source.id, store)
     ):
-        raise ValueError(
-            "review target must be produced for the source or its descendant"
-        )
+        raise ValueError("review target must be an eligible business output")
     if not _asset_has_committed_fact(store, asset.id):
         raise ValueError("review target Asset has no immutable committed fact")
     records = load_effect_projection_context(store)
@@ -315,7 +312,6 @@ def _validate_decision_target(
         or not target.promptable
         or target.disclosure_view != "original"
         or not is_business_output(target, output_name)
-        or not _is_contract_or_descendant(target.created_by, source.id, store)
     ):
         raise ValueError("review request no longer identifies its exact source output")
     report_output = str(payload.get("report_output", ""))

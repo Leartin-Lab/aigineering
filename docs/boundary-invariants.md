@@ -184,7 +184,10 @@ output satisfaction and exact retained-ID selection to the declared Contract
 or its immutable descendants, including pending Assets. A pending name alone
 cannot satisfy that policy. New application roots explicitly select it;
 historical `None` or mechanical policies without the field retain their original
-rules. System and recovery outputs retain their own-producer checks.
+rules. System outputs and protected recovery method outputs retain their
+mechanical own-producer checks. Business recovery with explicit `contract_tree`
+policy can use delegated output; historical recovery without that constraint
+keeps its own-producer rule to exclude stale repair inputs.
 SQLite schema22 fences older readers that would ignore the new policy field;
 stop already-open old Workers and back up before upgrading. The version gate
 does not fence an older process that already holds a connection.
@@ -197,8 +200,9 @@ and exact Asset ID. Producer self-attestation, wrong-slot Assets, non-task
 Assets, missing evidence, and capability gaps fail closed. Accepted
 attestation creates reconstructable `asset.attested` and `output.qualified`
 facts; terminal projection commits in the same transaction. The exact Asset
-may come from the Contract or an immutable descendant, but never from an
-unrelated same-name producer.
+may come from another Contract tree only through this exact qualification and
+claim-bound producer-publication proof. Name equality alone never qualifies an
+output; review-report provenance remains bound to the requested reviewer.
 
 When the immutable policy declares deterministic `output_shapes`, producer
 submission and independent qualification both validate the exact JSON shape.

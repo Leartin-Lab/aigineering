@@ -304,7 +304,7 @@ def test_verifier_worker_compiles_exact_disclosed_asset_attestation():
     }
 
 
-def test_tool_recovery_cannot_replace_missing_observation_with_direct_output():
+def test_tool_recovery_may_publish_valid_output_without_using_optional_tool_scope():
     store, _, original_host = _runtime('/exec {"result":"unused"}')
     fields = {
         "name": "retrieve.recover",
@@ -333,12 +333,11 @@ def test_tool_recovery_cannot_replace_missing_observation_with_direct_output():
     )
     assert claimed is not None
 
-    with pytest.raises(WorkerInvocationError, match="worker invocation failed"):
-        execute_claimed_package(claimed, host, store)
-
-    failure = store.scan_runtime_records(record_type="worker.invocation_failed")[-1][1]
-    assert failure.payload["category"] == "worker_error:tool_observation_required"
-    assert store.get_assets_by_name("result") == []
+    result = execute_claimed_package(claimed, host, store)
+    assert result["status"] == "accepted"
+    assert [asset.content for asset in store.get_assets_by_name("result")] == [
+        "fabricated"
+    ]
 
 
 def test_claim_bound_graph_output_rejects_partial_endpoint_batch():

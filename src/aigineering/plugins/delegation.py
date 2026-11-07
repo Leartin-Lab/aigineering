@@ -37,6 +37,10 @@ class TaskDelegationPlugin:
             raise ValueError(f"unsupported claimed task action {action.type!r}")
         if allowance < 1:
             raise ValueError("claimed task action has no causal allowance")
+        if action.type == "tool" and allowance < 2:
+            raise ValueError(
+                "tool action lacks allowance for its tool task and continuation"
+            )
         from aigineering.plugins.base import PluginProposal
 
         if action.type == "parallel_tool":
@@ -78,7 +82,11 @@ def _parallel_tool_contracts(
     parent: Contract, action: WorkerAction, allowance: int
 ) -> tuple[Contract, ...]:
     return _build_parallel_tool_contracts(
-        parent, action, allowance, legacy_stage_labels=False
+        parent,
+        action,
+        allowance,
+        legacy_stage_labels=False,
+        legacy_consumed_tool_scope=False,
     )
 
 
@@ -87,7 +95,24 @@ def _legacy_parallel_tool_contracts(
 ) -> tuple[Contract, ...]:
     """Recreate former signed parallel-tool declarations for history proofs."""
     return _build_parallel_tool_contracts(
-        parent, action, allowance, legacy_stage_labels=True
+        parent,
+        action,
+        allowance,
+        legacy_stage_labels=True,
+        legacy_consumed_tool_scope=True,
+    )
+
+
+def _baseline_parallel_tool_contracts(
+    parent: Contract, action: WorkerAction, allowance: int
+) -> tuple[Contract, ...]:
+    """Recreate ecee5f7: current labels with consumed tool scope."""
+    return _build_parallel_tool_contracts(
+        parent,
+        action,
+        allowance,
+        legacy_stage_labels=False,
+        legacy_consumed_tool_scope=True,
     )
 
 
@@ -97,6 +122,7 @@ def _build_parallel_tool_contracts(
     allowance: int,
     *,
     legacy_stage_labels: bool,
+    legacy_consumed_tool_scope: bool,
 ) -> tuple[Contract, ...]:
     payload = deep_thaw(action.payload)
     calls = payload.get("calls")
@@ -145,8 +171,10 @@ def _build_parallel_tool_contracts(
         "outputs": parent.outputs,
         "activation": " AND ".join(observations),
         "budget": allowance - len(tool_tasks),
-        "tool_scope": tuple(
-            tool for tool in parent.tool_scope if tool not in used_tools
+        "tool_scope": (
+            tuple(tool for tool in parent.tool_scope if tool not in used_tools)
+            if legacy_consumed_tool_scope
+            else parent.tool_scope
         ),
         "labels": tuple(
             dict.fromkeys((*parent.labels, "plugin:parallel_tool.continuation"))

@@ -499,7 +499,7 @@ def test_compile_rejects_execution_requirement_outside_delegation_scope():
     assert "capability_needs" in raised.value.fields
 
 
-def test_compile_rejects_tool_task_without_continuation_allowance():
+def test_compile_allows_optional_tool_permission_with_single_task_allowance():
     fields = {
         "name": "compile",
         "description": json.dumps({"allowed_inputs": ["source"]}),
@@ -517,7 +517,7 @@ def test_compile_rejects_tool_task_without_continuation_allowance():
             "contracts": [
                 {
                     "name": "lookup",
-                    "description": "Call lookup and produce the report.",
+                    "description": "Produce the report from the source; lookup is optional.",
                     "inputs": ["source"],
                     "outputs": ["final_report"],
                     "activation": "source",
@@ -529,15 +529,17 @@ def test_compile_rejects_tool_task_without_continuation_allowance():
         }
     )
 
-    with pytest.raises(PlanningCompileError) as raised:
-        compile_planning_blueprint(
-            contract,
-            {"planning_blueprint": blueprint},
-            allowance=2,
-        )
+    effects = compile_planning_blueprint(
+        contract,
+        {"planning_blueprint": blueprint},
+        allowance=2,
+    )
 
-    assert "budget" in raised.value.fields
-    assert "continuation" in str(raised.value)
+    assert len(effects) == 1
+    child = Contract(**effects[0].payload["contract"])
+    assert child.budget == 1
+    assert child.tool_scope == ("lookup",)
+    assert child.outputs == ("final_report",)
 
 
 def test_continuation_plugin_proposes_one_ordinary_task_and_registry_is_explicit():

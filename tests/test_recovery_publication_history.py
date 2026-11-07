@@ -89,7 +89,7 @@ def test_dual_recovery_history_status_matrix(legacy, current, expected):
 
 
 def _environment(
-    name: str = "history", *, store_path=":memory:"
+    name: str = "history", *, root_budget: int = 4, store_path=":memory:"
 ) -> RecoveryEnvironment:
     store = SQLiteStore(store_path)
     setup_signer = Ed25519Signer()
@@ -136,7 +136,7 @@ def _environment(
             id=f"task:{name}:root",
             name=f"{name}-root",
             outputs=("report",),
-            budget=4,
+            budget=root_budget,
         )
     )
     failed = setup.accept_contract(
@@ -995,6 +995,169 @@ def test_method_result_recovery_replays_the_same_result_asset_parent():
     env.store.close()
 
 
+def test_projection_recovery_name_does_not_limit_signed_funded_publication():
+    from aigineering.core.causal_allowance import allowance_available
+
+    env = _environment("projection.recover.recover.recover", root_budget=4)
+    before = allowance_available(
+        env.root, tuple(record for _, record in env.store.scan_runtime_records())
+    )
+
+    result = schedule_projection_recovery(
+        env.context,
+        failed_contract=env.failed,
+        candidate_raw="malformed output",
+        rejections=[
+            {"category": "fixture", "name": "report", "reject_reason": "invalid"}
+        ],
+        include_disposition=True,
+    )
+
+    assert result.contract is not None
+    assert result.reason == ""
+    assert result.contract.name.startswith(env.failed.name)
+    records = tuple(record for _, record in env.store.scan_runtime_records())
+    assert allowance_available(env.root, records) == before - result.contract.budget
+    reservations = [
+        record
+        for record in records
+        if record.record_type == "allowance.reserved"
+        and record.payload.get("child_contract_id") == result.contract.id
+    ]
+    assert len(reservations) == 1
+    assert reservations[0].payload["source_contract_id"] == env.root.id
+    assert reservations[0].payload["amount"] == result.contract.budget
+    receipts = [
+        record
+        for record in records
+        if record.record_type == "candidate.received"
+        and record.payload.get("actor_id") == env.recovery_key.actor_id
+    ]
+    assert len(receipts) == 1
+    assert any(
+        entry.event_type == "recovery_scheduled"
+        and entry.relation_target == result.contract.id
+        for entry in env.store.get_trace_events(env.failed.id)
+    )
+    env.store.close()
+
+
+def test_projection_recovery_name_does_not_bypass_exhausted_parent_allowance():
+    env = _environment("empty.recover.recover.recover", root_budget=1)
+
+    result = schedule_projection_recovery(
+        env.context,
+        failed_contract=env.failed,
+        candidate_raw="malformed output",
+        rejections=[
+            {"category": "fixture", "name": "report", "reject_reason": "invalid"}
+        ],
+        include_disposition=True,
+    )
+
+    assert result is None
+    assert not any(
+        contract.name == f"{env.failed.name}.recover"
+        for contract in env.store.get_all_contracts()
+    )
+    assert any(
+        record.record_type == "candidate.rejected"
+        for _, record in env.store.scan_runtime_records()
+    )
+    assert not any(
+        record.record_type == "candidate_rejection.recovery_scheduled"
+        for _, record in env.store.scan_runtime_records()
+    )
+    env.store.close()
+
+
+def test_method_result_recovery_name_does_not_limit_signed_funded_publication():
+    from aigineering.core.causal_allowance import allowance_available
+
+    env = _environment("method.recover.recover.recover", root_budget=4)
+    result_asset = env.setup.accept_asset(
+        system_asset(
+            name=f"_plan_result_{env.failed.parent_id}",
+            content="malformed result",
+            created_by=env.failed.id,
+            promptable=True,
+        )
+    )
+    before = allowance_available(
+        env.root, tuple(record for _, record in env.store.scan_runtime_records())
+    )
+
+    recovery = schedule_method_result_recovery(
+        env.context,
+        method_type="plan",
+        parent_id=env.failed.parent_id,
+        failed_contract=env.failed,
+        result_asset=result_asset,
+        rejections=[{"field": "contracts", "reason": "invalid", "recoverable": True}],
+    )
+
+    assert recovery is not None
+    assert recovery.outputs == (f"_plan_result_{env.failed.parent_id}",)
+    records = tuple(record for _, record in env.store.scan_runtime_records())
+    assert allowance_available(env.root, records) == before - recovery.budget
+    reservation = next(
+        record
+        for record in records
+        if record.record_type == "allowance.reserved"
+        and record.payload.get("child_contract_id") == recovery.id
+    )
+    assert reservation.payload["source_contract_id"] == env.root.id
+    assert reservation.payload["amount"] == recovery.budget
+    assert (
+        len(
+            [
+                record
+                for record in records
+                if record.record_type == "candidate.received"
+                and record.payload.get("actor_id") == env.recovery_key.actor_id
+            ]
+        )
+        == 1
+    )
+    env.store.close()
+
+
+def test_method_result_recovery_name_does_not_bypass_exhausted_parent_allowance():
+    env = _environment("method-empty.recover.recover.recover", root_budget=1)
+    result_asset = env.setup.accept_asset(
+        system_asset(
+            name=f"_plan_result_{env.failed.parent_id}",
+            content="malformed result",
+            created_by=env.failed.id,
+            promptable=True,
+        )
+    )
+
+    recovery = schedule_method_result_recovery(
+        env.context,
+        method_type="plan",
+        parent_id=env.failed.parent_id,
+        failed_contract=env.failed,
+        result_asset=result_asset,
+        rejections=[{"field": "contracts", "reason": "invalid", "recoverable": True}],
+    )
+
+    assert recovery is None
+    assert not any(
+        contract.name == f"{env.failed.name}.recover"
+        for contract in env.store.get_all_contracts()
+    )
+    assert any(
+        record.record_type == "candidate.rejected"
+        for _, record in env.store.scan_runtime_records()
+    )
+    assert not any(
+        record.record_type == "candidate_rejection.recovery_scheduled"
+        for _, record in env.store.scan_runtime_records()
+    )
+    env.store.close()
+
+
 def test_recovery_capture_retries_revision_change_and_fails_closed_if_unstable(
     monkeypatch,
 ):
@@ -1275,6 +1438,7 @@ def test_signed_tool_worker_failure_publishes_method_preserving_recovery(
         method_payload(recursive_recovery)["recovery_source_contract_id"] == recovery.id
     )
 
+    from aigineering.agent.mock import MockWorker
     from aigineering.agent.tool_worker import ToolWorker
     from aigineering.core.tools import ToolRegistry, ToolSpec
 
@@ -1332,8 +1496,6 @@ def test_signed_tool_worker_failure_publishes_method_preserving_recovery(
         for item in env.store.get_all_contracts()
         if item.parent_id == parent.id and item.origin == "continuation"
     )
-    from aigineering.agent.mock import MockWorker
-
     final_worker = MockWorker(worker_id="worker:recovered-method-final")
     final_worker.set_output(
         continuation.name,
@@ -2797,16 +2959,18 @@ def test_signed_admitted_rejected_method_candidate_schedules_exact_successor(
     env.store.close()
 
 
-@pytest.mark.parametrize("method_shape", ["current", "legacy", "mixed"])
+@pytest.mark.parametrize("method_shape", ["current", "baseline", "legacy", "mixed"])
 def test_parallel_method_recovery_preserves_healthy_sibling_and_join(
     monkeypatch, method_shape
 ):
     import json
 
+    from aigineering.agent.mock import MockWorker
     from aigineering.agent.tool_worker import ToolWorker
     from aigineering.core.capability_descriptors import create_tool_descriptor
     from aigineering.core.tools import ToolRegistry, ToolSpec
     from aigineering.plugins.delegation import (
+        _baseline_parallel_tool_contracts,
         _legacy_parallel_tool_contracts,
         _parallel_tool_contracts,
     )
@@ -2850,12 +3014,18 @@ def test_parallel_method_recovery_preserves_healthy_sibling_and_join(
         },
     )
     current_contracts = _parallel_tool_contracts(parent, action, allowance=7)
+    baseline_contracts = _baseline_parallel_tool_contracts(parent, action, allowance=7)
     legacy_contracts = _legacy_parallel_tool_contracts(parent, action, allowance=7)
+    assert current_contracts[-1].tool_scope == parent.tool_scope
+    assert baseline_contracts[-1].tool_scope == ()
+    assert legacy_contracts[-1].tool_scope == ()
     assert tuple(contract.id for contract in current_contracts) != tuple(
         contract.id for contract in legacy_contracts
     )
     if method_shape == "current":
         published_contracts = current_contracts
+    elif method_shape == "baseline":
+        published_contracts = baseline_contracts
     elif method_shape == "legacy":
         published_contracts = legacy_contracts
     else:
@@ -2868,6 +3038,7 @@ def test_parallel_method_recovery_preserves_healthy_sibling_and_join(
         )
         assert tuple(contract.id for contract in published_contracts) not in {
             tuple(contract.id for contract in current_contracts),
+            tuple(contract.id for contract in baseline_contracts),
             tuple(contract.id for contract in legacy_contracts),
         }
     effects = tuple(
@@ -3050,11 +3221,80 @@ def test_parallel_method_recovery_preserves_healthy_sibling_and_join(
             (("continuation.publish.v1", env.publisher),)
         ),
     )
-    join_claim = claim_next_package(
-        env.store,
-        worker_id="worker:parallel-join-ready",
-        contract_id=join.id,
-    )
-    assert join_claim is not None
-    assert join_claim.contract.id == join.id
+    if method_shape == "current":
+        repeated_worker = MockWorker(worker_id="worker:parallel-join-repeat")
+        repeated_host = hosted_worker(
+            env.store,
+            repeated_worker,
+            genesis=env.genesis,
+            authority_key=env.setup.actor_key,
+            authority_signer=env.setup.signer,
+        )
+        repeated_worker.set_output(
+            join.name,
+            '/tool {"name":"probe_tool","args":{"n":99}}',
+        )
+        repeated_claim = claim_next_package(
+            env.store,
+            worker_id=repeated_host.worker_id,
+            contract_id=join.id,
+            candidate_publishers=env.publishers,
+            claim_candidate=repeated_host.claim_candidate(
+                request_id="claim:parallel-join-repeat", contract_id=join.id
+            ),
+        )
+        assert repeated_claim is not None
+        repeated_action = execute_claimed_package(
+            repeated_claim,
+            repeated_host,
+            env.store,
+            candidate_publishers=env.publishers,
+        )
+        assert repeated_action["status"] == "task_delegated", repeated_action
+        repeated_item = env.store.get_contract(repeated_action["child_contract_id"])
+        assert repeated_item is not None
+        assert repeated_item.parent_id == join.id
+        assert repeated_item.tool_scope == join.tool_scope
+        repeated_tool_claim = claim_next_package(
+            env.store,
+            worker_id=recovered_host.worker_id,
+            contract_id=repeated_item.id,
+            candidate_publishers=env.publishers,
+            claim_candidate=recovered_host.claim_candidate(
+                request_id="claim:parallel-join-repeat-tool",
+                contract_id=repeated_item.id,
+            ),
+        )
+        assert repeated_tool_claim is not None
+        assert (
+            execute_claimed_package(
+                repeated_tool_claim,
+                recovered_host,
+                env.store,
+                candidate_publishers=env.publishers,
+            )["status"]
+            == "accepted"
+        )
+        assert observed[-1] == ("probe_tool", {"n": 99})
+        assert process_task_completions(
+            env.store,
+            default_completion_registry(),
+            candidate_publishers=CandidatePublisherRegistry(
+                (("continuation.publish.v1", env.publisher),)
+            ),
+        ) == [repeated_item.id]
+        repeated_join_continuation = next(
+            contract
+            for contract in env.store.get_all_contracts()
+            if contract.parent_id == join.id and contract.origin == "continuation"
+        )
+        assert repeated_join_continuation.tool_scope == join.tool_scope
+    else:
+        join_claim = claim_next_package(
+            env.store,
+            worker_id="worker:parallel-join-ready",
+            contract_id=join.id,
+        )
+        assert join_claim is not None
+        assert join_claim.contract.id == join.id
     env.store.close()

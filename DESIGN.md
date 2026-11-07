@@ -52,9 +52,9 @@ failure and recovery semantics. See [change 059](changes/059-provider-log-privac
 
 The action adapter may also unwrap one syntactically valid method action that a
 provider accidentally quoted as the sole `/exec` key/value pair. Ambiguous,
-partial, or unsupported wrappers remain rejected. For a planned, retry, or
-recovery task with unresolved tool scope, the Contract prompt permits only
-tool dispatch; output publication happens in the observation continuation.
+partial, or unsupported wrappers remain rejected. Tool scope permits calls; it
+does not force planned, retry or recovery work to dispatch before producing its
+declared outputs. Actual calls and their continuations remain ordinary tasks.
 
 ## Implemented runtime path
 
@@ -468,8 +468,7 @@ Each stage is independently claimable and testable. Compile enforces:
 - monotonic activation syntax;
 - input reachability from disclosed facts or accepted producers;
 - complete parent-output recommitment;
-- at least two allowance units for a task with tool scope, covering one tool
-  task and its continuation;
+- positive child allowance, within the remaining parent allowance;
 - labels contained within the parent's non-Plugin context-selection scope;
 - tool, Worker, authority, and allowance containment.
 
@@ -484,11 +483,11 @@ Historical method-source proof recognizes exact old and current publications
 without changing their Contracts, scope or allowance. See
 [change 114](changes/114-isolate-planning-stage-roles-from-method-children.md).
 
-Both planning formats default an omitted child budget to two for nonempty tool
-scope and one otherwise. Explicit insufficient tool budgets remain rejected;
-containment cannot reduce a tool child below that minimum. This is a minimum
-for one tool and continuation, not a cost formula for arbitrary tool chains.
-See [change 107](changes/107-planned-tool-budget-default.md).
+Both planning formats default an omitted child budget to one. Tool scope is
+permission, not a promise to call a tool or an allowance reservation. An actual
+`/tool` action still needs at least two fundable units for its tool task and
+continuation; additional calls consume their own causal allowance. See
+[change 135](changes/135-execution-permission-and-exact-output-eligibility.md).
 
 A final reachability closure is computed from accepted producers only. A
 rejected producer, self-dependency, or ungrounded cycle cannot leave an admitted
@@ -498,15 +497,18 @@ Replanning uses the same task protocol recursively. Tool use, fail, retry,
 continuation, recovery, and verification also publish or complete ordinary
 facts through registered Plugins.
 
-A successful tool task publishes a continuation whose scope omits that exact
-tool. Repeated calls are represented as separate ordinary tasks rather than an
-unbounded same-task tool loop; other parent-authorized tools remain available.
+A successful tool task publishes a continuation retaining the parent-authorized
+tool scope. The same tool may be called again with new arguments. Each call
+still publishes ordinary funded work; retaining permission does not reset a
+claim, reuse a task invocation or mint allowance.
 New continuations retain the parent's input roles and exact input policy. Their
 method context freezes the ordered, deduplicated union of the exact parent's
 previous context and the current tool observations before publication. An
 interrupted publication reuses those prepared IDs. Historical recognition
-accepts the original legacy empty-input construction but never replaces its
-Contract or refreshes its saved context; conflicting history fails closed. See
+compares three exact constructions: retained inputs with full scope, retained
+inputs with consumed scope, and legacy empty inputs with consumed scope. It
+never replaces their Contracts or refreshes saved context;
+conflicting history fails closed. See
 [change 110](changes/110-continuation-input-and-observation-retention.md).
 Tool and synchronous MCP adapter preflight or invocation failures raise the
 existing `WorkerExecutionError` with a fixed safe code and message, so no
@@ -522,9 +524,11 @@ existing typed parent terminal and publishes no new continuation for it.
 
 Projection and method-result repair publish new recovery Contracts and retain
 the failed task's Skill context, routing scope, tools, and acceptance policy.
-Recovery depth is bounded at three immutable successor attempts. A recovery
-with unresolved tool scope cannot publish tool-derived outputs directly; it
-must first publish a tool task and consume the committed observation.
+Recovery publication remains causally funded; display names do not determine
+its limit by counting `.recover` substrings. Method recovery additionally
+checks exact source history and retains its bounded proof-depth limit. Tool scope alone does
+not require a recovery task to call a tool before producing its business output;
+tool observations still cannot directly satisfy business output slots.
 When a claim-proven system tool method fails, its bounded recovery successor
 retains the exact tool method, arguments, input scope, output roles, capabilities
 and acceptance policy. A normal signed Worker claim and ToolWorker execution
@@ -651,9 +655,16 @@ an output and again before qualification. Planning, recovery, retry, and
 continuation inherit the relevant shapes, so a verifier opinion cannot
 legalize mechanically malformed content.
 
-The exact Asset may be produced by the Contract itself or by a Contract whose
-immutable parent chain reaches it. This supports plan and tool descendants
-without accepting an unrelated same-name Asset.
+The exact qualified Asset may come from another Contract tree. Qualification
+proves its producer-declared output and exact submitted-claim publication, then
+binds that immutable Asset to the target slot and frozen policy. A same-name
+Asset without this qualification does not satisfy independent acceptance.
+Review request and decision entry points share that target rule; the review
+report must still have the exact requested reviewer provenance. Ordinary
+business recovery outputs with explicit `contract_tree` policy may use delegated
+child outputs. Historical recovery without that constraint retains its
+own-producer check to exclude stale repair inputs. System and protected recovery
+method outputs retain their mechanical own-producer checks.
 
 ## Persistence and reconstruction
 

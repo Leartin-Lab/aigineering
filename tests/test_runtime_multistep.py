@@ -27,6 +27,7 @@ from aigineering.protocol.effect_builders import (
     worker_registration_effect,
 )
 from aigineering.runtime import (
+    WorkerInvocationError,
     claim_next_package,
     execute_claimed_package,
     process_task_completions,
@@ -91,6 +92,67 @@ def test_plan_action_expands_to_three_independent_stage_tasks():
         record.payload.get("contract_id") == root.id
         for _, record in store.scan_runtime_records(record_type="lifecycle.terminal")
     )
+    store.close()
+
+
+def test_tool_scope_permission_allows_output_but_underfunded_call_is_observable():
+    store = SQLiteStore(":memory:")
+    setup = candidate_runtime(store)
+    worker = MockWorker(worker_id="scope-worker")
+    host = hosted_worker(
+        store,
+        worker,
+        genesis=setup.genesis,
+        authority_key=setup.actor_key,
+        authority_signer=setup.signer,
+    )
+
+    direct = setup.accept_contract(
+        build_control_plane_contract(
+            name="scoped-direct-output",
+            outputs=("report",),
+            budget=1,
+            tool_scope=("lookup",),
+        )
+    )
+    worker.set_output(
+        direct.name,
+        '/exec {"outputs":{"report":"recovery result"}}',
+    )
+    direct_claim = claim_next_package(
+        store, worker_id=worker.worker_id, contract_id=direct.id
+    )
+    assert direct_claim is not None
+    direct_result = execute_claimed_package(direct_claim, host, store)
+    assert direct_result["status"] == "accepted"
+    assert [asset.content for asset in store.get_assets_by_name("report")] == [
+        "recovery result"
+    ]
+
+    underfunded = setup.accept_contract(
+        build_control_plane_contract(
+            name="scoped-underfunded-tool",
+            outputs=("other_report",),
+            budget=1,
+            tool_scope=("lookup",),
+        )
+    )
+    worker.set_output(
+        underfunded.name,
+        '/tool {"name":"lookup","args":{"query":"distinct"}}',
+    )
+    tool_claim = claim_next_package(
+        store, worker_id=worker.worker_id, contract_id=underfunded.id
+    )
+    assert tool_claim is not None
+    with pytest.raises(WorkerInvocationError, match="worker invocation failed"):
+        execute_claimed_package(tool_claim, host, store)
+    failures = store.scan_runtime_records(record_type="worker.invocation_failed")
+    assert failures[-1][1].payload["category"] == (
+        "worker_error:task_delegation_rejected"
+    )
+    assert "lacks allowance" in failures[-1][1].payload["diagnostic"]
+    assert store.get_assets_by_name("other_report") == []
     store.close()
 
 
@@ -159,7 +221,7 @@ def test_legacy_negative_tool_observation_preserves_parent_lifecycle(
             outputs=("final_report",),
             tool_scope=("lookup",),
             worker_capabilities=("tool-execution",),
-            budget=4,
+            budget=8,
         )
     )
     worker = MockWorker(worker_id="worker")
@@ -213,7 +275,7 @@ def test_legacy_negative_tool_observation_preserves_parent_lifecycle(
     root_view = RuntimeProjection(store, store).contract_view(root)
     assert root_view.terminal == ("failed" if parent_terminal else None)
     if not parent_terminal:
-        assert "lookup" not in continuations[0].tool_scope
+        assert continuations[0].tool_scope == root.tool_scope
         scheduled_entries = [
             entry
             for entry in store.get_by_contract(root.id)
@@ -221,13 +283,62 @@ def test_legacy_negative_tool_observation_preserves_parent_lifecycle(
         ]
         assert len(scheduled_entries) == 1
         assert scheduled_entries[0].relation_target == continuations[0].id
+        continuation = continuations[0]
+        worker.set_output(
+            continuation.name,
+            '/tool {"name":"lookup","args":{"key":"second"}}',
+        )
+        continuation_claim = claim_next_package(
+            store, worker_id="worker", contract_id=continuation.id
+        )
+        assert continuation_claim is not None
+        repeated = execute_claimed_package(continuation_claim, host, store)
+        assert repeated["status"] == "task_delegated", repeated
+        repeated_tool = store.get_contract(repeated["child_contract_id"])
+        assert repeated_tool is not None
+        assert repeated_tool.parent_id == continuation.id
+        assert repeated_tool.tool_scope == continuation.tool_scope
+        repeated_observation = json.dumps(
+            {"ok": True, "tool": "lookup", "result": "second", "error": None},
+            sort_keys=True,
+        )
+        worker.set_output(
+            repeated_tool.name,
+            "/exec " + json.dumps({repeated_tool.outputs[0]: repeated_observation}),
+        )
+        repeated_claim = claim_next_package(
+            store, worker_id="worker", contract_id=repeated_tool.id
+        )
+        assert repeated_claim is not None
+        assert execute_claimed_package(repeated_claim, host, store)["status"] == (
+            "accepted"
+        )
+        repeated_assets = [
+            asset
+            for asset in store.get_assets_by_name(repeated_tool.outputs[0])
+            if asset.created_by == repeated_tool.id
+        ]
+        assert [asset.content for asset in repeated_assets] == [repeated_observation]
+        assert store.get_assets_by_name("final_report") == []
+        assert process_task_completions(
+            store,
+            default_completion_registry(),
+            candidate_publishers=publishers,
+        ) == [repeated_tool.id]
+        repeated_continuations = [
+            task
+            for task in store.get_all_contracts()
+            if task.parent_id == continuation.id and task.origin == "continuation"
+        ]
+        assert len(repeated_continuations) == 1
+        assert repeated_continuations[0].tool_scope == root.tool_scope
     receipts = [
         record
         for _, record in store.scan_runtime_records(record_type="candidate.received")
         if record.payload.get("actor_id") == plugin_key.actor_id
         and record.payload.get("effect_types") == ("contract.declare",)
     ]
-    assert len(receipts) == (1 if parent_terminal else 2)
+    assert len(receipts) == (1 if parent_terminal else 3)
     before_digest = store.runtime_materialization_digest()
     store.close()
 
@@ -241,7 +352,7 @@ def test_legacy_negative_tool_observation_preserves_parent_lifecycle(
                 for contract in reopened.get_all_contracts()
                 if contract.origin == "continuation"
             ]
-        ) == (0 if parent_terminal else 1)
+        ) == (0 if parent_terminal else 2)
         assert RuntimeProjection(reopened, reopened).contract_view(root).terminal == (
             "failed" if parent_terminal else None
         )

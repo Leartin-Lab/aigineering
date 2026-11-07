@@ -62,9 +62,6 @@ def schedule_method_result_recovery(
 ) -> Contract | None:
     """Create a normal Worker task that repairs malformed method output."""
 
-    if _recovery_depth(failed_contract.name) >= 3:
-        return None
-
     output_name = _method_result_output_name(method_type, parent_id)
     context_name = f"_fail_context_{failed_contract.id}"
     context = {
@@ -172,10 +169,6 @@ def schedule_projection_recovery(
     include_disposition: bool = False,
 ) -> Contract | RecoveryDisposition | None:
     """Create a normal recovery task for rejected Worker output."""
-
-    if _recovery_depth(failed_contract.name) >= 3:
-        result = RecoveryDisposition(None, "recovery_depth_exceeded")
-        return result if include_disposition else None
 
     source_method, source_error = _recoverable_tool_method(failed_contract)
     if source_error:
@@ -493,6 +486,7 @@ def _canonical_method_source(
         validate_published_member,
     )
     from aigineering.plugins.delegation import (
+        _baseline_parallel_tool_contracts,
         _claimed_method_contract,
         _legacy_claimed_method_contract,
         _legacy_parallel_tool_contracts,
@@ -598,6 +592,11 @@ def _canonical_method_source(
             WorkerAction(type="parallel_tool", payload={"calls": normalized}),
             allowance=len(normalized) + continuations[0].budget,
         )
+        expected_baseline = _baseline_parallel_tool_contracts(
+            parent,
+            WorkerAction(type="parallel_tool", payload={"calls": normalized}),
+            allowance=len(normalized) + continuations[0].budget,
+        )
         expected_legacy = _legacy_parallel_tool_contracts(
             parent,
             WorkerAction(type="parallel_tool", payload={"calls": normalized}),
@@ -606,7 +605,7 @@ def _canonical_method_source(
     except (TypeError, ValueError):
         return "parallel_method_source_noncanonical"
     source_ids = tuple(row.payload["contract"]["id"] for row in ordered_declarations)
-    expected_variants = (expected_current, expected_legacy)
+    expected_variants = (expected_current, expected_baseline, expected_legacy)
     if not any(
         source_ids == tuple(contract.id for contract in expected)
         for expected in expected_variants
@@ -970,7 +969,3 @@ def _append_activation(existing: str, context_name: str) -> str:
     if existing.strip():
         return f"({existing}) AND {context_name}"
     return context_name
-
-
-def _recovery_depth(name: str) -> int:
-    return name.count(".recover")

@@ -10,6 +10,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
+from aigineering.core.authority import matched_reserved_prefix
+
 if TYPE_CHECKING:
     from aigineering.core.store import StoreProtocol
     from aigineering.protocol.types import Asset, Contract
@@ -60,10 +62,8 @@ def output_asset_is_eligible(
 
     policy = contract.acceptance_policy
     if policy is not None and policy.get("mode") == "independent":
-        return (
-            asset.id in qualified_asset_ids
-            and is_business_output(asset, output_name)
-            and _is_contract_or_descendant(asset.created_by, contract.id, store)
+        return asset.id in qualified_asset_ids and is_business_output(
+            asset, output_name
         )
 
     if (
@@ -74,15 +74,19 @@ def output_asset_is_eligible(
     ):
         return False
 
-    if contract.origin in {"system", "recovery"}:
-        return asset.created_by == contract.id
-    if not is_business_output(asset, output_name):
-        return False
-    if (
+    uses_contract_tree = (
         policy is not None
         and policy.get("mode") == "mechanical"
         and policy.get("output_source") == "contract_tree"
+    )
+    if contract.origin == "system" or (
+        contract.origin == "recovery"
+        and (not uses_contract_tree or matched_reserved_prefix(output_name) is not None)
     ):
+        return asset.created_by == contract.id
+    if not is_business_output(asset, output_name):
+        return False
+    if uses_contract_tree:
         return _is_contract_or_descendant(asset.created_by, contract.id, store)
     return True
 

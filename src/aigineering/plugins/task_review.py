@@ -118,8 +118,6 @@ def project_task_review_request_effect(
     ):
         raise ValueError("task.review.request target is not an eligible source output")
     view = ProjectionStoreView(context)
-    if not _is_contract_or_descendant(target.created_by, source.id, view):
-        raise ValueError("task.review.request target is not an eligible source output")
     validate_claim_bound_output(
         context, target, _contract(context.contracts, target.created_by)
     )
@@ -294,10 +292,8 @@ def project_task_review_decision_effect(
     if target is None or _is_qualified(source.id, output_name, context.runtime_records):
         raise ValueError("task.review.decide source output is no longer eligible")
     if not is_business_output(target, output_name):
-        raise ValueError("task.review.decide target is no longer source-owned")
+        raise ValueError("task.review.decide target is no longer an eligible output")
     view = ProjectionStoreView(context)
-    if not _is_contract_or_descendant(target.created_by, source.id, view):
-        raise ValueError("task.review.decide target is no longer source-owned")
     validate_claim_bound_output(
         context, target, _contract(context.contracts, target.created_by)
     )

@@ -194,7 +194,7 @@ def test_signed_compile_tool_observation_continuation_and_blueprint(monkeypatch)
     )
     assert "plugin:plan.compile" in continuation.labels
     assert active_planning_stage(continuation) == "plugin:plan.compile"
-    assert continuation.tool_scope == ()
+    assert continuation.tool_scope == stage.tool_scope
     assert "Planning compiler protocol (required)" in contract_prompt(continuation, [])
 
     final_claim = claim_next_package(
@@ -507,6 +507,7 @@ def test_parallel_tool_items_drop_stage_labels_while_join_retains_stage():
     assert "plugin:plan.compile" in continuation.labels
     assert active_planning_stage(continuation) == "plugin:plan.compile"
     assert continuation.acceptance_policy == parent.acceptance_policy
+    assert continuation.tool_scope == parent.tool_scope
 
 
 @pytest.mark.parametrize(
