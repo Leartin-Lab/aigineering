@@ -12,7 +12,6 @@ from aigineering.core.commitment import CandidateCommitter, reduce_candidate
 from aigineering.core.control_plane import build_control_plane_contract
 from aigineering.core.ids import contract_identity_v3
 from aigineering.core.injected_fact_replay import exact_single_effect_head_replay
-from aigineering.core.lifecycle_facts import commit_terminal_outcome
 from aigineering.core.projection_context import (
     AssetProposalProjectionInputs,
     AssetProposalProjectionRequest,
@@ -99,7 +98,7 @@ def _closed_history(store, runtime, count):
         build_control_plane_contract(
             name=f"asset-projection-closed-{index}",
             inputs=(),
-            outputs=(),
+            outputs=("closed-history-result",),
             activation="",
             budget=1,
         )
@@ -111,8 +110,10 @@ def _closed_history(store, runtime, count):
             idempotency_key=f"asset-projection-history-{count}",
         )
         assert decision.accepted
-    for contract in contracts:
-        assert commit_terminal_outcome(store, contract, "complete")
+        assert runtime.publisher.publish(
+            (_asset_effect("closed-history-result"),),
+            idempotency_key=f"asset-projection-history-result-{count}",
+        ).accepted
 
 
 def test_builder_freezes_only_exact_homogeneous_builtin_asset_proposals():

@@ -22,17 +22,26 @@ the [import migration notes](../../changes/133-cli-guidance-and-runtime-contract
 
 - Use a fresh workspace for an independent configured run. Resume freezes the
   committed task and inputs; it does not replace them with current local files.
-- New application Contracts default to contract-tree output provenance.
-  Explicit policies and historical Contracts retain their stated semantics;
-  a mechanical policy without `output_source` uses legacy same-name behavior.
-  Schema22 prevents old readers from reopening these workspaces; stop older
-  Workers and back up before upgrading.
-- Independent qualification can bind an exact claim-bound output from another
-  task tree. Same-name assets alone do not establish qualification.
+- New application Contracts use mechanical output conditions. Without explicit
+  selectors, matching same-name business Assets retain the coarse compatibility
+  behavior. `acceptance_policy.output_requirements` can bind exact Definition,
+  Content and producer actor IDs; an admitted Asset from another task can meet
+  those conditions without a claim on the target Contract. Independent policy
+  still requires exact qualification. Historical `output_source` fields remain
+  readable but do not impose a producer-tree rule. Schema23 prevents old readers
+  from reopening these workspaces; stop older Workers and back up before
+  upgrading.
+- Engine bridge output Definitions describe the frozen goal and exact mapped
+  inputs. Existing signed bridge history is not rewritten; a replay whose
+  outputs do not match the current goal conditions may require new ordinary
+  work.
+- Independent qualification can bind an exact admitted output from any source;
+  the target Contract need not have a claim. Same-name assets alone do not
+  establish qualification.
 - Tool scope is permission: repeated calls remain separate funded tasks, and
   scope alone does not require a call. Recovery names do not set a retry limit;
-  causal funding still applies. Method recovery retains exact source-history
-  checks and a bounded proof depth.
+  causal funding still applies. Method recovery checks the complete finite
+  source-history chain with cycle detection and no fixed three-level cutoff.
 - Submission and invocation finish do not establish business completion.
   Scheduled recovery must be claimed and completed as new work.
 - Provider request timeout, run wait timeout, retries, causal allowance and

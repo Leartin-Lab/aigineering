@@ -24,7 +24,7 @@ from aigineering.cli._task_batch import (
 )
 from aigineering.core.output_satisfaction import (
     all_outputs_satisfied,
-    is_business_output,
+    output_asset_is_eligible,
 )
 from aigineering.runtime_services import RedisSyncPending
 from aigineering.task_publication import (
@@ -498,8 +498,6 @@ def task_show(contract_id: str, as_json: bool) -> None:
 def _qualified_outputs(contract, store) -> list[dict]:
     if not all_outputs_satisfied(contract, store):
         raise ValueError("task outputs are not all committed and policy-qualified")
-    contracts = store.get_all_contracts()
-    contract_ids = contract_tree_ids(contracts, contract.id)
     selected: list[dict] = []
     policy = contract.acceptance_policy
     for output_name in contract.outputs:
@@ -515,19 +513,16 @@ def _qualified_outputs(contract, store) -> list[dict]:
             }
         candidates = []
         for asset in store.get_assets_by_name(output_name):
-            if not is_business_output(asset, output_name):
-                continue
             if asset.disclosure_view != "original" or asset.tombstoned:
                 continue
             if not asset.promptable:
                 continue
-            if (
-                contract.origin in {"system", "recovery"}
-                and asset.created_by != contract.id
-            ):
-                continue
-            if qualified_ids is not None and (
-                asset.id not in qualified_ids or asset.created_by not in contract_ids
+            if not output_asset_is_eligible(
+                contract,
+                output_name,
+                asset,
+                store,
+                qualified_asset_ids=qualified_ids or frozenset(),
             ):
                 continue
             candidates.append(asset)

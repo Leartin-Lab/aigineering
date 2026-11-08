@@ -312,7 +312,7 @@ def test_engine_worker_restarts_from_inner_facts_and_fences_late_outer_result(
         )
     )
     next_worker = EngineWorker(
-        _OutputWorker("inner result"),
+        _MustNotRun(),
         inner_store_factory=lambda: SQLiteStore(inner_path),
         inner_signer=Ed25519Signer.from_private_key_hex(inner_private_key),
     )
@@ -338,7 +338,7 @@ def test_engine_worker_restarts_from_inner_facts_and_fences_late_outer_result(
     ]
     assert len(completions) == 2
     assert len({item["inner_contract_id"] for item in completions}) == 2
-    assert len(inner.get_assets_by_name("report")) == 2
+    assert len(inner.get_assets_by_name("report")) == 1
     inner.close()
     outer.close()
 
@@ -534,8 +534,15 @@ def test_existing_workspace_engine_worker_uses_pinned_receiver_fleet(
         )
         report_assets = receiver_store.get_assets_by_name("report")
         assert len(report_assets) == 1
-        assert report_assets[0].created_by.startswith("task:v6:")
-        inner_root = receiver_store.get_contract(report_assets[0].created_by)
+        assertion = next(
+            item
+            for item in receiver_store.get_definition_content_assertions(
+                definition_id=report_assets[0].definition_hash,
+                content_id=report_assets[0].content_hash,
+            )
+            if item["actor_id"] == report_assets[0].signed_by
+        )
+        inner_root = receiver_store.get_contract(assertion["evidence"]["contract_id"])
         assert inner_root is not None
         from aigineering.core.input_bindings import input_asset_bindings
 
@@ -556,7 +563,10 @@ def test_existing_workspace_engine_worker_uses_pinned_receiver_fleet(
         )
         assert inner_root.context_asset_ids == mapped_ids
         assert inner_root.acceptance_policy["mode"] == "mechanical"
-        assert inner_root.acceptance_policy["output_source"] == "contract_tree"
+        assert "output_source" not in inner_root.acceptance_policy
+        assert inner_root.acceptance_policy["output_requirements"] == {
+            "report": {"definition_id": report_assets[0].definition_hash}
+        }
         assert inner_root.acceptance_policy["output_shapes"] == {
             "report": {"value": "string"}
         }

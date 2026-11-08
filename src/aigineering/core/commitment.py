@@ -40,6 +40,7 @@ from aigineering.core.candidate_rejection import (
 from aigineering.core.claim_holds import ClaimHoldConflict
 from aigineering.core.claim_assignments import AssignmentConflict
 from aigineering.core.claim_constraints import ClaimConstraintConflict
+from aigineering.core.output_satisfaction import CompletionConditionConflict
 from aigineering.core.effect_projection import (
     freeze_additional_effects,
     project_effect_batch,
@@ -317,6 +318,7 @@ class CandidateCommitter:
             CausalAllowanceConflict,
             ImmutableRecordConflict,
             OutputQualificationConflict,
+            CompletionConditionConflict,
         ) as exc:
             return record_authenticated_candidate_rejection(
                 candidate, decision, str(exc), self._store, self._trace

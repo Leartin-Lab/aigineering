@@ -10,7 +10,6 @@ from aigineering.core.input_bindings import (
     read_contract_input_assets,
 )
 from aigineering.core.output_satisfaction import (
-    all_outputs_satisfied,
     output_asset_is_eligible,
 )
 from aigineering.core.projection_store_view import ProjectionStoreView
@@ -25,8 +24,27 @@ def satisfied_asset_ids(
     context: EffectProjectionContext,
 ) -> tuple[str, ...]:
     """Return exact eligible Asset IDs satisfying one output slot."""
-    slots = satisfied_output_slots(replace(contract, outputs=(output_name,)), context)
-    return slots[0][1] if slots else ()
+    view = ProjectionStoreView(context)
+    qualified = {
+        str(record.payload.get("asset_id", ""))
+        for record in context.runtime_records
+        if record.record_type == "output.qualified"
+        and record.payload.get("contract_id") == contract.id
+        and record.payload.get("output_name") == output_name
+    }
+    return tuple(
+        sorted(
+            asset.id
+            for asset in context.assets
+            if output_asset_is_eligible(
+                contract,
+                output_name,
+                asset,
+                view,
+                qualified_asset_ids=qualified,
+            )
+        )
+    )
 
 
 def satisfied_output_slots(
@@ -36,31 +54,9 @@ def satisfied_output_slots(
     if not contract.outputs:
         return ()
 
-    view = ProjectionStoreView(context)
     slots = []
     for name in contract.outputs:
-        slot = replace(contract, outputs=(name,))
-        if not all_outputs_satisfied(slot, view):
-            continue
-        qualified = {
-            str(record.payload.get("asset_id", ""))
-            for record in context.runtime_records
-            if record.record_type == "output.qualified"
-            and record.payload.get("contract_id") == contract.id
-            and record.payload.get("output_name") == name
-        }
-        selected = {
-            asset.id
-            for asset in context.assets
-            if output_asset_is_eligible(
-                contract,
-                name,
-                asset,
-                view,
-                qualified_asset_ids=qualified,
-            )
-        }
-        ids = tuple(sorted(selected))
+        ids = satisfied_asset_ids(contract, name, context)
         if ids:
             slots.append((name, ids))
     return tuple(slots)
@@ -135,6 +131,20 @@ def build_successor_contract(
         name = name_override
     if description_override is not None:
         description = description_override
+    from aigineering.protocol.immutability import deep_thaw
+
+    acceptance_policy = None
+    if source.acceptance_policy is not None:
+        acceptance_policy = deep_thaw(source.acceptance_policy)
+        if not isinstance(acceptance_policy, dict):
+            raise ValueError("source acceptance policy must be an object")
+        acceptance_policy.pop("output_source", None)
+        for key in ("output_shapes", "output_requirements"):
+            value = acceptance_policy.get(key)
+            if isinstance(value, dict):
+                acceptance_policy[key] = {
+                    output: value[output] for output in outputs if output in value
+                }
     return contract_from_fields(
         name=name,
         description=description,
@@ -157,11 +167,7 @@ def build_successor_contract(
             if use_source_sensitive_policy and source.sensitive_input_policy is not None
             else sensitive_input_policy
         ),
-        acceptance_policy=(
-            dict(source.acceptance_policy)
-            if source.acceptance_policy is not None
-            else None
-        ),
+        acceptance_policy=acceptance_policy,
     )
 
 

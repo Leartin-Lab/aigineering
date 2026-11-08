@@ -28,13 +28,16 @@ rubric/evidence IDs. Projection rejects missing, changed, unknown, or
 non-committed context. Accepted attestation and qualification remain separate
 facts.
 
-The selected Asset must be a producer-declared output with an exact submitted
-claim and immutable publication proof. An authorized independent attestation
-may bind such an Asset from another Contract tree to the target output slot.
-Tree membership and name equality alone do not establish qualification. The
-redundant ancestry restriction was removed by
+The selected Asset must be an exact admitted publication matching the target
+output conditions. Claim-bound production authenticates its own claim at
+ingress; the target Contract itself need not have a claim.
+An authorized independent attestation may bind an Asset from any admitted
+source to the target output slot. Name equality alone does not establish
+qualification. The cross-tree ancestry restriction was removed by
 [change 135](../../changes/135-execution-permission-and-exact-output-eligibility.md);
-the exact policy, evidence and one-selected-Asset constraints remain.
+[change 136](../../changes/136-asset-condition-completion.md) adds optional
+exact Definition, Content and producer conditions without changing the exact
+policy, evidence and one-selected-Asset constraints.
 
 The Store transaction enforces one selected immutable Asset per
 `(contract_id, output_name)`. Repeated attestations for that same Asset

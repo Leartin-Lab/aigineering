@@ -7,7 +7,10 @@ from dataclasses import dataclass, replace
 import json
 import math
 
-from aigineering.core.output_satisfaction import all_outputs_satisfied
+from aigineering.core.output_satisfaction import (
+    all_outputs_satisfied,
+    output_asset_meets_conditions,
+)
 from aigineering.core.projection_store_view import ProjectionStoreView
 from aigineering.core.publication_history import (
     read_effect_types,
@@ -23,18 +26,12 @@ from aigineering.protocol.candidate import CandidateEffect, CandidateProposal
 from aigineering.protocol.types import TraceEntry
 
 
-def validate_claim_bound_output(context, asset, producer) -> None:
-    """Prove an output Asset is in its producer's exact submitted claim."""
+def validate_asset_publication(context, asset):
+    """Prove one exact admitted Asset and its immutable publication membership."""
     from aigineering.core.asset_graph_facts import asset_from_graph_values
     from aigineering.protocol.runtime_record import validate_runtime_record
     from aigineering.protocol.wire import asset_to_dict
 
-    if (
-        producer is None
-        or asset.created_by != producer.id
-        or asset.name not in producer.outputs
-    ):
-        raise ValueError("task output does not match a producer-declared output")
     rows = context.runtime_records
     committed_by_id = tuple(
         row
@@ -49,7 +46,7 @@ def validate_claim_bound_output(context, asset, producer) -> None:
     validate_runtime_record(committed)
     if (
         committed.payload.get("asset") != asset_to_dict(asset)
-        or committed.payload.get("contract_id") != producer.id
+        or committed.payload.get("contract_id") != asset.created_by
     ):
         raise ValueError("task output publication differs from its exact Asset")
     if asset.definition_hash.startswith("definition:v1:"):
@@ -98,10 +95,51 @@ def validate_claim_bound_output(context, asset, producer) -> None:
     else:
         member = committed
     receipt, head = validate_published_member(rows, member)
-    if receipt.payload.get("contract_id") != producer.id:
-        raise ValueError("task output receipt is not bound to its producer Contract")
     if committed.id not in head.payload.get("committed_record_ids", ()):
         raise ValueError("task output fact is outside its publication head")
+    return receipt, head, member
+
+
+def validate_claim_bound_output(context, asset, producer=None):
+    """Prove an output belongs to its producer's exact submitted claim."""
+    from aigineering.protocol.runtime_record import validate_runtime_record
+
+    receipt, head, member = validate_asset_publication(context, asset)
+    if producer is None:
+        producer = next(
+            (
+                contract
+                for contract in context.contracts
+                if contract.id == receipt.payload.get("contract_id")
+            ),
+            None,
+        )
+    policy = producer.acceptance_policy if producer is not None else None
+    requirements = policy.get("output_requirements", {}) if policy is not None else {}
+    requirement = requirements.get(asset.name, {})
+    shared_definition = requirement.get("definition_id") == asset.definition_hash
+    if (
+        producer is None
+        or asset.name not in producer.outputs
+        or (asset.created_by != producer.id and not shared_definition)
+    ):
+        raise ValueError("claim output does not match a producer-declared output")
+    if receipt.payload.get("contract_id") != producer.id:
+        raise ValueError("task output receipt is not bound to its producer Contract")
+    if shared_definition and receipt.payload.get("actor_id") != asset.signed_by:
+        raise ValueError("task output signer differs from its claim actor")
+    if shared_definition:
+        assertion = member.payload.get("assertion", {})
+        evidence = assertion.get("evidence", {})
+        if (
+            assertion.get("actor_id") != receipt.payload.get("actor_id")
+            or assertion.get("key_id") != receipt.payload.get("key_id")
+            or not isinstance(evidence, Mapping)
+            or evidence.get("contract_id") != producer.id
+            or evidence.get("output_name") != asset.name
+        ):
+            raise ValueError("shared Definition output lacks its exact claim evidence")
+    rows = context.runtime_records
     submitted_rows = tuple(
         row
         for row in rows
@@ -180,6 +218,7 @@ def validate_claim_bound_output(context, asset, producer) -> None:
         validate_runtime_record(request_receipts[0])
         if "worker.claim" not in read_effect_types(request_receipts[0].payload):
             raise ValueError("task output claim request receipt has the wrong effect")
+    return producer
 
 
 @dataclass(frozen=True)
@@ -190,7 +229,137 @@ class AttestationProjection:
 
 
 class OutputQualificationConflict(ValueError):
-    """A Contract output slot already selected another immutable Asset."""
+    """An output qualification conflicts with canonical policy or selection."""
+
+
+def validate_fresh_policy_facts(
+    candidate: CandidateProposal,
+    receipt_id: str,
+    context: EffectProjectionContext,
+    records: tuple[RuntimeRecord, ...],
+    actor_capabilities: tuple[str, ...],
+) -> None:
+    """Reproject fresh policy evidence without trusting its effect owner."""
+    from aigineering.protocol.effect_builders import asset_attestation_effect
+    from aigineering.protocol.runtime_record import runtime_record_effective_payload
+
+    existing_ids = {record.id for record in context.runtime_records}
+    fresh = {
+        record.id: record
+        for record in records
+        if record.record_type in {"asset.attested", "output.qualified"}
+        and record.id not in existing_ids
+    }
+    if not fresh:
+        return
+    if "asset.attest" not in actor_capabilities:
+        raise OutputQualificationConflict(
+            "policy facts require the current actor's asset.attest capability"
+        )
+    expected: dict[str, RuntimeRecord] = {}
+    fresh_qualifications = tuple(
+        record for record in fresh.values() if record.record_type == "output.qualified"
+    )
+    for record in fresh.values():
+        if record.record_type != "asset.attested":
+            continue
+        payload = record.payload
+        try:
+            effect = asset_attestation_effect(
+                payload.get("contract_id", ""),
+                payload.get("output_name", ""),
+                payload.get("asset_id", ""),
+                verdict=payload.get("verdict", ""),
+                policy_id=payload.get("policy_id", ""),
+                policy_version=payload.get("policy_version", ""),
+                rubric_asset_ids=payload.get("rubric_asset_ids", ()),
+                evidence_asset_ids=payload.get("evidence_asset_ids", ()),
+            )
+            canonical = project_asset_attestation_records(
+                effect, candidate, receipt_id, context
+            )
+        except (TypeError, ValueError) as exc:
+            raise OutputQualificationConflict(
+                f"policy fact does not match canonical attestation: {exc}"
+            ) from exc
+        if not set(canonical.additional_capabilities).issubset(actor_capabilities):
+            raise OutputQualificationConflict(
+                "policy facts require all current verifier capabilities"
+            )
+        if record.id != canonical.records[0].id:
+            raise OutputQualificationConflict(
+                "policy fact differs from its authenticated attestation"
+            )
+        attestation = canonical.records[0]
+        expected[attestation.id] = attestation
+        selected = tuple(
+            item
+            for item in fresh_qualifications
+            if item.causal_parents == (attestation.id,)
+        )
+        if selected and payload.get("verdict") != "accepted":
+            raise OutputQualificationConflict(
+                "rejected attestation cannot qualify an output"
+            )
+        prior_actors = {
+            item.payload.get("verifier_actor_id")
+            for item in context.runtime_records
+            if item.record_type == "asset.attested"
+            and item.payload.get("verdict") == "accepted"
+            and all(
+                item.payload.get(field) == payload.get(field)
+                for field in (
+                    "contract_id",
+                    "output_name",
+                    "asset_id",
+                    "policy_id",
+                    "policy_version",
+                )
+            )
+        }
+        for qualification in selected:
+            actors = qualification.payload.get("verifier_actor_ids")
+            if (
+                not isinstance(actors, (list, tuple))
+                or not all(isinstance(actor, str) and actor for actor in actors)
+                or tuple(actors) != tuple(sorted(set(actors)))
+                or candidate.actor_id not in actors
+                or not set(actors).issubset(prior_actors | {candidate.actor_id})
+            ):
+                raise OutputQualificationConflict(
+                    "qualification has unproved verifier actors"
+                )
+            item = _qualification_record(attestation, set(actors))
+            expected[item.id] = item
+        if len(canonical.records) > 1 and not selected:
+            raise OutputQualificationConflict(
+                "accepted attestation lacks its qualification"
+            )
+    if set(expected) != set(fresh) or any(
+        runtime_record_effective_payload(record)
+        != runtime_record_effective_payload(expected[record_id])
+        for record_id, record in fresh.items()
+    ):
+        raise OutputQualificationConflict(
+            "policy facts must be the complete canonical attestation projection"
+        )
+
+
+def _qualification_record(
+    attestation: RuntimeRecord, accepted_verifiers: set[str]
+) -> RuntimeRecord:
+    payload = attestation.payload
+    return create_runtime_record(
+        "output.qualified",
+        {
+            "asset_id": payload["asset_id"],
+            "contract_id": payload["contract_id"],
+            "output_name": payload["output_name"],
+            "policy_id": payload["policy_id"],
+            "verifier_actor_ids": sorted(accepted_verifiers),
+        },
+        causal_parents=(attestation.id,),
+    )
 
 
 def project_asset_attestation_records(
@@ -230,17 +399,19 @@ def project_asset_attestation_records(
         raise ValueError(f"asset.attest references unknown Asset {asset_id!r}")
     if output_name not in contract.outputs or asset.name != output_name:
         raise ValueError("asset.attest must bind an exact declared output slot")
-    validate_claim_bound_output(context, asset, view.get_contract(asset.created_by))
-    if asset.signed_by == candidate.actor_id:
-        raise ValueError("asset producer cannot attest its own output")
     policy = contract.acceptance_policy
     if policy is None or policy.get("mode") != "independent":
         raise ValueError("asset.attest requires independent Contract acceptance")
+    validate_output_shape(policy, output_name, asset.content)
+    if not output_asset_meets_conditions(contract, output_name, asset):
+        raise ValueError("asset.attest target does not meet declared Asset conditions")
+    validate_asset_publication(context, asset)
+    if asset.signed_by == candidate.actor_id:
+        raise ValueError("asset producer cannot attest its own output")
     expected_policy_version = policy.get("policy_version")
     if not isinstance(expected_policy_version, str) or not expected_policy_version:
         raise ValueError("independent acceptance requires a policy_version")
     expected_policy_id = acceptance_policy_id(policy)
-    validate_output_shape(policy, output_name, asset.content)
     if supplied_policy_id and supplied_policy_id != expected_policy_id:
         raise ValueError("asset.attest acceptance policy identity does not match")
     if supplied_policy_version and supplied_policy_version != expected_policy_version:
@@ -323,17 +494,7 @@ def project_asset_attestation_records(
         {candidate.actor_id} if verdict == "accepted" else set()
     )
     if not already_qualified and accepted_verifiers:
-        qualification = create_runtime_record(
-            "output.qualified",
-            {
-                "asset_id": asset_id,
-                "contract_id": contract_id,
-                "output_name": output_name,
-                "policy_id": expected_policy_id,
-                "verifier_actor_ids": sorted(accepted_verifiers),
-            },
-            causal_parents=(attestation.id,),
-        )
+        qualification = _qualification_record(attestation, accepted_verifiers)
         records = (*records, qualification)
     return AttestationProjection(
         records=records,

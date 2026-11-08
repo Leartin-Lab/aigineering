@@ -368,10 +368,14 @@ def test_attestation_rejects_preexisting_non_finite_claim_output_without_rewriti
     acceptance_domain, monkeypatch
 ):
     import aigineering.core.effect_projection as effect_projection
+    import aigineering.core.acceptance as acceptance
 
     store, genesis, committer, _, _, verifier, _, _, db_path = acceptance_domain
     original_guard = effect_projection.validate_output_shape
     monkeypatch.setattr(effect_projection, "validate_output_shape", lambda *_: None)
+    # Reproduce a pre-fix admitted fact, before both claim and condition readers
+    # shared the shape guard. This is historical fixture setup only.
+    monkeypatch.setattr(acceptance, "validate_output_shape", lambda *_: None)
     contract, candidate, committer = _signed_claim_output_candidate(
         acceptance_domain,
         output_shapes={"report": {"score": "number"}},
@@ -380,6 +384,7 @@ def test_attestation_rejects_preexisting_non_finite_claim_output_without_rewriti
     )
     prepared = committer.commit(candidate, genesis)
     monkeypatch.setattr(effect_projection, "validate_output_shape", original_guard)
+    monkeypatch.setattr(acceptance, "validate_output_shape", original_guard)
     assert prepared.accepted, prepared
     asset = store.get_assets_by_name("report")[0]
     from aigineering.core.projection_context import load_effect_projection_context
@@ -684,7 +689,7 @@ def test_acceptance_binds_exact_claim_output_regardless_of_tree(
     assert all_outputs_satisfied(contract, store)
 
 
-def test_parent_acceptance_rejects_unrelated_same_name_asset(acceptance_domain):
+def test_name_only_requirement_can_accept_an_admitted_external_asset(acceptance_domain):
     store, genesis, committer, owner, _, verifier, _, _, _ = acceptance_domain
     contract, _ = _publish_contract_and_output(acceptance_domain)
     unrelated = Asset(id="unrelated", name="report", content="unrelated")
@@ -716,9 +721,8 @@ def test_parent_acceptance_rejects_unrelated_same_name_asset(acceptance_domain):
         ),
         genesis,
     )
-    assert not decision.accepted
-    assert "producer-declared output" in str(decision.runtime_records[1].payload)
-    assert not all_outputs_satisfied(contract, store)
+    assert decision.accepted
+    assert all_outputs_satisfied(contract, store)
 
 
 def test_attestation_must_bind_exact_policy_rubric_and_evidence(acceptance_domain):

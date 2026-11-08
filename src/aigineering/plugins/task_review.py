@@ -9,6 +9,7 @@ from aigineering.core.acceptance import (
     acceptance_policy_id,
     project_asset_attestation_records,
     validate_claim_bound_output,
+    validate_asset_publication,
 )
 from aigineering.core.causal_allowance import allowance_available
 from aigineering.core.disclosure import REDACTED_CONTENT, compute_disclosure
@@ -20,6 +21,7 @@ from aigineering.core.effect_projection import EffectHandler
 from aigineering.core.output_satisfaction import (
     _is_contract_or_descendant,
     is_business_output,
+    output_asset_meets_conditions,
 )
 from aigineering.core.projection_context import EffectProjectionContext
 from aigineering.core.projection_store_view import ProjectionStoreView
@@ -115,12 +117,11 @@ def project_task_review_request_effect(
         target.name != output_name
         or target.tombstoned
         or not is_business_output(target, output_name)
+        or not output_asset_meets_conditions(source, output_name, target)
     ):
         raise ValueError("task.review.request target is not an eligible source output")
     view = ProjectionStoreView(context)
-    validate_claim_bound_output(
-        context, target, _contract(context.contracts, target.created_by)
-    )
+    validate_asset_publication(context, target)
     target_commit = _asset_commit_record(target.id, context.runtime_records)
     if target_commit is None:
         raise ValueError("task.review.request target has no committed Asset fact")
@@ -291,12 +292,12 @@ def project_task_review_decision_effect(
     target = next((asset for asset in context.assets if asset.id == target_id), None)
     if target is None or _is_qualified(source.id, output_name, context.runtime_records):
         raise ValueError("task.review.decide source output is no longer eligible")
-    if not is_business_output(target, output_name):
+    if not is_business_output(target, output_name) or not output_asset_meets_conditions(
+        source, output_name, target
+    ):
         raise ValueError("task.review.decide target is no longer an eligible output")
     view = ProjectionStoreView(context)
-    validate_claim_bound_output(
-        context, target, _contract(context.contracts, target.created_by)
-    )
+    validate_asset_publication(context, target)
 
     report = next(
         (asset for asset in context.assets if asset.id == report_asset_id), None
@@ -307,12 +308,11 @@ def project_task_review_decision_effect(
         or report.name != report_name
         or report.tombstoned
         or not is_business_output(report, report_name)
-        or not _is_contract_or_descendant(report.created_by, reviewer.id, view)
     ):
         raise ValueError("task.review.decide requires the exact reviewer report output")
-    validate_claim_bound_output(
-        context, report, _contract(context.contracts, report.created_by)
-    )
+    report_producer = validate_claim_bound_output(context, report)
+    if not _is_contract_or_descendant(report_producer.id, reviewer.id, view):
+        raise ValueError("task.review.decide requires the exact reviewer report output")
     _validated_context_assets(
         (
             target.id,

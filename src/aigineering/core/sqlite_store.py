@@ -3434,6 +3434,11 @@ class SQLiteStore:
                 contracts
             )
             self._validate_output_qualification_records(runtime_records)
+            fresh_declarations = tuple(
+                declaration
+                for declaration in declarations
+                if self.get_contract(declaration.id) is None
+            )
             for declaration in declarations:
                 self._insert_contract(declaration)
             self._validate_allowance_records(
@@ -3449,14 +3454,29 @@ class SQLiteStore:
                 declarations,
                 trace_entries,
                 runtime_records,
+                fresh_declarations=fresh_declarations,
             )
             trace_entries = list(trace_entries) + list(derived_traces)
             runtime_records = runtime_records + derived_records
+            self._validate_fresh_policy_facts(runtime_records, candidate_proposal)
+            self._validate_complete_asset_conditions(runtime_records)
+            fresh_ids = {declaration.id for declaration in fresh_declarations}
+            allowance_read_hint = tuple(
+                record
+                for record in runtime_records
+                if not (
+                    record.record_type
+                    in {"lifecycle.terminal", "allowance.extinguished"}
+                    and record.payload.get("contract_id") in fresh_ids
+                    and self.get_runtime_record(record.id) is None
+                )
+            )
             self._validate_allowance_records(
                 runtime_records,
                 candidate_id=candidate_id,
                 candidate_proposal=candidate_proposal,
                 effect_fact_owners=tuple(effect_fact_owners),
+                read_hint_records=allowance_read_hint,
             )
             if reducer_callback is not None:
                 reducer_traces: list[TraceEntry] = reducer_callback()
@@ -3502,12 +3522,142 @@ class SQLiteStore:
                 )
             return derived_traces, derived_records
 
+    def _validate_fresh_policy_facts(self, records, candidate) -> None:
+        """Keep every policy producer on the same authenticated core semantics."""
+        fresh = tuple(
+            record
+            for record in records
+            if record.record_type in {"asset.attested", "output.qualified"}
+            and self.get_runtime_record(record.id) is None
+        )
+        if not fresh:
+            return
+        from aigineering.core.acceptance import (
+            OutputQualificationConflict,
+            validate_fresh_policy_facts,
+        )
+        from aigineering.core.actor_facts import (
+            candidate_actor_capabilities,
+            load_effective_actor_keys,
+        )
+        from aigineering.core.domain import load_genesis
+        from aigineering.core.projection_context import EffectProjectionContext
+        from aigineering.protocol.candidate import candidate_received_record
+
+        if candidate is None:
+            raise OutputQualificationConflict(
+                "fresh policy facts require a signed Candidate"
+            )
+        genesis = load_genesis(self)
+        actor_keys = load_effective_actor_keys(self, genesis)
+        try:
+            receipt = candidate_received_record(
+                candidate, genesis, actor_keys=actor_keys
+            )
+        except ValueError as exc:
+            from aigineering.core.candidate_decision import ProjectionSnapshotConflict
+
+            raise ProjectionSnapshotConflict(
+                "policy Candidate no longer authenticates at commitment",
+                authentication_rejected=True,
+            ) from exc
+        if not any(
+            record.id == receipt.id
+            and runtime_record_effective_payload(record)
+            == runtime_record_effective_payload(receipt)
+            for record in records
+        ):
+            raise OutputQualificationConflict(
+                "policy Candidate lacks its exact receipt"
+            )
+        capabilities = candidate_actor_capabilities(candidate, actor_keys)
+        if "asset.attest" not in capabilities:
+            raise OutputQualificationConflict(
+                "policy facts require the current actor's asset.attest capability"
+            )
+        target_contract_ids = {
+            str(record.payload.get("contract_id", "")) for record in fresh
+        }
+        contracts = {
+            contract.id: contract
+            for contract_id in target_contract_ids
+            if (contract := self.get_contract(contract_id)) is not None
+        }
+        asset_ids = {str(record.payload.get("asset_id", "")) for record in fresh}
+        for contract in tuple(contracts.values()):
+            policy = contract.acceptance_policy or {}
+            for field_name in ("rubric_asset_ids", "evidence_asset_ids"):
+                asset_ids.update(policy.get(field_name, ()))
+        assets = tuple(self.get_assets_by_ids(tuple(sorted(asset_ids))))
+        for asset in assets:
+            if (producer := self.get_contract(asset.created_by)) is not None:
+                contracts[producer.id] = producer
+        validate_fresh_policy_facts(
+            candidate,
+            receipt.id,
+            EffectProjectionContext(
+                contracts=tuple(contracts.values()),
+                assets=assets,
+                runtime_records=tuple(
+                    record for _, record in self.scan_runtime_records()
+                ),
+                actor_keys=actor_keys,
+            ),
+            fresh,
+            capabilities,
+        )
+
+    def _validate_complete_asset_conditions(
+        self, records: tuple[RuntimeRecord, ...]
+    ) -> None:
+        """Fence fresh completions against the writer-visible Asset conditions."""
+        from aigineering.core.output_satisfaction import (
+            CompletionConditionConflict,
+            all_outputs_satisfied,
+        )
+
+        pending_qualifications: dict[tuple[str, str], set[str]] = {}
+        for record in records:
+            if record.record_type == "output.qualified":
+                slot = (
+                    str(record.payload.get("contract_id", "")),
+                    str(record.payload.get("output_name", "")),
+                )
+                pending_qualifications.setdefault(slot, set()).add(
+                    str(record.payload.get("asset_id", ""))
+                )
+        checked: set[str] = set()
+        for record in records:
+            if (
+                record.record_type != "lifecycle.terminal"
+                or record.payload.get("terminal") != "complete"
+                or self.get_runtime_record(record.id) is not None
+            ):
+                continue
+            contract_id = str(record.payload.get("contract_id", ""))
+            if contract_id in checked:
+                continue
+            contract = self.get_contract(contract_id)
+            if contract is None or not all_outputs_satisfied(
+                contract,
+                self,
+                require_outputs=True,
+                extra_qualified_asset_ids=pending_qualifications,
+            ):
+                raise CompletionConditionConflict(
+                    "complete terminal requires satisfying declared Asset conditions: "
+                    f"{contract_id}"
+                )
+            checked.add(contract_id)
+
     def _commit_time_ingress_consequences(
         self,
         accepted_assets: list[Asset],
         declarations: tuple[Contract, ...],
         trace_entries: list[TraceEntry],
         runtime_records: tuple[RuntimeRecord, ...],
+        *,
+        fresh_declarations: tuple[Contract, ...] = (),
     ) -> tuple[tuple[TraceEntry, ...], tuple[RuntimeRecord, ...]]:
         """Close races between pure projection and serialized commitment.
 
@@ -3519,12 +3669,13 @@ class SQLiteStore:
         """
         from aigineering.core.causal_allowance import materialize_terminal_allowance
 
-        if accepted_assets:
-            from aigineering.core.fact_materialization import (
-                reduce_asset_facts,
-                trace_records,
-            )
+        from aigineering.core.fact_materialization import (
+            materialize_fact_reduction,
+            reduce_asset_facts,
+            trace_records,
+        )
 
+        if accepted_assets:
             projected_traces, projected_records = reduce_asset_facts(
                 self,
                 self,
@@ -3533,12 +3684,40 @@ class SQLiteStore:
             )
         else:
             projected_traces, projected_records = (), ()
+        if fresh_declarations:
+            from aigineering.core.fact_reducer import FactReducer
+
+            terminals = frozenset(
+                str(record.payload.get("contract_id", ""))
+                for record in (*runtime_records, *projected_records)
+                if record.record_type == "lifecycle.terminal"
+            )
+            qualified: dict[tuple[str, str], set[str]] = {}
+            for record in runtime_records:
+                if record.record_type == "output.qualified":
+                    key = (
+                        str(record.payload.get("contract_id", "")),
+                        str(record.payload.get("output_name", "")),
+                    )
+                    qualified.setdefault(key, set()).add(
+                        str(record.payload.get("asset_id", ""))
+                    )
+            events = FactReducer(self).on_contracts_created(
+                fresh_declarations,
+                terminal_contract_ids=terminals,
+                extra_qualified_asset_ids=qualified,
+            )
+            declaration_traces, declaration_records = materialize_fact_reduction(
+                events, ()
+            )
+            projected_traces = (*projected_traces, *declaration_traces)
+            projected_records = (*projected_records, *declaration_records)
         known_trace_ids = {entry.id for entry in trace_entries}
         known_record_ids = {record.id for record in runtime_records}
         new_traces = tuple(
             entry for entry in projected_traces if entry.id not in known_trace_ids
         )
-        projected_trace_records = trace_records(new_traces) if accepted_assets else ()
+        projected_trace_records = trace_records(new_traces)
         candidates = tuple(projected_records) + projected_trace_records
         new_records = tuple(
             record for record in candidates if record.id not in known_record_ids
@@ -3847,6 +4026,7 @@ class SQLiteStore:
         candidate_id: str | None = None,
         candidate_proposal=None,
         effect_fact_owners=(),
+        read_hint_records: tuple[RuntimeRecord, ...] | None = None,
     ) -> None:
         if not any(
             record.record_type
@@ -3863,7 +4043,7 @@ class SQLiteStore:
 
         narrow = (
             self._narrow_allowance_commit_inputs(
-                runtime_records,
+                runtime_records if read_hint_records is None else read_hint_records,
                 candidate_id,
                 candidate_proposal=candidate_proposal,
                 effect_fact_owners=effect_fact_owners,

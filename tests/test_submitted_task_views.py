@@ -230,7 +230,7 @@ def test_signed_submitted_independent_outputs_are_a_qualification_blocker(
     reopened.close()
 
 
-def test_submitted_view_ignores_earlier_unclaimed_graph_asset(tmp_path):
+def test_pending_view_accepts_admitted_graph_without_a_target_claim(tmp_path):
     import test_task_review as review
     from aigineering.core.projection_context import load_effect_projection_context
     from aigineering.core.publication_history import validate_published_member
@@ -245,6 +245,11 @@ def test_submitted_view_ignores_earlier_unclaimed_graph_asset(tmp_path):
             env,
             content_text='{"answer":"looks shaped but has no claim"}',
         )
+        assert store.get_claim(env["source"].id) is None
+        before_claim = project_task_status(env["source"], store)
+        assert before_claim["status"] != "submitted"
+        assert before_claim["qualification_pending_outputs"] == {"final": fake.id}
+        assert "qualification:independent_acceptance" in before_claim["blockers"]
         context = load_effect_projection_context(store)
         fake_committed = next(
             record
@@ -285,8 +290,7 @@ def test_submitted_view_ignores_earlier_unclaimed_graph_asset(tmp_path):
         status = project_task_status(env["source"], store)
         assert status["status"] == "submitted"
         assert status["outputs_satisfied"] is False
-        assert status["qualification_pending_outputs"] == {"final": canonical.id}
-        assert fake.id not in status["qualification_pending_outputs"].values()
+        assert status["qualification_pending_outputs"] == {"final": fake.id}
         assert "qualification:independent_acceptance" in status["blockers"]
     finally:
         store.close()

@@ -49,6 +49,13 @@ Existing canonical registration and runtime maintenance remain in use;
 root-scoped invocation does not imply root-scoped maintenance. Receiver Fleets
 reject Engine adapters, preventing recursive configuration expansion.
 
+### Superseded output-selection detail
+
+Change 136 supersedes the tree-provenance sentence above for new work. Engine
+roots now declare goal and mapped-input output conditions; accepted Assets must
+match those exact conditions, while the signed assertion and claim prove the
+actual producer. Historical bridge facts and Contract bytes remain unchanged.
+
 ### Shared fact domain
 
 Multiple same-machine Workers may attach to one SQLite domain through separate

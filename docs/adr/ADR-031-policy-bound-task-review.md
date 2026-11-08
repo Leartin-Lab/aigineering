@@ -60,6 +60,11 @@ not prove a valid review report. Decision independently rejects a foreign report
 and cannot qualify source work with it. A valid exact reviewer report remains
 eligible even if an unrelated same-name Asset also exists.
 
+Change 136 makes the same-name condition the default when no output selectors
+are declared; exact Definition, Content, producer and shape selectors can narrow
+it. The review report's exact requested reviewer-task provenance remains a
+separate method-specific requirement.
+
 Distinct signed actors establish protocol attribution, not different natural
 persons or independent models. Directly writing qualifications, changing task
 status, using a report as newly frozen evidence, or granting arbitrary verifier

@@ -11,6 +11,7 @@ from aigineering.core.actor_facts import load_effective_actor_keys
 from aigineering.core.acceptance import (
     acceptance_policy_id,
     validate_claim_bound_output,
+    validate_asset_publication,
     validate_output_shape,
 )
 from aigineering.core.causal_allowance import allowance_available
@@ -21,6 +22,7 @@ from aigineering.core.domain import load_genesis
 from aigineering.core.output_satisfaction import (
     _is_contract_or_descendant,
     is_business_output,
+    output_asset_meets_conditions,
 )
 from aigineering.core.signing import Ed25519Signer
 from aigineering.local_identity import (
@@ -103,17 +105,13 @@ def _source_asset_scope(store, source, output_name: str, asset_id: str):
         or not asset.promptable
         or asset.disclosure_view != "original"
         or not is_business_output(asset, output_name)
+        or not output_asset_meets_conditions(source, output_name, asset)
     ):
         raise ValueError("review target must be an eligible business output")
     if not _asset_has_committed_fact(store, asset.id):
         raise ValueError("review target Asset has no immutable committed fact")
     records = load_effect_projection_context(store)
-    producer = next(
-        (item for item in records.contracts if item.id == asset.created_by), None
-    )
-    if producer is None:
-        raise ValueError("review target producer Contract is missing")
-    validate_claim_bound_output(records, asset, producer)
+    validate_asset_publication(records, asset)
     policy = source.acceptance_policy
     validate_output_shape(policy, output_name, asset.content)
     policy_version = policy.get("policy_version")
@@ -312,6 +310,7 @@ def _validate_decision_target(
         or not target.promptable
         or target.disclosure_view != "original"
         or not is_business_output(target, output_name)
+        or not output_asset_meets_conditions(source, output_name, target)
     ):
         raise ValueError("review request no longer identifies its exact source output")
     report_output = str(payload.get("report_output", ""))
@@ -321,7 +320,6 @@ def _validate_decision_target(
         or not report.promptable
         or report.disclosure_view != "original"
         or not is_business_output(report, report_output)
-        or not _is_contract_or_descendant(report.created_by, child.id, store)
     ):
         raise ValueError(
             "report Asset must be the exact declared output of the reviewer Contract"
@@ -341,16 +339,12 @@ def _validate_decision_target(
             "review source or report Asset has no immutable committed fact"
         )
     records = load_effect_projection_context(store)
-    target_producer = next(
-        (item for item in records.contracts if item.id == target.created_by), None
-    )
-    report_producer = next(
-        (item for item in records.contracts if item.id == report.created_by), None
-    )
-    if target_producer is None or report_producer is None:
-        raise ValueError("review source or report producer Contract is missing")
-    validate_claim_bound_output(records, target, target_producer)
-    validate_claim_bound_output(records, report, report_producer)
+    validate_asset_publication(records, target)
+    report_producer = validate_claim_bound_output(records, report)
+    if not _is_contract_or_descendant(report_producer.id, child.id, store):
+        raise ValueError(
+            "review report must come from the exact reviewer task ancestry"
+        )
     if child.acceptance_policy is not None:
         raise ValueError("reviewer Contract must remain an ordinary report task")
     policy = source.acceptance_policy

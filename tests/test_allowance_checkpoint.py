@@ -63,7 +63,7 @@ def test_signed_publication_materializes_checkpoint_without_schema_floor_change(
         ).fetchone()
         is not None
     )
-    assert CURRENT_SCHEMA_VERSION == 22
+    assert CURRENT_SCHEMA_VERSION == 23
     store.close()
 
 

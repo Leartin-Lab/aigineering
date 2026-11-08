@@ -177,32 +177,49 @@ causal Contract or raw Candidate evidence is missing. That condition is an
 explicit consistency error: silently continuing would leave the same work
 permanently unprocessed on every restart.
 
-## 11. Assertion and independent acceptance are distinct
+## 11. Declared Asset conditions and independent acceptance are distinct
 
-Mechanical policies may require `output_source="contract_tree"`. This binds
-output satisfaction and exact retained-ID selection to the declared Contract
-or its immutable descendants, including pending Assets. A pending name alone
-cannot satisfy that policy. New application roots explicitly select it;
-historical `None` or mechanical policies without the field retain their original
-rules. System outputs and protected recovery method outputs retain their
-mechanical own-producer checks. Business recovery with explicit `contract_tree`
-policy can use delegated output; historical recovery without that constraint
-keeps its own-producer rule to exclude stale repair inputs.
-SQLite schema22 fences older readers that would ignore the new policy field;
-stop already-open old Workers and back up before upgrading. The version gate
-does not fence an older process that already holds a connection.
+A Contract output role is satisfied by any admitted Asset that matches its
+declared name and optional exact Definition ID, Content ID, producer actor IDs,
+and shape. Without selectors, same-name business output remains the coarse
+compatibility condition. Neither task origin, root grouping nor immutable
+Contract ancestry adds an output condition. The historical mechanical
+`output_source` field remains readable but does not reinstate a tree fence.
+An unknown but syntactically valid required Definition remains unmet until its
+signed graph fact exists; it never falls back to a name match.
+Successors preserve only conditions for retained output roles. An explicitly
+declared protected observation role may be satisfied across task origins, while
+tool and MCP observations cannot satisfy ordinary business roles by name alone.
+
+A matching Asset need not have been produced under a claim for the receiving
+Contract. Claim-bound publication still requires the authenticated Candidate's
+exact active claim, and shared-Definition output binds the signed assertion's
+actor, key, Contract ID and output role to that Candidate. Definition
+`source_uri` is provenance metadata, not producer authority. Control-plane
+actions have distinct signed capabilities but cannot force completion.
+
+SQLite schema23 fences readers that would ignore declared output conditions or
+completion of a Contract when a matching Asset already exists at declaration.
+The latter is projected through the same writer transaction. Stop already-open
+old Workers and back up before upgrading; the version gate does not fence an
+older process that already holds a connection. Historical Asset and typed
+terminal facts are not rewritten.
 
 An output Asset is an authorized assertion, not automatic semantic truth. A
 Contract whose identity binds `acceptance_policy.mode=independent` remains
 unsatisfied until a different actor with every required verifier capability
 publishes an `asset.attest` Candidate for that Contract, declared output slot,
-and exact Asset ID. Producer self-attestation, wrong-slot Assets, non-task
-Assets, missing evidence, and capability gaps fail closed. Accepted
+and exact Asset ID. The Asset may be a valid non-task publication; the target
+Contract need not have a claim. Producer self-attestation, wrong-slot Assets,
+missing evidence, and capability gaps fail closed. Accepted
 attestation creates reconstructable `asset.attested` and `output.qualified`
 facts; terminal projection commits in the same transaction. The exact Asset
-may come from another Contract tree only through this exact qualification and
-claim-bound producer-publication proof. Name equality alone never qualifies an
-output; review-report provenance remains bound to the requested reviewer.
+may come from any admitted source only through this exact qualification; name
+equality alone never qualifies an independent output. Method review reports
+still require the exact requested reviewer task and provenance. Ordinary
+completion cancels unfinished descendants without an inferred verifier
+keep-alive. Staged compilers preserve their parent's independent conditions;
+capability or input-name similarity cannot prolong a completed obligation.
 
 When the immutable policy declares deterministic `output_shapes`, producer
 submission and independent qualification both validate the exact JSON shape.
@@ -301,7 +318,7 @@ Missing, tombstoned and wrong-role active references fail closed. Original trust
 signer, derivation and redaction checks still apply to selected inputs. Empty maps
 or unused bindings grant neither new input roles nor capabilities. Guard-bearing
 Contracts require task:v6; older identity domains cannot carry the guard. This
-reader gate began with schema18; the current floor is schema22. It is a normal reopen
+reader gate began with schema18; the current floor is schema23. It is a normal reopen
 compatibility gate, not protection for old connections
 that were already open.
 

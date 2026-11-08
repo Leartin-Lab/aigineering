@@ -15,15 +15,12 @@ from aigineering.core.claim_constraints import (
     open_claim_constraints,
 )
 from aigineering.core.store import require_operational_store
-from aigineering.core.acceptance import (
-    validate_claim_bound_output,
-    validate_output_shape,
-)
+from aigineering.core.acceptance import validate_asset_publication
 from aigineering.core.contract_admission import validate_acceptance_policy
 from aigineering.core.output_satisfaction import (
-    _is_contract_or_descendant,
     all_outputs_satisfied,
-    is_business_output,
+    output_asset_meets_conditions,
+    is_output_role_asset,
 )
 from aigineering.core.worker_routing import eligible_workers
 from aigineering.core.claim_assignments import (
@@ -117,10 +114,8 @@ def project_task_status(
         if query_context is not None
         else load_effect_projection_context(store)
     )
-    candidate_qualification_outputs = (
-        _submitted_independent_output_assets(contract, store, projection_context)
-        if view.claim_status == "submitted"
-        else {}
+    candidate_qualification_outputs = _submitted_independent_output_assets(
+        contract, store, projection_context
     )
     assignment_context = assignment_context_from_projection(projection_context)
     assignment_fact = assignment_head(assignment_context, contract_id=contract.id)
@@ -153,7 +148,9 @@ def project_task_status(
         assignment_blocker=assignment_issue,
     )
     qualification_pending_outputs = (
-        candidate_qualification_outputs if status == "submitted" else {}
+        candidate_qualification_outputs
+        if status not in {"completed", "failed", "cancelled", "unreachable", "stalled"}
+        else {}
     )
     qualification_pending = bool(qualification_pending_outputs)
     failure_details = _descendant_failure_details(
@@ -341,9 +338,22 @@ def _latest_attempt_outcome(store, contract_id: str) -> str:
 
 
 def _output_assets(contract: Contract, store) -> dict[str, str]:
+    qualified: dict[str, set[str]] = {}
+    if (contract.acceptance_policy or {}).get("mode") == "independent":
+        for _, record in store.scan_runtime_records(record_type="output.qualified"):
+            if record.payload.get("contract_id") == contract.id:
+                qualified.setdefault(
+                    str(record.payload.get("output_name", "")), set()
+                ).add(str(record.payload.get("asset_id", "")))
     outputs: dict[str, str] = {}
     for name in contract.outputs:
-        matches = store.get_assets_by_name(name)
+        matches = [
+            asset
+            for asset in store.get_assets_by_name(name)
+            if is_output_role_asset(asset, name)
+            and output_asset_meets_conditions(contract, name, asset)
+            and (not qualified.get(name) or asset.id in qualified[name])
+        ]
         if matches:
             outputs[name] = matches[-1].id
     return outputs
@@ -505,8 +515,8 @@ def _submitted_independent_output_assets(
         matching_assets = store.get_assets_by_name(output_name)
         if any(
             asset.id in qualified_asset_ids
-            and is_business_output(asset, output_name)
-            and _is_contract_or_descendant(asset.created_by, contract.id, store)
+            and is_output_role_asset(asset, output_name)
+            and output_asset_meets_conditions(contract, output_name, asset)
             for asset in matching_assets
         ):
             continue
@@ -514,29 +524,17 @@ def _submitted_independent_output_assets(
         eligible_asset_id = None
         for asset in matching_assets:
             try:
-                validate_claim_bound_output(
-                    projection_context,
-                    asset,
-                    next(
-                        item
-                        for item in projection_context.contracts
-                        if item.id == asset.created_by
-                    ),
-                )
-            except (LookupError, StopIteration, ValueError):
+                validate_asset_publication(projection_context, asset)
+            except (LookupError, ValueError):
                 continue
             if (
                 asset.tombstoned
                 or not asset.promptable
                 or asset.disclosure_view != "original"
-                or not is_business_output(asset, output_name)
-                or not _is_contract_or_descendant(asset.created_by, contract.id, store)
+                or not is_output_role_asset(asset, output_name)
+                or not output_asset_meets_conditions(contract, output_name, asset)
                 or asset.id not in committed_asset_ids
             ):
-                continue
-            try:
-                validate_output_shape(policy, output_name, asset.content)
-            except (TypeError, ValueError):
                 continue
             eligible_asset_id = asset.id
             break
@@ -627,8 +625,7 @@ def _descendant_failure_risks(
                 has_active_recovery=child.id in active_recovery_for,
                 view=view,
                 qualification_pending=(
-                    view.claim_status == "submitted"
-                    and bool(
+                    bool(
                         _submitted_independent_output_assets(
                             child, store, projection_context
                         )

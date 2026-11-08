@@ -87,6 +87,7 @@ def _parallel_tool_contracts(
         allowance,
         legacy_stage_labels=False,
         legacy_consumed_tool_scope=False,
+        legacy_acceptance_policy=False,
     )
 
 
@@ -100,6 +101,7 @@ def _legacy_parallel_tool_contracts(
         allowance,
         legacy_stage_labels=True,
         legacy_consumed_tool_scope=True,
+        legacy_acceptance_policy=True,
     )
 
 
@@ -113,6 +115,7 @@ def _baseline_parallel_tool_contracts(
         allowance,
         legacy_stage_labels=False,
         legacy_consumed_tool_scope=True,
+        legacy_acceptance_policy=True,
     )
 
 
@@ -123,6 +126,7 @@ def _build_parallel_tool_contracts(
     *,
     legacy_stage_labels: bool,
     legacy_consumed_tool_scope: bool,
+    legacy_acceptance_policy: bool,
 ) -> tuple[Contract, ...]:
     payload = deep_thaw(action.payload)
     calls = payload.get("calls")
@@ -195,12 +199,21 @@ def _build_parallel_tool_contracts(
         ),
         "context_asset_ids": parent.context_asset_ids,
     }
-    if (
-        parent.acceptance_policy is not None
-        and parent.acceptance_policy.get("mode") == "mechanical"
-        and parent.acceptance_policy.get("output_source") == "contract_tree"
-    ):
-        continuation_fields["acceptance_policy"] = deep_thaw(parent.acceptance_policy)
+    if legacy_acceptance_policy:
+        if (
+            parent.acceptance_policy is not None
+            and parent.acceptance_policy.get("mode") == "mechanical"
+            and parent.acceptance_policy.get("output_source") == "contract_tree"
+        ):
+            continuation_fields["acceptance_policy"] = deep_thaw(
+                parent.acceptance_policy
+            )
+    elif parent.acceptance_policy is not None:
+        acceptance_policy = deep_thaw(parent.acceptance_policy)
+        if not isinstance(acceptance_policy, dict):
+            raise ValueError("parent acceptance policy must be an object")
+        acceptance_policy.pop("output_source", None)
+        continuation_fields["acceptance_policy"] = acceptance_policy
     continuation = contract_from_fields(**continuation_fields)
     return (*tool_tasks, continuation)
 

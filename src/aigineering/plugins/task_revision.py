@@ -6,7 +6,11 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
 
-from aigineering.core.acceptance import acceptance_policy_id
+from aigineering.core.acceptance import (
+    acceptance_policy_id,
+    validate_asset_publication,
+    validate_claim_bound_output,
+)
 from aigineering.core.claim_assignments import (
     ASSIGNMENT_FACT,
     AssignmentAdmission,
@@ -31,6 +35,7 @@ from aigineering.core.effect_projection import EffectHandler
 from aigineering.core.output_satisfaction import (
     _is_contract_or_descendant,
     is_business_output,
+    output_asset_meets_conditions,
 )
 from aigineering.core.projection_context import EffectProjectionContext
 from aigineering.plugins.task_successors import (
@@ -205,18 +210,21 @@ def validate_task_revision_references(
     if target.name != output_name or output_name not in source.outputs:
         raise ValueError("review target is not a declared source output")
     view = ProjectionStoreView(context)
-    if not is_business_output(target, output_name) or not _is_contract_or_descendant(
-        target.created_by, source.id, view
+    if not is_business_output(target, output_name) or not output_asset_meets_conditions(
+        source, output_name, target
     ):
-        raise ValueError("review target is outside source output ancestry")
+        raise ValueError("review target does not meet source Asset conditions")
+    validate_asset_publication(context, target)
     report = _committed_asset(str(decision.payload.get("report_asset_id", "")), context)
     report_output = str(request.payload.get("report_output", ""))
     if (
         not report_output
         or report.name != report_output
         or not is_business_output(report, report_output)
-        or not _is_contract_or_descendant(report.created_by, reviewer.id, view)
     ):
+        raise ValueError("review decision report is not the exact reviewer output")
+    report_producer = validate_claim_bound_output(context, report)
+    if not _is_contract_or_descendant(report_producer.id, reviewer.id, view):
         raise ValueError("review decision report is not the exact reviewer output")
     if not report.signed_by or report.signed_by == target.signed_by:
         raise ValueError("review report producer must differ from target producer")

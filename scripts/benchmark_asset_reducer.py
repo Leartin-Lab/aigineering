@@ -1016,7 +1016,7 @@ def _cascade_acceptance_microcase(root: Path, imports) -> dict[str, Any]:
     review = imports["contract_from_fields"](
         name="independent_verifier",
         description="Review the root output.",
-        parent_id=child.id,
+        parent_id=parent.id,
         inputs=("root_final",),
         outputs=("review_receipt",),
         activation="root_final",
@@ -1082,16 +1082,26 @@ def _cascade_acceptance_microcase(root: Path, imports) -> dict[str, Any]:
         or child_terminal[0].payload.get("terminal") != "complete"
     ):
         raise RuntimeError("intermediate did not reach its signed complete terminal")
+    if review.parent_id != parent.id:
+        raise RuntimeError("pending verifier is not a direct root child")
     if store.get_claim(review.id) is not None:
         raise RuntimeError("verifier branch unexpectedly claimed before root output")
     execute(producer, parent, "root_final", "cascade-root-claim")
-    if any(
+    root_pending_before_attestation = not any(
         record.payload.get("contract_id") == parent.id
         for _revision, record in store.scan_runtime_records(
             record_type="lifecycle.terminal"
         )
-    ):
+    )
+    if not root_pending_before_attestation:
         raise RuntimeError("independent root completed before verifier attestation")
+    if any(
+        record.payload.get("contract_id") == review.id
+        for _revision, record in store.scan_runtime_records(
+            record_type="lifecycle.terminal"
+        )
+    ):
+        raise RuntimeError("root verifier was cancelled before root acceptance")
     verifier_host = imports["WorkerHost"](
         imports["MockWorker"](worker_id=verifier.actor_id),
         genesis,
@@ -1144,6 +1154,12 @@ def _cascade_acceptance_microcase(root: Path, imports) -> dict[str, Any]:
     }
     observed = {
         "root_output_existed_before_attestation": output_asset is not None,
+        "completed_intermediate_before_attestation": child_terminal[0].payload.get(
+            "terminal"
+        )
+        == "complete",
+        "verifier_is_direct_root_child": review.parent_id == parent.id,
+        "root_pending_until_attestation": root_pending_before_attestation,
         "root_completed_after_attestation": terminals.get(parent.id) == "complete",
         "completed_intermediate_preserved": terminals.get(child.id) == "complete",
         "claimed_verifier_cancelled_after_acceptance": terminals.get(review.id)

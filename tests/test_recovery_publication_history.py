@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, replace
 
 import pytest
@@ -26,7 +27,9 @@ from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.core.trace_manager import TraceManager
 from aigineering.plugins.completion_projection import TaskCompletionContext
 from aigineering.plugins.recovery import (
+    RecoveryDisposition,
     _history_status_disposition,
+    prepare_method_recovery_intent,
     schedule_method_result_recovery,
     schedule_projection_recovery,
 )
@@ -686,6 +689,151 @@ def test_signed_v6_system_tool_recovery_reuses_exact_history_proof(
     env.store.close()
 
 
+@pytest.mark.parametrize(
+    ("contract_id", "source_id"),
+    [
+        ("task:method-source-self-cycle", "task:method-source-self-cycle"),
+        ("task:method-source-broken", "task:missing-method-source"),
+    ],
+)
+def test_method_recovery_source_walk_rejects_cycle_and_missing_source(
+    contract_id, source_id
+):
+    env = _environment("method-source-walk")
+    snapshot = _snapshot(env)
+    payload = {
+        "method": "tool",
+        "parent_contract_id": env.root.id,
+        "parent_contract_name": env.root.name,
+        "parent_inputs": [],
+        "parent_outputs": ["report"],
+        "parent_tool_scope": ["probe_tool"],
+        "payload": {"name": "probe_tool", "args": {}},
+        "recovery_intent_version": 1,
+        "recovery_source_contract_id": source_id,
+    }
+    failed = Contract(
+        id=contract_id,
+        name="operator-named-method-recovery",
+        description=json.dumps(payload, sort_keys=True),
+        outputs=("report",),
+        origin="system",
+        parent_id=env.root.id,
+    )
+    binding = {
+        "kind": "worker.invocation_failed",
+        "contract_id": failed.id,
+        "grant_record_id": "grant:source",
+        "witness_record_ids": ("failure:source",),
+    }
+
+    result = prepare_method_recovery_intent(
+        snapshot,
+        failed_contract=failed,
+        source_binding=binding,
+        ancestor_source_bindings={failed.id: binding},
+    )
+
+    assert isinstance(result, RecoveryDisposition)
+    assert result.reason == "method_source_history_unverified"
+    env.store.close()
+
+
+def test_ancestor_source_binding_walk_detects_cycle_in_malformed_snapshot(
+    monkeypatch,
+):
+    from types import SimpleNamespace
+
+    from aigineering.task_diagnostics import (
+        TaskDiagnosticError,
+        task_recovery_ancestor_source_bindings,
+    )
+    import aigineering.task_diagnostics as task_diagnostics_module
+    import aigineering.core.publication_history as publication_history_module
+
+    contract_id = "task:malformed-method-source-cycle"
+    payload = {
+        "method": "tool",
+        "parent_contract_id": "task:cycle-parent",
+        "parent_contract_name": "cycle-parent",
+        "parent_inputs": [],
+        "parent_outputs": ["report"],
+        "parent_tool_scope": ["probe_tool"],
+        "payload": {"name": "probe_tool", "args": {}},
+        "recovery_intent_version": 1,
+        "recovery_source_contract_id": contract_id,
+    }
+    contract = Contract(
+        id=contract_id,
+        name="malformed-self-cycle",
+        description=json.dumps(payload, sort_keys=True),
+        outputs=("report",),
+        origin="system",
+        parent_id="task:cycle-parent",
+    )
+    hint = {
+        "kind": "worker.invocation_failed",
+        "contract_id": contract_id,
+        "claim_id": "claim:self-cycle",
+        "grant_record_id": "grant:self-cycle",
+        "witness_record_ids": ["failure:self-cycle"],
+        "source_record_id": "failure:self-cycle",
+    }
+    context = SimpleNamespace(
+        id="asset:cycle-context",
+        content=json.dumps({"failed_contract_id": contract_id, "source_binding": hint}),
+    )
+    declaration = SimpleNamespace(
+        record_type="contract.declared",
+        payload={"contract": {"id": contract_id}, "candidate_id": "candidate:cycle"},
+    )
+    asset_member = SimpleNamespace(
+        record_type="asset.committed",
+        payload={"asset": {"id": context.id}},
+    )
+    receipt = SimpleNamespace(id="receipt:cycle", payload={})
+    head = SimpleNamespace(
+        id="head:cycle", payload={"committed_record_ids": ("asset-member",)}
+    )
+    index = SimpleNamespace(by_id={"asset-member": (asset_member,)})
+    query = SimpleNamespace(
+        domain_id="domain:cycle",
+        runtime_records=((1, declaration),),
+        assets=(context,),
+        require_match=lambda _store: None,
+        get_contract=lambda selected_id: (
+            contract if selected_id == contract_id else None
+        ),
+    )
+
+    monkeypatch.setattr(
+        task_diagnostics_module,
+        "task_recovery_source_binding",
+        lambda *_args, **_kwargs: {
+            **hint,
+            "grant_record_id": "grant:self-cycle",
+            "witness_record_ids": ("failure:self-cycle",),
+        },
+    )
+    monkeypatch.setattr(
+        publication_history_module, "index_published_records", lambda _records: index
+    )
+    monkeypatch.setattr(
+        publication_history_module,
+        "validate_published_member",
+        lambda *_args, **_kwargs: (receipt, head),
+    )
+    monkeypatch.setattr(
+        publication_history_module,
+        "read_effect_types",
+        lambda _payload: ("contract.declare", "asset.propose"),
+    )
+    with pytest.raises(TaskDiagnosticError, match="recovery_source_history_cycle"):
+        task_recovery_ancestor_source_bindings(
+            object(), contract_id, query_context=query
+        )
+
+
 def test_exact_context_residue_with_missing_contract_is_conflict_and_not_republished(
     monkeypatch,
 ):
@@ -1261,7 +1409,9 @@ def test_signed_tool_worker_failure_publishes_method_preserving_recovery(
             raise WorkerExecutionError("fixture_tool_failure", "safe fixture failure")
 
     source_path = tmp_path / "signed-tool-method.sqlite3"
-    env = _environment("signed-tool-method-intent", store_path=source_path)
+    env = _environment(
+        "signed-tool-method-intent", root_budget=16, store_path=source_path
+    )
     env.setup.accept_asset(
         create_tool_descriptor("probe_tool", "fixture probe", {"type": "object"})
     )
@@ -1270,7 +1420,7 @@ def test_signed_tool_worker_failure_publishes_method_preserving_recovery(
             id="task:tool-method-parent",
             name="tool-method-parent",
             outputs=("report",),
-            budget=4,
+            budget=8,
             tool_scope=("probe_tool",),
         )
     )
@@ -1438,6 +1588,118 @@ def test_signed_tool_worker_failure_publishes_method_preserving_recovery(
         method_payload(recursive_recovery)["recovery_source_contract_id"] == recovery.id
     )
 
+    last_failed_recovery = recursive_recovery
+    current_recovery = recursive_recovery
+    for generation in range(3):
+        failed_claim = claim_next_package(
+            env.store,
+            worker_id=host.worker_id,
+            contract_id=current_recovery.id,
+            candidate_publishers=env.publishers,
+            claim_candidate=host.claim_candidate(
+                request_id=f"claim:deep-method-recovery-{generation}",
+                contract_id=current_recovery.id,
+            ),
+        )
+        assert failed_claim is not None
+        with pytest.raises(WorkerInvocationError):
+            execute_claimed_package(
+                failed_claim, host, env.store, candidate_publishers=env.publishers
+            )
+        process_worker_failures(env.store, candidate_publishers=env.publishers)
+        last_failed_recovery = current_recovery
+        next_recoveries = [
+            contract
+            for contract in env.store.get_all_contracts()
+            if method_payload(contract).get("recovery_source_contract_id")
+            == last_failed_recovery.id
+        ]
+        assert len(next_recoveries) == 1
+        current_recovery = next_recoveries[0]
+
+    assert current_recovery != recursive_recovery
+    chain_cursor = current_recovery
+    recovery_generations = 0
+    while method_payload(chain_cursor).get("recovery_source_contract_id"):
+        recovery_generations += 1
+        previous_id = method_payload(chain_cursor)["recovery_source_contract_id"]
+        chain_cursor = env.store.get_contract(previous_id)
+        assert chain_cursor is not None
+    assert recovery_generations == 5
+
+    # Reopen a second connection and prove the fifth recovery from one fixed
+    # immutable history snapshot, including every earlier source binding.
+    from aigineering.task_diagnostics import (
+        task_recovery_ancestor_source_bindings,
+        task_recovery_source_binding,
+    )
+
+    reopened_store = SQLiteStore(str(source_path))
+    reopened_publisher = CandidatePublisher(
+        reopened_store,
+        reopened_store,
+        env.genesis,
+        env.recovery_key,
+        env.recovery_signer,
+    )
+    reopened_publishers = CandidatePublisherRegistry(
+        (("recovery.publish.v1", reopened_publisher),)
+    )
+    reopened_context = TaskCompletionContext(
+        reopened_store, TraceManager(reopened_store), reopened_publishers
+    )
+    reopened_snapshot = reopened_context.capture_recovery_history()
+    assert reopened_snapshot is not None
+    assert reopened_snapshot.query_context is not None
+    final_failure = next(
+        record
+        for _, record in reopened_store.scan_runtime_records(
+            record_type="worker.invocation_failed"
+        )
+        if record.payload.get("contract_id") == last_failed_recovery.id
+    )
+    final_binding = task_recovery_source_binding(
+        reopened_store,
+        last_failed_recovery.id,
+        final_failure.payload["claim_id"],
+        final_failure.id,
+        "worker.invocation_failed",
+        query_context=reopened_snapshot.query_context,
+    )
+    ancestor_bindings = task_recovery_ancestor_source_bindings(
+        reopened_store,
+        last_failed_recovery.id,
+        query_context=reopened_snapshot.query_context,
+    )
+    from aigineering.plugins.recovery import (
+        MethodRecoveryIntent,
+        _recovery_effects,
+        prepare_method_recovery_intent,
+    )
+
+    reopened_intent = prepare_method_recovery_intent(
+        reopened_snapshot,
+        failed_contract=last_failed_recovery,
+        source_binding=final_binding,
+        ancestor_source_bindings=ancestor_bindings,
+    )
+    assert isinstance(reopened_intent, MethodRecoveryIntent)
+    assert reopened_intent.recovery == current_recovery
+    reopened_proof = prove_recovery_publication(
+        reopened_snapshot,
+        recovery=reopened_intent.recovery,
+        context_template=reopened_intent.context_asset,
+        effects=_recovery_effects(
+            reopened_intent.recovery, reopened_intent.context_asset
+        ),
+        idempotency_key=reopened_intent.idempotency_key,
+        causal_parents=reopened_intent.causal_parents,
+        source_record_ids=reopened_intent.source_record_ids,
+    )
+    assert reopened_proof.status == "matched", reopened_proof.reason
+    assert reopened_proof.contract == current_recovery
+    reopened_store.close()
+
     from aigineering.agent.mock import MockWorker
     from aigineering.agent.tool_worker import ToolWorker
     from aigineering.core.tools import ToolRegistry, ToolSpec
@@ -1465,10 +1727,10 @@ def test_signed_tool_worker_failure_publishes_method_preserving_recovery(
     recovered_claim = claim_next_package(
         env.store,
         worker_id=tool_host.worker_id,
-        contract_id=recursive_recovery.id,
+        contract_id=current_recovery.id,
         candidate_publishers=env.publishers,
         claim_candidate=tool_host.claim_candidate(
-            request_id="claim:recovered-tool-method", contract_id=recursive_recovery.id
+            request_id="claim:recovered-tool-method", contract_id=current_recovery.id
         ),
     )
     assert recovered_claim is not None
@@ -1490,7 +1752,7 @@ def test_signed_tool_worker_failure_publishes_method_preserving_recovery(
         env.store,
         default_completion_registry(),
         candidate_publishers=completion_publishers,
-    ) == [recursive_recovery.id]
+    ) == [current_recovery.id]
     continuation = next(
         item
         for item in env.store.get_all_contracts()

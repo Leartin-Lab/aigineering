@@ -77,7 +77,6 @@ def test_contract_builder_creates_canonical_human_proposal():
     assert contract.outputs == ("final_report",)
     assert contract.acceptance_policy == {
         "mode": "mechanical",
-        "output_source": "contract_tree",
     }
     assert contract.labels == ("reviewed",)
     assert contract.tool_scope == ("lookup",)

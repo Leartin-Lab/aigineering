@@ -56,7 +56,10 @@ from aigineering.protocol.candidate import (
 from aigineering.protocol.effect_builders import (
     asset_proposal_effect,
     contract_declaration_effect,
+    definition_publication_effect,
 )
+from aigineering.protocol.asset_graph import create_signed_definition
+from aigineering.protocol.immutability import deep_thaw
 from aigineering.protocol.types import Asset, Candidate, Contract
 
 if TYPE_CHECKING:
@@ -195,6 +198,21 @@ class EngineWorker:
                     input_assets=disclosed_assets,
                     input_id_map=input_id_map,
                     operation_id=operation_id,
+                )
+                output_requirements = _publish_output_definitions(
+                    inner,
+                    outer=contract,
+                    inner_contract=inner_contract,
+                    genesis=genesis,
+                    actor_key=actor_key,
+                    signer=signer,
+                )
+                inner_contract = _inner_contract(
+                    contract,
+                    input_assets=disclosed_assets,
+                    input_id_map=input_id_map,
+                    operation_id=operation_id,
+                    output_requirements=output_requirements,
                 )
             except ValueError as exc:
                 return self._failure(str(exc))
@@ -543,6 +561,7 @@ def _inner_contract(
     input_assets: list[Asset],
     input_id_map: dict[str, str],
     operation_id: str,
+    output_requirements: dict | None = None,
 ) -> Contract:
     if outer.minting_authority:
         raise ValueError("receiver Engine Worker does not support minting authority")
@@ -594,9 +613,10 @@ def _inner_contract(
     output_shapes = original.get("output_shapes", {})
     acceptance = {
         "mode": "mechanical",
-        "output_source": "contract_tree",
         "output_shapes": output_shapes,
     }
+    if output_requirements:
+        acceptance["output_requirements"] = output_requirements
     name = f"{outer.name}.engine.{operation_id.rsplit(':', 1)[-1]}"
     return contract_from_fields(
         name=name,
@@ -616,6 +636,51 @@ def _inner_contract(
         acceptance_policy=acceptance,
         context_asset_ids=context_ids,
     )
+
+
+def _publish_output_definitions(
+    store, *, outer, inner_contract, genesis, actor_key, signer
+) -> dict:
+    """Describe required outputs by frozen goal and inputs, not task ownership."""
+    policy = outer.acceptance_policy or {}
+    requirements = {}
+    for output in outer.outputs:
+        original = policy.get("output_requirements", {}).get(output, {})
+        statement = {
+            "goal": outer.description,
+            "output": output,
+            "inputs": input_asset_bindings(inner_contract.sensitive_input_policy),
+            "source_requirement": dict(original),
+            "shape": policy.get("output_shapes", {}).get(output),
+        }
+        description = canonical_json(deep_thaw(statement))
+        definition = create_signed_definition(
+            domain_id=genesis.id,
+            name=output,
+            description=description,
+            content_type="text",
+            source_kind="engine-output-requirement",
+            source_uri=f"goal:v1:{compute_content_hash(description)}",
+            actor_id=actor_key.actor_id,
+            key_id=actor_key.key_id,
+            signer=signer,
+        )
+        result = publish_effect(
+            store,
+            store,
+            genesis,
+            actor_key,
+            signer,
+            definition_publication_effect(definition),
+            idempotency_key=f"inner-output-definition:{definition.id}",
+        )
+        if not result.accepted:
+            raise ValueError("inner domain rejected its output requirement definition")
+        selectors = {"definition_id": definition.id}
+        if "content_id" in original:
+            selectors["content_id"] = original["content_id"]
+        requirements[output] = selectors
+    return requirements
 
 
 def _claim_inner_work(

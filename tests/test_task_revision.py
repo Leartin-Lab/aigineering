@@ -45,7 +45,7 @@ from aigineering.protocol.effect_builders import asset_attestation_effect
 from aigineering.protocol.types import Asset
 
 
-def _env(tmp_path):
+def _env(tmp_path, *, external_target=False):
     store = SQLiteStore(tmp_path / "revision.sqlite")
     signer = Ed25519Signer()
     authority = ActorKey(
@@ -163,6 +163,10 @@ def _env(tmp_path):
         "qualify-draft",
     )
     assert qualification.accepted, qualification
+    if external_target:
+        final = _publish_asset(
+            store, genesis, signer, operator, "final", "An admitted external final"
+        )
     request_effect = task_review_request_effect(
         source.id, "final", final.id, "Please check the final output", budget=1
     )
@@ -319,10 +323,12 @@ def _candidate(genesis, signer, actor, effect, idem):
     )
 
 
+@pytest.mark.parametrize("external_target", [False, True])
 def test_changes_decision_creates_bounded_revision_and_retains_qualified_slots(
     tmp_path,
+    external_target,
 ):
-    env = _env(tmp_path)
+    env = _env(tmp_path, external_target=external_target)
     store = env["store"]
     # The draft is currently an ordinary output and the final slot is the one
     # under review, so both remain obligations until independently qualified.

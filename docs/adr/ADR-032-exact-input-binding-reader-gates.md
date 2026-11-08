@@ -51,3 +51,8 @@ An exact binding freezes Asset selection, not external knowledge or universal
 semantic truth. Original unbound Contracts remain dynamic. Planner and tool
 continuation containment still authorize new roles and preserve inherited policy;
 unmapped selection is not permission to widen parent scope.
+
+The schema18 statement above is the introduction point for exact input bindings,
+not the current Store floor. Change 136 raises the current floor to schema23 for
+declared Asset output conditions and completion-on-declaration; it does not
+change this ADR's input-selection decision.

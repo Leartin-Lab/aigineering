@@ -14,6 +14,7 @@ from aigineering.core.domain import load_genesis
 from aigineering.core.store import require_operational_store
 from aigineering.protocol.identity import canonical_json
 from aigineering.protocol.runtime_record import RuntimeRecord, validate_runtime_record
+from aigineering.protocol.types import Asset
 from aigineering.planning_diagnostics import (
     is_compile_failure,
     valid_compile_diagnostics,
@@ -1651,10 +1652,23 @@ def task_recovery_ancestor_source_bindings(
     query_context.require_match(store)
     records = tuple(record for _revision, record in query_context.runtime_records)
     index = index_published_records(records)
+    declarations_by_contract: dict[str, list[RuntimeRecord]] = {}
+    for record in records:
+        if record.record_type != "contract.declared":
+            continue
+        declaration = record.payload.get("contract")
+        if not isinstance(declaration, Mapping):
+            continue
+        declared_id = declaration.get("id")
+        if isinstance(declared_id, str) and declared_id:
+            declarations_by_contract.setdefault(declared_id, []).append(record)
+    assets_by_id: dict[str, list[Asset]] = {}
+    for asset in query_context.assets:
+        assets_by_id.setdefault(asset.id, []).append(asset)
     bindings: dict[str, dict[str, Any]] = {}
     target_id = contract_id
     visited: set[str] = set()
-    for _depth in range(3):
+    while True:
         if target_id in visited:
             raise TaskDiagnosticError("recovery_source_history_cycle")
         visited.add(target_id)
@@ -1667,13 +1681,7 @@ def task_recovery_ancestor_source_bindings(
         source_id = payload.get("recovery_source_contract_id")
         if not isinstance(source_id, str) or not source_id:
             raise TaskDiagnosticError("recovery_source_history_unverified")
-        declaration_rows = tuple(
-            record
-            for record in records
-            if record.record_type == "contract.declared"
-            and isinstance(record.payload.get("contract"), Mapping)
-            and record.payload["contract"].get("id") == target.id
-        )
+        declaration_rows = tuple(declarations_by_contract.get(target.id, ()))
         if len(declaration_rows) != 1:
             raise TaskDiagnosticError("recovery_source_publication_unverified")
         declaration = declaration_rows[0]
@@ -1724,9 +1732,7 @@ def task_recovery_ancestor_source_bindings(
             raise TaskDiagnosticError("recovery_source_context_unverified") from exc
         del asset_receipt, asset_head
         asset_id = asset_members[0].payload.get("asset", {}).get("id")
-        contexts = tuple(
-            asset for asset in query_context.assets if asset.id == asset_id
-        )
+        contexts = tuple(assets_by_id.get(asset_id, ()))
         if len(contexts) != 1:
             raise TaskDiagnosticError("recovery_source_context_unverified")
         try:
@@ -1768,13 +1774,6 @@ def task_recovery_ancestor_source_bindings(
                 raise TaskDiagnosticError("recovery_source_context_unverified")
         bindings[source_id] = binding
         target_id = source_id
-    target = query_context.get_contract(target_id)
-    if (
-        target is not None
-        and method_payload(target).get("recovery_intent_version") == 1
-    ):
-        raise TaskDiagnosticError("recovery_source_history_depth_exceeded")
-    return bindings
 
 
 def _diagnostic_events(

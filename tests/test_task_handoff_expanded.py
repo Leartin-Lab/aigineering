@@ -295,7 +295,7 @@ def test_typed_terminal_intermediate_hold_does_not_block_live_grandchild():
     assert inventory.repairs == ()
 
 
-def test_system_observation_repairs_own_output_but_not_business_source_output():
+def test_explicit_observation_role_is_satisfied_without_task_origin_privilege():
     observation_name = "_tool_obs_result"
     source = _contract("source", outputs=(observation_name,))
     system_child = _contract(
@@ -321,7 +321,7 @@ def test_system_observation_repairs_own_output_but_not_business_source_output():
     assert inventory.repair_outputs == (
         (system_child.id, ((observation_name, (observation.id,), ()),)),
     )
-    assert remaining_output_slots(source, context) == (observation_name,)
+    assert remaining_output_slots(source, context) == ()
 
 
 def test_successor_output_selection_preserves_entry_compatibility():
@@ -359,11 +359,14 @@ def test_successor_output_selection_preserves_entry_compatibility():
     assert satisfied_asset_ids(source, "", context) == ("asset:empty-name",)
 
 
-def test_successor_retained_ids_exclude_foreign_same_name_asset():
+def test_successor_retained_ids_exclude_assets_outside_exact_content_requirement():
     source = _contract(
         "source",
         outputs=("report",),
-        acceptance_policy={"mode": "mechanical", "output_source": "contract_tree"},
+        acceptance_policy={
+            "mode": "mechanical",
+            "output_requirements": {"report": {"content_id": "content:v1:" + "a" * 64}},
+        },
     )
     unrelated = _contract("unrelated")
     assets = (
@@ -373,6 +376,7 @@ def test_successor_retained_ids_exclude_foreign_same_name_asset():
             content="owned",
             created_by=source.id,
             origin="human",
+            content_hash="content:v1:" + "a" * 64,
         ),
         Asset(
             id="asset:foreign-report",
@@ -380,6 +384,7 @@ def test_successor_retained_ids_exclude_foreign_same_name_asset():
             content="foreign",
             created_by=unrelated.id,
             origin="human",
+            content_hash="content:v1:" + "b" * 64,
         ),
     )
     context = EffectProjectionContext(contracts=(source, unrelated), assets=assets)

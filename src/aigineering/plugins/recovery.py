@@ -299,102 +299,140 @@ def prepare_method_recovery_intent(
     candidate_raw: str = "",
     rejections: list[dict] | None = None,
     ancestor_source_bindings: dict[str, dict] | None = None,
-    _proof_depth: int = 0,
 ) -> MethodRecoveryIntent | RecoveryDisposition | None:
-    """Prepare the one canonical current and legacy intent pair from a snapshot."""
-    source_method, unsupported_reason = _recoverable_tool_method(failed_contract)
-    if unsupported_reason:
-        return RecoveryDisposition(None, unsupported_reason)
-    if source_method is None:
-        return None
-    if _proof_depth >= 3:
-        return RecoveryDisposition(None, "recovery_depth_exceeded")
-    if (
-        source_binding.get("contract_id") != failed_contract.id
-        or source_binding.get("kind")
-        not in {
-            "worker.invocation_failed",
-            "claim.expired",
-            "candidate.rejected",
-            "projection.decided",
-        }
-        or not isinstance(source_binding.get("grant_record_id"), str)
-        or not isinstance(source_binding.get("witness_record_ids"), (tuple, list))
-    ):
-        return RecoveryDisposition(None, "source_proof_missing")
-    original_source = failed_contract
-    original_method = source_method
-    if source_method.get("recovery_intent_version") == 1:
-        source_id = source_method["recovery_source_contract_id"]
-        source_contract = next(
-            (
-                contract
-                for contract in snapshot.context.contracts
-                if contract.id == source_id
-            ),
-            None,
-        )
-        source_binding_for_predecessor = (ancestor_source_bindings or {}).get(source_id)
-        if source_contract is None or source_binding_for_predecessor is None:
-            return RecoveryDisposition(None, "method_source_history_unverified")
-        prior = prepare_method_recovery_intent(
-            snapshot,
-            failed_contract=source_contract,
-            source_binding=source_binding_for_predecessor,
-            ancestor_source_bindings=ancestor_source_bindings,
-            _proof_depth=_proof_depth + 1,
-        )
-        if not isinstance(prior, MethodRecoveryIntent):
-            return RecoveryDisposition(None, "method_source_history_unverified")
-        from aigineering.plugins.recovery_history import prove_recovery_publication
+    """Prepare a method recovery after proving its finite source chain."""
+    chain: list[tuple[Contract, dict, Mapping[str, object]]] = []
+    visited: set[str] = set()
+    contracts_by_id: dict[str, list[Contract]] = {}
+    for contract in snapshot.context.contracts:
+        contracts_by_id.setdefault(contract.id, []).append(contract)
+    current_contract = failed_contract
+    current_binding: Mapping[str, object] = source_binding
+    original_source: Contract | None = None
+    original_method: dict | None = None
 
-        prior_legacy = prove_recovery_publication(
-            snapshot,
-            recovery=prior.legacy_recovery,
-            context_template=prior.legacy_context,
-            effects=_recovery_effects(prior.legacy_recovery, prior.legacy_context),
-            idempotency_key=prior.idempotency_key,
-            causal_parents=prior.causal_parents,
-            source_record_ids=prior.source_record_ids,
-        )
-        prior_current = prove_recovery_publication(
-            snapshot,
-            recovery=prior.recovery,
-            context_template=prior.context_asset,
-            effects=_recovery_effects(prior.recovery, prior.context_asset),
-            idempotency_key=prior.idempotency_key,
-            causal_parents=prior.causal_parents,
-            source_record_ids=prior.source_record_ids,
-        )
-        if (
-            prior_legacy.status != "absent"
-            or prior_current.status != "matched"
-            or prior_current.contract != failed_contract
+    while True:
+        if current_contract.id in visited:
+            return RecoveryDisposition(None, "method_source_history_unverified")
+        visited.add(current_contract.id)
+
+        method, unsupported_reason = _recoverable_tool_method(current_contract)
+        if unsupported_reason:
+            return RecoveryDisposition(
+                None,
+                unsupported_reason if not chain else "method_source_history_unverified",
+            )
+        if method is None:
+            if chain:
+                return RecoveryDisposition(None, "method_source_history_unverified")
+            return None
+        if not isinstance(current_binding, Mapping) or (
+            current_binding.get("contract_id") != current_contract.id
+            or current_binding.get("kind")
+            not in {
+                "worker.invocation_failed",
+                "claim.expired",
+                "candidate.rejected",
+                "projection.decided",
+            }
+            or not isinstance(current_binding.get("grant_record_id"), str)
+            or not isinstance(current_binding.get("witness_record_ids"), (tuple, list))
         ):
+            return RecoveryDisposition(
+                None,
+                "source_proof_missing"
+                if not chain
+                else "method_source_history_unverified",
+            )
+
+        if method.get("recovery_intent_version") is None:
+            original_source = current_contract
+            original_method = method
+            break
+
+        source_id = method["recovery_source_contract_id"]
+        if source_id in visited:
             return RecoveryDisposition(None, "method_source_history_unverified")
-        original_source = source_contract
-        original_method, source_error = _recoverable_tool_method(source_contract)
-        if source_error or original_method is None:
+        source_contracts = contracts_by_id.get(source_id, ())
+        source_binding_for_predecessor = (ancestor_source_bindings or {}).get(source_id)
+        if len(source_contracts) != 1 or source_binding_for_predecessor is None:
             return RecoveryDisposition(None, "method_source_history_unverified")
-    source_parent = next(
-        (
-            contract
-            for contract in snapshot.context.contracts
-            if contract.id == original_source.parent_id
-        ),
-        None,
-    )
-    if source_parent is None:
+        source_contract = source_contracts[0]
+        chain.append((current_contract, method, current_binding))
+        current_contract = source_contract
+        current_binding = source_binding_for_predecessor
+
+    assert original_source is not None and original_method is not None
+    source_parents = contracts_by_id.get(original_source.parent_id, ())
+    if len(source_parents) != 1:
         return RecoveryDisposition(None, "method_parent_missing")
-    canonical_error = (
-        ""
-        if source_method.get("recovery_intent_version") == 1
-        else _canonical_method_source(
-            snapshot, original_source, source_parent, original_method
-        )
+    source_parent = source_parents[0]
+    canonical_error = _canonical_method_source(
+        snapshot, original_source, source_parent, original_method
     )
     if canonical_error:
         return RecoveryDisposition(None, canonical_error)
+
+    # The bottom source builds the first expected recovery. Each exact accepted
+    # publication then proves the next Contract in the chain before it is used.
+    intent = _build_method_recovery_intent(
+        original_source,
+        original_method,
+        current_binding,
+        candidate_raw=candidate_raw if not chain else "",
+        rejections=rejections if not chain else None,
+    )
+    if chain:
+        from aigineering.plugins.recovery_history import prove_recovery_publication
+
+        for index in range(len(chain) - 1, -1, -1):
+            failed, method, binding = chain[index]
+            prior_legacy = prove_recovery_publication(
+                snapshot,
+                recovery=intent.legacy_recovery,
+                context_template=intent.legacy_context,
+                effects=_recovery_effects(
+                    intent.legacy_recovery, intent.legacy_context
+                ),
+                idempotency_key=intent.idempotency_key,
+                causal_parents=intent.causal_parents,
+                source_record_ids=intent.source_record_ids,
+            )
+            prior_current = prove_recovery_publication(
+                snapshot,
+                recovery=intent.recovery,
+                context_template=intent.context_asset,
+                effects=_recovery_effects(intent.recovery, intent.context_asset),
+                idempotency_key=intent.idempotency_key,
+                causal_parents=intent.causal_parents,
+                source_record_ids=intent.source_record_ids,
+            )
+            if (
+                prior_legacy.status != "absent"
+                or prior_current.status != "matched"
+                or prior_current.contract != failed
+            ):
+                return RecoveryDisposition(None, "method_source_history_unverified")
+            is_requested_failure = index == 0
+            intent = _build_method_recovery_intent(
+                failed,
+                method,
+                binding,
+                candidate_raw=candidate_raw if is_requested_failure else "",
+                rejections=rejections if is_requested_failure else None,
+            )
+    return intent
+
+
+def _build_method_recovery_intent(
+    failed_contract: Contract,
+    source_method: dict,
+    source_binding: Mapping[str, object],
+    *,
+    candidate_raw: str,
+    rejections: list[dict] | None,
+) -> MethodRecoveryIntent:
+    """Construct one deterministic recovery intent for a proven source."""
     payload = dict(source_method)
     payload["recovery_intent_version"] = 1
     payload["recovery_source_contract_id"] = failed_contract.id

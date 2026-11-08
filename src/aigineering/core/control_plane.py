@@ -140,9 +140,7 @@ def build_control_plane_contract(
 
     policy = sensitive_input_policy if sensitive_input_policy is not None else None
     output_policy = (
-        acceptance_policy
-        if acceptance_policy is not None
-        else {"mode": "mechanical", "output_source": "contract_tree"}
+        acceptance_policy if acceptance_policy is not None else {"mode": "mechanical"}
     )
     identity_fields = dict(
         name=name,

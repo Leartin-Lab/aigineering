@@ -22,10 +22,23 @@ and `worker_errors`. Completion satisfies the Contract policy; it does not prove
 general semantic correctness. `--json` emits one result object, not a streaming
 format shared with another harness.
 
-Without an explicit acceptance policy, new tasks require outputs from their own
-Contract tree. An explicit mechanical policy without `output_source` retains
-legacy same-name semantics; include `output_source = "contract_tree"` when
-specifying a mechanical policy that should keep the new default's source rule.
+New tasks use mechanical output conditions. With no explicit output selector,
+the compatibility condition is a matching business Asset name, regardless of
+producer Contract tree. To bind an output role to an existing semantic
+Definition or exact version, configure `acceptance_policy.output_requirements`
+with `definition_id`, optional `content_id`, and optional sorted
+`producer_actor_ids`. A syntactically valid Definition may be required before it
+is published; until its signed graph fact exists, the output remains unmet and
+does not fall back to its name. The legacy mechanical `output_source` field is
+readable but no longer adds a tree restriction. Independent acceptance still
+requires exact qualification for its declared output slot.
+
+The SQLite reader floor is schema23. Stop old Workers and run
+`aig domain upgrade --json` before relying on the new output conditions; the
+command backs up before migration. An older process with an already-open
+connection is not fenced. Existing signed Engine bridge history is immutable;
+if it does not satisfy a newly compiled goal Definition and mapped-input
+conditions, continue with new ordinary work rather than rewriting that history.
 
 Add `--once` to traverse the configured Worker slots until one eligible
 package is claimed, invoke at most that one package, and return the current

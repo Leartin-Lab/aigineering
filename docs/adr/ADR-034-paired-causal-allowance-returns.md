@@ -64,6 +64,10 @@ schema or Contract identity version changes. Historical v3-v6 identities stay
 unchanged. Causal allowance remains a bound on work expansion, not token billing
 or provider cost.
 
+Change 136 raises the current Store reader floor to schema23 for declared Asset
+output conditions and completion-on-declaration. This ADR's paired-return
+authorization and conservation rules are unchanged.
+
 Rejecting every expanded task leaves the product gap. Cloning the old tree changes
 ancestry and acceptance. Issuing another root grant amplifies the budget. Paired
 returns allow the same obligation to continue through ordinary contained work.

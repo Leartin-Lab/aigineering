@@ -34,16 +34,22 @@ def test_causal_allowance_is_the_single_generic_conservation_owner():
         assert f'"{record_type}"' in store
     assert "validate_allowance_grants(" in allowance
     assert "require_committed_head=True" in allowance
-    assert "CURRENT_SCHEMA_VERSION = 22" in migration
+    assert "CURRENT_SCHEMA_VERSION = 23" in migration
     assert "def _migrate_to_v19(self)" in migration
     assert "pre-existing allowance.returned facts" in migration
 
 
-def test_verifier_preservation_has_one_shared_core_owner():
+def test_verifier_keepalive_is_reserved_for_signed_handoff_tree_transfer():
     predicate = (ROOT / "src/aigineering/core/task_lifecycle.py").read_text()
     reducer = (ROOT / "src/aigineering/core/fact_reducer.py").read_text()
+    handoff_tree = (ROOT / "src/aigineering/plugins/handoff_tree.py").read_text()
     assert "def serves_pending_independent_acceptance(" in predicate
-    assert "return serves_pending_independent_acceptance(" in reducer
+    assert "serves_pending_independent_acceptance" not in reducer
+    assert (
+        "from aigineering.core.task_lifecycle import serves_pending_independent_acceptance"
+        in handoff_tree
+    )
+    assert "and serves_pending_independent_acceptance(" in handoff_tree
 
 
 def test_only_reviewed_handoff_feature_requests_new_return_consequences():

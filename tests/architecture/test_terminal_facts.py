@@ -21,6 +21,8 @@ from aigineering.core.control_plane import build_control_plane_contract
 from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.core.store import MemoryStore
 from aigineering.core.trace import MemoryTraceStore
+from aigineering.plugins.base import PluginRequest
+from aigineering.plugins.staged_planning import StagedPlanningPlugin
 from aigineering.protocol.effect_builders import asset_proposal_effect
 from aigineering.protocol.runtime_record import create_runtime_record
 from aigineering.protocol.types import Asset, Contract
@@ -77,6 +79,13 @@ def _legacy_mechanical_contract(**fields):
     return build_control_plane_contract(
         **fields, acceptance_policy={"mode": "mechanical"}
     )
+
+
+def test_fact_reducer_cascades_completion_without_verifier_keepalive():
+    source = Path(fact_reducer_module.__file__).read_text(encoding="utf-8")
+
+    assert "task_lifecycle" not in source
+    assert "serves_pending_independent_acceptance" not in source
 
 
 def _install_fact_reducer_observer(monkeypatch, store):
@@ -629,8 +638,10 @@ def test_dispatch_reference_checks_all_method_prefix_owner_cases(
     assert state["windows"][0]["output_helper_calls"] == len(exact_owners) - 1
     assert state["windows"][0]["graph_calls"] == len(exact_owners) - 1
     assert state["windows"][0]["K_total"] == len(assets) + len(exact_owners)
+    # The reducer builds one child adjacency map per completed owner; BFS then
+    # reads that index, so the complete Contract overlay is yielded once.
     assert state["windows"][0]["graph_contract_yields"] == tuple(
-        [2 * len(store.get_all_contracts())] * (len(exact_owners) - 1)
+        [len(store.get_all_contracts())] * (len(exact_owners) - 1)
     )
     record_property("method_owner_measurement", json.dumps(state["windows"][0]))
 
@@ -1018,10 +1029,12 @@ def test_bad_pending_child_output_does_not_evade_cancellation_fence(reverse):
     assert ("child_cancelled", child.id) in terminals
 
 
-def test_completed_planning_stage_keeps_ancestor_acceptance_verifier_reachable():
+def test_staged_compiler_inherits_independent_gate_before_verifier_is_needed():
     store = MemoryStore()
-    root = replace(
-        build_control_plane_contract(name="root", outputs=("report",), budget=8),
+    root = build_control_plane_contract(
+        name="root",
+        outputs=("report",),
+        budget=12,
         acceptance_policy={
             "mode": "independent",
             "policy_version": "review-v1",
@@ -1029,12 +1042,10 @@ def test_completed_planning_stage_keeps_ancestor_acceptance_verifier_reachable()
             "verifier_capabilities": ("report.verify",),
         },
     )
-    root = replace(root, id=contract_identity_v3(root))
-    compiler = replace(
-        build_control_plane_contract(name="compiler", outputs=("report",), budget=6),
-        parent_id=root.id,
+    stages = StagedPlanningPlugin().stages(
+        PluginRequest(parent=root, allowance=root.budget)
     )
-    compiler = replace(compiler, id=contract_identity_v3(compiler))
+    compiler = stages.compile
     verifier = replace(
         build_control_plane_contract(name="verifier", outputs=("receipt",), budget=1),
         parent_id=compiler.id,
@@ -1042,7 +1053,7 @@ def test_completed_planning_stage_keeps_ancestor_acceptance_verifier_reachable()
         worker_capabilities=("report.verify",),
     )
     verifier = replace(verifier, id=contract_identity_v3(verifier))
-    for contract in (root, compiler, verifier):
+    for contract in (*stages.contracts, verifier):
         store.add_contract(contract)
     report = Asset(
         id="asset:report",
@@ -1055,7 +1066,14 @@ def test_completed_planning_stage_keeps_ancestor_acceptance_verifier_reachable()
     events = FactReducer(store, MemoryTraceStore()).on_assets_created((report,))
 
     terminals = [(event.type, event.contract_id) for event in events]
-    assert ("contract_complete", compiler.id) in terminals
+    assert compiler.acceptance_policy == root.acceptance_policy
+    assert not all_outputs_satisfied(
+        compiler, store, pending_assets=(report,), require_outputs=True
+    )
+    assert not all_outputs_satisfied(
+        root, store, pending_assets=(report,), require_outputs=True
+    )
+    assert ("contract_complete", compiler.id) not in terminals
     assert ("contract_complete", root.id) not in terminals
     assert ("child_cancelled", verifier.id) not in terminals
 
@@ -1324,7 +1342,7 @@ def test_signed_asset_dispatch_index_has_one_pass_and_sparse_candidates(
         reopened.close()
 
 
-def test_signed_completion_output_bucket_keeps_full_descendant_overlay(
+def test_signed_completion_output_bucket_cancels_descendants_without_keepalive(
     tmp_path, monkeypatch, record_property
 ):
     path = str(tmp_path / "d1b2-completion-overlay.db")
@@ -1401,12 +1419,12 @@ def test_signed_completion_output_bucket_keeps_full_descendant_overlay(
     for window in state["windows"]:
         events = window["events"]
         assert ("child_cancelled", unfinished.id, compiler.id) in events
-        assert not any(
+        assert any(
             event[0] == "child_cancelled" and event[1] == verifier.id
             for event in events
         )
         assert window["graph_calls"] == 1
-        assert window["graph_contract_yields"] == (8,)
+        assert window["graph_contract_yields"] == (4,)
         assert window["output_helper_calls"] >= 2
         helper_reads = [
             read
@@ -1424,7 +1442,13 @@ def test_signed_completion_output_bucket_keeps_full_descendant_overlay(
         if record.payload.get("terminal") == "cancelled"
     }
     assert unfinished.id in terminal_ids
-    assert verifier.id not in terminal_ids
+    assert verifier.id in terminal_ids
+    terminal_outcomes = {
+        record.payload.get("contract_id"): record.payload.get("terminal")
+        for _, record in store.scan_runtime_records(record_type="lifecycle.terminal")
+    }
+    assert terminal_outcomes[compiler.id] == "complete"
+    assert root.id not in terminal_outcomes
     assert not any(
         record.record_type == "candidate.rejected"
         for record in decision.runtime_records

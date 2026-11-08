@@ -168,6 +168,9 @@ def test_asset_reducer_benchmark_smoke_is_signed_and_pairs_twins(
     assert cancellation["unfinished_grandchild_terminal"] == "cancelled"
     assert cancellation["twins"]["read_only_rebuild_digest_equal"]
     cascade = microcases["descendant_and_independent_acceptance"]
+    assert cascade["completed_intermediate_before_attestation"]
+    assert cascade["verifier_is_direct_root_child"]
+    assert cascade["root_pending_until_attestation"]
     assert cascade["root_completed_after_attestation"]
     assert cascade["claimed_verifier_cancelled_after_acceptance"]
     assert cascade["attestation_twin"]["read_only_rebuild_digest_equal"]

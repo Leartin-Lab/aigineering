@@ -504,22 +504,28 @@ def claim_bound_graph_output_effects(
     group = f"output:{contract.id}"
     effects: list[CandidateEffect] = []
     published_content_ids: set[str] = set()
+    requirements = (contract.acceptance_policy or {}).get("output_requirements", {})
     for name, raw_content in _claim_bound_outputs(envelope):
         content = create_content_object(raw_content)
-        definition = create_signed_definition(
-            domain_id=domain_id,
-            name=name,
-            description=f"Declared output {name!r} of Contract {contract.id}",
-            content_type="text",
-            source_kind="contract-output",
-            source_uri=contract.id,
-            actor_id=actor_id,
-            key_id=key_id,
-            signer=signer,
+        required_definition = requirements.get(name, {}).get("definition_id")
+        definition = (
+            None
+            if required_definition
+            else create_signed_definition(
+                domain_id=domain_id,
+                name=name,
+                description=f"Declared output {name!r} of Contract {contract.id}",
+                content_type="text",
+                source_kind="contract-output",
+                source_uri=contract.id,
+                actor_id=actor_id,
+                key_id=key_id,
+                signer=signer,
+            )
         )
         assertion = create_definition_content_assertion(
             domain_id=domain_id,
-            definition_id=definition.id,
+            definition_id=required_definition or definition.id,
             content_id=content.id,
             relation_type="satisfies",
             actor_id=actor_id,
@@ -531,9 +537,9 @@ def claim_bound_graph_output_effects(
             effect = content_publication_effect(content)
             effects.append(CandidateEffect(effect.effect_type, effect.payload, group))
             published_content_ids.add(content.id)
-        for effect in (
-            definition_publication_effect(definition),
-            definition_content_assertion_effect(assertion),
-        ):
+        if definition is not None:
+            effect = definition_publication_effect(definition)
             effects.append(CandidateEffect(effect.effect_type, effect.payload, group))
+        effect = definition_content_assertion_effect(assertion)
+        effects.append(CandidateEffect(effect.effect_type, effect.payload, group))
     return tuple(effects)

@@ -11,6 +11,7 @@ from aigineering.core.input_bindings import (
     input_asset_bindings,
     validate_input_asset_binding_targets,
 )
+from aigineering.core.output_satisfaction import validate_output_requirements
 from aigineering.protocol.types import Contract
 
 
@@ -20,6 +21,7 @@ def validate_acceptance_policy(contract: Contract) -> None:
         return
     if not isinstance(policy, Mapping):
         raise ValueError("Contract acceptance_policy must be an object")
+    validate_output_requirements(contract)
     mode = policy.get("mode")
     if mode not in {"mechanical", "independent"}:
         raise ValueError(

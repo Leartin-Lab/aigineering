@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, replace
 from datetime import datetime
-from types import SimpleNamespace
 from typing import TYPE_CHECKING, Protocol
 
 from aigineering.core.activation import (
@@ -21,6 +20,7 @@ from aigineering.core.claim_assignments import (
     effective_assignment,
 )
 from aigineering.core.projection_context import EffectProjectionContext
+from aigineering.core.projection_store_view import ProjectionStoreView
 from aigineering.core.worker_routing import registration_from_record
 from aigineering.core.causal_allowance import (
     allowance_available,
@@ -28,16 +28,13 @@ from aigineering.core.causal_allowance import (
 )
 from aigineering.core.terminal_types import TERMINAL_EVENTS
 from aigineering.core.ids import compute_content_hash
-from aigineering.core.output_satisfaction import (
-    all_outputs_satisfied,
-    is_business_output,
-)
+from aigineering.core.output_satisfaction import all_outputs_satisfied
 from aigineering.core.store_capabilities import (
     AssetReader,
     RuntimeRecordReader,
     TraceReader,
 )
-from aigineering.protocol.wire import trace_entry_from_dict
+from aigineering.protocol.wire import asset_from_dict, trace_entry_from_dict
 
 if TYPE_CHECKING:
     from aigineering.protocol.runtime_record import RuntimeRecord
@@ -119,24 +116,25 @@ class RuntimeProjection:
                 else None
             )
         else:
-            asset_payloads, entries, typed_terminal_events, typed_budget = historical
+            (
+                asset_payloads,
+                entries,
+                typed_terminal_events,
+                typed_budget,
+                historical_records,
+            ) = historical
             available_names = {
                 str(payload.get("name", "")) for payload in asset_payloads
             }
-            outputs_satisfied = bool(contract.outputs) and all(
-                any(
-                    contract.origin == "system"
-                    or is_business_output(
-                        SimpleNamespace(
-                            name=payload.get("name", ""),
-                            origin=payload.get("origin", ""),
-                        ),
-                        output,
+            outputs_satisfied = all_outputs_satisfied(
+                contract,
+                ProjectionStoreView(
+                    EffectProjectionContext(
+                        assets=tuple(asset_from_dict(item) for item in asset_payloads),
+                        runtime_records=historical_records,
                     )
-                    for payload in asset_payloads
-                    if payload.get("name") == output
-                )
-                for output in contract.outputs
+                ),
+                require_outputs=True,
             )
         invalid_activation = False
         try:
@@ -304,7 +302,16 @@ class RuntimeProjection:
 
     def _historical_facts(
         self, contract: Contract
-    ) -> tuple[list[dict], list[TraceEntry], tuple[str, ...], int | None] | None:
+    ) -> (
+        tuple[
+            list[dict],
+            list[TraceEntry],
+            tuple[str, ...],
+            int | None,
+            tuple[RuntimeRecord, ...],
+        ]
+        | None
+    ):
         if self._as_of is None and self._as_of_revision is None:
             return None
         records = self._records()
@@ -365,6 +372,7 @@ class RuntimeProjection:
             entries,
             terminal_events,
             typed_budget,
+            selected_records,
         )
 
     def _record_selected(self, revision: int, recorded_at: str) -> bool:

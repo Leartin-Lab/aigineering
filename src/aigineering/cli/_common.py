@@ -454,7 +454,7 @@ def _run_demo(
         tool_scope=[],
         labels=list(behavior_labels),
         origin="human",
-        acceptance_policy={"mode": "mechanical", "output_source": "contract_tree"},
+        acceptance_policy={"mode": "mechanical"},
     )
 
     publications = [("contract", contract_declaration_effect(contract))]

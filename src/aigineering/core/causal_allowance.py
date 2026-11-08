@@ -392,8 +392,17 @@ def materialize_terminal_allowance(
     ):
         return ()
     existing_records = tuple(record for _, record in store.scan_runtime_records())
+    by_id = {contract.id: contract for contract in contracts}
+    for record in pending_records:
+        if record.record_type != "lifecycle.terminal":
+            continue
+        contract_id = str(record.payload.get("contract_id", ""))
+        if contract_id not in by_id:
+            contract = store.get_contract(contract_id)
+            if contract is not None:
+                by_id[contract_id] = contract
     return terminal_allowance_records(
-        tuple(store.get_all_contracts()) + tuple(contracts),
+        tuple(by_id.values()),
         existing_records,
         pending_records,
     )

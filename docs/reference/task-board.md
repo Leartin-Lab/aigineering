@@ -644,10 +644,12 @@ original time, revision, completed slot names and retained exact Asset IDs.
 Only unfinished outputs are declared, with the predecessor's frozen tools,
 inputs, labels, context, worker/delegation restrictions and acceptance policy.
 The explicit reason becomes successor description and Worker context. Retained
-Asset contents are not automatically added to inputs or prompts. Ordinary tasks
-retain global same-name business-output matching: retained IDs are not proof
-that this predecessor produced them. Independent-policy tasks require exact
-qualification, and predecessor acceptance cannot qualify successor outputs.
+Asset contents are not automatically added to inputs or prompts. Without
+explicit output selectors, ordinary tasks retain global same-name
+business-output matching: retained IDs are not proof that this predecessor
+produced them. Exact output requirements remain bound to retained roles.
+Independent-policy tasks require exact qualification, and predecessor acceptance
+cannot qualify successor outputs.
 
 The operation supports active business tasks, including expanded roots and planner
 output tasks. It closes selected unfinished descendants and transfers the original
@@ -684,15 +686,20 @@ recovery path. Handoff events are scoped to both source and successor. Event
 reads are paginated: continue from `next_revision` rather than assume the first
 default page contains the full task history.
 
-Current workspaces use schema22, including the mechanical output-source reader
-gate. Stop old Workers and use
+Current workspaces use schema23, including declared output requirements and
+completion when a matching Asset predates its Contract. Stop old Workers and use
 `aig domain upgrade --json` before other writable commands to retain the upgrade
 backup. Ordinary writable opens also migrate automatically. Schema18 has no
 supported return producer; any preexisting returned row blocks migration with
 the original Store retained. Upgrade also checks historical funding facts against
 canonical declared budgets and committed provenance; unsupported extra grants
 block with the old version and records retained. Already-open old connections are outside the reader
-gate. See [allowance returns](../adr/ADR-034-paired-causal-allowance-returns.md) and
+gate. Existing signed Engine bridge history is not rewritten; a replay that no
+longer meets the frozen goal's exact output conditions may reject, in which case
+continue with new ordinary work. Upgrade does not reauthenticate or repair old
+qualification/terminal facts. If a custom extension previously published
+noncanonical qualifications, use a new workspace and new publication/acceptance
+evidence for the corrected boundary. See [allowance returns](../adr/ADR-034-paired-causal-allowance-returns.md) and
 [expanded handoff](../adr/ADR-035-expanded-root-handoff.md).
 
 ## Edit task instructions
@@ -1093,9 +1100,10 @@ Decision checks its exact ID, output name, immutable reviewer ancestry and
 producer separation, then uses the existing policy-bound attestation owner.
 The newly generated report is linked separately; it does not change the frozen
 policy evidence. The operator's verdict is not automatically inferred from
-report prose. Ordinary report completion retains same-name output matching; a
-concurrent foreign output can complete that task, but it cannot pass decision
-report checks or qualify source work.
+report prose. Ordinary report completion uses its declared output conditions,
+which default to the same-name business Asset condition. A concurrent foreign
+output may complete that report task when it meets those conditions, but it
+cannot pass decision report checks or qualify source work.
 
 Use `--verdict changes` to record rejected attestation and keep the output
 unqualified. Decision itself does not publish a revision or reopen work. Use the

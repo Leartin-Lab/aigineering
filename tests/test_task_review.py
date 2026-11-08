@@ -387,7 +387,7 @@ def _publish_unclaimed_graph(
     return decision.assets[0]
 
 
-def test_unclaimed_graph_asset_cannot_be_qualified(tmp_path):
+def test_admitted_unclaimed_graph_asset_can_be_qualified(tmp_path):
     env = _workspace(tmp_path)
     rogue = _publish_unclaimed_graph(env)
     candidate = create_candidate_proposal(
@@ -412,12 +412,12 @@ def test_unclaimed_graph_asset_cannot_be_qualified(tmp_path):
         candidate, env["genesis"]
     )
 
-    assert not decision.accepted
-    assert env["store"].scan_runtime_records(record_type="output.qualified") == []
+    assert decision.accepted
+    assert env["store"].scan_runtime_records(record_type="output.qualified")
     env["store"].close()
 
 
-def test_unclaimed_graph_asset_cannot_be_review_requested(tmp_path):
+def test_admitted_unclaimed_graph_asset_can_be_review_requested(tmp_path):
     env = _workspace(tmp_path)
     rogue = _publish_unclaimed_graph(env)
     candidate = _request_candidate(env, asset_id=rogue.id)
@@ -425,12 +425,12 @@ def test_unclaimed_graph_asset_cannot_be_review_requested(tmp_path):
         env["store"], env["store"], additional_effects=TASK_REVIEW_EFFECTS
     ).commit(candidate, env["genesis"])
 
-    assert not decision.accepted
-    assert project_task_reviews(decision.runtime_records) == ()
+    assert decision.accepted
+    assert project_task_reviews(decision.runtime_records)
     env["store"].close()
 
 
-def test_public_review_request_rejects_published_input_graph_without_claim(tmp_path):
+def test_public_review_request_accepts_published_graph_without_target_claim(tmp_path):
     env = _workspace(tmp_path)
     rogue = _publish_unclaimed_graph(env)
     context = load_effect_projection_context(env["store"])
@@ -449,14 +449,13 @@ def test_public_review_request_rejects_published_input_graph_without_claim(tmp_p
 
     from aigineering.task_policy_review import validate_task_review_request
 
-    with pytest.raises(ValueError, match="task output receipt"):
-        validate_task_review_request(
-            env["store"],
-            env["source"].id,
-            "final",
-            rogue.id,
-            "Review this published input.",
-        )
+    validate_task_review_request(
+        env["store"],
+        env["source"].id,
+        "final",
+        rogue.id,
+        "Review this published input.",
+    )
     env["store"].close()
 
 
@@ -1206,7 +1205,9 @@ def test_request_rejects_non_disclosable_or_missing_frozen_context(tmp_path):
         env["store"].close()
 
 
-def test_request_rejects_external_same_name_asset_and_missing_capability(tmp_path):
+def test_request_accepts_external_matching_asset_but_rejects_missing_capability(
+    tmp_path,
+):
     env = _workspace(tmp_path)
     external = publish_effect(
         env["store"],
@@ -1226,8 +1227,8 @@ def test_request_rejects_external_same_name_asset_and_missing_capability(tmp_pat
     rejected_target = CandidateCommitter(
         env["store"], env["store"], additional_effects=TASK_REVIEW_EFFECTS
     ).commit(wrong_target, env["genesis"])
-    assert not rejected_target.accepted
-    assert not project_task_reviews(rejected_target.runtime_records)
+    assert rejected_target.accepted
+    assert project_task_reviews(rejected_target.runtime_records)
 
     no_cap = _request_candidate(
         env, actor=env["limited_requester"], reason="no capability"
@@ -1699,11 +1700,13 @@ def test_recovery_business_child_follows_frozen_source_policy(tmp_path, explicit
         tool_scope=(),
         labels=(),
         origin="recovery",
-        acceptance_policy=(
-            {"mode": "mechanical", "output_source": "contract_tree"}
-            if explicit_tree
-            else None
-        ),
+        acceptance_policy={
+            "mode": "mechanical",
+            "output_requirements": {
+                "final": {"content_id": create_content_object("repaired output").id}
+            },
+            **({"output_source": "contract_tree"} if explicit_tree else {}),
+        },
     )
     child = contract_from_fields(
         name="repair report child",
@@ -1716,6 +1719,7 @@ def test_recovery_business_child_follows_frozen_source_policy(tmp_path, explicit
         tool_scope=(),
         labels=(),
         origin="plan",
+        acceptance_policy=dict(recovery.acceptance_policy),
     )
     for contract in (recovery, child):
         declared = publish_effect(
@@ -1729,23 +1733,19 @@ def test_recovery_business_child_follows_frozen_source_policy(tmp_path, explicit
         )
         assert declared.accepted, declared
     assert not all_outputs_satisfied(recovery, env["store"])
-    asset = _publish_unclaimed_graph(env, claimed=True, contract=child)
+    asset = _publish_unclaimed_graph(
+        env, claimed=True, contract=child, content_text="repaired output"
+    )
     assert asset.created_by == child.id
-    assert all_outputs_satisfied(recovery, env["store"]) is explicit_tree
-    assert (
-        any(
-            record.payload.get("contract_id") == recovery.id
-            for _, record in env["store"].scan_runtime_records(
-                record_type="lifecycle.terminal"
-            )
+    assert all_outputs_satisfied(recovery, env["store"])
+    assert any(
+        record.payload.get("contract_id") == recovery.id
+        for _, record in env["store"].scan_runtime_records(
+            record_type="lifecycle.terminal"
         )
-        is explicit_tree
     )
     env["store"].close()
     with SQLiteStore(env["store_path"]) as reopened:
         digest = reopened.runtime_materialization_digest()
         assert reopened.rebuild_runtime_materializations(strict=True) == digest
-        assert (
-            all_outputs_satisfied(reopened.get_contract(recovery.id), reopened)
-            is explicit_tree
-        )
+        assert all_outputs_satisfied(reopened.get_contract(recovery.id), reopened)

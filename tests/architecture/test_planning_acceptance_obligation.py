@@ -75,7 +75,7 @@ def test_compile_waits_for_ancestor_qualification_before_parent_can_cancel_it():
             Asset(
                 id="asset:report",
                 name="report",
-                content="verified report",
+                content='{"type":"verified report"}',
                 content_hash="report-hash",
             ),
             created_by=compile_contract.id,
@@ -107,4 +107,5 @@ def test_compile_waits_for_ancestor_qualification_before_parent_can_cancel_it():
 
     assert ("contract_complete", root.id) in after_types
     assert ("child_cancelled", compile_contract.id) in after_types
+    assert ("child_cancelled", gate.id) in after_types
     assert ("contract_complete", compile_contract.id) not in after_types

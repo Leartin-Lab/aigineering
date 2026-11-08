@@ -136,12 +136,11 @@ classes; operator-owned Worker registrations map them to concrete providers.
 Contracts with `sensitive_input_policy.input_asset_bindings` use v6. It reuses
 the complete v5 canonical field owner while marking exact input-selection support.
 Guard-bearing older identities are rejected; historical no-key identities stay
-unchanged. This reader gate began with schema18; the current floor is schema22,
-which also protects paired causal-allowance returns, task claim constraints and
-Worker assignments, and prevents older readers from ignoring mechanical
-output-source constraints. It prevents older readers
-from reopening an upgraded Store,
-without changing historical facts or adding columns. Stop old Workers and use
+unchanged. This reader gate began with schema18; the current floor is schema23,
+which also protects paired causal-allowance returns, task claim constraints,
+Worker assignments, and declared Asset output conditions. It prevents older
+readers from reopening an upgraded Store without changing historical facts or
+adding tables or columns. Stop old Workers and use
 `domain upgrade` to back up before migration; ordinary writable opens also migrate.
 The gate cannot protect an already-open old connection. See
 [ADR-032](docs/adr/ADR-032-exact-input-binding-reader-gates.md).
@@ -168,8 +167,10 @@ Neither case overwrites history or transfers authority between signers.
 The three graph fact types enter through ordinary typed Candidate effects.
 Endpoint existence, domain binding, actor keys, and signatures are validated
 before commitment. An authenticated WorkerHost translates `/exec` output into
-one atomic content/definition/assertion batch using its own key; the runtime
-never holds the private key. Accepted assertions deterministically materialize
+an atomic content/assertion batch and publishes a Definition when needed; it may
+reuse a frozen required Definition. Its signed assertion binds the actual
+producer to the claimed Contract and output role. The runtime never holds the
+private key. Accepted assertions deterministically materialize
 the compatibility Asset and `asset.committed` fact used by activation,
 completion, disclosure, and historical projection. Its identity follows the
 assertion while its definition and content fields reference the independent
@@ -297,7 +298,7 @@ Fleet, Engine, method, CLI, harness and HTTP paths share this authentication
 boundary. Recordless trusted Store compatibility calls are internal seams, not
 operational authentication evidence. Coordination itself did not change fact
 types or the reader floor; task assignments introduced schema21 and the current
-reader floor is schema22. Expired claims, invocation failures,
+reader floor is schema23. Expired claims, invocation failures,
 malformed Worker results, and Contract terminal facts close visibly. A terminal
 fact releases an unrelated active claim in the same transaction and records an
 immutable transition that rebuilds to the same claim view. A stale Candidate
@@ -526,7 +527,8 @@ Projection and method-result repair publish new recovery Contracts and retain
 the failed task's Skill context, routing scope, tools, and acceptance policy.
 Recovery publication remains causally funded; display names do not determine
 its limit by counting `.recover` substrings. Method recovery additionally
-checks exact source history and retains its bounded proof-depth limit. Tool scope alone does
+checks the full finite exact source-history chain with cycle detection; there is
+no fixed three-level cutoff. Tool scope alone does
 not require a recovery task to call a tool before producing its business output;
 tool observations still cannot directly satisfy business output slots.
 When a claim-proven system tool method fails, its bounded recovery successor
@@ -621,22 +623,44 @@ allowance projection. There is no process-local budget owner. Historical
 Contracts without allowance facts fall back to their declared budget only for
 compatibility.
 
-## Independent acceptance
+## Asset output conditions and independent acceptance
 
-New application Contracts default to a mechanical policy with
-`output_source="contract_tree"`. A business output must come from that Contract
-or its immutable descendants. The same shared predicate selects exact retained
-Asset IDs for handoff and revision; a matching name or pending name alone is
-insufficient. Planning and parallel continuation preserve this constraint.
-Historical Contracts without the field retain their original same-name rules.
-Reopening does not add a policy or rewrite terminal facts. Explicit mechanical
-policies without the field remain the legacy opt-in compatibility path.
+A Contract declares output role names. It may bind a role to an exact signed
+Definition ID, optional Content ID, and optional sorted producer actor IDs in
+`acceptance_policy.output_requirements`; deterministic output shapes remain an
+additional condition. When no selector is declared, a matching business Asset
+name retains the coarse compatibility condition. Any admitted Asset meeting
+the declared conditions can satisfy the output, regardless of the producing
+Contract tree or whether the receiving Contract has a claim. No delivery or
+adoption action is required. The legacy mechanical `output_source` field stays
+readable in old Contract bytes but does not add a producer-tree condition.
+An unknown but syntactically valid required Definition leaves the output
+unsatisfied; it does not make declaration invalid or fall back to name matching.
+The selected Definition must exist as an admitted signed graph fact before an
+Asset can match it.
+
+The same matcher selects exact retained Asset IDs for handoff, revision,
+planning and historical views. Successors filter output requirements to the
+roles they retain. Tool and MCP observations cannot satisfy ordinary business
+roles by matching a name. An explicitly declared protected observation role
+can be satisfied across task origins, subject to its existing publication
+authority. Task origin and root grouping do not grant output eligibility or
+completion authority; control-plane actions still use authenticated, authorized
+Candidates and cannot force completion.
+
+Schema23 is the reader floor for declared output requirements and completion
+from an Asset committed before its Contract. If a matching Asset already exists
+when a Contract is declared, the existing SQLite writer applies the same
+completion and descendant-cancellation projection. Historical Contract bytes
+and typed terminal facts are not rewritten. Stop old Workers and back up before
+upgrade; an older process with an already-open connection is not fenced.
 
 An authorized output assertion is not automatically semantic truth. A Contract
 may bind an independent acceptance policy.
 
-For such a Contract, completion requires an attestation from a different actor
-with all required verifier capabilities. The attestation binds:
+For such a Contract, an admitted Asset must first meet the declared output
+conditions, then completion requires an attestation from a different actor with
+all required verifier capabilities. The attestation binds:
 
 - policy ID and version;
 - Contract and declared output slot;
@@ -655,16 +679,16 @@ an output and again before qualification. Planning, recovery, retry, and
 continuation inherit the relevant shapes, so a verifier opinion cannot
 legalize mechanically malformed content.
 
-The exact qualified Asset may come from another Contract tree. Qualification
-proves its producer-declared output and exact submitted-claim publication, then
-binds that immutable Asset to the target slot and frozen policy. A same-name
-Asset without this qualification does not satisfy independent acceptance.
-Review request and decision entry points share that target rule; the review
-report must still have the exact requested reviewer provenance. Ordinary
-business recovery outputs with explicit `contract_tree` policy may use delegated
-child outputs. Historical recovery without that constraint retains its
-own-producer check to exclude stale repair inputs. System and protected recovery
-method outputs retain their mechanical own-producer checks.
+The exact qualified Asset may come from any admitted source; target-Contract
+claim ownership is not required. Qualification proves the Asset's own signed
+publication and binds that immutable Asset to the target slot and frozen
+policy. A same-name Asset without this qualification does not satisfy
+independent acceptance. Review request and decision entry points share that
+target rule; a method report still requires its exact requested task and
+reviewer provenance. A completed parent cancels unfinished descendants without
+inferring a verifier exception from capabilities or input names. Staged
+compilers retain the parent's independent policy, so their own Asset conditions
+keep them open until qualified or cancelled by a satisfied ancestor.
 
 ## Persistence and reconstruction
 
@@ -780,11 +804,16 @@ unbound safe errors. Neither path creates task state or exposes exception text.
 EngineWorker applies the same rule across fact domains. It can use a private
 inner Store or an explicitly pinned, already initialized local workspace.
 Bridge operations bind the source and target domains, exact outer claim,
-receiver configuration and inner root. New operations get distinct roots with
-contract-tree output provenance; exact replay can reuse that operation's work.
-Disclosed input IDs are remapped to their signed imports in the receiving
-domain. The outer acceptance policy remains authoritative for exported effects;
-an expired outer claim cannot submit a late result.
+receiver configuration and inner root. New operations get distinct roots whose
+output Definitions describe the frozen goal and mapped inputs. The outer
+Contract's exact output requirements select eligible Assets; an unrelated
+same-name result cannot satisfy a different Definition or content requirement.
+Exact replay can reuse that operation's work. Disclosed input IDs are remapped
+to their signed imports in the receiving domain. The outer acceptance policy
+remains authoritative for exported effects; an expired outer claim cannot submit
+a late result. Existing signed bridge history remains immutable; if its outputs
+do not meet a newly declared goal's conditions, publish new ordinary work rather
+than rewriting that history.
 
 The existing-workspace mode is trusted same-operator composition: its Fleet
 profile supplies the receiving workspace, Genesis pin, root key file and Fleet
@@ -1268,8 +1297,9 @@ requiring `contract.cancel` and `contract.publish`. SQLite atomically cancels
 the predecessor, releases its claim, reserves bounded remaining allowance and
 declares a successor. Late submission under the old claim is fenced. Only
 unfinished output slots are declared; completed slot names and exact Asset IDs
-remain link metadata. Ordinary tasks retain global same-name business-output
-matching; independent-policy tasks require exact Contract qualification.
+remain link metadata. Ordinary tasks without explicit selectors retain global
+same-name business-output matching; declared exact conditions narrow that set.
+Independent-policy tasks require exact Contract qualification.
 The successor inherits frozen execution/disclosure scope and acceptance policy.
 For ordinary handoff the operator's explicit reason is appended to its description and is Worker
 context; retained Asset contents are not automatically added to that context.
@@ -1437,10 +1467,10 @@ invocation. It uses the goal and only the UTF-8 files explicitly supplied with
 network sources, or load operator tools. Successful exportable text is saved as
 Markdown to `--output PATH`, defaulting to `.aig/outputs/<session>.md`; existing
 destinations are not overwritten. Each quick run claims only its root Contract
-or current descendants. Newly prepared application roots use contract-tree
-output provenance; historical policies can retain domain-wide same-name
-satisfaction. Existing content can be disclosed as an explicit input without
-being treated as a new task's completed output. Runtime maintenance
+or current descendants. New application roots use mechanical output
+conditions, with same-name compatibility when no selectors are declared.
+Existing content can be disclosed as an explicit input without being treated
+as a new task's completed output. Runtime maintenance
 and expired-claim processing remain domain-wide; quick-run claim selection does
 not isolate every Store side effect. A failed root remains terminal; its
 recovery successor is a separate task and must be run explicitly with

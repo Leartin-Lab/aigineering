@@ -41,7 +41,7 @@ def test_review_contract_and_links_are_ordinary_immutable_runtime_facts():
     )
 
 
-def test_task_output_claim_provenance_has_one_shared_acceptance_owner():
+def test_target_publication_and_report_claim_proofs_share_acceptance_owners():
     acceptance = (ROOT / "src/aigineering/core/acceptance.py").read_text()
     plugin = (ROOT / "src/aigineering/plugins/task_review.py").read_text()
     views = (ROOT / "src/aigineering/task_views.py").read_text()
@@ -49,5 +49,8 @@ def test_task_output_claim_provenance_has_one_shared_acceptance_owner():
     assert "def validate_claim_bound_output(" in acceptance
     assert "validate_published_member(rows, member)" in acceptance
     assert "validate_claim_bound_output(" in plugin
-    assert "validate_claim_bound_output(" in views
-    assert "validate_claim_bound_output(records, asset, producer)" in policy_review
+    assert "validate_asset_publication(" in views
+    assert "validate_claim_bound_output(" not in views
+    assert "_is_contract_or_descendant" not in views
+    assert "validate_asset_publication(records, target)" in policy_review
+    assert "validate_claim_bound_output(records, report)" in policy_review

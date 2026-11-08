@@ -23,6 +23,7 @@ from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.core.worker_routing import WorkerRegistration
 from aigineering.plugins.delegation import (
     TaskDelegationPlugin,
+    _legacy_parallel_tool_contracts,
     _legacy_claimed_method_contract,
     _parallel_tool_contracts,
 )
@@ -511,13 +512,19 @@ def test_parallel_tool_items_drop_stage_labels_while_join_retains_stage():
 
 
 @pytest.mark.parametrize(
-    "parent_policy",
+    "parent_policy,legacy_expected",
     (
-        {"mode": "mechanical"},
-        {"mode": "independent", "policy_version": "review-v1"},
+        ({"mode": "mechanical"}, None),
+        ({"mode": "independent", "policy_version": "review-v1"}, None),
+        (
+            {"mode": "mechanical", "output_source": "contract_tree"},
+            {"mode": "mechanical", "output_source": "contract_tree"},
+        ),
     ),
 )
-def test_parallel_continuation_preserves_legacy_policy_identity(parent_policy):
+def test_parallel_continuation_preserves_policy_and_legacy_builder_identity(
+    parent_policy, legacy_expected
+):
     parent = build_control_plane_contract(
         name="legacy-parallel-parent",
         outputs=("final_report",),
@@ -536,11 +543,17 @@ def test_parallel_continuation_preserves_legacy_policy_identity(parent_policy):
     )
 
     continuation = _parallel_tool_contracts(parent, action, allowance=8)[-1]
+    historical_continuation = _legacy_parallel_tool_contracts(
+        parent, action, allowance=8
+    )[-1]
 
-    assert continuation.acceptance_policy is None
+    expected_current = dict(parent_policy)
+    expected_current.pop("output_source", None)
+    assert continuation.acceptance_policy == expected_current
+    assert historical_continuation.acceptance_policy == legacy_expected
 
 
-def test_planned_child_inherits_only_strict_mechanical_output_source():
+def test_planned_child_inherits_only_output_conditions_without_tree_gate():
     parent = build_control_plane_contract(
         name="strict-planning-parent",
         outputs=("report",),
@@ -572,11 +585,10 @@ def test_planned_child_inherits_only_strict_mechanical_output_source():
     assert child.acceptance_policy == {
         "mode": "mechanical",
         "output_shapes": {"report": {"type": "string"}},
-        "output_source": "contract_tree",
     }
 
 
-def test_planned_child_does_not_copy_independent_acceptance_source_scope():
+def test_planned_child_keeps_legacy_shape_copy_from_independent_parent():
     parent = build_control_plane_contract(
         name="independent-planning-parent",
         outputs=("report",),

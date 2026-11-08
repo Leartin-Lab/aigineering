@@ -23,8 +23,9 @@ from aigineering.core.activation import check_activation
 from aigineering.core.output_satisfaction import (
     all_outputs_satisfied,
     is_business_output,
+    is_output_role_asset,
+    output_asset_meets_conditions,
 )
-from aigineering.core.task_lifecycle import serves_pending_independent_acceptance
 from aigineering.protocol.immutability import deep_freeze
 
 if TYPE_CHECKING:
@@ -285,6 +286,48 @@ class FactReducer:
             contract, (), terminal_contract_ids, self._contracts_with(())
         )
 
+    def on_contracts_created(
+        self,
+        contracts: tuple[Contract, ...],
+        *,
+        terminal_contract_ids: frozenset[str] = frozenset(),
+        extra_qualified_asset_ids: Mapping[tuple[str, str], set[str]] | None = None,
+    ) -> list[FactReducerEvent]:
+        """Apply the same conditions to newly declared work and existing Assets.
+
+        The writer supplies only previously absent declarations. Their possible
+        descendants are in this same batch, so declaration ingress needs no
+        full-domain Contract or terminal-history scan.
+        """
+        satisfied = tuple(
+            contract
+            for contract in contracts
+            if contract.id not in terminal_contract_ids
+            and all_outputs_satisfied(
+                contract,
+                self._store,
+                require_outputs=True,
+                extra_qualified_asset_ids=extra_qualified_asset_ids,
+            )
+        )
+        closed = set(terminal_contract_ids) | {item.id for item in satisfied}
+        events = [
+            FactReducerEvent(
+                type="contract_complete",
+                contract_id=contract.id,
+                asset_name="",
+                details=MappingProxyType({"trigger": "required_assets_present"}),
+            )
+            for contract in satisfied
+        ]
+        for contract in satisfied:
+            cancelled = self._detect_unfinished_children(
+                contract, (), closed, contracts
+            )
+            events.extend(cancelled)
+            closed.update(event.contract_id for event in cancelled)
+        return events
+
     # -- Method result detection --------------------------------------------
 
     def _detect_method_result(
@@ -390,9 +433,9 @@ class FactReducer:
             if asset.name not in contract.outputs:
                 continue
 
-            if contract.origin not in {"system", "recovery"} and not is_business_output(
+            if not is_output_role_asset(
                 asset, asset.name
-            ):
+            ) or not output_asset_meets_conditions(contract, asset.name, asset):
                 continue
 
             events.append(
@@ -442,10 +485,10 @@ class FactReducer:
 
         A terminal or already-satisfied intermediate Contract does not shield
         unfinished descendants from an ancestor that has now closed their
-        obligation. A live independent verifier remains an explicit exception.
+        obligation. A child serves a live obligation by its declared conditions,
+        never by a capability or input-name guess after its parent completes.
         """
         events: list[FactReducerEvent] = []
-        contracts_by_id = {contract.id: contract for contract in contracts}
         children_by_parent: dict[str, list[Contract]] = {}
         for contract in contracts:
             if contract.parent_id:
@@ -463,11 +506,6 @@ class FactReducer:
                     continue
                 visited.add(child.id)
                 already_terminal = child.id in known_terminals
-                if not already_terminal and self._serves_pending_independent_acceptance(
-                    child, parent, contracts_by_id, known_terminals
-                ):
-                    continue
-
                 # Keep existing terminal facts immutable, but continue through
                 # their branch so any still-live descendants can be fenced.
                 if already_terminal or self._all_outputs_satisfied(
@@ -487,28 +525,6 @@ class FactReducer:
                 known_terminals.add(child.id)
                 queue.append(child)
         return events
-
-    @staticmethod
-    def _serves_pending_independent_acceptance(
-        child: Contract,
-        completed_parent: Contract,
-        contracts_by_id: dict[str, Contract],
-        terminal_contract_ids: set[str],
-    ) -> bool:
-        """Keep an explicit verifier reachable after an intermediate parent ends.
-
-        Staged planning owns its compiled children, so the task producing a
-        business output and the task independently qualifying it are siblings.
-        The compiler may finish when the output appears, but its verifier still
-        serves an independently accepted ancestor.  Capability and input
-        containment make that relationship explicit in immutable Contracts.
-        """
-        return serves_pending_independent_acceptance(
-            child,
-            completed_parent,
-            contracts_by_id,
-            terminal_contract_ids,
-        )
 
     def _contracts_with(
         self, pending_contracts: tuple[Contract, ...]

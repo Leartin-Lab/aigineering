@@ -24,7 +24,7 @@ def test_v6_marker_and_schema_version_guard_binding_readers():
     assert "def hash_contract_v6(" in identity
     assert "hash_contract_v5(" in identity
     assert '"input_asset_bindings"' in identity
-    assert "CURRENT_SCHEMA_VERSION = 22" in migrations
+    assert "CURRENT_SCHEMA_VERSION = 23" in migrations
     assert "def _migrate_to_v18(self)" in migrations
     assert "CREATE TABLE input_asset_bindings" not in migrations
 

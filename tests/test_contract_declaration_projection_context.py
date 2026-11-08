@@ -9,7 +9,6 @@ import pytest
 from aigineering.core.control_plane import build_control_plane_contract
 from aigineering.core.commitment import CandidateCommitter
 from aigineering.core.ids import contract_identity_v3
-from aigineering.core.lifecycle_facts import commit_terminal_outcome
 from aigineering.core.signing import create_verifier
 from aigineering.core.actor_facts import candidate_actor_capabilities
 from aigineering.core.effect_projection import project_effect_batch
@@ -27,9 +26,12 @@ from aigineering.protocol.candidate import (
     candidate_received_record,
 )
 from aigineering.protocol.runtime_record import create_runtime_record
-from aigineering.protocol.types import Contract
+from aigineering.protocol.types import Asset, Contract
 from aigineering.protocol.wire import contract_to_dict
-from aigineering.protocol.effect_builders import contract_declaration_effect
+from aigineering.protocol.effect_builders import (
+    asset_proposal_effect,
+    contract_declaration_effect,
+)
 from aigineering.protocol.candidate import create_candidate_proposal
 from conftest import candidate_runtime
 
@@ -204,7 +206,7 @@ def _closed_signed_history(store, publisher, count):
         build_control_plane_contract(
             name=f"bounded-history-{index}",
             inputs=(),
-            outputs=(),
+            outputs=("bounded-history-result",),
             activation="",
             budget=1,
         )
@@ -216,8 +218,14 @@ def _closed_signed_history(store, publisher, count):
             idempotency_key=f"bounded-history-{count}",
         )
         assert decision.accepted
-    for contract in contracts:
-        assert commit_terminal_outcome(store, contract, "complete")
+        assert publisher.publish(
+            (
+                asset_proposal_effect(
+                    Asset(id="", name="bounded-history-result", content="done")
+                ),
+            ),
+            idempotency_key=f"bounded-history-output-{count}",
+        ).accepted
     return contracts
 
 

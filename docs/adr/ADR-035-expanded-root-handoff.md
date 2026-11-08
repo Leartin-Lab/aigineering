@@ -65,3 +65,9 @@ work without transferring those authorities to the successor.
 Expanded handoff and its scoped historical completion repair do not establish
 complete Kanban feature parity or stable-release qualification. Other historical
 conflicts and the remaining release gates retain their own observable obligations.
+
+Change 136 supersedes this ADR's tree-based output-eligibility assumptions.
+Expanded handoff still uses its signed cancellation, allowance and history proof;
+successor output conditions are filtered to retained roles, and any admitted
+Asset matching them may satisfy the obligation. Independent qualification and
+the explicit handoff operation remain unchanged.

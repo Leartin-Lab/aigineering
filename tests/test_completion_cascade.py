@@ -23,6 +23,8 @@ from aigineering.protocol.effect_builders import (
     asset_proposal_effect,
     contract_declaration_effect,
 )
+from aigineering.plugins.base import PluginRequest
+from aigineering.plugins.staged_planning import StagedPlanningPlugin
 from aigineering.protocol.identity import contract_from_fields
 from aigineering.protocol.runtime_record import create_runtime_record
 from aigineering.protocol.types import Asset
@@ -261,7 +263,7 @@ def test_root_acceptance_cancels_claimed_grandchild_and_fences_late_submit(tmp_p
     store.close()
 
 
-def test_completed_intermediate_keeps_verifier_until_root_acceptance(tmp_path):
+def test_completed_intermediate_cancels_verifier_before_root_acceptance(tmp_path):
     (
         store,
         signer,
@@ -302,14 +304,25 @@ def test_completed_intermediate_keeps_verifier_until_root_acceptance(tmp_path):
     ]
     assert len(child_terminal_before) == 1
     assert child_terminal_before[0].payload["terminal"] == "complete"
-    assert store.get_claim(review.id) is None
-    review_claim = store.claim_contract(
-        review.id, verifier.actor_id, package_id="pkg:review-before-root-acceptance"
-    )
-    assert review_claim is not None
-    assert not any(
-        record.payload.get("contract_id") == review.id
+    review_terminal_before = [
+        record
         for _, record in store.scan_runtime_records(record_type="lifecycle.terminal")
+        if record.payload.get("contract_id") == review.id
+    ]
+    assert len(review_terminal_before) == 1
+    assert review_terminal_before[0].payload["terminal"] == "cancelled"
+    assert not any(
+        record.payload.get("contract_id") == root.id
+        for _, record in store.scan_runtime_records(record_type="lifecycle.terminal")
+    )
+    assert store.get_claim(review.id) is None
+    assert (
+        store.claim_contract(
+            review.id,
+            verifier.actor_id,
+            package_id="pkg:review-after-intermediate-completion",
+        )
+        is None
     )
 
     _submit_output(store, signer, genesis, worker, root, "final")
@@ -328,7 +341,73 @@ def test_completed_intermediate_keeps_verifier_until_root_acceptance(tmp_path):
     assert [record.id for record in child_terminals] == [child_terminal_before[0].id]
     assert len(review_terminals) == 1
     assert review_terminals[0].payload["terminal"] == "cancelled"
-    assert store.get_claim(review.id)["status"] == "released"
+    assert store.get_claim(review.id) is None
+    store.close()
+
+
+def test_staged_compile_inherits_independent_policy_without_keepalive(tmp_path):
+    (
+        store,
+        signer,
+        genesis,
+        operator,
+        worker,
+        verifier,
+        root,
+        policy,
+    ) = _world(tmp_path)
+    stages = StagedPlanningPlugin().stages(
+        PluginRequest(parent=root, allowance=root.budget)
+    )
+    for stage in stages.contracts:
+        result = publish_effect(
+            store,
+            store,
+            genesis,
+            operator,
+            signer,
+            contract_declaration_effect(stage),
+            idempotency_key=f"declare-stage:{stage.id}",
+        )
+        assert result.accepted, result
+    compiler = stages.compile
+    assert compiler.acceptance_policy == root.acceptance_policy
+
+    reviewer = _declare_child(
+        store,
+        signer,
+        genesis,
+        operator,
+        parent=compiler,
+        name="compiler verifier",
+        output="review_receipt",
+        budget=2,
+        inputs=("final",),
+    )
+    _submit_output(store, signer, genesis, worker, compiler, "final")
+
+    terminals_before_root_acceptance = {
+        record.payload["contract_id"]: record.payload["terminal"]
+        for _, record in store.scan_runtime_records(record_type="lifecycle.terminal")
+    }
+    assert root.id not in terminals_before_root_acceptance
+    assert compiler.id not in terminals_before_root_acceptance
+    assert reviewer.id not in terminals_before_root_acceptance
+    reviewer_claim = store.claim_contract(
+        reviewer.id, verifier.actor_id, package_id="pkg:compiler-review"
+    )
+    assert reviewer_claim is not None
+
+    _qualify_root(store, signer, genesis, operator, root, policy)
+
+    terminals_after_root_acceptance = {
+        record.payload["contract_id"]: record.payload["terminal"]
+        for _, record in store.scan_runtime_records(record_type="lifecycle.terminal")
+    }
+    assert terminals_after_root_acceptance[root.id] == "complete"
+    assert terminals_after_root_acceptance[compiler.id] == "cancelled"
+    assert terminals_after_root_acceptance[reviewer.id] == "cancelled"
+    assert store.get_claim(reviewer.id)["status"] == "released"
     store.close()
 
 

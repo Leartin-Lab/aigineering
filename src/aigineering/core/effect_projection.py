@@ -340,7 +340,13 @@ def project_effect_batch(
         )
     assets = assets + tuple(asset for asset, _ in graph_assets)
     if claimed_parent is not None:
-        _validate_claim_bound_projection(claimed_parent, contracts, assets)
+        _validate_claim_bound_projection(
+            claimed_parent,
+            contracts,
+            assets,
+            candidate=candidate,
+            graph_assets=graph_assets,
+        )
     pending_records = projection_records + tuple(
         asset_committed_record(asset, causal_parents=(assertion.id,))
         for asset, assertion in graph_assets
@@ -552,19 +558,52 @@ def _validate_claim_bound_projection(
     parent: Contract,
     contracts: tuple[Contract, ...],
     assets: tuple[Asset, ...],
+    *,
+    candidate: CandidateProposal,
+    graph_assets,
 ) -> None:
     if assets:
-        if any(asset.created_by != parent.id for asset in assets):
-            raise ValueError("claim-bound output Asset has invalid Contract provenance")
+        requirements = (parent.acceptance_policy or {}).get("output_requirements", {})
+        assertions = {
+            asset.id: record.payload["assertion"] for asset, record in graph_assets
+        }
+        for asset in assets:
+            required_definition = requirements.get(asset.name, {}).get("definition_id")
+            if required_definition:
+                assertion = assertions.get(asset.id, {})
+                evidence = assertion.get("evidence", {})
+                if (
+                    asset.definition_hash != required_definition
+                    or assertion.get("actor_id") != candidate.actor_id
+                    or assertion.get("key_id") != candidate.key_id
+                    or not isinstance(evidence, Mapping)
+                    or evidence.get("contract_id") != parent.id
+                    or evidence.get("output_name") != asset.name
+                ):
+                    raise ValueError(
+                        "shared-definition output lacks exact claim provenance"
+                    )
+            elif asset.created_by != parent.id:
+                raise ValueError(
+                    "claim-bound output Asset has invalid Contract provenance"
+                )
         if {asset.name for asset in assets} != set(parent.outputs):
             raise ValueError(
                 "claim-bound output must satisfy exactly all declared outputs"
             )
         if parent.acceptance_policy is not None:
+            from aigineering.core.output_satisfaction import (
+                output_asset_meets_conditions,
+            )
+
             for asset in assets:
                 validate_output_shape(
                     parent.acceptance_policy, asset.name, asset.content
                 )
+                if not output_asset_meets_conditions(parent, asset.name, asset):
+                    raise ValueError(
+                        "claim-bound output does not meet declared Asset conditions"
+                    )
         return
     if not contracts:
         raise ValueError("claim-bound expansion produced no Contracts")
