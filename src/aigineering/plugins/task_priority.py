@@ -3,20 +3,12 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from types import MappingProxyType
 
-from aigineering.core.effect_projectors import EffectProjection
-from aigineering.core.effect_projection import EffectHandler
 from aigineering.core.contract_admission import validate_contract_commitment
-from aigineering.core.output_satisfaction import all_outputs_satisfied
 from aigineering.core.projection_context import EffectProjectionContext
-from aigineering.plugins.task_successors import ProjectionStoreView
-from aigineering.protocol.candidate import CandidateEffect, CandidateProposal
 from aigineering.protocol.immutability import deep_thaw
 from aigineering.protocol.runtime_record import (
     RuntimeRecord,
-    create_runtime_record,
-    runtime_record_effective_payload,
     validate_runtime_record,
 )
 from aigineering.protocol.wire import contract_from_dict
@@ -27,134 +19,6 @@ PRIORITY_EFFECT = "task.priority.set"
 
 class PriorityStateRejected(ValueError):
     """A valid priority request conflicts with the exact current task state."""
-
-
-def task_priority_projector(
-    effect: CandidateEffect,
-    candidate: CandidateProposal,
-    receipt_id: str,
-    context: EffectProjectionContext,
-) -> EffectProjection:
-    if candidate.effects != (effect,):
-        raise ValueError("task priority Candidate must contain exactly one effect")
-    payload = effect.payload
-    if set(payload) != {
-        "contract_id",
-        "priority",
-        "previous_priority_id",
-        "reason",
-    }:
-        raise ValueError("task priority effect payload fields are invalid")
-    contract_id = _text(payload["contract_id"], "contract_id")
-    reason = _text(payload["reason"], "reason")
-    priority = payload["priority"]
-    if (
-        isinstance(priority, bool)
-        or not isinstance(priority, int)
-        or not -100 <= priority <= 100
-    ):
-        raise ValueError("priority must be an integer from -100 through 100")
-    previous_id = payload["previous_priority_id"]
-    if not isinstance(previous_id, str):
-        raise ValueError("previous_priority_id must be text")
-
-    contract = next(
-        (item for item in context.contracts if item.id == contract_id), None
-    )
-    if contract is None:
-        raise LookupError(f"unknown Contract {contract_id!r}")
-    declaration = _contract_declaration(context, contract_id)
-    expected_candidate_parents = (
-        declaration.id,
-        *((previous_id,) if previous_id else ()),
-    )
-    if candidate.causal_parents != expected_candidate_parents:
-        raise ValueError("task priority Candidate has incorrect causal parents")
-    proposed = create_runtime_record(
-        PRIORITY_FACT,
-        {
-            "actor_id": candidate.actor_id,
-            "candidate_id": candidate.id,
-            "contract_id": contract_id,
-            "key_id": candidate.key_id,
-            "previous_priority_id": previous_id,
-            "priority": priority,
-            "reason": reason,
-        },
-        causal_parents=(
-            receipt_id,
-            declaration.id,
-            *((previous_id,) if previous_id else ()),
-        ),
-    )
-    existing = next(
-        (record for record in context.runtime_records if record.id == proposed.id),
-        None,
-    )
-    if existing is not None:
-        if priority_history(context, contract_id).count(existing) != 1:
-            raise ValueError("priority replay is not a committed history member")
-        if runtime_record_effective_payload(
-            existing
-        ) != runtime_record_effective_payload(proposed):
-            raise ValueError("priority fact ID conflicts with existing history")
-        return EffectProjection((existing,), contract_id)
-
-    validate_task_priority_request(context, contract_id, priority, previous_id)
-
-    return EffectProjection((proposed,), contract_id)
-
-
-def validate_task_priority_request(
-    context: EffectProjectionContext,
-    contract_id: str,
-    priority: int,
-    previous_priority_id: str,
-):
-    """Validate mutable-independent priority intent against one fact snapshot."""
-    if not isinstance(contract_id, str) or not contract_id.strip():
-        raise ValueError("contract_id must be non-empty text")
-    if (
-        isinstance(priority, bool)
-        or not isinstance(priority, int)
-        or not -100 <= priority <= 100
-    ):
-        raise ValueError("priority must be an integer from -100 through 100")
-    if not isinstance(previous_priority_id, str):
-        raise ValueError("previous_priority_id must be text")
-    contracts = [item for item in context.contracts if item.id == contract_id]
-    if len(contracts) != 1:
-        raise LookupError(f"unknown or ambiguous Contract {contract_id!r}")
-    contract = contracts[0]
-    declaration = _contract_declaration(context, contract_id)
-    if contract is None:
-        raise LookupError(f"unknown Contract {contract_id!r}")
-    history = priority_history(context, contract_id)
-    head = history[-1] if history else None
-    head_id = head.id if head is not None else ""
-    if previous_priority_id != head_id:
-        raise PriorityStateRejected(
-            "previous_priority_id does not match the exact current head"
-        )
-    if head is not None and head.payload["priority"] == priority:
-        raise PriorityStateRejected(
-            "priority is unchanged; no priority fact was created"
-        )
-    if head is None and priority == 0:
-        raise PriorityStateRejected(
-            "priority zero is already the default; no fact was created"
-        )
-    if any(
-        record.record_type == "lifecycle.terminal"
-        and record.payload.get("contract_id") == contract_id
-        for record in context.runtime_records
-    ):
-        raise PriorityStateRejected("terminal task priority cannot be changed")
-    if contract.outputs and all_outputs_satisfied(
-        contract, ProjectionStoreView(context), require_outputs=True
-    ):
-        raise PriorityStateRejected("completed task priority cannot be changed")
-    return contract, declaration, head
 
 
 def _contract_declaration(
@@ -394,15 +258,3 @@ def _text(value: object, field: str) -> str:
     except UnicodeEncodeError as exc:
         raise ValueError(f"{field} must be valid UTF-8") from exc
     return value
-
-
-TASK_PRIORITY_EFFECTS = MappingProxyType(
-    {
-        PRIORITY_EFFECT: EffectHandler(
-            capability="task.priority.manage",
-            projector=task_priority_projector,
-            direct_output_fact_types=frozenset({PRIORITY_FACT}),
-            reserved_fact_types=frozenset({PRIORITY_FACT}),
-        )
-    }
-)

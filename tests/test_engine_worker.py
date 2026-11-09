@@ -222,7 +222,12 @@ def test_engine_worker_unfinished_inner_run_fails_visibly_at_outer_boundary():
     assert result["status"] == "rejected"
     assert store.get_assets_by_name("report") == []
     terminal = store.scan_runtime_records(record_type="lifecycle.terminal")
-    assert terminal[-1][1].payload["terminal"] == "failed"
+    assert not any(
+        record.payload.get("contract_id") == contract.id for _, record in terminal
+    )
+    # The outer claim remains submitted for diagnosis; the inner run produced
+    # no signed terminal outcome for the business Task.
+    assert store.get_claim(contract.id)["status"] == "submitted"
     store.close()
 
 

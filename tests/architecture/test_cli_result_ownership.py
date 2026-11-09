@@ -11,7 +11,6 @@ _ALIASES = {
     "task_assignment": {
         "_failure": "_cli_result_failure",
         "_success": "_cli_result_success",
-        "_pending_failure": "_cli_pending_failure",
         "_internal_error": "_cli_internal_error",
     },
     "task_collaboration": {
@@ -30,8 +29,6 @@ _ALIASES = {
     "task_priority": {
         "_error": "_cli_result_failure",
         "_success": "_cli_result_success",
-        "_pending_failure": "_cli_pending_failure",
-        "_internal_error": "_cli_internal_error",
     },
     "task": {"_parse_json_object": "_cli_json_object_option"},
     "contract": {"_parse_json_object": "_cli_json_object_option"},
@@ -87,15 +84,3 @@ def test_shared_result_helpers_do_not_acquire_or_publish_runtime_state():
             node.attr for node in ast.walk(helper) if isinstance(node, ast.Attribute)
         }
         assert names.isdisjoint(forbidden), helper.name
-
-
-def test_semantically_extended_renderers_keep_their_local_owner():
-    handoff = _tree("src/aigineering/cli/task_handoff.py")
-    handoff_failure = _function(handoff, "_failure")
-    assert [argument.arg for argument in handoff_failure.args.kwonlyargs] == [
-        "next_step"
-    ]
-
-    collaboration = importlib.import_module("aigineering.cli.task_collaboration")
-    common = importlib.import_module("aigineering.cli._common")
-    assert collaboration._pending_failure is not common._cli_pending_failure

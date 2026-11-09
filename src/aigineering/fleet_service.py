@@ -24,7 +24,6 @@ from aigineering.adapters.redis_query import QueryProjectionUnavailable
 from aigineering.application import require_redis
 from aigineering.core.domain import load_genesis
 from aigineering.core.sqlite_store import SQLiteStore
-from aigineering.plugins import default_completion_registry
 from aigineering.local_fleet import (
     FleetHost,
     PullAdmissionGate,
@@ -483,13 +482,11 @@ def _serve_from_environment() -> int:
             sync_runtime(store)
         maintenance_store = SQLiteStore(db_path)
         maintenance_publishers = ensure_local_runtime_publishers(maintenance_store)
-        completion_registry = default_completion_registry()
 
         def maintenance_tick() -> None:
             require_redis()
             run_runtime_maintenance_step(
                 maintenance_store,
-                completion_registry,
                 candidate_publishers=maintenance_publishers,
             )
             sync_runtime(maintenance_store)

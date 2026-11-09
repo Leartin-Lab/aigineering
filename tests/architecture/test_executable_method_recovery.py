@@ -30,7 +30,7 @@ def test_recovery_projects_signed_effects_without_owning_storage_or_scheduling()
         or module.startswith("aigineering.core.sqlite_store.")
         for module in imports
     )
-    assert "runtime.publish_task_effects(" in source
+    assert "publisher.publish(" in source
     assert "commit_ingress_batch" not in source
     assert "append_runtime_record" not in source
 

@@ -253,36 +253,33 @@ def all_outputs_satisfied(
     )
 
 
-def _unmet_output_names(
+def selected_output_assets(
     contract: Contract,
     store: StoreProtocol,
     *,
-    extra_output_names: set[str] | None = None,
     pending_assets: tuple[Asset, ...] = (),
     extra_qualified_asset_ids: Mapping[tuple[str, str], set[str]] | None = None,
-) -> tuple[str, ...]:
-    extra_output_names = extra_output_names or set()
+) -> dict[str, Asset]:
     extra_qualified_asset_ids = extra_qualified_asset_ids or {}
     policy = contract.acceptance_policy
     try:
         validate_output_requirements(contract)
     except (TypeError, ValueError):
-        return tuple(contract.outputs)
+        return {}
     requirements = (
         policy.get("output_requirements", {}) if isinstance(policy, Mapping) else {}
     )
     qualified_by_output: dict[str, set[str]] = {}
     independent = isinstance(policy, Mapping) and policy.get("mode") == "independent"
     if independent:
-        for _, record in store.scan_runtime_records(record_type="output.qualified"):
-            if record.payload.get("contract_id") == contract.id:
-                output_name = record.payload.get("output_name")
-                if isinstance(output_name, str):
-                    qualified_by_output.setdefault(output_name, set()).add(
-                        str(record.payload.get("asset_id", ""))
-                    )
+        for record in store.read_task_facts(contract.id, ("output.qualified",)):
+            output_name = record.payload.get("output_name")
+            if isinstance(output_name, str):
+                qualified_by_output.setdefault(output_name, set()).add(
+                    str(record.payload.get("asset_id", ""))
+                )
 
-    unmet: list[str] = []
+    selected: dict[str, Asset] = {}
     for output_name in contract.outputs:
         if independent:
             qualified_ids = set(qualified_by_output.get(output_name, ()))
@@ -290,7 +287,6 @@ def _unmet_output_names(
                 extra_qualified_asset_ids.get((contract.id, output_name), set())
             )
             if not qualified_ids:
-                unmet.append(output_name)
                 continue
         else:
             qualified_ids = set()
@@ -314,36 +310,47 @@ def _unmet_output_names(
             *committed,
             *(asset for asset in pending_assets if asset.name == output_name),
         )
-        if any(
-            output_asset_is_eligible(
-                contract,
-                output_name,
-                asset,
-                store,
-                qualified_asset_ids=qualified_ids,
-            )
+        eligible = [
+            asset
             for asset in matching
-        ):
-            continue
+            if output_asset_is_eligible(
+                contract, output_name, asset, store, qualified_asset_ids=qualified_ids
+            )
+        ]
+        if eligible:
+            selected[output_name] = min(eligible, key=lambda asset: asset.id)
+    return selected
 
-        has_explicit_requirement = (
-            isinstance(requirements, Mapping) and output_name in requirements
+
+def _unmet_output_names(
+    contract: Contract,
+    store: StoreProtocol,
+    *,
+    extra_output_names: set[str] | None = None,
+    pending_assets: tuple[Asset, ...] = (),
+    extra_qualified_asset_ids: Mapping[tuple[str, str], set[str]] | None = None,
+) -> tuple[str, ...]:
+    selected = selected_output_assets(
+        contract,
+        store,
+        pending_assets=pending_assets,
+        extra_qualified_asset_ids=extra_qualified_asset_ids,
+    )
+    policy = contract.acceptance_policy or {}
+    requirements = policy.get("output_requirements", {})
+    shapes = policy.get("output_shapes", {})
+    extra = extra_output_names or set()
+    return tuple(
+        output
+        for output in contract.outputs
+        if output not in selected
+        and not (
+            output in extra
+            and output not in requirements
+            and output not in shapes
+            and policy.get("mode") != "independent"
         )
-        output_shapes = (
-            policy.get("output_shapes", {}) if isinstance(policy, Mapping) else {}
-        )
-        has_shape_requirement = (
-            isinstance(output_shapes, Mapping) and output_name in output_shapes
-        )
-        if (
-            output_name in extra_output_names
-            and not has_explicit_requirement
-            and not has_shape_requirement
-            and not independent
-        ):
-            continue
-        unmet.append(output_name)
-    return tuple(unmet)
+    )
 
 
 def _is_contract_or_descendant(producer_id: str, contract_id: str, store) -> bool:

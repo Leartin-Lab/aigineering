@@ -138,6 +138,9 @@ def test_integrity_handles_malformed_runtime_record_json_without_payload_leak(
     path = tmp_path / "malformed-record.sqlite"
     _signed_runtime_database(path)
     with sqlite3.connect(path) as connection:
+        # Bypass expression-index validation only to simulate on-disk corruption.
+        connection.execute("DROP INDEX idx_runtime_records_contract_type")
+        connection.execute("DROP INDEX idx_runtime_records_committed_asset")
         connection.execute(
             "UPDATE runtime_records SET payload_json=? "
             "WHERE record_type='asset.committed'",

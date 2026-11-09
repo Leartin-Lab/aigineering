@@ -7,10 +7,6 @@ from types import MappingProxyType
 from typing import Any, Callable, Mapping
 
 from aigineering.core.acceptance import project_asset_attestation_records
-from aigineering.core.claim_assignments import (
-    AssignmentIntent,
-    SuccessorAssignmentWitness,
-)
 from aigineering.core.actor_facts import actor_key_payload
 from aigineering.core.asset_versions import replacement_claim_payload
 from aigineering.core.asset_graph_facts import legacy_asset_graph_record
@@ -58,8 +54,6 @@ class EffectProjection:
     assets: tuple[Asset, ...] = ()
     accepted_asset_names: tuple[str, ...] = ()
     additional_capabilities: tuple[str, ...] = ()
-    assignment_intents: tuple[AssignmentIntent, ...] = ()
-    successor_assignment_witnesses: tuple[SuccessorAssignmentWitness, ...] = ()
 
 
 def _contract_from_payload(payload: Mapping[str, Any]) -> Contract:

@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 import json
 import math
 
 from aigineering.core.output_satisfaction import (
-    all_outputs_satisfied,
     output_asset_meets_conditions,
 )
 from aigineering.core.projection_store_view import ProjectionStoreView
@@ -16,14 +15,10 @@ from aigineering.core.publication_history import (
     read_effect_types,
     validate_published_member,
 )
-from aigineering.core.lifecycle_facts import create_terminal_record
 from aigineering.core.ids import acceptance_policy_id
 from aigineering.core.projection_context import EffectProjectionContext
-from aigineering.core.trace import create_entry
-from aigineering.core.candidate_decision import trace_record
 from aigineering.protocol.runtime_record import RuntimeRecord, create_runtime_record
 from aigineering.protocol.candidate import CandidateEffect, CandidateProposal
-from aigineering.protocol.types import TraceEntry
 
 
 def validate_asset_publication(context, asset):
@@ -172,7 +167,15 @@ def validate_claim_bound_output(context, asset, producer=None):
     grant = grants[0]
     validate_runtime_record(grant)
     if (
-        submitted.causal_parents != (grant.id, head.id)
+        submitted.causal_parents
+        != (
+            grant.id,
+            receipt.id if head.payload.get("closure_version") == 1 else head.id,
+        )
+        or (
+            head.payload.get("closure_version") == 1
+            and submitted.id not in head.payload["committed_record_ids"]
+        )
         or submitted.payload.get("contract_id") != producer.id
         or submitted.payload.get("worker_id") != receipt.payload.get("actor_id")
         or receipt.payload.get("claim_id") != claim_id
@@ -230,119 +233,6 @@ class AttestationProjection:
 
 class OutputQualificationConflict(ValueError):
     """An output qualification conflicts with canonical policy or selection."""
-
-
-def validate_fresh_policy_facts(
-    candidate: CandidateProposal,
-    receipt_id: str,
-    context: EffectProjectionContext,
-    records: tuple[RuntimeRecord, ...],
-    actor_capabilities: tuple[str, ...],
-) -> None:
-    """Reproject fresh policy evidence without trusting its effect owner."""
-    from aigineering.protocol.effect_builders import asset_attestation_effect
-    from aigineering.protocol.runtime_record import runtime_record_effective_payload
-
-    existing_ids = {record.id for record in context.runtime_records}
-    fresh = {
-        record.id: record
-        for record in records
-        if record.record_type in {"asset.attested", "output.qualified"}
-        and record.id not in existing_ids
-    }
-    if not fresh:
-        return
-    if "asset.attest" not in actor_capabilities:
-        raise OutputQualificationConflict(
-            "policy facts require the current actor's asset.attest capability"
-        )
-    expected: dict[str, RuntimeRecord] = {}
-    fresh_qualifications = tuple(
-        record for record in fresh.values() if record.record_type == "output.qualified"
-    )
-    for record in fresh.values():
-        if record.record_type != "asset.attested":
-            continue
-        payload = record.payload
-        try:
-            effect = asset_attestation_effect(
-                payload.get("contract_id", ""),
-                payload.get("output_name", ""),
-                payload.get("asset_id", ""),
-                verdict=payload.get("verdict", ""),
-                policy_id=payload.get("policy_id", ""),
-                policy_version=payload.get("policy_version", ""),
-                rubric_asset_ids=payload.get("rubric_asset_ids", ()),
-                evidence_asset_ids=payload.get("evidence_asset_ids", ()),
-            )
-            canonical = project_asset_attestation_records(
-                effect, candidate, receipt_id, context
-            )
-        except (TypeError, ValueError) as exc:
-            raise OutputQualificationConflict(
-                f"policy fact does not match canonical attestation: {exc}"
-            ) from exc
-        if not set(canonical.additional_capabilities).issubset(actor_capabilities):
-            raise OutputQualificationConflict(
-                "policy facts require all current verifier capabilities"
-            )
-        if record.id != canonical.records[0].id:
-            raise OutputQualificationConflict(
-                "policy fact differs from its authenticated attestation"
-            )
-        attestation = canonical.records[0]
-        expected[attestation.id] = attestation
-        selected = tuple(
-            item
-            for item in fresh_qualifications
-            if item.causal_parents == (attestation.id,)
-        )
-        if selected and payload.get("verdict") != "accepted":
-            raise OutputQualificationConflict(
-                "rejected attestation cannot qualify an output"
-            )
-        prior_actors = {
-            item.payload.get("verifier_actor_id")
-            for item in context.runtime_records
-            if item.record_type == "asset.attested"
-            and item.payload.get("verdict") == "accepted"
-            and all(
-                item.payload.get(field) == payload.get(field)
-                for field in (
-                    "contract_id",
-                    "output_name",
-                    "asset_id",
-                    "policy_id",
-                    "policy_version",
-                )
-            )
-        }
-        for qualification in selected:
-            actors = qualification.payload.get("verifier_actor_ids")
-            if (
-                not isinstance(actors, (list, tuple))
-                or not all(isinstance(actor, str) and actor for actor in actors)
-                or tuple(actors) != tuple(sorted(set(actors)))
-                or candidate.actor_id not in actors
-                or not set(actors).issubset(prior_actors | {candidate.actor_id})
-            ):
-                raise OutputQualificationConflict(
-                    "qualification has unproved verifier actors"
-                )
-            item = _qualification_record(attestation, set(actors))
-            expected[item.id] = item
-        if len(canonical.records) > 1 and not selected:
-            raise OutputQualificationConflict(
-                "accepted attestation lacks its qualification"
-            )
-    if set(expected) != set(fresh) or any(
-        runtime_record_effective_payload(record)
-        != runtime_record_effective_payload(expected[record_id])
-        for record_id, record in fresh.items()
-    ):
-        raise OutputQualificationConflict(
-            "policy facts must be the complete canonical attestation projection"
-        )
 
 
 def _qualification_record(
@@ -566,11 +456,11 @@ def validate_output_shape(
         raise ValueError(f"acceptance output shape mismatch: {shape_error}")
 
 
-def validate_output_qualification_commit(
+def validate_output_qualification_batch(
     existing_records: Sequence[RuntimeRecord],
     pending_records: Sequence[RuntimeRecord],
 ) -> None:
-    """Enforce one immutable selected Asset per Contract output slot."""
+    """Project at most one selected Asset per slot across the whole core batch."""
     selected: dict[tuple[str, str], str] = {}
     for record in (*tuple(existing_records), *tuple(pending_records)):
         if record.record_type != "output.qualified":
@@ -585,86 +475,3 @@ def validate_output_qualification_commit(
             raise OutputQualificationConflict(
                 "qualified output slot already selects a different immutable Asset"
             )
-
-
-def materialize_qualification_facts(
-    store,
-    pending_records: Sequence[RuntimeRecord],
-) -> tuple[tuple[TraceEntry, ...], tuple[RuntimeRecord, ...]]:
-    """Complete independently accepted Contracts in the attestation transaction."""
-    qualifications = tuple(
-        record for record in pending_records if record.record_type == "output.qualified"
-    )
-    if not qualifications:
-        return (), ()
-    pending_ids: dict[tuple[str, str], set[str]] = {}
-    causal_ids: dict[str, list[str]] = {}
-    for record in qualifications:
-        contract_id = str(record.payload["contract_id"])
-        output_name = str(record.payload["output_name"])
-        asset_id = str(record.payload["asset_id"])
-        pending_ids.setdefault((contract_id, output_name), set()).add(asset_id)
-        causal_ids.setdefault(contract_id, []).append(record.id)
-    terminal_contracts = {
-        str(record.payload.get("contract_id", ""))
-        for _, record in store.scan_runtime_records(record_type="lifecycle.terminal")
-    }
-    traces: list[TraceEntry] = []
-    records: list[RuntimeRecord] = []
-    completed_contracts = []
-    terminal_contracts.update(
-        str(record.payload.get("contract_id", ""))
-        for record in pending_records
-        if record.record_type == "lifecycle.terminal"
-    )
-    for contract_id in sorted(causal_ids):
-        if contract_id in terminal_contracts:
-            continue
-        contract = store.get_contract(contract_id)
-        if contract is None or not all_outputs_satisfied(
-            contract,
-            store,
-            extra_qualified_asset_ids=pending_ids,
-        ):
-            continue
-        entry = replace(
-            create_entry(
-                contract.id,
-                "complete",
-                authority_policy="independent",
-                authority_result="qualified",
-                accepted_fragments=[
-                    f"[qualified] {output}: {sorted(asset_ids)}"
-                    for (cid, output), asset_ids in sorted(pending_ids.items())
-                    if cid == contract.id
-                ],
-                budget_remaining=0,
-            ),
-            timestamp="",
-        )
-        terminal = create_terminal_record(contract.id, "complete")
-        trace_fact = trace_record(entry, causal_parents=(terminal.id,))
-        traces.append(entry)
-        records.extend((terminal, trace_fact))
-        completed_contracts.append(contract)
-        terminal_contracts.add(contract.id)
-    from aigineering.core.fact_reducer import FactReducer
-    from aigineering.core.fact_materialization import (
-        materialize_fact_reduction,
-        trace_records,
-    )
-
-    reducer = FactReducer(store)
-    for contract in completed_contracts:
-        events = reducer.on_contract_completed(
-            contract, terminal_contract_ids=terminal_contracts
-        )
-        child_traces, child_records = materialize_fact_reduction(events, ())
-        traces.extend(child_traces)
-        records.extend((*child_records, *trace_records(child_traces)))
-        terminal_contracts.update(
-            str(record.payload["contract_id"])
-            for record in child_records
-            if record.record_type == "lifecycle.terminal"
-        )
-    return tuple(traces), tuple(records)

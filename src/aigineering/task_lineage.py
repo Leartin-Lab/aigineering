@@ -15,11 +15,9 @@ from aigineering.core.publication_history import (
 from aigineering.protocol.immutability import deep_thaw
 from aigineering.protocol.runtime_record import validate_runtime_record
 from aigineering.protocol.wire import asset_to_dict, contract_to_dict
-from aigineering.plugins.task_semantics import method_payload
 from aigineering.task_diagnostics import (
     TaskDiagnosticError,
     _task_invocation_failure_binding,
-    task_recovery_ancestor_source_bindings,
     task_recovery_source_binding,
     safe_recovery_reason,
 )
@@ -34,6 +32,14 @@ from aigineering.task_views import project_task_status
 
 _RECOVERY_ACTOR = "plugin:recovery.publish.v1"
 _RECOVERY_EFFECTS = ("contract.declare", "asset.propose")
+_RECOVERY_FAILURE_TYPES = frozenset(
+    {
+        "worker.invocation_failed",
+        "claim.expired",
+        "candidate.rejected",
+        "projection.decided",
+    }
+)
 _SCHEDULE_TYPES = frozenset(
     {
         "worker_failure.recovery_scheduled",
@@ -56,8 +62,8 @@ def task_lineage(store, selected_contract_id: str) -> dict:
     """Return one exact-snapshot component over verified publication links.
 
     Recovery links are accepted only when the original recovery publisher's
-    receipt, domain, source causal parent, committed head, declaration and
-    source-created context Asset all agree with the materialized Contracts.
+    receipt, exact failed-claim proof, committed head, declaration, context
+    Asset, and same-head funding agree with their materialized facts.
     Revision links prove only their accepted source-to-successor relation;
     historical review decisions remain owned by the revision publisher.
     Failure and scheduling records are returned as source diagnostics; they
@@ -84,11 +90,6 @@ def task_lineage(store, selected_contract_id: str) -> dict:
         record_rows[record.id].append((revision, record))
     duplicate_ids = {
         record_id for record_id, rows in record_rows.items() if len(rows) != 1
-    }
-    record_revisions = {
-        record_id: rows[0][0]
-        for record_id, rows in record_rows.items()
-        if record_id not in duplicate_ids
     }
     by_id = {
         record_id: rows[0][1]
@@ -127,7 +128,6 @@ def task_lineage(store, selected_contract_id: str) -> dict:
             declaration_rows[target_id].append(declaration)
 
     publication_cache: dict[str, tuple] = {}
-    verified_schedule_cache: dict[str, tuple] = {}
     publication_index = index_published_records(records)
 
     def publication_for(contract):
@@ -210,118 +210,90 @@ def task_lineage(store, selected_contract_id: str) -> dict:
         target = by_contract.get(target_id) if isinstance(target_id, str) else None
         if target is None:
             continue
-        target_method_payload = method_payload(target)
-        current_method_recovery = target.origin == "system" and any(
-            key in target_method_payload
-            for key in ("recovery_intent_version", "recovery_source_contract_id")
-        )
-        if target.origin != "recovery" and not current_method_recovery:
-            continue
-        receipt_ids = tuple(declaration.causal_parents)
-        declared_receipt = by_id.get(receipt_ids[0]) if len(receipt_ids) == 1 else None
         source_id = None
-        if declared_receipt is not None:
-            source_id = next(
-                (
-                    parent_id
-                    for parent_id in declared_receipt.causal_parents
-                    if parent_id in by_contract
-                ),
-                None,
-            )
         try:
             proven_declaration, receipt, head = publication_for(target)
             if proven_declaration.id != declaration.id:
                 raise ValueError("recovery declaration is ambiguous")
-            source_ids = tuple(receipt.causal_parents)
-            if (
-                receipt.payload.get("actor_id") != _RECOVERY_ACTOR
-                or read_effect_types(receipt.payload) != _RECOVERY_EFFECTS
-                or len(source_ids) != 1
-                or source_ids[0] not in by_contract
-            ):
-                raise ValueError("recovery publisher or source witness mismatch")
-            source_id = source_ids[0]
-            if deep_thaw(declared) != deep_thaw(contract_to_dict(target)):
-                raise ValueError("recovery declaration differs from materialized task")
+            if receipt.payload.get("actor_id") != _RECOVERY_ACTOR:
+                continue
+            if read_effect_types(receipt.payload) != _RECOVERY_EFFECTS:
+                raise ValueError("recovery publisher effects mismatch")
+            receipt_parent_ids = set(receipt.causal_parents)
+            receipt_rows = record_rows.get(receipt.id, ())
+            if len(receipt_rows) != 1:
+                raise ValueError("recovery receipt revision is ambiguous")
+            receipt_revision = receipt_rows[0][0]
+            source_bindings = []
+            source_contract_ids = tuple(
+                parent_id
+                for parent_id in receipt.causal_parents
+                if parent_id in by_contract
+            )
+            failure_records = tuple(
+                by_id[parent_id]
+                for parent_id in receipt.causal_parents
+                if parent_id in by_id
+                and by_id[parent_id].record_type in _RECOVERY_FAILURE_TYPES
+            )
+            for candidate_source_id in source_contract_ids:
+                for source_record in failure_records:
+                    payload = source_record.payload
+                    claim_id = payload.get("claim_id")
+                    if (
+                        payload.get("contract_id") != candidate_source_id
+                        or not isinstance(claim_id, str)
+                        or not claim_id
+                    ):
+                        continue
+                    try:
+                        binding = task_recovery_source_binding(
+                            store,
+                            candidate_source_id,
+                            claim_id,
+                            source_record.id,
+                            source_record.record_type,
+                            query_context=query,
+                            _proof_cache=claim_proof_cache,
+                            _observed_at=observation_time,
+                        )
+                    except TaskDiagnosticError:
+                        continue
+                    witness_ids = tuple(binding.get("witness_record_ids", ()))
+                    if not witness_ids or not set(witness_ids).issubset(by_id):
+                        continue
+                    witness_rows = tuple(
+                        record_rows.get(witness_id, ()) for witness_id in witness_ids
+                    )
+                    if any(
+                        len(rows) != 1 or rows[0][0] >= receipt_revision
+                        for rows in witness_rows
+                    ):
+                        continue
+                    source_bindings.append(
+                        (candidate_source_id, source_record, binding)
+                    )
+            if len(source_bindings) != 1:
+                raise ValueError("recovery source claim proof is missing or ambiguous")
+            source_id, source_record, source_binding = source_bindings[0]
             source = by_contract[source_id]
             publication_for(source)
-            if current_method_recovery:
-                from aigineering.plugins.recovery import (
-                    MethodRecoveryIntent,
-                    _recovery_effects,
-                    prepare_method_recovery_intent,
+            if (
+                source_id not in receipt_parent_ids
+                or source_record.id not in receipt_parent_ids
+            ):
+                raise ValueError(
+                    "recovery receipt omits source Contract or failure anchor"
                 )
-                from aigineering.plugins.recovery_history import (
-                    RecoveryHistorySnapshot,
-                    prove_recovery_publication,
-                )
-
-                if query.domain_id is None:
-                    raise ValueError("recovery domain is unavailable")
-                recovery_snapshot = RecoveryHistorySnapshot(
-                    context=query.effect_projection,
-                    store_domain_id=query.domain_id,
-                    publisher_domain_id=query.domain_id,
-                    publisher_actor_id=_RECOVERY_ACTOR,
-                    revision=query.revision,
-                    query_context=query,
-                )
-                verified_source = _verified_source_schedules(
-                    source_id,
-                    schedules=schedules_by_contract.get(source_id, ()),
-                    grants=grants_by_contract.get(source_id, ()),
-                    query=query,
-                    store=store,
-                    by_id=by_id,
-                    proof_cache=claim_proof_cache,
-                    observed_at=observation_time,
-                    receipt_revision=record_rows[receipt.id][0][0],
-                    record_revisions=record_revisions,
-                    target_contract_id=target.id,
-                )
-                if not verified_source:
-                    raise ValueError("method recovery source proof unavailable")
-                prepared = prepare_method_recovery_intent(
-                    recovery_snapshot,
-                    failed_contract=source,
-                    source_binding=verified_source[0][2],
-                    ancestor_source_bindings=task_recovery_ancestor_source_bindings(
-                        store, source.id, query_context=query
-                    ),
-                )
-                if not isinstance(prepared, MethodRecoveryIntent):
-                    raise ValueError("method recovery intent is unsupported")
-                proof = prove_recovery_publication(
-                    recovery_snapshot,
-                    recovery=prepared.recovery,
-                    context_template=prepared.context_asset,
-                    effects=_recovery_effects(
-                        prepared.recovery, prepared.context_asset
-                    ),
-                    idempotency_key=prepared.idempotency_key,
-                    causal_parents=prepared.causal_parents,
-                    source_record_ids=prepared.source_record_ids,
-                )
-                if proof.status != "matched" or proof.contract != target:
-                    raise ValueError("system method recovery publication mismatch")
+            if deep_thaw(declared) != deep_thaw(contract_to_dict(target)):
+                raise ValueError("recovery declaration differs from materialized task")
             member_ids = tuple(head.payload.get("committed_record_ids", ()))
             members = tuple(by_id[item] for item in member_ids)
             declarations = tuple(
                 item for item in members if item.record_type == "contract.declared"
             )
-            context_name = (
-                f"_fail_context_{source_id}.recovery"
-                if current_method_recovery
-                else f"_fail_context_{source_id}"
-            )
             context_rows = tuple(
-                item
-                for item in members
-                if item.record_type == "asset.committed"
-                and isinstance(item.payload.get("asset"), Mapping)
-                and item.payload["asset"].get("name") == context_name
-                and item.payload["asset"].get("created_by") == source_id
+                item for item in members if item.record_type == "asset.committed"
             )
             context_assets = [
                 asset
@@ -329,9 +301,10 @@ def task_lineage(store, selected_contract_id: str) -> dict:
                 if context_rows
                 and asset.id == context_rows[0].payload["asset"].get("id")
             ]
-            if len(context_rows) == 1 and (
-                len(context_assets) != 1
-                or deep_thaw(context_rows[0].payload["asset"])
+            if (
+                len(context_rows) != 1
+                or len(context_assets) != 1
+                or deep_thaw(context_rows[0].payload.get("asset"))
                 != deep_thaw(asset_to_dict(context_assets[0]))
             ):
                 raise ValueError(
@@ -341,62 +314,62 @@ def task_lineage(store, selected_contract_id: str) -> dict:
                 len(declarations) != 1
                 or declarations[0].id != declaration.id
                 or len(context_rows) != 1
-                or any(
-                    item.record_type
-                    not in {
-                        "contract.declared",
-                        "asset.committed",
-                        "asset.legacy-graph.migrated",
-                        "allowance.granted",
-                        "allowance.reserved",
-                    }
-                    for item in members
-                )
             ):
-                raise ValueError("recovery publication head has unexpected members")
-            receipt_rows = record_rows.get(receipt.id, ())
-            if len(receipt_rows) != 1:
-                raise ValueError("recovery receipt revision is ambiguous")
-            schedule_key = (source_id, receipt_rows[0][0])
-            schedules = verified_schedule_cache.get(schedule_key)
-            if schedules is None:
-                schedules = _verified_source_schedules(
-                    source_id,
-                    schedules=schedules_by_contract.get(source_id, ()),
-                    grants=grants_by_contract.get(source_id, ()),
-                    query=query,
-                    store=store,
-                    by_id=by_id,
-                    proof_cache=claim_proof_cache,
-                    observed_at=observation_time,
-                    receipt_revision=receipt_rows[0][0],
-                    record_revisions=record_revisions,
-                    target_contract_id=(target.id if current_method_recovery else None),
-                )
-                verified_schedule_cache[schedule_key] = schedules
-            if current_method_recovery:
-                schedules = tuple(
-                    item
-                    for item in schedules
-                    if item[1].payload.get("recovery_contract_id") == target.id
-                )
-            if not schedules:
-                raise ValueError("no verified worker-failure recovery schedule")
+                raise ValueError("recovery declaration or context is not in its head")
+            if target.parent_id is None or target.parent_id not in by_contract:
+                raise ValueError("recovery has no funded parent")
+            grants = tuple(
+                item
+                for item in members
+                if item.record_type == "allowance.granted"
+                and item.payload.get("contract_id") == target.id
+                and item.payload.get("source_contract_id") == target.parent_id
+            )
+            reservations = tuple(
+                item
+                for item in members
+                if item.record_type == "allowance.reserved"
+                and item.payload.get("child_contract_id") == target.id
+                and item.payload.get("source_contract_id") == target.parent_id
+            )
+            if len(grants) != 1 or len(reservations) != 1:
+                raise ValueError("recovery funding bundle is missing or ambiguous")
+            if (
+                grants[0].payload.get("amount") != target.budget
+                or reservations[0].payload.get("amount") != target.budget
+            ):
+                raise ValueError("recovery funding amount differs from declaration")
+            if grants[0].id not in member_ids or reservations[0].id not in member_ids:
+                raise ValueError("recovery funding is outside committed head")
             edges.append(
                 {
                     "kind": "recovery_publication",
                     "source_contract_id": source_id,
                     "target_contract_id": target.id,
                     "evidence_record_ids": sorted(
-                        (receipt.id, declaration.id, head.id, context_rows[0].id)
+                        {
+                            receipt.id,
+                            declaration.id,
+                            head.id,
+                            context_rows[0].id,
+                            grants[0].id,
+                            reservations[0].id,
+                            source_record.id,
+                            *source_binding["witness_record_ids"],
+                        }
                     ),
                     "receipt_id": receipt.id,
                     "head_id": head.id,
                     "declaration_id": declaration.id,
                     "publisher_actor_id": _RECOVERY_ACTOR,
-                    "diagnostic_schedule_record_ids": sorted(
-                        record.id for _revision, record, _binding in schedules
+                    "source_claim_id": source_binding["claim_id"],
+                    "source_failure_record_id": source_record.id,
+                    "source_witness_record_ids": sorted(
+                        source_binding["witness_record_ids"]
                     ),
+                    "funding_parent_contract_id": target.parent_id,
+                    "allowance_grant_id": grants[0].id,
+                    "allowance_reservation_id": reservations[0].id,
                 }
             )
         except (KeyError, TypeError, ValueError, RuntimeError, AttributeError):

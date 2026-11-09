@@ -68,7 +68,6 @@ def build_canonical_allowance_declaration_batch(
     candidate_id: str,
     *,
     candidate_proposal,
-    effect_fact_owners=(),
 ) -> CanonicalAllowanceDeclarationBatch | None:
     """Build a safe hint for a pure, built-in declaration Candidate.
 
@@ -83,6 +82,9 @@ def build_canonical_allowance_declaration_batch(
         "allowance.reserved",
         "trace.recorded",
         "attempt.closed",
+        "claim.submitted",
+        "asset.committed",
+        "asset.legacy-graph.migrated",
     }
     effects = getattr(candidate_proposal, "effects", ())
     if (
@@ -90,7 +92,10 @@ def build_canonical_allowance_declaration_batch(
         or candidate_proposal is None
         or getattr(candidate_proposal, "id", None) != candidate_id
         or not effects
-        or any(effect.effect_type != "contract.declare" for effect in effects)
+        or any(
+            effect.effect_type not in {"contract.declare", "asset.propose"}
+            for effect in effects
+        )
         or any(record.record_type not in allowed for record in runtime_records)
         or not any(
             record.record_type == "contract.declared" for record in runtime_records
@@ -125,20 +130,8 @@ def build_canonical_allowance_declaration_batch(
         for record in runtime_records
         if record.record_type == "contract.declared"
     )
-    if len(effects) != len(declarations) or len(effect_fact_owners) != len(
+    if sum(effect.effect_type == "contract.declare" for effect in effects) != len(
         declarations
-    ):
-        return None
-    declaration_ids = {record.id for record in declarations}
-    if (
-        any(
-            getattr(owner, "effect_type", None) != "contract.declare"
-            or getattr(owner, "record_id", None) not in declaration_ids
-            or getattr(getattr(owner, "assignment_admission", None), "value", None)
-            not in {"none", None}
-            for owner in effect_fact_owners
-        )
-        or {owner.record_id for owner in effect_fact_owners} != declaration_ids
     ):
         return None
     try:

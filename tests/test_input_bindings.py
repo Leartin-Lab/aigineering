@@ -375,7 +375,7 @@ def test_tool_continuation_carries_binding_identity_without_widening_inputs():
     assert continuation.sensitive_input_policy["input_asset_bindings"] == {
         "dataset": ("asset:chosen",)
     }
-    assert continuation.inputs == parent.inputs
+    assert continuation.inputs == (*parent.inputs, *tool.outputs)
     validate_contract_identity(continuation)
 
 
@@ -416,7 +416,7 @@ def test_schema_18_marker_preserves_schema_17_facts_and_materializations(tmp_pat
 
     reopened = SQLiteStore(path)
     try:
-        assert reopened.schema_version == CURRENT_SCHEMA_VERSION == 23
+        assert reopened.schema_version == CURRENT_SCHEMA_VERSION == 24
         assert (
             tuple(record.id for _, record in reopened.scan_runtime_records())
             == before_ids

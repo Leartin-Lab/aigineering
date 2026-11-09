@@ -3,12 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 from aigineering.core.commitment import CandidateCommitter, CommitmentDecision
-from aigineering.core.effect_projection import freeze_additional_effects
-from aigineering.core.effect_projectors import EffectProjector
 from aigineering.core.signing import Signer
 from aigineering.protocol.candidate import (
     ActorKey,
@@ -32,7 +29,6 @@ def publish_effect(
     *,
     idempotency_key: str,
     causal_parents: tuple[str, ...] = (),
-    additional_effects: Mapping[str, tuple[str, EffectProjector]] | None = None,
 ) -> CommitmentDecision:
     """Sign and commit one effect for an explicitly selected actor key."""
     return publish_effects(
@@ -44,7 +40,6 @@ def publish_effect(
         (effect,),
         idempotency_key=idempotency_key,
         causal_parents=causal_parents,
-        additional_effects=additional_effects,
     )
 
 
@@ -58,7 +53,6 @@ def publish_effects(
     *,
     idempotency_key: str,
     causal_parents: tuple[str, ...] = (),
-    additional_effects: Mapping[str, tuple[str, EffectProjector]] | None = None,
 ) -> CommitmentDecision:
     """Sign and atomically commit one Candidate effect batch."""
     if actor_key.public_key != signer.signer_id or actor_key.kind != signer.kind:
@@ -72,9 +66,7 @@ def publish_effects(
         causal_parents=causal_parents,
         idempotency_key=idempotency_key,
     )
-    return CandidateCommitter(
-        store, trace, additional_effects=additional_effects
-    ).commit(candidate, genesis)
+    return CandidateCommitter(store, trace).commit(candidate, genesis)
 
 
 @dataclass(frozen=True)
@@ -86,14 +78,6 @@ class CandidatePublisher:
     genesis: GenesisManifest
     actor_key: ActorKey
     signer: Signer
-    additional_effects: Mapping[str, tuple[str, EffectProjector]] | None = None
-
-    def __post_init__(self) -> None:
-        object.__setattr__(
-            self,
-            "additional_effects",
-            freeze_additional_effects(self.additional_effects),
-        )
 
     def publish(
         self,
@@ -111,7 +95,6 @@ class CandidatePublisher:
             effects,
             idempotency_key=idempotency_key,
             causal_parents=causal_parents,
-            additional_effects=self.additional_effects,
         )
 
 

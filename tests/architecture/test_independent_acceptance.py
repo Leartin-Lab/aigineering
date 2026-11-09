@@ -13,7 +13,7 @@ import pytest
 from aigineering.core.commitment import CandidateCommitter
 from aigineering.core.acceptance import (
     OutputQualificationConflict,
-    validate_output_qualification_commit,
+    validate_output_qualification_batch,
     validate_output_shape,
 )
 from aigineering.core.domain import initialize_genesis
@@ -793,44 +793,50 @@ def test_qualification_slot_replay_allows_same_asset_and_rejects_replacement() -
         {"contract_id": "task:one", "output_name": "report", "asset_id": "a2"},
     )
 
-    validate_output_qualification_commit((first,), (replay,))
+    validate_output_qualification_batch((first,), (replay,))
     with pytest.raises(OutputQualificationConflict, match="different immutable Asset"):
-        validate_output_qualification_commit((first,), (replacement,))
+        validate_output_qualification_batch((first,), (replacement,))
 
 
-def test_qualification_race_becomes_durable_candidate_rejection(
-    acceptance_domain, monkeypatch
-) -> None:
-    store, genesis, committer, _, _, verifier, _, _, _ = acceptance_domain
-    contract, asset = _publish_contract_and_output(acceptance_domain)
-    candidate = _candidate(
+def test_same_candidate_cannot_qualify_two_different_assets_for_one_slot(
+    acceptance_domain,
+):
+    store, genesis, committer, owner, _, verifier, _, _, _ = acceptance_domain
+    contract, first = _publish_contract_and_output(acceptance_domain)
+    decision = committer.commit(
+        _candidate(
+            genesis,
+            "human:owner",
+            "owner-key",
+            owner,
+            asset_proposal_effect(
+                Asset(id="unused", name="report", content="another report")
+            ),
+            "second-output",
+        ),
         genesis,
-        "worker:verifier",
-        "verifier-key",
-        verifier,
-        _attestation_effect(contract, asset),
-        "qualification-race",
     )
-    original = validate_output_qualification_commit
-
-    def race(existing_records, pending_records):
-        if any(record.record_type == "output.qualified" for record in pending_records):
-            raise OutputQualificationConflict("simulated competing output selection")
-        return original(existing_records, pending_records)
-
-    monkeypatch.setattr(
-        "aigineering.core.acceptance.validate_output_qualification_commit", race
+    assert decision.accepted
+    second = decision.assets[0]
+    candidate = create_candidate_proposal(
+        domain_id=genesis.id,
+        actor_id="worker:verifier",
+        key_id="verifier-key",
+        signer=verifier,
+        effects=(
+            _attestation_effect(contract, first),
+            _attestation_effect(contract, second),
+        ),
+        idempotency_key="competing-slot-in-one-candidate",
     )
-
-    decision = committer.commit(candidate, genesis)
-
-    assert not decision.accepted
+    rejected = committer.commit(candidate, genesis)
+    assert not rejected.accepted
     assert any(
-        record.record_type == "candidate.rejected"
-        for record in decision.runtime_records
+        row.record_type == "candidate.rejected" for row in rejected.runtime_records
     )
-    assert store.scan_runtime_records(record_type="output.qualified") == []
-    assert store.scan_runtime_records(record_type="lifecycle.terminal") == []
+    assert not store.read_task_facts(
+        contract.id, ("output.qualified", "lifecycle.terminal")
+    )
 
 
 def test_rejected_attestation_is_evidence_not_qualification(acceptance_domain):
@@ -888,26 +894,23 @@ def test_concurrent_independent_attestations_converge_without_terminal_conflict(
     )
     stores = (SQLiteStore(db_path), SQLiteStore(db_path))
     barrier = Barrier(2)
-    for current in stores:
-        original = current.commit_ingress_batch
 
-        def synchronized_commit(*args, _original=original, **kwargs):
-            barrier.wait(timeout=5)
-            return _original(*args, **kwargs)
+    def commit_one(pair):
+        barrier.wait(timeout=5)
+        return CandidateCommitter(pair[0], pair[0]).commit(pair[1], genesis)
 
-        current.commit_ingress_batch = synchronized_commit
     try:
         with ThreadPoolExecutor(max_workers=2) as pool:
             decisions = tuple(
                 pool.map(
-                    lambda pair: CandidateCommitter(pair[0], pair[0]).commit(
-                        pair[1], genesis
-                    ),
+                    commit_one,
                     zip(stores, candidates, strict=True),
                 )
             )
         assert all(decision.accepted for decision in decisions)
-        assert len(store.scan_runtime_records(record_type="output.qualified")) == 2
+        # The second writer observes the qualification already selected by the first.
+        assert len(store.scan_runtime_records(record_type="output.qualified")) == 1
+        assert len(store.scan_runtime_records(record_type="asset.attested")) == 2
         assert len(store.scan_runtime_records(record_type="lifecycle.terminal")) == 1
         assert all_outputs_satisfied(contract, store)
     finally:

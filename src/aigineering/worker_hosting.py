@@ -17,7 +17,6 @@ from aigineering.protocol.candidate import ActorKey, GenesisManifest
 from aigineering.protocol.effect_builders import (
     actor_authorization_effect,
     worker_registration_effect,
-    worker_profile_promotion_effect,
 )
 
 
@@ -29,7 +28,6 @@ def authorize_worker_host(
     authority: CandidatePublisher,
     *,
     registration: WorkerRegistration | None = None,
-    promotion_previous_registration_id: str | None = None,
 ) -> WorkerHost:
     """Bind *worker* after publishing any missing identity facts."""
     if authority.genesis.id != genesis.id:
@@ -66,21 +64,12 @@ def authorize_worker_host(
     effects = []
     if current_key is None:
         effects.append(actor_authorization_effect(actor_key))
-    if promotion_previous_registration_id is not None and registration_changed:
-        if "worker.profile.promote" not in (authority.additional_effects or {}):
-            raise ValueError("profile promotion handler was not explicitly injected")
-        effects.append(
-            worker_profile_promotion_effect(
-                promotion_previous_registration_id, selected_registration
-            )
-        )
     if registration_changed:
         effects.append(worker_registration_effect(selected_registration))
     if effects:
         identity = compute_content_hash(
             canonical_json(
                 {
-                    "promotion_from": promotion_previous_registration_id or "",
                     "registration": worker_registration_payload(selected_registration),
                 }
             )

@@ -14,88 +14,24 @@ from aigineering.core.commitment import CandidateCommitter
 
 
 def test_authentication_rejection_returns_through_audit_owner_before_commit_path():
-    source = inspect.getsource(CandidateCommitter.commit)
+    source = inspect.getsource(CandidateCommitter._commit_locked)
     function = ast.parse(textwrap.dedent(source)).body[0]
-    audit_call = next(
-        node
-        for node in ast.walk(function)
-        if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Name)
-        and node.func.id == "record_unreceipted_authentication_rejection"
+    auth_try = next(node for node in function.body if isinstance(node, ast.Try))
+    assert "candidate_received_record(" in ast.unparse(auth_try)
+    failure = ast.unparse(auth_try.handlers[0])
+    assert "return record_candidate_rejection(" in failure
+    assert "receipt=None" in failure
+    assert "claim_binding" not in failure
+    assert "close_claim_attempt" not in failure
+    assert source.index("candidate_received_record(") < source.index(
+        "read_candidate_publication("
     )
-    guard = next(
-        node
-        for node in ast.walk(function)
-        if isinstance(node, ast.If)
-        and isinstance(node.test, ast.Compare)
-        and isinstance(node.test.left, ast.Name)
-        and node.test.left.id == "rejected"
+    assert source.index("read_candidate_publication(") < source.index(
+        "close_claim_attempt("
     )
-    guard_text = ast.unparse(guard)
-    assert "is not None" in ast.unparse(guard.test)
-    assert "self._trace_exporter.export(rejected.trace_entries)" in guard_text
-    assert any(
-        isinstance(node, ast.Return)
-        and isinstance(node.value, ast.Name)
-        and node.value.id == "rejected"
-        for node in ast.walk(guard)
-    )
-
-    attempt_calls = [
-        node.lineno
-        for node in ast.walk(function)
-        if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Name)
-        and node.func.id == "close_claim_attempt"
-    ]
-    writer_argument_calls = [
-        node.lineno
-        for node in ast.walk(function)
-        if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Attribute)
-        and node.func.attr == "commit_ingress_batch"
-    ]
-    assert attempt_calls and writer_argument_calls
-    assert audit_call.lineno < min(attempt_calls)
-    assert audit_call.lineno < min(writer_argument_calls)
-
-    writer_call = next(
-        node
-        for node in ast.walk(function)
-        if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Attribute)
-        and node.func.attr == "commit_ingress_batch"
-    )
-    writer_keywords = {keyword.arg for keyword in writer_call.keywords}
-    assert {
-        "accepted_assets",
-        "trace_entries",
-        "contracts",
-        "runtime_records",
-        "candidate_proposal",
-        "effect_fact_owners",
-        "assignment_intents",
-        "successor_assignment_witnesses",
-        "validate_snapshot",
-    } <= writer_keywords
-    admitted_assignment = next(
-        node
-        for node in ast.walk(function)
-        if isinstance(node, ast.Assign)
-        and any(
-            isinstance(target, ast.Name) and target.id == "admitted_decision"
-            for target in node.targets
-        )
-    )
-    close_call = next(
-        node
-        for node in ast.walk(function)
-        if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Name)
-        and node.func.id == "close_claim_attempt"
-    )
-    assert admitted_assignment.lineno < close_call.lineno < writer_call.lineno
-    assert "validate_snapshot" in source
+    assert source.index("close_claim_attempt(") < source.index("commit_ingress_batch(")
+    for obsolete in ("effect_fact_owners", "assignment_intents", "validate_snapshot"):
+        assert obsolete not in source
 
     auth_owner = ast.parse(
         textwrap.dedent(inspect.getsource(record_unreceipted_authentication_rejection))

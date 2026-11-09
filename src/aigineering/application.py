@@ -8,9 +8,6 @@ from typing import Optional
 
 from aigineering.agent.llm import LLMWorker
 from aigineering.agent.mock import MockWorker
-from aigineering.plugins import (
-    default_completion_registry as default_completion_registry,
-)
 from aigineering.core.session import SessionStore, session_trace_path
 from aigineering.core.query_projection import StoreQueryProjection
 from aigineering.core.sqlite_store import SQLiteStore

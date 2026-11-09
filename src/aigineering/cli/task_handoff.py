@@ -2,40 +2,26 @@
 
 from __future__ import annotations
 
-from copy import copy
-
 import click
 
-from aigineering.application import collaboration_service, require_redis
+from aigineering.application import require_redis
 from aigineering.cli._common import (
     _cli_result_success as _success,
     _output_json,
     _persistent_snapshot,
-    _persistent_store,
 )
 from aigineering.core.domain import load_genesis
 from aigineering.runtime_services import RedisSyncPending
 from aigineering.task_handoff import (
-    publish_task_handoff,
-    publish_task_edit,
     task_edit_records,
     task_handoff_records,
-    validate_task_edit,
-    validate_task_handoff,
 )
 
 
-def _failure(
-    code: str, message: str, as_json: bool, *, next_step: str | None = None
-) -> None:
+def _failure(code: str, message: str, as_json: bool) -> None:
     if as_json:
-        payload = {"ok": False, "error": {"code": code, "message": message}}
-        if next_step:
-            payload["next_step"] = next_step
-        _output_json(payload)
+        _output_json({"ok": False, "error": {"code": code, "message": message}})
         raise click.exceptions.Exit(1)
-    if next_step:
-        message += f" Next step: {next_step}"
     raise click.ClickException(message)
 
 
@@ -55,13 +41,13 @@ def _redis_pending(exc: RedisSyncPending, as_json: bool) -> None:
         raise click.exceptions.Exit(1) from exc
     message = str(exc)
     if exc.accepted is True:
-        message += " The edit successor is committed and retained."
+        message += " Previously committed facts are retained."
     raise click.ClickException(message) from exc
 
 
 def _human_handoff(item: dict) -> str:
     lines = [
-        f"Handoff {item['record_id']}",
+        f"Historical handoff {item['record_id']}",
         f"  source: {item['contract_id']}",
         f"  successor: {item['successor_id']}",
         f"  budget: {item['budget']}",
@@ -71,15 +57,6 @@ def _human_handoff(item: dict) -> str:
         lines.append(f"  completed outputs: {item['completed_outputs']}")
     if item.get("retained_asset_ids"):
         lines.append(f"  retained Assets: {', '.join(item['retained_asset_ids'])}")
-    if "assignment_mode" in item:
-        lines.extend(
-            (
-                f"  successor assignment: {item['assignment_mode']} to "
-                f"{item.get('worker_id') or '(unassigned)'}",
-                f"  source assignment: {item.get('source_assignment_id') or '(none)'}",
-                f"  successor assignment fact: {item.get('assignment_fact_id') or '(none emitted)'}",
-            )
-        )
     if "source_original_balance" in item:
         lines.extend(
             (
@@ -127,15 +104,6 @@ def _human_handoff(item: dict) -> str:
                 f"{', '.join(proof['asset_ids'])}; facts "
                 f"{', '.join(proof['proof_record_ids']) or 'none'}"
             )
-    if item.get("hold_id"):
-        lines.extend(
-            (
-                f"  successor hold: {item['hold_id']}",
-                f"  release with: {item['unblock_command']}",
-            )
-        )
-    if item.get("run_command"):
-        lines.append(f"  continue with: {item['run_command']}")
     return "\n".join(lines)
 
 
@@ -143,123 +111,6 @@ def _human_history(items: list[dict], contract_id: str) -> str:
     if not items:
         return f"No handoffs from Contract {contract_id}."
     return "\n\n".join(_human_handoff(item) for item in items)
-
-
-@click.command("handoff")
-@click.argument("source")
-@click.option("--reason", required=True, help="Why the work is being handed off.")
-@click.option("--budget", type=click.IntRange(min=1), default=None)
-@click.option("--hold-reason", default=None, help="Optionally hold the successor.")
-@click.option(
-    "--assignment-worker",
-    default=None,
-    help="Explicitly assign the successor to this registered Worker.",
-)
-@click.option(
-    "--clear-assignment",
-    is_flag=True,
-    help="Explicitly leave the successor unassigned.",
-)
-@click.option(
-    "--source-assignment-id",
-    default=None,
-    help="Exact source assignment head required for an override; use an empty value only when no head exists.",
-)
-@click.option("--idempotency-key", default=None, help="Signed Candidate replay key.")
-@click.option("--json", "as_json", is_flag=True)
-def task_handoff(
-    source: str,
-    reason: str,
-    budget: int | None,
-    hold_reason: str | None,
-    assignment_worker: str | None,
-    clear_assignment: bool,
-    source_assignment_id: str | None,
-    idempotency_key: str | None,
-    as_json: bool,
-) -> None:
-    """Cancel a task tree and publish one bounded successor."""
-    if not source.strip():
-        _failure("invalid_input", "source Contract ID must be non-empty", as_json)
-    try:
-        # Structural validation happens before any plugin identity provisioning.
-        if not isinstance(reason, str) or not reason.strip():
-            raise ValueError("reason must be non-empty text")
-        if hold_reason is not None and not hold_reason.strip():
-            raise ValueError("hold_reason must be non-empty when supplied")
-        override_requested = assignment_worker is not None or clear_assignment
-        if override_requested != (source_assignment_id is not None):
-            raise ValueError("assignment override requires --source-assignment-id")
-        if clear_assignment == (assignment_worker is not None):
-            if override_requested:
-                raise ValueError(
-                    "choose exactly one of --assignment-worker or --clear-assignment"
-                )
-        if assignment_worker is not None and not assignment_worker.strip():
-            raise ValueError("assignment Worker ID must be non-empty")
-        if idempotency_key is not None and not idempotency_key.strip():
-            raise ValueError("idempotency key must not be blank")
-    except ValueError as exc:
-        _failure("invalid_input", str(exc), as_json)
-
-    require_redis()
-    try:
-        snapshot = _persistent_snapshot()
-    except FileNotFoundError:
-        _failure(
-            "workspace_not_initialized", "Initialize this workspace first.", as_json
-        )
-        raise AssertionError("unreachable")
-    try:
-        try:
-            load_genesis(snapshot)
-        except LookupError:
-            _failure(
-                "workspace_not_initialized", "Initialize this workspace first.", as_json
-            )
-        collaboration_service(snapshot).sync()
-        validate_task_handoff(
-            snapshot,
-            source,
-            reason,
-            budget=budget,
-            hold_reason=hold_reason or "",
-            assignment_worker_id=assignment_worker,
-            clear_assignment=clear_assignment,
-            source_assignment_id=source_assignment_id,
-            idempotency_key=idempotency_key,
-        )
-    except LookupError as exc:
-        _failure("not_found", str(exc), as_json)
-    except RedisSyncPending as exc:
-        _redis_pending(exc, as_json)
-    except ValueError as exc:
-        _failure("invalid_input", str(exc), as_json)
-    finally:
-        snapshot.close()
-
-    store = _persistent_store()
-    try:
-        data, revision = publish_task_handoff(
-            store,
-            source,
-            reason,
-            budget=budget,
-            hold_reason=hold_reason or "",
-            assignment_worker_id=assignment_worker,
-            clear_assignment=clear_assignment,
-            source_assignment_id=source_assignment_id,
-            idempotency_key=idempotency_key,
-        )
-    except LookupError as exc:
-        _failure("not_found", str(exc), as_json)
-    except RedisSyncPending as exc:
-        _redis_pending(exc, as_json)
-    except ValueError as exc:
-        _failure("rejected", str(exc), as_json)
-    finally:
-        store.close()
-    _success(as_json, data, revision, _human_handoff(data))
 
 
 @click.command("handoffs")
@@ -295,58 +146,8 @@ def task_handoffs(source: str, as_json: bool) -> None:
 
 
 def register_task_handoff_commands(task_group: click.Group) -> None:
-    for command in (task_handoff, task_handoffs, task_edit, task_edits):
-        task_group.add_command(copy(command))
-
-
-def _human_edit(item: dict) -> str:
-    lines = [
-        f"Task edit {item['record_id']}",
-        f"  source: {item['contract_id']} ({item.get('source_status', 'unknown')})",
-        f"  successor: {item['successor_id']}",
-        f"  changed: {', '.join(item['edit']['changed_fields'])}",
-        f"  reason: {item['reason']}",
-        f"  assignment: {item.get('successor_assignment_id') or '(unassigned)'}",
-    ]
-    if item.get("idempotency_key"):
-        lines.append(f"  idempotency key: {item['idempotency_key']}")
-    mapping = item["edit"].get("hold_mapping", ())
-    if mapping:
-        lines.append("  copied holds:")
-        lines.extend(
-            f"    {row['source_hold_id']} -> {row['successor_hold_id']}"
-            for row in mapping
-        )
-    lines.append(f"  next step: {_edit_next_step(item)}")
-    return "\n".join(lines)
-
-
-def _edit_next_step(item: dict) -> str:
-    successor = str(item["successor_id"])
-    mapping = item.get("edit", {}).get("hold_mapping", ())
-    if mapping:
-        commands = "; then ".join(
-            f"aig task unblock {successor} --hold {row['successor_hold_id']} "
-            "--reason 'ready to continue'"
-            for row in mapping
-        )
-        return (
-            f"Inspect copied holds with `aig task holds {successor} --json`; "
-            f"only if each hold's reason is resolved, release exact IDs with {commands}; "
-            f"then run `aig run --task {successor}`."
-        )
-    return str(item.get("run_command") or f"aig run --task {successor}")
-
-
-def _edit_error_next_step(message: str, source: str) -> str | None:
-    if "already terminal" in message:
-        return (
-            f"Inspect verified task lineage with `aig task lineage {source} --json`; "
-            "edit only a task that is currently open and otherwise eligible."
-        )
-    if "task edit is a no-op" in message:
-        return "Change --title or --body so at least one supplied value differs from the current task."
-    return None
+    task_group.add_command(task_handoffs)
+    task_group.add_command(task_edits)
 
 
 def _human_edit_history(items: list[dict], source: str) -> str:
@@ -355,125 +156,16 @@ def _human_edit_history(items: list[dict], source: str) -> str:
     return "\n\n".join(
         "\n".join(
             (
-                f"Task edit {item['record_id']}",
+                f"Historical task edit {item['record_id']}",
                 f"  successor: {item['successor_id']}",
                 f"  changed: {', '.join(item['edit']['changed_fields'])}",
                 f"  reason: {item['reason']}",
-                f"  source assignment: {item['source_assignment_id'] or '(none)'}",
+                f"  recorded source assignment: {item['source_assignment_id'] or '(none)'}",
                 "  source holds: " + (", ".join(item["source_hold_ids"]) or "none"),
             )
         )
         for item in items
     )
-
-
-@click.command("edit")
-@click.argument("source")
-@click.option("--title", default=None, help="Replace the task title exactly.")
-@click.option(
-    "--body",
-    default=None,
-    help="Replace the task body exactly; an empty value is allowed.",
-)
-@click.option("--reason", required=True, help="Why a successor task is being created.")
-@click.option(
-    "--source-assignment-id",
-    default=None,
-    help="Optional exact source assignment head for replay.",
-)
-@click.option(
-    "--source-hold-id",
-    "source_hold_ids",
-    multiple=True,
-    help="Exact source hold ID; repeat each returned ID when replaying an edit.",
-)
-@click.option("--idempotency-key", default=None, help="Signed Candidate replay key.")
-@click.option("--json", "as_json", is_flag=True)
-def task_edit(
-    source: str,
-    title: str | None,
-    body: str | None,
-    reason: str,
-    source_assignment_id: str | None,
-    source_hold_ids: tuple[str, ...],
-    idempotency_key: str | None,
-    as_json: bool,
-) -> None:
-    """Edit a task by publishing a bounded successor Contract."""
-    if not source.strip():
-        _failure("invalid_input", "source Contract ID must be non-empty", as_json)
-    try:
-        if title is None and body is None:
-            raise ValueError("supply --title, --body, or both")
-        if not isinstance(reason, str) or not reason.strip():
-            raise ValueError("reason must be non-empty text")
-        if idempotency_key is not None and not idempotency_key.strip():
-            raise ValueError("idempotency key must not be blank")
-        if len(source_hold_ids) != len(set(source_hold_ids)):
-            raise ValueError("source hold IDs must not be repeated")
-    except ValueError as exc:
-        next_step = _edit_error_next_step(str(exc), source)
-        _failure("invalid_input", str(exc), as_json, next_step=next_step)
-
-    require_redis()
-    try:
-        snapshot = _persistent_snapshot()
-    except FileNotFoundError:
-        _failure(
-            "workspace_not_initialized", "Initialize this workspace first.", as_json
-        )
-        raise AssertionError("unreachable")
-    try:
-        try:
-            load_genesis(snapshot)
-        except LookupError:
-            _failure(
-                "workspace_not_initialized", "Initialize this workspace first.", as_json
-            )
-        collaboration_service(snapshot).sync()
-        validate_task_edit(
-            snapshot,
-            source,
-            reason,
-            title=title,
-            body=body,
-            source_assignment_id=source_assignment_id,
-            source_hold_ids=source_hold_ids if source_hold_ids else None,
-            idempotency_key=idempotency_key,
-        )
-    except LookupError as exc:
-        _failure("not_found", str(exc), as_json)
-    except RedisSyncPending as exc:
-        _redis_pending(exc, as_json)
-    except ValueError as exc:
-        next_step = _edit_error_next_step(str(exc), source)
-        _failure("invalid_input", str(exc), as_json, next_step=next_step)
-    finally:
-        snapshot.close()
-
-    store = _persistent_store()
-    try:
-        item, revision = publish_task_edit(
-            store,
-            source,
-            reason,
-            title=title,
-            body=body,
-            source_assignment_id=source_assignment_id,
-            source_hold_ids=source_hold_ids if source_hold_ids else None,
-            idempotency_key=idempotency_key,
-        )
-    except LookupError as exc:
-        _failure("not_found", str(exc), as_json)
-    except RedisSyncPending as exc:
-        _redis_pending(exc, as_json)
-    except ValueError as exc:
-        next_step = _edit_error_next_step(str(exc), source)
-        _failure("rejected", str(exc), as_json, next_step=next_step)
-    finally:
-        store.close()
-    item["next_step"] = _edit_next_step(item)
-    _success(as_json, item, revision, _human_edit(item))
 
 
 @click.command("edits")

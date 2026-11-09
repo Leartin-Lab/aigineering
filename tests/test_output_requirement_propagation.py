@@ -1,98 +1,59 @@
-"""Output conditions follow only the successor's declared output roles."""
-
-from __future__ import annotations
+"""Ordinary planners preserve only the output conditions they declare."""
 
 from aigineering.core.control_plane import build_control_plane_contract
-from aigineering.core.projection_context import EffectProjectionContext
+from aigineering.core.output_satisfaction import output_asset_meets_conditions
 from aigineering.plugins.delegation import _parallel_tool_contracts
 from aigineering.plugins.task_semantics import _build_plan_contract
-from aigineering.plugins.task_successors import (
-    satisfied_asset_ids,
-    satisfied_output_slots,
-    build_successor_contract,
-)
 from aigineering.protocol.actions import WorkerAction
 from aigineering.protocol.immutability import deep_thaw
 from aigineering.protocol.types import Asset
 
 
 def _requirements(definition: str, content: str) -> dict:
-    return {
-        "definition_id": definition,
-        "content_id": content,
-    }
+    return {"definition_id": definition, "content_id": content}
 
 
-def test_slot_matching_uses_complete_multi_output_contract():
-    requirements = {
-        "draft": _requirements("definition:v1:" + "a" * 64, "content:v1:" + "b" * 64),
-        "final": _requirements("definition:v1:" + "c" * 64, "content:v1:" + "d" * 64),
+def test_output_matcher_checks_all_declared_asset_conditions():
+    policy = {
+        "mode": "mechanical",
+        "output_shapes": {"final": {"ok": "boolean"}},
+        "output_requirements": {
+            "final": _requirements(
+                "definition:v1:" + "a" * 64, "content:v1:" + "b" * 64
+            )
+        },
     }
     contract = build_control_plane_contract(
-        name="multi-slot",
-        outputs=("draft", "final"),
-        acceptance_policy={"mode": "mechanical", "output_requirements": requirements},
+        name="exact-output", outputs=("final",), acceptance_policy=policy
     )
-    draft = Asset(
-        id="draft-asset",
-        name="draft",
-        content="body",
-        origin="human",
+    asset = Asset(
+        id="matching",
+        name="final",
+        content='{"ok":true}',
+        origin="recovery",
         definition_hash="definition:v1:" + "a" * 64,
         content_hash="content:v1:" + "b" * 64,
     )
-
-    context = EffectProjectionContext(contracts=(contract,), assets=(draft,))
-
-    assert satisfied_output_slots(contract, context) == (("draft", ("draft-asset",)),)
-    assert satisfied_asset_ids(contract, "draft", context) == ("draft-asset",)
-
-
-def test_successor_filters_role_conditions_and_drops_retired_tree_source():
-    policy = {
-        "mode": "mechanical",
-        "output_source": "contract_tree",
-        "output_shapes": {
-            "draft": {"type": "string"},
-            "final": {"type": "object"},
-        },
-        "output_requirements": {
-            "draft": _requirements(
-                "definition:v1:" + "a" * 64, "content:v1:" + "b" * 64
-            ),
-            "final": _requirements(
-                "definition:v1:" + "c" * 64, "content:v1:" + "d" * 64
-            ),
-        },
-        "independent_review": {"policy": "review-v1"},
-    }
-    source = build_control_plane_contract(
-        name="source", outputs=("draft", "final"), acceptance_policy=policy
+    wrong_content = Asset(
+        **{
+            **asset.__dict__,
+            "id": "wrong-content",
+            "content_hash": "content:v1:" + "c" * 64,
+        }
     )
+    wrong_shape = Asset(**{**asset.__dict__, "id": "wrong-shape", "content": "[]"})
 
-    successor = build_successor_contract(
-        source, ("final",), 4, "continue", name_suffix=".next"
-    )
-
-    assert deep_thaw(successor.acceptance_policy) == {
-        "mode": "mechanical",
-        "output_shapes": {"final": {"type": "object"}},
-        "output_requirements": {
-            "final": _requirements(
-                "definition:v1:" + "c" * 64, "content:v1:" + "d" * 64
-            )
-        },
-        "independent_review": {"policy": "review-v1"},
-    }
+    assert output_asset_meets_conditions(contract, "final", asset)
+    assert not output_asset_meets_conditions(contract, "final", wrong_content)
+    assert not output_asset_meets_conditions(contract, "final", wrong_shape)
 
 
-def test_plan_contract_filters_shapes_and_requirements_without_tree_gate():
+def test_planned_child_preserves_exact_requirements_for_declared_slot():
     source = build_control_plane_contract(
         name="planner-source",
         outputs=("draft", "final"),
         acceptance_policy={
             "mode": "mechanical",
-            "output_source": "contract_tree",
             "output_shapes": {
                 "draft": {"type": "string"},
                 "final": {"type": "object"},
@@ -107,7 +68,6 @@ def test_plan_contract_filters_shapes_and_requirements_without_tree_gate():
             },
         },
     )
-
     child = _build_plan_contract(
         parent_id=source.id,
         parent_contract=source,
@@ -137,10 +97,9 @@ def test_plan_contract_filters_shapes_and_requirements_without_tree_gate():
     }
 
 
-def test_parallel_continuation_keeps_policy_except_retired_source():
+def test_tool_continuation_keeps_parent_output_conditions():
     policy = {
         "mode": "mechanical",
-        "output_source": "contract_tree",
         "output_shapes": {"final": {"type": "string"}},
         "output_requirements": {
             "final": _requirements(
@@ -150,7 +109,7 @@ def test_parallel_continuation_keeps_policy_except_retired_source():
         "independent_review": {"policy": "review-v1"},
     }
     parent = build_control_plane_contract(
-        name="parallel-parent",
+        name="tool-parent",
         outputs=("final",),
         budget=8,
         tool_scope=("lookup", "lookup2"),
@@ -169,6 +128,4 @@ def test_parallel_continuation_keeps_policy_except_retired_source():
     continuation = _parallel_tool_contracts(parent, action, allowance=8)[-1]
 
     assert continuation.outputs == parent.outputs
-    assert deep_thaw(continuation.acceptance_policy) == {
-        key: value for key, value in policy.items() if key != "output_source"
-    }
+    assert deep_thaw(continuation.acceptance_policy) == policy

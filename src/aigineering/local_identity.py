@@ -28,12 +28,7 @@ from aigineering.core.worker_routing import (
     WorkerRegistration,
     worker_registration_payload,
 )
-from aigineering.core.projection_context import load_effect_projection_context
-from aigineering.plugins.worker_profile_promotion import (
-    WORKER_PROFILE_PROMOTION_EFFECTS,
-    completed_profile_promotion_matches,
-    validate_worker_profile_promotion,
-)
+
 from aigineering.worker_hosting import authorize_worker_host
 
 
@@ -140,7 +135,7 @@ def ensure_local_domain(store, *, key_path: Path | None = None) -> GenesisManife
 
 
 def _local_root_publisher(
-    store, *, additional_effects=None, key_path: Path | None = None
+    store, *, key_path: Path | None = None
 ) -> tuple[GenesisManifest, CandidatePublisher]:
     genesis = ensure_local_domain(store, key_path=key_path)
     signer = load_actor_signer(key_path)
@@ -158,7 +153,6 @@ def _local_root_publisher(
         genesis,
         actor_key,
         signer,
-        additional_effects=additional_effects,
     )
 
 
@@ -176,7 +170,6 @@ def ensure_local_worker_host(
     require_redis()
     genesis, authority = _local_root_publisher(
         store,
-        additional_effects=WORKER_PROFILE_PROMOTION_EFFECTS,
         key_path=key_path,
     )
     worker_id = str(worker.worker_id)
@@ -240,7 +233,6 @@ def ensure_local_worker_host(
     if worker_registration_payload(current) == worker_registration_payload(requested):
         return replace(existing_host, registration_version=current.version)
 
-    records = tuple(record for _, record in store.scan_runtime_records())
     if pull_only:
         pull_view = replace(
             requested, profile_id=current.profile_id, version=current.version
@@ -253,45 +245,20 @@ def ensure_local_worker_host(
             f"Worker {worker_id!r} registration version {current.version!r} has "
             "routing metadata incompatible with pull-only package retrieval"
         )
-    if (
-        requested.version == "1"
-        and current.version != "1"
-        and completed_profile_promotion_matches(
-            records, requested=requested, current=current
-        )
+    current_adapter = replace(requested, version=current.version)
+    if worker_registration_payload(current_adapter) == worker_registration_payload(
+        current
     ):
         return replace(existing_host, registration_version=current.version)
-
-    actor_keys = tuple(load_effective_actor_keys(store, genesis))
-    context = load_effect_projection_context(store, actor_keys=actor_keys)
-    history = [
-        record
-        for record in records
-        if record.record_type == "worker.registered"
-        and record.payload.get("worker_id") == worker_id
-    ]
-    if (
-        requested.version == "1"
-        and current.version.isdecimal()
-        and str(int(current.version)) == current.version
-        and len(history) == 1
-        and requested.profile_id
-        and not effect_capabilities
-    ):
-        promoted = replace(requested, version=str(int(current.version) + 1))
-        previous = validate_worker_profile_promotion(
-            context,
-            previous_registration_id=history[0].id,
-            registration=promoted,
-        )
+    if requested.version == "1" and current.version.isdecimal():
+        registration = replace(requested, version=str(int(current.version) + 1))
         return authorize_worker_host(
             worker,
             genesis,
             existing_host.actor_key,
             existing_host.signer,
             authority,
-            registration=promoted,
-            promotion_previous_registration_id=previous.id,
+            registration=registration,
         )
 
     changed = [

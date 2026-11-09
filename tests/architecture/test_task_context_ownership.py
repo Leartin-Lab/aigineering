@@ -53,22 +53,10 @@ def test_task_context_owner_has_no_cli_or_mutation_dependencies():
     assert "aigineering.core.disclosure.compute_disclosure" in imports
 
 
-def test_runtime_compatibility_helper_delegates_to_shared_owner():
-    tree = _tree("src/aigineering/runtime.py")
-    matches = [
-        node
-        for node in tree.body
-        if isinstance(node, ast.FunctionDef)
-        and node.name == "_method_context_assets_for"
-    ]
-    assert len(matches) == 1
-    function = matches[0]
-    assert len(function.body) == 1
-    statement = function.body[0]
-    assert isinstance(statement, ast.Return)
-    assert isinstance(statement.value, ast.Call)
-    assert isinstance(statement.value.func, ast.Name)
-    assert statement.value.func.id == "method_context_assets_for"
+def test_runtime_has_no_legacy_trace_context_helper():
+    source = (ROOT / "src/aigineering/runtime.py").read_text()
+    assert "def _method_context_assets_for" not in source
+    assert "method_context_assets_for(" not in source
 
 
 def test_task_context_is_registered_on_existing_task_group():

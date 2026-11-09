@@ -175,14 +175,8 @@ def continuation_contract(
     *,
     method: str,
     budget: int,
-    legacy_empty_inputs: bool = False,
-    legacy_consumed_tool_scope: bool = False,
 ) -> Contract:
-    """Create a follow-up retaining input roles; recognize old empty-input wire.
-
-    Legacy-shape options are only for exact historical publication proofs.
-    Ordinary continuation proposals retain parent inputs and tool permissions.
-    """
+    """Create an ordinary follow-up retaining its source evidence and scope."""
     effective_budget = max(1, budget)
     name = f"{parent.name or parent.id}.{method}.continue.{source_contract.id}"
     authority = tuple(
@@ -193,22 +187,17 @@ def continuation_contract(
         if parent.sensitive_input_policy is not None
         else None
     )
-    tool_scope = parent.tool_scope
-    if method == "tool" and legacy_consumed_tool_scope:
-        source_payload = method_payload(source_contract).get("payload", {})
-        used_tool = (
-            source_payload.get("name") if isinstance(source_payload, Mapping) else None
-        )
-        if isinstance(used_tool, str) and used_tool:
-            tool_scope = tuple(tool for tool in parent.tool_scope if tool != used_tool)
+    is_tool = method == "tool"
+    source_observations = source_contract.outputs if is_tool else ()
+    inputs = tuple(dict.fromkeys((*parent.inputs, *source_observations)))
     return contract_from_fields(
         name=name,
         description=parent.description,
-        inputs=() if legacy_empty_inputs else parent.inputs,
+        inputs=inputs,
         outputs=parent.outputs,
-        activation="",
+        activation=" AND ".join(source_observations),
         budget=effective_budget,
-        tool_scope=tool_scope,
+        tool_scope=parent.tool_scope,
         labels=parent.labels,
         worker_capabilities=parent.worker_capabilities,
         worker_pools=parent.worker_pools,

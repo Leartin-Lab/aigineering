@@ -18,17 +18,13 @@ def test_output_conditions_have_one_matcher_without_task_origin_or_tree_authorit
     assert "return _is_contract_or_descendant(" not in output
     assert 'policy.get("output_source")' not in output
     assert "validate_output_requirements(contract)" in admission
-    assert "CURRENT_SCHEMA_VERSION = 23" in migration
+    assert "CURRENT_SCHEMA_VERSION = 24" in migration
     assert "def _migrate_to_v23(self)" in migration
 
 
 def test_control_plane_defaults_to_mechanical_and_successors_filter_shared_policy():
     control_plane = (SRC / "core/control_plane.py").read_text()
     cli_common = (SRC / "cli/_common.py").read_text()
-    successors = (SRC / "plugins/task_successors.py").read_text()
     assert 'else {"mode": "mechanical"}' in control_plane
     assert 'acceptance_policy={"mode": "mechanical"}' in cli_common
-    assert "output_asset_is_eligible(" in successors
-    assert 'acceptance_policy.pop("output_source", None)' in successors
-    assert 'for key in ("output_shapes", "output_requirements")' in successors
-    assert "for output in outputs if output in value" in successors
+    assert not (SRC / "plugins/task_successors.py").exists()

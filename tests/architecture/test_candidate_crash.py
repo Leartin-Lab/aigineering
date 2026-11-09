@@ -117,7 +117,9 @@ CandidateCommitter(store, store).commit(
 def test_terminal_crash_before_claim_release_rolls_back_both_facts(tmp_path):
     path = tmp_path / "terminal-claim-crash.db"
     store = SQLiteStore(str(path))
-    contract = Contract(id="task:terminal-claim-crash", name="crash")
+    contract = Contract(
+        id="task:terminal-claim-crash", name="crash", outputs=("unmet",), budget=1
+    )
     store.add_contract(contract)
     claim = store.claim_contract(
         contract.id,

@@ -8,8 +8,6 @@ from dataclasses import replace
 import pytest
 
 from aigineering.core.candidate_publisher import (
-    CandidatePublisher,
-    CandidatePublisherRegistry,
     publish_effects,
 )
 from aigineering.core.ids import (
@@ -21,14 +19,12 @@ from aigineering.core.ids import (
 from aigineering.core.signing import Ed25519Signer
 from aigineering.core.store import MemoryStore
 from aigineering.core.trace import MemoryTraceStore
-from aigineering.plugins.task_semantics import method_contract
+from aigineering.plugins.task_semantics import method_contract, method_payload
 from aigineering.plugins import (
-    ContinuationTaskPlugin,
     PlanningExpansionPlugin,
     PluginRequest,
     TaskDelegationPlugin,
     TaskPlugin,
-    ToolCompletionPlugin,
 )
 from aigineering.plugins.planning import (
     PlanningCompileError,
@@ -542,53 +538,19 @@ def test_compile_allows_optional_tool_permission_with_single_task_allowance():
     assert child.outputs == ("final_report",)
 
 
-def test_continuation_plugin_proposes_one_ordinary_task_and_registry_is_explicit():
+def test_continuation_contract_is_an_ordinary_declaration_value():
+    from aigineering.plugins.task_semantics import continuation_contract
+
     parent = _parent()
     source = method_contract(
         parent,
         WorkerAction(type="tool", payload={"name": "lookup", "args": {}}),
     )
-    plugin = ContinuationTaskPlugin()
-
-    proposal = plugin.propose(PluginRequest(parent=parent, source=source, allowance=3))
-
-    assert isinstance(plugin, TaskPlugin)
-    assert len(proposal.effects) == 1
-    assert proposal.effects[0].effect_type == "contract.declare"
-    payload = proposal.effects[0].payload["contract"]
-    assert payload["origin"] == "continuation"
-    assert payload["parent_id"] == parent.id
-    assert payload["budget"] == 3
-
-    signer = Ed25519Signer()
-    actor = ActorKey(
-        "plugin:continuation.publish.v1",
-        "continuation-1",
-        signer.kind,
-        signer.signer_id,
-        ("contract.publish",),
-    )
-    genesis = create_genesis_manifest(
-        "continuation-test", (actor,), "policy:continuation-test"
-    )
-    store = MemoryStore()
-    trace = MemoryTraceStore()
-    publisher = CandidatePublisher(store, trace, genesis, actor, signer)
-    publishers = CandidatePublisherRegistry(((plugin.plugin_id, publisher),))
-    parent_decision = publisher.publish(
-        (contract_declaration_effect(parent),),
-        idempotency_key="continuation-parent",
-    )
-    assert parent_decision.accepted is True
-
-    decision = publishers.get(plugin.plugin_id).publish(
-        proposal.effects,
-        idempotency_key="continuation-1",
-        causal_parents=(source.id,),
-    )
-
-    assert decision.accepted is True
-    assert len(store.get_all_contracts()) == 2
+    continuation = continuation_contract(parent, source, method="tool", budget=3)
+    assert continuation.origin == "continuation"
+    assert continuation.parent_id == parent.id
+    assert continuation.budget == 3
+    assert continuation.outputs == parent.outputs
 
 
 def test_parallel_tool_method_compiles_independent_tasks_and_boolean_join():
@@ -707,18 +669,39 @@ def test_claimed_action_plugin_rejects_unknown_action_without_fallback():
         )
 
 
-def test_tool_completion_plugin_requires_declared_worker_observation():
+def test_tool_action_is_compiled_as_an_ordinary_method_task():
     parent = replace(_parent(), tool_scope=("lookup",))
-    contract = method_contract(
+    proposal = TaskDelegationPlugin().propose_claimed(
         parent,
         WorkerAction(type="tool", payload={"name": "lookup", "args": {}}),
+        allowance=parent.budget,
     )
-    observation = Asset(
-        id="tool-observation",
-        name=contract.outputs[0],
-        content='{"ok":true,"result":"value"}',
-    )
-    plugin = ToolCompletionPlugin()
+    assert all(effect.effect_type == "contract.declare" for effect in proposal.effects)
+    declared = [
+        contract_from_dict(effect.payload["contract"]) for effect in proposal.effects
+    ]
+    assert any(method_payload(item).get("method") == "tool" for item in declared)
+    assert any(item.origin == "continuation" for item in declared)
 
-    assert plugin.handle_completion(None, contract, [observation]) is True
-    assert plugin.handle_completion(None, contract, []) is False
+
+def test_plugins_do_not_expose_postcompletion_lifecycle_controller():
+    from pathlib import Path
+
+    plugin_root = Path("src/aigineering/plugins")
+    for module in (
+        "completion.py",
+        "completion_projection.py",
+        "fail_completion.py",
+        "planning_completion.py",
+        "tool_completion.py",
+    ):
+        assert not (plugin_root / module).exists()
+
+    exports = (plugin_root / "__init__.py").read_text()
+    for export in (
+        "CompletionRegistry",
+        "TaskCompletionContext",
+        "TaskCompletionProjector",
+        "FailCompletionPlugin",
+    ):
+        assert export not in exports

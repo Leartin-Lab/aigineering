@@ -3,159 +3,15 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
-from types import MappingProxyType
 
 from aigineering.business import artifacts
-from aigineering.core.effect_projectors import EffectProjection
-from aigineering.core.effect_projection import EffectHandler
-from aigineering.core.projection_context import EffectProjectionContext
 from aigineering.core.publication_history import (
     validate_published_member,
 )
-from aigineering.protocol.candidate import CandidateEffect, CandidateProposal
 from aigineering.protocol.immutability import deep_thaw
-from aigineering.protocol.runtime_record import RuntimeRecord, create_runtime_record
-from aigineering.protocol.wire import contract_to_dict
+from aigineering.protocol.runtime_record import RuntimeRecord
 
 LINKED = "task.attachment.linked"
-
-
-def task_attachment_link_effect(
-    effect: CandidateEffect,
-    candidate: CandidateProposal,
-    receipt_id: str,
-    context: EffectProjectionContext,
-) -> EffectProjection:
-    if candidate.effects != (effect,):
-        raise ValueError("attachment link Candidate must contain exactly one effect")
-    payload = effect.payload
-    required = {
-        "contract_id",
-        "asset_id",
-        "contract_record_id",
-        "asset_record_id",
-        "asset_candidate_id",
-        "asset_receipt_id",
-        "asset_head_id",
-        "idempotency_key",
-    }
-    if set(payload) != required:
-        raise ValueError("attachment link effect fields are invalid")
-    contract_id = _text(payload["contract_id"], "contract_id")
-    asset_id = _text(payload["asset_id"], "asset_id")
-    contract_fact_id = _text(payload["contract_record_id"], "contract_record_id")
-    asset_fact_id = _text(payload["asset_record_id"], "asset_record_id")
-    source_candidate = _text(payload["asset_candidate_id"], "asset_candidate_id")
-    source_receipt = _text(payload["asset_receipt_id"], "asset_receipt_id")
-    source_head = _text(payload["asset_head_id"], "asset_head_id")
-    idempotency_key = _text(payload["idempotency_key"], "idempotency_key")
-    if candidate.idempotency_key != idempotency_key:
-        raise ValueError("attachment link idempotency key does not match Candidate")
-
-    contracts = [
-        contract for contract in context.contracts if contract.id == contract_id
-    ]
-    assets = [asset for asset in context.assets if asset.id == asset_id]
-    declarations = [
-        record
-        for record in context.runtime_records
-        if record.id == contract_fact_id
-        and record.record_type == "contract.declared"
-        and isinstance(record.payload.get("contract"), Mapping)
-        and record.payload["contract"].get("id") == contract_id
-    ]
-    committed_assets = [
-        record
-        for record in context.runtime_records
-        if record.id == asset_fact_id
-        and record.record_type == "asset.committed"
-        and isinstance(record.payload.get("asset"), Mapping)
-        and record.payload["asset"].get("id") == asset_id
-    ]
-    if (
-        len(contracts) != 1
-        or len(assets) != 1
-        or len(declarations) != 1
-        or len(committed_assets) != 1
-    ):
-        raise ValueError(
-            f"attachment publication is unavailable ({len(contracts)},{len(assets)},{len(declarations)},{len(committed_assets)})"
-        )
-    declaration = declarations[0]
-    if deep_thaw(declaration.payload["contract"]) != deep_thaw(
-        contract_to_dict(contracts[0])
-    ):
-        raise ValueError("task declaration does not match its current Contract")
-    records = tuple(context.runtime_records)
-    domain_id = _domain_id(records)
-    if candidate.domain_id != domain_id:
-        raise ValueError("attachment Candidate belongs to another domain")
-    validate_contract_declaration_member(
-        records, declaration, contract_id=contract_id, domain_id=domain_id
-    )
-    committed = committed_assets[0]
-    source_receipt_record, source_head_record = validate_published_member(
-        records,
-        committed,
-        expected_candidate=source_candidate,
-        expected_receipt=source_receipt,
-        expected_head=source_head,
-        domain_id=domain_id,
-    )
-    if tuple(source_receipt_record.payload.get("effect_types", ())) != (
-        "asset.propose",
-    ):
-        raise ValueError("attachment was not published by the supported import effect")
-    expected_parents = (
-        declaration.id,
-        committed.id,
-        source_receipt,
-        source_head,
-    )
-    if candidate.causal_parents != expected_parents:
-        raise ValueError("attachment Candidate has incorrect causal witnesses")
-    fact = create_runtime_record(
-        LINKED,
-        {
-            "actor_id": candidate.actor_id,
-            "asset_candidate_id": source_candidate,
-            "asset_head_id": source_head,
-            "asset_id": asset_id,
-            "asset_receipt_id": source_receipt,
-            "asset_record_id": committed.id,
-            "candidate_id": candidate.id,
-            "contract_id": contract_id,
-            "contract_record_id": declaration.id,
-            "key_id": candidate.key_id,
-            "idempotency_key": idempotency_key,
-        },
-        causal_parents=(receipt_id, *expected_parents),
-    )
-    existing = [record for record in records if record.id == fact.id]
-    if existing:
-        if len(existing) != 1:
-            raise ValueError("attachment link history is ambiguous")
-        _validate_link_member(records, existing[0])
-        if deep_thaw(existing[0].payload) != deep_thaw(fact.payload):
-            raise ValueError("attachment link replay conflicts with its original fact")
-        return EffectProjection((existing[0],), contract_id)
-    if any(
-        record.record_type == LINKED
-        and record.payload.get("contract_id") == contract_id
-        and record.payload.get("idempotency_key") == idempotency_key
-        for record in records
-    ):
-        raise ValueError("attachment idempotency key is already bound to another link")
-    asset = assets[0]
-    if deep_thaw(committed.payload["asset"]) != _asset_payload(asset):
-        raise ValueError("attachment Asset does not match its committed fact")
-    try:
-        if artifacts.envelope(asset)["kind"] != "attachment":
-            raise ValueError("asset is not an attachment")
-        artifacts.attachment_bytes(asset)
-    except (TypeError, ValueError) as exc:
-        raise ValueError("attachment bytes are unavailable") from exc
-    return EffectProjection((fact,), contract_id)
 
 
 def validate_link_history(
@@ -273,7 +129,10 @@ def validate_link_history(
             expected_head=str(payload.get("asset_head_id")),
             domain_id=domain_id,
         )
-        if tuple(source_receipt.payload.get("effect_types", ())) != ("asset.propose",):
+        source_effect_types = source_receipt.payload.get("effect_types", ())
+        if not isinstance(source_effect_types, (tuple, list)) or (
+            "asset.propose" not in source_effect_types
+        ):
             raise ValueError("attachment source publication is unsupported")
     return selected
 
@@ -281,12 +140,11 @@ def validate_link_history(
 def validate_contract_declaration_member(
     records, declaration, *, contract_id, domain_id=None
 ):
-    """Validate a declaration under a known publisher's complete head shape."""
+    """Validate a task declaration and its funding inside its exact publication."""
     rows = tuple(records)
     receipt, head = validate_published_member(rows, declaration, domain_id=domain_id)
     if declaration.payload.get("contract", {}).get("id") != contract_id:
         raise ValueError("task declaration identifies another Contract")
-    effects = receipt.payload.get("effect_types")
     members = tuple(head.payload.get("committed_record_ids", ()))
     by_id = {record.id: record for record in rows}
     committed = tuple(by_id[record_id] for record_id in members)
@@ -295,214 +153,24 @@ def validate_contract_declaration_member(
     )
     if declaration not in declarations:
         raise ValueError("task declaration is absent from its committed head")
+
+    # The head may contain other effects from the same Candidate. Validate all
+    # declarations and their exact funding witnesses without imposing a
+    # constructor or publisher-effect shape on the task.
     _validate_declaration_allowance_bundle(rows, receipt, head, committed, declarations)
+    from aigineering.core.contract_admission import validate_contract_commitment
+    from aigineering.protocol.wire import contract_from_dict
 
-    # Direct fan-out publishers (planning, delegation, staged planning) may
-    # publish several declarations in one Candidate. Their entire head must
-    # consist of exactly that many canonical declaration facts.
-    if (
-        isinstance(effects, (tuple, list))
-        and effects
-        and all(effect == "contract.declare" for effect in effects)
-    ):
-        if len(declarations) != len(effects) or any(
-            record.record_type
-            not in {
-                "contract.declared",
-                "allowance.granted",
-                "allowance.reserved",
-            }
-            for record in committed
-        ):
-            raise ValueError("multi-task declaration head is incomplete")
-        from aigineering.core.contract_admission import validate_contract_commitment
-        from aigineering.protocol.wire import contract_from_dict
-
-        declared_ids = set()
-        try:
-            for record in declarations:
-                contract = contract_from_dict(deep_thaw(record.payload["contract"]))
-                validate_contract_commitment(contract)
-                if contract.id in declared_ids:
-                    raise ValueError("declaration head repeats a Contract")
-                declared_ids.add(contract.id)
-        except (TypeError, KeyError) as exc:
-            raise ValueError("declaration head contains an invalid Contract") from exc
-        return receipt, head
-
-    # These three existing compound publishers emit a declaration together
-    # with a typed relation proving how the ordinary task was produced.
-    compound = {
-        ("task.handoff",): (
-            "task.handed_off",
-            "successor_id",
-            {
-                "lifecycle.terminal",
-                "contract.declared",
-                "claim.assignment.changed",
-                "claim.hold.placed",
-                "allowance.returned",
-                "task.handed_off",
-                "allowance.granted",
-                "allowance.reserved",
-            },
-        ),
-        ("task.revise",): (
-            "task.revised",
-            "successor_id",
-            {
-                "lifecycle.terminal",
-                "contract.declared",
-                "claim.assignment.changed",
-                "task.revised",
-                "allowance.granted",
-                "allowance.reserved",
-            },
-        ),
-        ("task.review.request",): (
-            "task.review.requested",
-            "child_contract_id",
-            {
-                "contract.declared",
-                "task.review.requested",
-                "allowance.granted",
-                "allowance.reserved",
-            },
-        ),
-    }
-    if not isinstance(effects, (tuple, list)):
-        raise ValueError("task declaration publisher metadata is invalid")
-    shape = compound.get(tuple(effects))
-    if shape is None:
-        raise ValueError("task declaration publication is unsupported")
-    relation_type, target_field, allowed_types = shape
-    relations = tuple(
-        record for record in committed if record.record_type == relation_type
-    )
-    target = next(
-        (
-            record
-            for record in declarations
-            if record.payload.get("contract", {}).get("id") == contract_id
-        ),
-        None,
-    )
+    declared_ids = set()
     try:
-        from aigineering.protocol.wire import contract_from_dict
-
-        target_contract = (
-            contract_from_dict(deep_thaw(target.payload["contract"]))
-            if target is not None
-            else None
-        )
+        for record in declarations:
+            contract = contract_from_dict(deep_thaw(record.payload["contract"]))
+            validate_contract_commitment(contract)
+            if contract.id in declared_ids:
+                raise ValueError("declaration head repeats a Contract")
+            declared_ids.add(contract.id)
     except (TypeError, ValueError, KeyError) as exc:
-        raise ValueError("compound task declaration is invalid") from exc
-    if (
-        len(declarations) != 1
-        or len(relations) != 1
-        or target is None
-        or target_contract is None
-        or target_contract.parent_id != relations[0].payload.get("contract_id")
-        or any(record.record_type not in allowed_types for record in committed)
-        or relations[0].payload.get(target_field) != contract_id
-        or relations[0].payload.get("candidate_id")
-        != receipt.payload.get("candidate_id")
-        or relations[0].payload.get("actor_id") != receipt.payload.get("actor_id")
-        or relations[0].payload.get("key_id") != receipt.payload.get("key_id")
-        or target.id not in relations[0].causal_parents
-    ):
-        raise ValueError("compound task declaration head is incomplete")
-    source_id = relations[0].payload.get("contract_id")
-    if not isinstance(source_id, str) or not source_id:
-        raise ValueError("compound task declaration source is invalid")
-    source_terminals = tuple(
-        record
-        for record in committed
-        if record.record_type == "lifecycle.terminal"
-        and record.payload.get("contract_id") == source_id
-        and record.payload.get("terminal") == "cancelled"
-        and record.id in relations[0].causal_parents
-        and receipt.id in record.causal_parents
-    )
-    if effects in {("task.handoff",), ("task.revise",)} and len(source_terminals) != 1:
-        raise ValueError("successor declaration lacks its exact source terminal")
-    if effects == ("task.review.request",):
-        targets = tuple(
-            record
-            for record in rows
-            if record.record_type == "asset.committed"
-            and record.payload.get("asset", {}).get("id")
-            == relations[0].payload.get("asset_id")
-        )
-        if len(targets) != 1 or targets[0].id not in relations[0].causal_parents:
-            raise ValueError("review declaration lacks its exact target Asset")
-        request_receipt, _request_head = validate_published_member(
-            rows,
-            relations[0],
-            domain_id=domain_id or _domain_id(rows),
-            allow_additional_causal_parents=True,
-        )
-        if (
-            tuple(request_receipt.payload.get("effect_types", ()))
-            != ("task.review.request",)
-            or target.id not in relations[0].causal_parents
-            or declaration.id not in (relations[0].causal_parents)
-        ):
-            raise ValueError("review declaration publisher metadata is unsupported")
-    if effects == ("task.revise",):
-        decision_id = relations[0].payload.get("decision_id")
-        decisions = tuple(
-            record
-            for record in rows
-            if record.record_type == "task.review.decided"
-            and record.id == decision_id
-            and record.payload.get("verdict") == "changes"
-            and record.payload.get("contract_id") == source_id
-        )
-        if len(decisions) != 1 or decisions[0].id not in relations[0].causal_parents:
-            raise ValueError("revision declaration lacks its exact review decision")
-        decision_receipt, _decision_head = validate_published_member(
-            rows,
-            decisions[0],
-            domain_id=domain_id or _domain_id(rows),
-            allow_additional_causal_parents=True,
-        )
-        if tuple(decision_receipt.payload.get("effect_types", ())) != (
-            "task.review.decide",
-        ):
-            raise ValueError("revision review-decision publisher is unsupported")
-        report_commits = tuple(
-            record
-            for record in rows
-            if record.record_type == "asset.committed"
-            and record.payload.get("asset", {}).get("id")
-            == decisions[0].payload.get("report_asset_id")
-        )
-        if (
-            decisions[0].payload.get("request_id") not in decisions[0].causal_parents
-            or len(report_commits) != 1
-            or report_commits[0].id not in decisions[0].causal_parents
-        ):
-            raise ValueError("revision decision causal witnesses are incomplete")
-        requests = tuple(
-            record
-            for record in rows
-            if record.record_type == "task.review.requested"
-            and record.id == decisions[0].payload.get("request_id")
-            and record.payload.get("contract_id") == source_id
-        )
-        if len(requests) != 1:
-            raise ValueError("revision decision lacks its exact source request")
-        request_receipt, _request_head = validate_published_member(
-            rows,
-            requests[0],
-            domain_id=domain_id or _domain_id(rows),
-            allow_additional_causal_parents=True,
-        )
-        if tuple(request_receipt.payload.get("effect_types", ())) != (
-            "task.review.request",
-        ):
-            raise ValueError("revision source request publisher is unsupported")
+        raise ValueError("task declaration head contains an invalid Contract") from exc
     return receipt, head
 
 
@@ -650,22 +318,8 @@ def _text(value, field):
     return value
 
 
-TASK_ATTACHMENT_EFFECTS = MappingProxyType(
-    {
-        "task.attachment.link": EffectHandler(
-            capability="task.attach",
-            projector=task_attachment_link_effect,
-            direct_output_fact_types=frozenset({LINKED}),
-            reserved_fact_types=frozenset({LINKED}),
-        )
-    }
-)
-
-
 __all__ = [
     "LINKED",
-    "TASK_ATTACHMENT_EFFECTS",
-    "task_attachment_link_effect",
     "validate_contract_declaration_member",
     "validate_link_history",
     "validate_published_member",

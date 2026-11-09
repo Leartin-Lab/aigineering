@@ -16,8 +16,16 @@ runtime, with transactional SQLite facts and required Redis collaboration.
 4. Reduce duplication and unnecessary maintenance; address confirmed performance
    defects after the supported user path works.
 
-Planning, tool continuation, retry and recovery remain ordinary runtime tasks.
-These priorities do not introduce a second scheduler or expand kernel authority.
+Planning, tool continuation, retry and funded recovery use ordinary runtime
+tasks. The runtime does not maintain an execution DAG or post-completion
+controller. Unfunded recovery remains a visible blocker; no root grant is
+fabricated.
+
+Current control-plane scope is intentionally limited to ordinary task creation,
+execution, claims, Assets, attestation, cancellation, retry and diagnostics.
+Legacy handoff, revision/edit, assignment, dependency, hold/promotion, priority,
+comment and attachment-link records are historical read surfaces, not fresh
+writer workflows.
 
 ## Outside current scope
 

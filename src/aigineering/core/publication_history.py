@@ -9,6 +9,129 @@ from types import MappingProxyType
 from aigineering.protocol.runtime_record import RuntimeRecord, validate_runtime_record
 
 
+class CandidateHistoryError(ValueError):
+    """Historical replay cannot prove a complete immutable decision."""
+
+
+def committed_member_ids(head):
+    """Read the versioned head format, including immutable legacy heads."""
+    fields = {"candidate_id", "committed_record_ids"}
+    if "closure_version" in head.payload:
+        if (
+            type(head.payload["closure_version"]) is not int
+            or head.payload["closure_version"] != 1
+        ):
+            raise ValueError("unsupported Candidate closure version")
+        fields.add("closure_version")
+    ids = head.payload.get("committed_record_ids")
+    if (
+        set(head.payload) != fields
+        or not isinstance(ids, (tuple, list))
+        or any(not isinstance(item, str) or not item for item in ids)
+        or len(ids) != len(set(ids))
+    ):
+        raise ValueError("Candidate committed head fields are invalid")
+    return tuple(ids)
+
+
+def candidate_commit_head(receipt, records):
+    """Close one logical action only after all of its records are known."""
+    from aigineering.protocol.runtime_record import create_runtime_record
+
+    member_ids = tuple(row.id for row in records if row.id != receipt.id)
+    if len(member_ids) != len(set(member_ids)):
+        raise ValueError("Candidate closure contains duplicate members")
+    return create_runtime_record(
+        "candidate.committed",
+        {
+            "candidate_id": receipt.payload["candidate_id"],
+            "closure_version": 1,
+            "committed_record_ids": member_ids,
+        },
+        causal_parents=(receipt.id, *member_ids),
+    )
+
+
+def committed_candidate_decision(receipt, records):
+    """Return exact immutable history without running any effect maker."""
+    from aigineering.core.candidate_decision import CommitmentDecision
+    from aigineering.protocol.runtime_record import runtime_record_effective_payload
+    from aigineering.protocol.wire import (
+        asset_from_dict,
+        contract_from_dict,
+        trace_entry_from_dict,
+    )
+
+    candidate_id = receipt.payload["candidate_id"]
+    heads = tuple(
+        row
+        for row in records
+        if row.record_type == "candidate.committed"
+        and row.payload.get("candidate_id") == candidate_id
+    )
+    receipts = tuple(
+        row
+        for row in records
+        if row.record_type == "candidate.received"
+        and row.payload.get("candidate_id") == candidate_id
+    )
+    if len(heads) != 1 or len(receipts) != 1:
+        raise ValueError("Candidate history has no unique receipt and committed head")
+    head, original = heads[0], receipts[0]
+    if runtime_record_effective_payload(receipt) != runtime_record_effective_payload(
+        original
+    ):
+        raise ValueError("Candidate replay differs from the authenticated receipt")
+    ids = committed_member_ids(head)
+    if head.payload.get("closure_version") != 1:
+        raise CandidateHistoryError(
+            "legacy Candidate head has no complete closure; inspect its history "
+            "without replaying effects"
+        )
+    if (
+        original.id in ids
+        or head.id in ids
+        or head.causal_parents != (original.id, *ids)
+    ):
+        raise ValueError("Candidate history has a malformed committed closure")
+    index = index_published_records(records)
+    members = []
+    for record_id in ids:
+        matches = index.by_id.get(record_id, ())
+        if len(matches) != 1:
+            raise ValueError("Candidate committed member is missing or ambiguous")
+        member = matches[0]
+        validate_runtime_record(member)
+        if (
+            head.payload.get("closure_version") == 1
+            and head.id in member.causal_parents
+        ):
+            raise ValueError("Candidate closure contains a causal cycle")
+        members.append(member)
+    validate_runtime_record(original)
+    validate_runtime_record(head)
+    return CommitmentDecision(
+        candidate_id=candidate_id,
+        accepted=True,
+        runtime_records=(original, *members, head),
+        trace_entries=tuple(
+            trace_entry_from_dict(row.payload["trace"])
+            for row in members
+            if row.record_type == "trace.recorded"
+        ),
+        contracts=tuple(
+            contract_from_dict(row.payload["contract"])
+            for row in members
+            if row.record_type == "contract.declared"
+        ),
+        assets=tuple(
+            asset_from_dict(row.payload["asset"])
+            for row in members
+            if row.record_type == "asset.committed"
+        ),
+    )
+
+
 def read_effect_types(payload):
     """Read the exact ordered effect sequence from a publication payload.
 

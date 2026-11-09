@@ -1,7 +1,6 @@
 """Target-scoped behavior for ``aig run --task``."""
 
 import json
-import sqlite3
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -432,68 +431,13 @@ def test_recovery_status_does_not_cross_same_name_roots(monkeypatch, tmp_path):
         )
         assert failed.exit_code == 1, failed.output
         first_recoveries = json.loads(failed.output)["recoveries"]
-        assert first_recoveries
-        deeply_nested = "[" * 1500 + "0" + "]" * 1500
-        with sqlite3.connect(".aig/store.db") as connection:
-            connection.execute(
-                "UPDATE contracts SET description=? WHERE id=?",
-                (deeply_nested, first_recoveries[0]),
-            )
-
+        assert first_recoveries == []
         first_status = runner.invoke(cli, ["task", "status", failed_id, "--json"])
-        assert first_status.exit_code == 1, first_status.output
-        first_status_payload = json.loads(first_status.output)
-        assert first_status_payload["recoveries"] == first_recoveries
-
-        status = runner.invoke(cli, ["task", "status", other_id, "--json"])
-        assert status.exit_code == 1, status.output
-        assert json.loads(status.output)["recoveries"] == []
-        from aigineering.task_views import _has_active_recovery
-
-        store = SQLiteStore(".aig/store.db")
-        try:
-            failed_contract = store.get_contract(failed_id)
-            other_contract = store.get_contract(other_id)
-            assert failed_contract is not None
-            assert other_contract is not None
-            assert _has_active_recovery(failed_contract, store) is True
-            assert _has_active_recovery(other_contract, store) is False
-        finally:
-            store.close()
-
-        from aigineering.agent.worker import WorkerExecutionError
-
-        class FailingWorker:
-            worker_id = "failing-worker-for-recovery-attribution"
-
-            def invoke(self, contract, disclosed_assets):
-                del contract, disclosed_assets
-                raise WorkerExecutionError("fixture_failure", "fixture failure")
-
-        monkeypatch.setattr(
-            "aigineering.cli.run.build_worker",
-            lambda *_args, **_kwargs: FailingWorker(),
-        )
-        second_failure = runner.invoke(
-            cli,
-            [
-                "run",
-                "--task",
-                other_id,
-                "--worker",
-                "llm",
-                "--model",
-                "fixture",
-                "--json",
-            ],
-        )
-
-        assert second_failure.exit_code == 1, second_failure.output
-        second_recoveries = json.loads(second_failure.output)["recoveries"]
-        assert second_recoveries
-        assert set(second_recoveries).isdisjoint(
-            json.loads(failed.output)["recoveries"]
-        )
+        other_status = runner.invoke(cli, ["task", "status", other_id, "--json"])
+        assert json.loads(first_status.output)["status"] == "stalled"
+        assert json.loads(other_status.output)["status"] == "ready"
+        assert json.loads(first_status.output)["recoveries"] == []
+        assert json.loads(other_status.output)["recoveries"] == []
 
 
 def test_target_pool_claims_child_recovery_and_tool_descendants(monkeypatch):

@@ -77,6 +77,28 @@ class TaskViewQueryContext:
     def get_contract(self, contract_id):
         return self._contracts_by_id.get(contract_id)
 
+    def read_task_facts(self, contract_id, record_types):
+        return tuple(
+            record
+            for _, record in self.runtime_records
+            if record.record_type in record_types
+            and (
+                record.payload.get("contract_id") == contract_id
+                or (
+                    record.record_type in {"allowance.reserved", "allowance.returned"}
+                    and record.payload.get("source_contract_id") == contract_id
+                )
+                or (
+                    record.record_type == "allowance.returned"
+                    and record.payload.get("from_contract_id") == contract_id
+                )
+                or (
+                    record.record_type == "contract.declared"
+                    and record.payload["contract"]["id"] == contract_id
+                )
+            )
+        )
+
     def get_all_assets(self):
         return list(self.assets)
 

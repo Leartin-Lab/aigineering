@@ -18,7 +18,6 @@ from aigineering.core.asset_versions import (
     create_replacement_claim,
     create_slice_asset,
 )
-from aigineering.core.commitment import CandidateCommitter
 from aigineering.core.domain import initialize_genesis
 from aigineering.core.signing import Ed25519Signer
 from aigineering.core.sqlite_store import SQLiteStore
@@ -38,9 +37,7 @@ from aigineering.protocol.effect_builders import (
     worker_claim_effect,
     worker_claim_renewal_effect,
     worker_registration_effect,
-    task_assign_effect,
 )
-from aigineering.plugins.task_assignment import TASK_ASSIGNMENT_EFFECTS
 from aigineering.server.app import app
 
 
@@ -751,69 +748,6 @@ def test_worker_submission_authentication_rejection_preserves_claim(
         assert not persisted.get_assets_by_name("out")
     finally:
         persisted.close()
-
-
-def test_http_claim_respects_signed_assignment_and_selected_worker(
-    tmp_path, monkeypatch
-):
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr("aigineering.server.app.require_redis", lambda: None)
-    monkeypatch.setattr(
-        "aigineering.server.app.sync_runtime", lambda _store, *, accepted: None
-    )
-    client, actor = _signed_client()
-    created = _post_contract(
-        client, actor, name="http assigned", outputs=["result"], budget=1
-    )
-    contract_id = created.json()["id"]
-    wrong_worker = _register_worker(client, actor, "worker:wrong")
-    selected_worker = _register_worker(client, actor, "worker:selected")
-
-    signer, genesis = actor
-    assignment_candidate = create_candidate_proposal(
-        domain_id=genesis.id,
-        actor_id="test:client",
-        key_id="root",
-        effects=[
-            task_assign_effect(contract_id, "worker:selected", "", "route via HTTP")
-        ],
-        signer=signer,
-        idempotency_key="http-assignment-selected-worker",
-    )
-    store = SQLiteStore(".aig/store.db")
-    assignment = CandidateCommitter(
-        store, store, additional_effects=TASK_ASSIGNMENT_EFFECTS
-    ).commit(assignment_candidate, genesis)
-    assert assignment.accepted
-    store.close()
-
-    denied = client.post(
-        "/worker/claims",
-        json=_worker_command(
-            actor,
-            wrong_worker,
-            worker_claim_effect("worker:wrong", contract_id=contract_id),
-            "claim-wrong-assigned-worker",
-        ),
-    )
-    assert denied.status_code == 409
-    store = SQLiteStore(".aig/store.db")
-    assert store.get_claim(contract_id) is None
-    store.close()
-
-    claimed = client.post(
-        "/worker/claims",
-        json=_worker_command(
-            actor,
-            selected_worker,
-            worker_claim_effect("worker:selected", contract_id=contract_id),
-            "claim-selected-assigned-worker",
-        ),
-    )
-    assert claimed.status_code == 200, claimed.text
-    store = SQLiteStore(".aig/store.db")
-    assert store.get_claim(contract_id)["worker_id"] == "worker:selected"
-    store.close()
 
 
 def test_unregistered_worker_cannot_lock_a_server_task(tmp_path, monkeypatch):

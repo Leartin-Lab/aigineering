@@ -41,10 +41,14 @@ class TestConcurrentClaims:
         # Set up contracts in main thread store
         setup_store = SQLiteStore(db_path)
         setup_store.add_contract(
-            Contract(id="task:a", name="task_a", outputs=("out",), activation="")
+            Contract(
+                id="task:a", name="task_a", outputs=("out",), activation="", budget=1
+            )
         )
         setup_store.add_contract(
-            Contract(id="task:b", name="task_b", outputs=("out",), activation="")
+            Contract(
+                id="task:b", name="task_b", outputs=("out",), activation="", budget=1
+            )
         )
         setup_store.close()
 
@@ -89,7 +93,11 @@ class TestConcurrentClaims:
         setup_store = SQLiteStore(db_path)
         setup_store.add_contract(
             Contract(
-                id="task:shared", name="shared_task", outputs=("out",), activation=""
+                id="task:shared",
+                name="shared_task",
+                outputs=("out",),
+                activation="",
+                budget=1,
             )
         )
         setup_store.close()
@@ -172,7 +180,13 @@ class TestConcurrentClaims:
         db_path = str(tmp_path / "aig_c4.db")
         setup_store = SQLiteStore(db_path)
         setup_store.add_contract(
-            Contract(id="task:r1", name="reader_test", outputs=("out",), activation="")
+            Contract(
+                id="task:r1",
+                name="reader_test",
+                outputs=("out",),
+                activation="",
+                budget=1,
+            )
         )
         setup_store.add_asset(_mk_asset("reader_asset"))
         setup_store.close()

@@ -19,7 +19,6 @@ from aigineering.cli._candidate import commit_local_effects, require_accepted
 from aigineering.agent.worker import WorkerExecutionError
 from aigineering.runtime import (
     WorkerSubmissionCommitError,
-    _method_context_assets_for,
     submit_worker_proposal,
 )
 from aigineering.runtime_services import (
@@ -108,7 +107,6 @@ def worker_package(contract_id: str, json_output: bool) -> None:
             raise click.exceptions.Exit(1)
 
         scope = compute_disclosure(contract, store)
-        method_context_assets = _method_context_assets_for(contract, store)
 
         def metadata(asset: object) -> dict[str, object]:
             if isinstance(asset, dict):
@@ -139,9 +137,6 @@ def worker_package(contract_id: str, json_output: bool) -> None:
             "contract_id": contract.id,
             "contract": contract_to_dict(contract),
             "disclosed_assets": [metadata(asset) for asset in scope],
-            "method_context_assets": [
-                metadata(asset) for asset in method_context_assets
-            ],
             "tool_scope": list(contract.tool_scope),
             "budget_remaining": contract.budget,
             "capability_requirements": list(contract.worker_capabilities),

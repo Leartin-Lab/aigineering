@@ -10,7 +10,6 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
-from aigineering.plugins import default_completion_registry
 from aigineering.runtime_services import (
     claim_next_application_package,
     order_application_contract_ids,
@@ -18,7 +17,6 @@ from aigineering.runtime_services import (
 from aigineering.runtime import (
     WorkerInvocationError,
     execute_claimed_package,
-    process_task_completions,
     run_runtime_maintenance_step,
 )
 from aigineering.core.candidate_publisher import (
@@ -492,12 +490,9 @@ def _run_inner_steps(
     inner_workers: tuple[tuple[object, Worker], ...],
     max_steps: int,
 ) -> bool:
-    registry = default_completion_registry()
     worker_hosts: dict[str, WorkerHost] = {}
     for _ in range(max_steps):
-        run_runtime_maintenance_step(
-            store, registry, candidate_publishers=candidate_publishers
-        )
+        run_runtime_maintenance_step(store, candidate_publishers=candidate_publishers)
         selected = _claim_inner_work(
             store,
             delegate,
@@ -523,9 +518,7 @@ def _run_inner_steps(
             )
         except (ValueError, WorkerInvocationError):
             return False
-        process_task_completions(
-            store, registry, candidate_publishers=candidate_publishers
-        )
+
     return True
 
 

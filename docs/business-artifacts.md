@@ -174,11 +174,8 @@ Any unresolved runtime parents are listed separately. The evidence HTML
 highlights extracted text and can link to the PDF page; it does not overlay a
 bounding box in the original PDF.
 
-## Associate an imported file with a task
+## Historical task attachments
 
-The [task attachment commands](reference/task-attachments.md) reuse the
-artifact-v1 byte validator and signed publication history. `task attachment add`
-creates a typed, attributed task/Asset relation; `list` exposes safe metadata and
-`export` copies currently available original bytes to an explicit fresh file.
-A relation preserves task input and qualification scope. Supplying Worker input
-still requires the existing explicit immutable Contract mechanisms.
+[Historical attachment list/export](reference/task-attachments.md) verifies the
+original signed relation and pinned bytes. New attachment-link publication has
+been removed. Give a Worker input through explicit immutable Contract bindings.

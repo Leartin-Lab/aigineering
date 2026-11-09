@@ -96,7 +96,6 @@ def test_fleet_result_includes_capture_warning_completed_during_executor_join(
     monkeypatch.setattr(
         local_fleet_module, "ensure_local_runtime_publishers", lambda _s: {}
     )
-    monkeypatch.setattr(local_fleet_module, "default_completion_registry", lambda: {})
     monkeypatch.setattr(
         local_fleet_module, "run_runtime_maintenance_step", lambda *_a, **_k: None
     )
@@ -220,7 +219,6 @@ def test_late_unexpected_future_is_reported_safely_after_executor_join(
     monkeypatch.setattr(
         local_fleet_module, "ensure_local_runtime_publishers", lambda _store: {}
     )
-    monkeypatch.setattr(local_fleet_module, "default_completion_registry", lambda: {})
     monkeypatch.setattr(
         local_fleet_module, "run_runtime_maintenance_step", lambda *_a, **_k: None
     )
@@ -785,18 +783,20 @@ def test_local_fleet_recovers_bad_output_with_frozen_skill_context(
 ):
     if concurrent_recovery:
         recovery_barrier = Barrier(2)
-        original_commit = SQLiteStore.commit_ingress_batch
+        from aigineering.core.commitment import CandidateCommitter
 
-        def synchronized_recovery(store, *args, **kwargs):
+        original_commit = CandidateCommitter.commit
+
+        def synchronized_recovery(committer, candidate, *args, **kwargs):
             if any(
-                record.record_type == "contract.declared"
-                and record.payload["contract"].get("origin") == "recovery"
-                for record in kwargs.get("runtime_records", ())
+                effect.effect_type == "contract.declare"
+                and effect.payload["contract"].get("origin") == "recovery"
+                for effect in candidate.effects
             ):
                 recovery_barrier.wait(timeout=5)
-            return original_commit(store, *args, **kwargs)
+            return original_commit(committer, candidate, *args, **kwargs)
 
-        monkeypatch.setattr(SQLiteStore, "commit_ingress_batch", synchronized_recovery)
+        monkeypatch.setattr(CandidateCommitter, "commit", synchronized_recovery)
     monkeypatch.chdir(tmp_path)
     db_path = str(tmp_path / "recovery-fleet.db")
     store = SQLiteStore(db_path)
@@ -873,22 +873,21 @@ def test_local_fleet_recovers_bad_output_with_frozen_skill_context(
         assert recovery.context_asset_ids == task.context_asset_ids
         assert reopened.get_assets_by_name("evidence")[0].created_by == recovery.id
         assert reopened.scan_runtime_records(record_type="candidate.rejected")
-        assert reopened.scan_runtime_records(
+        assert not reopened.scan_runtime_records(
             record_type="candidate_rejection.recovery_scheduled"
         )
+        (declaration,) = (
+            row
+            for _, row in reopened.scan_runtime_records(record_type="contract.declared")
+            if row.payload["contract"]["id"] == recovery.id
+        )
+        from aigineering.core.publication_history import validate_published_member
+
+        rows = tuple(row for _, row in reopened.scan_runtime_records())
+        receipt, head = validate_published_member(rows, declaration)
+        assert receipt.payload["actor_id"] == "plugin:recovery.publish.v1"
+        assert declaration.id in head.payload["committed_record_ids"]
         before_traces = {entry.id: entry for entry in reopened.get_all()}
-        if concurrent_recovery:
-            recovery_records = [
-                record
-                for _, record in reopened.scan_runtime_records(
-                    record_type="trace.recorded"
-                )
-                if record.payload["trace"]["event_type"] == "recovery_scheduled"
-            ]
-            assert len(recovery_records) == 2
-            assert (
-                len({record.payload["trace"]["id"] for record in recovery_records}) == 1
-            )
         before_digest = reopened.runtime_materialization_digest()
         rebuilt_digest = reopened.rebuild_runtime_materializations()
         assert rebuilt_digest == before_digest
@@ -973,19 +972,37 @@ def test_parallel_tool_method_runs_calls_concurrently_then_joins(
     assert result.completed is not fail_one_call
     reopened = SQLiteStore(db_path)
     try:
+        declarations = tuple(
+            row
+            for _, row in reopened.scan_runtime_records(record_type="contract.declared")
+        )
+        continuation = next(
+            contract
+            for contract in reopened.get_all_contracts()
+            if "plugin:parallel_tool.continuation" in contract.labels
+        )
+        (source_candidate,) = (
+            row.payload["candidate_id"]
+            for row in declarations
+            if row.payload["contract"]["id"] == continuation.id
+        )
+        original_ids = {
+            row.payload["contract"]["id"]
+            for row in declarations
+            if row.payload["candidate_id"] == source_candidate
+        }
         tool_items = [
             contract
             for contract in reopened.get_all_contracts()
-            if "plugin:parallel_tool_item" in contract.labels
-            and method_payload(contract).get("recovery_source_contract_id") is None
+            if contract.id in original_ids
+            and "plugin:parallel_tool_item" in contract.labels
         ]
         assert len(tool_items) == 2
         recoveries = [
             contract
             for contract in reopened.get_all_contracts()
             if method_payload(contract).get("method") == "parallel_tool_item"
-            and method_payload(contract).get("recovery_source_contract_id")
-            in {item.id for item in tool_items}
+            and contract.id not in original_ids
         ]
         views = {
             item.name: RuntimeProjection(reopened, reopened).contract_view(item)
@@ -1002,12 +1019,24 @@ def test_parallel_tool_method_runs_calls_concurrently_then_joins(
                 for item in tool_items
                 if reopened.get_assets_by_name(item.outputs[0])
             )
-            assert views[failed.name].terminal == "failed"
+            assert views[failed.name].terminal is None
+            assert "budget_exhausted" in views[failed.name].blockers
             assert views[succeeded.name].terminal == "complete"
             assert len(recoveries) == 1
             recovery = recoveries[0]
-            assert recovery.parent_id == failed.parent_id
-            assert recovery.inputs == failed.inputs
+            assert recovery.parent_id is not None and recovery.parent_id != failed.id
+            assert recovery.budget == 1
+            from aigineering.task_lineage import task_lineage
+
+            assert any(
+                edge["kind"] == "recovery_publication"
+                and edge["source_contract_id"] == failed.id
+                and edge["target_contract_id"] == recovery.id
+                for edge in task_lineage(reopened, failed.id)["data"]["edges"]
+            )
+            assert recovery.inputs[: len(failed.inputs)] == failed.inputs
+            assert len(recovery.inputs) == len(failed.inputs) + 1
+            assert reopened.get_assets_by_name(recovery.inputs[-1])
             assert recovery.outputs == failed.outputs
             assert recovery.tool_scope == failed.tool_scope
             assert (
@@ -1087,9 +1116,6 @@ def test_local_cycle_skips_ineligible_slot_then_stops_after_one_claim(monkeypatc
     monkeypatch.setattr(
         local_fleet_module, "ensure_local_runtime_publishers", lambda _store: object()
     )
-    monkeypatch.setattr(
-        local_fleet_module, "default_completion_registry", lambda: object()
-    )
     monkeypatch.setattr(local_fleet_module, "sync_runtime", lambda _store: None)
     maintenance = type(
         "Maintenance",
@@ -1097,7 +1123,6 @@ def test_local_cycle_skips_ineligible_slot_then_stops_after_one_claim(monkeypatc
         {
             "worker_failures": (),
             "rejected_submissions": (),
-            "task_completions": (),
         },
     )()
     monkeypatch.setattr(
@@ -1713,7 +1738,7 @@ def test_local_cycle_rejects_stale_signed_host_registration(tmp_path, monkeypatc
         store.close()
 
 
-def test_full_fleet_settles_fail_parent_after_admitted_child_drains(
+def test_full_fleet_failure_report_keeps_parent_obligation_after_child_drains(
     tmp_path, monkeypatch
 ):
     admitted = Event()
@@ -1808,11 +1833,7 @@ def test_full_fleet_settles_fail_parent_after_admitted_child_drains(
             len(child_terminal) == 1
             and child_terminal[0][1].payload["terminal"] == "complete"
         )
-        assert (
-            len(parent_terminal) == 1
-            and parent_terminal[0][1].payload["terminal"] == "failed"
-        )
-        assert child_terminal[0][0] < parent_terminal[0][0]
+        assert parent_terminal == []
         grants = [r for _, r in records if r.record_type == "claim.granted"]
         assert len(grants) == 2 and {r.payload["contract_id"] for r in grants} == {
             root.id,
@@ -1821,7 +1842,7 @@ def test_full_fleet_settles_fail_parent_after_admitted_child_drains(
         assert worker.invocations == [root.id, child.id]
         assert reopened.get_claim(root.id)["status"] == "submitted"
         assert reopened.get_claim(child.id)["status"] == "submitted"
-        assert result.projection["status"] == "failed"
+        assert result.projection["status"] == "expanded"
         assert not reopened.get_assets_by_name("business_report")
     finally:
         reopened.close()

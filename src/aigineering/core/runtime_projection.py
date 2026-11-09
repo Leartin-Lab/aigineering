@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Protocol
 
@@ -12,21 +12,9 @@ from aigineering.core.activation import (
     check_activation,
     validate_execution_activation,
 )
-from aigineering.core.claim_holds import open_claim_holds
-from aigineering.core.claim_constraints import claim_constraint_blockers
-from aigineering.core.claim_assignments import (
-    assignment_blocker,
-    assignment_context_from_projection,
-    effective_assignment,
-)
 from aigineering.core.projection_context import EffectProjectionContext
 from aigineering.core.projection_store_view import ProjectionStoreView
-from aigineering.core.worker_routing import registration_from_record
-from aigineering.core.causal_allowance import (
-    allowance_available,
-    allowance_is_recorded,
-)
-from aigineering.core.terminal_types import TERMINAL_EVENTS
+from aigineering.core.causal_allowance import allowance_available
 from aigineering.core.ids import compute_content_hash
 from aigineering.core.output_satisfaction import all_outputs_satisfied
 from aigineering.core.store_capabilities import (
@@ -34,11 +22,11 @@ from aigineering.core.store_capabilities import (
     RuntimeRecordReader,
     TraceReader,
 )
-from aigineering.protocol.wire import asset_from_dict, trace_entry_from_dict
+from aigineering.protocol.wire import asset_from_dict
 
 if TYPE_CHECKING:
     from aigineering.protocol.runtime_record import RuntimeRecord
-    from aigineering.protocol.types import Contract, TraceEntry
+    from aigineering.protocol.types import Contract
 
 
 class RuntimeProjectionReader(AssetReader, RuntimeRecordReader, Protocol):
@@ -62,8 +50,6 @@ class ContractView:
     claim_status: str | None
     budget_remaining: int
     projection_hash: str
-    assignment_worker_id: str | None = None
-    assignment_blocker: str | None = None
 
 
 class RuntimeProjection:
@@ -82,7 +68,8 @@ class RuntimeProjection:
         if as_of is not None and as_of_revision is not None:
             raise ValueError("choose either as_of timestamp or as_of_revision")
         self._store = store
-        self._trace = trace
+        # Retain the historical argument shape for callers. Trace is never
+        # consulted for task state; durable facts own every control decision.
         self._as_of = as_of
         self._as_of_revision = as_of_revision
         self._runtime_records = runtime_records
@@ -101,7 +88,6 @@ class RuntimeProjection:
             outputs_satisfied = bool(contract.outputs) and all_outputs_satisfied(
                 contract, self._store
             )
-            entries = self._entries_for(contract.id)
             current_records = tuple(record for _, record in self._records())
             typed_terminal_events = tuple(
                 str(record.payload["terminal"])
@@ -110,15 +96,10 @@ class RuntimeProjection:
                 and record.payload.get("contract_id") == contract.id
             )
             allowance_records = current_records
-            typed_budget = (
-                allowance_available(contract, allowance_records)
-                if allowance_is_recorded(contract.id, allowance_records)
-                else None
-            )
+            typed_budget = allowance_available(contract, allowance_records)
         else:
             (
                 asset_payloads,
-                entries,
                 typed_terminal_events,
                 typed_budget,
                 historical_records,
@@ -152,66 +133,63 @@ class RuntimeProjection:
         missing_activation = activation_references - available_names
         missing_assets = tuple(sorted(missing_inputs | missing_activation))
         inputs_satisfied = not missing_inputs
-        terminal_events = tuple(
-            sorted(
-                set(typed_terminal_events)
-                | {
-                    entry.event_type
-                    for entry in entries
-                    if entry.event_type in TERMINAL_EVENTS
-                }
-            )
-        )
+        terminal_events = tuple(sorted(set(typed_terminal_events) - {"failed"}))
         if len(terminal_events) > 1:
             terminal = "conflict"
         elif terminal_events:
             terminal = terminal_events[0]
         else:
             terminal = None
-        budget_remaining = (
-            typed_budget
-            if typed_budget is not None
-            else _budget_remaining(contract, entries)
-        )
-        current_claim_id, claim_status = self._claim_view(contract.id)
-        claim_holds = open_claim_holds(
-            (
-                record
-                for revision, record in self._records()
-                if self._record_selected(revision, record.recorded_at)
-            ),
-            contract_id=contract.id,
-        )
-        delegation_pending = False
-        for entry in entries:
-            if entry.event_type in {
-                "task_delegated",
-                "method_scheduled",
-                "method_continuation_scheduled",
-            }:
-                delegation_pending = True
-            elif entry.event_type == "method_resumed":
-                delegation_pending = False
+        # Historical failed attempts do not veto later Asset satisfaction.
+        # Derive the exceptional old single-terminal case without rewriting it.
+        if terminal is None:
+            if outputs_satisfied:
+                terminal = "complete"
+            else:
+                if historical is None:
+                    projection_store = self._store
+                    ancestry_records = current_records
+                    get_contract = self._store.get_contract
+                else:
+                    projection_store = ProjectionStoreView(
+                        EffectProjectionContext(
+                            assets=tuple(
+                                asset_from_dict(item) for item in asset_payloads
+                            ),
+                            runtime_records=historical_records,
+                        )
+                    )
+                    ancestry_records = historical_records
+                    from aigineering.protocol.wire import contract_from_dict
 
-        selected_records = tuple(
-            record
-            for revision, record in self._records()
-            if self._record_selected(revision, record.recorded_at)
-        )
-        constraint_blockers = claim_constraint_blockers(
-            selected_records, contract_id=contract.id
-        )
-        assignment_context = _assignment_context(contract, selected_records)
-        assignment = effective_assignment(assignment_context, contract_id=contract.id)
-        assigned_worker_id = (
-            str(assignment.payload["worker_id"]) if assignment is not None else None
-        )
-        assignment_issue = assignment_blocker(
-            assignment_context, contract_id=contract.id
-        )
-        assignment_blocker_code = (
-            str(assignment_issue["reason"]) if assignment_issue else None
-        )
+                    ancestors = {
+                        row.payload["contract"]["id"]: contract_from_dict(
+                            row.payload["contract"]
+                        )
+                        for row in ancestry_records
+                        if row.record_type == "contract.declared"
+                    }
+                    get_contract = ancestors.get
+                parent_id = contract.parent_id
+                visited = {contract.id}
+                while parent_id and parent_id not in visited:
+                    visited.add(parent_id)
+                    parent = get_contract(parent_id)
+                    if parent is None:
+                        break
+                    if any(
+                        row.record_type == "lifecycle.terminal"
+                        and row.payload.get("contract_id") == parent_id
+                        and row.payload.get("terminal") == "complete"
+                        for row in ancestry_records
+                    ) or all_outputs_satisfied(
+                        parent, projection_store, require_outputs=True
+                    ):
+                        terminal = "cancelled"
+                        break
+                    parent_id = parent.parent_id
+        budget_remaining = typed_budget
+        current_claim_id, claim_status = self._claim_view(contract.id)
         blockers: list[str] = []
         if terminal == "conflict":
             blockers.append("terminal_conflict")
@@ -236,22 +214,8 @@ class RuntimeProjection:
                     blockers.append("activation_unsatisfied")
             if budget_remaining <= 0:
                 blockers.append("budget_exhausted")
-            if delegation_pending:
-                blockers.append("delegation_pending")
-            if assignment_issue is not None:
-                blockers.append(
-                    f"assignment:{assignment_issue['reason']}:{assignment_issue['worker_id']}"
-                )
             if current_claim_id is not None:
                 blockers.append(f"claim:{claim_status}")
-            blockers.extend(f"claim_hold:{record.id}" for record in claim_holds)
-            blockers.extend(
-                "prerequisite:"
-                f"{item['constraint_id']}:"
-                f"{item['prerequisite_contract_id']}:"
-                f"{item['observed_terminal']}"
-                for item in constraint_blockers
-            )
 
         canonical = {
             "activation_satisfied": activation_satisfied,
@@ -266,9 +230,6 @@ class RuntimeProjection:
             "terminal": terminal,
             "terminal_events": list(terminal_events),
         }
-        if assignment is not None:
-            canonical["assignment_worker_id"] = assigned_worker_id
-            canonical["assignment_blocker"] = assignment_blocker_code
         projection_hash = compute_content_hash(
             json.dumps(canonical, sort_keys=True, separators=(",", ":"))
         )
@@ -286,28 +247,19 @@ class RuntimeProjection:
             claim_status=claim_status,
             budget_remaining=budget_remaining,
             projection_hash=projection_hash,
-            assignment_worker_id=assigned_worker_id,
-            assignment_blocker=assignment_blocker_code,
         )
 
     def explain_not_enabled(self, contract: Contract) -> tuple[str, ...]:
         """Return stable, structured blockers for audit and CLI views."""
         return self.contract_view(contract).blockers
 
-    def _entries_for(self, contract_id: str) -> list[TraceEntry]:
-        entries = self._trace.get_by_contract(contract_id)
-        if self._as_of is None:
-            return entries
-        return [entry for entry in entries if entry.timestamp <= self._as_of]
-
     def _historical_facts(
         self, contract: Contract
     ) -> (
         tuple[
             list[dict],
-            list[TraceEntry],
             tuple[str, ...],
-            int | None,
+            int,
             tuple[RuntimeRecord, ...],
         ]
         | None
@@ -323,7 +275,7 @@ class RuntimeProjection:
         ]
         if not declared:
             # Legacy/import-only stores cannot provide asset history. Preserve
-            # trace-only compatibility only when no runtime fact log exists.
+            # compatibility only when no runtime fact log exists.
             if records:
                 raise RuntimeError(
                     f"historical projection for {contract.id!r} lacks contract fact"
@@ -349,12 +301,6 @@ class RuntimeProjection:
             for _, record in selected
             if record.record_type == "asset.committed"
         ]
-        entries = [
-            trace_entry_from_dict(dict(record.payload["trace"]))
-            for _, record in selected
-            if record.record_type == "trace.recorded"
-            and record.payload["trace"]["contract_id"] == contract.id
-        ]
         terminal_events = tuple(
             str(record.payload["terminal"])
             for _, record in selected
@@ -362,14 +308,9 @@ class RuntimeProjection:
             and record.payload["contract_id"] == contract.id
         )
         selected_records = tuple(record for _, record in selected)
-        typed_budget = (
-            allowance_available(contract, selected_records)
-            if allowance_is_recorded(contract.id, selected_records)
-            else None
-        )
+        typed_budget = allowance_available(contract, selected_records)
         return (
             asset_payloads,
-            entries,
             terminal_events,
             typed_budget,
             selected_records,
@@ -411,50 +352,3 @@ class RuntimeProjection:
         if self._runtime_records is not None:
             return self._runtime_records
         return tuple(self._store.scan_runtime_records())
-
-
-def _budget_remaining(contract: Contract, entries: list[TraceEntry]) -> int:
-    initial = max(contract.budget, 1)
-    consumed = [
-        entry.budget_remaining
-        for entry in entries
-        if entry.event_type == "budget_consumed"
-    ]
-    return consumed[-1] if consumed else initial
-
-
-def _assignment_context(contract, records):
-    """Build the assignment read model from the same selected fact cutoff."""
-    latest: dict[str, RuntimeRecord] = {}
-    active_claims: dict[str, str] = {}
-    for record in records:
-        if record.record_type == "worker.registered":
-            latest[str(record.payload.get("worker_id", ""))] = record
-        elif record.record_type == "claim.granted":
-            active_claims[str(record.payload.get("claim_id", ""))] = str(
-                record.payload.get("worker_id", "")
-            )
-        elif record.record_type in {
-            "claim.expired",
-            "claim.released",
-            "claim.submitted",
-        }:
-            active_claims.pop(str(record.payload.get("claim_id", "")), None)
-    counts: dict[str, int] = {}
-    for worker_id in active_claims.values():
-        counts[worker_id] = counts.get(worker_id, 0) + 1
-    registrations = tuple(
-        replace(
-            registration_from_record(record),
-            active_claims=counts.get(worker_id, 0),
-        )
-        for worker_id, record in sorted(latest.items())
-        if worker_id
-    )
-    return assignment_context_from_projection(
-        EffectProjectionContext(
-            contracts=(contract,),
-            runtime_records=tuple(records),
-            registrations=registrations,
-        )
-    )

@@ -26,7 +26,6 @@ from aigineering.protocol.effect_builders import (
 from aigineering.plugins.base import PluginRequest
 from aigineering.plugins.staged_planning import StagedPlanningPlugin
 from aigineering.protocol.identity import contract_from_fields
-from aigineering.protocol.runtime_record import create_runtime_record
 from aigineering.protocol.types import Asset
 
 
@@ -219,6 +218,24 @@ def test_root_acceptance_cancels_claimed_grandchild_and_fences_late_submit(tmp_p
         output="grandchild_output",
         budget=2,
     )
+    sibling = _declare_child(
+        store,
+        signer,
+        genesis,
+        operator,
+        parent=root,
+        name="completed sibling",
+        output="sibling_output",
+        budget=1,
+    )
+    _submit_output(store, signer, genesis, worker, sibling, "sibling_output")
+    sibling_terminal_before = [
+        record
+        for _, record in store.scan_runtime_records(record_type="lifecycle.terminal")
+        if record.payload.get("contract_id") == sibling.id
+    ]
+    assert len(sibling_terminal_before) == 1
+    assert sibling_terminal_before[0].payload["terminal"] == "complete"
     grandchild_claim = store.claim_contract(
         grandchild.id, worker.actor_id, package_id="pkg:grandchild"
     )
@@ -256,6 +273,7 @@ def test_root_acceptance_cancels_claimed_grandchild_and_fences_late_submit(tmp_p
     assert terminals[root.id] == "complete"
     assert terminals[child.id] == "cancelled"
     assert terminals[grandchild.id] == "cancelled"
+    assert terminals[sibling.id] == "complete"
     assert store.get_claim(grandchild.id)["status"] == "released"
     with pytest.raises(CandidateCommitRejected):
         CandidateCommitter(store, store).commit(late_submit, genesis)
@@ -373,6 +391,20 @@ def test_staged_compile_inherits_independent_policy_without_keepalive(tmp_path):
     compiler = stages.compile
     assert compiler.acceptance_policy == root.acceptance_policy
 
+    # Stage inputs are real signed Assets. Declaring the graph alone does not
+    # satisfy its exact input bindings or activation requirements.
+    _submit_output(
+        store, signer, genesis, worker, stages.draft, stages.draft.outputs[0]
+    )
+    _submit_output(
+        store,
+        signer,
+        genesis,
+        worker,
+        stages.dependencies,
+        stages.dependencies.outputs[0],
+    )
+
     reviewer = _declare_child(
         store,
         signer,
@@ -408,87 +440,4 @@ def test_staged_compile_inherits_independent_policy_without_keepalive(tmp_path):
     assert terminals_after_root_acceptance[compiler.id] == "cancelled"
     assert terminals_after_root_acceptance[reviewer.id] == "cancelled"
     assert store.get_claim(reviewer.id)["status"] == "released"
-    store.close()
-
-
-def test_terminal_intermediate_does_not_shield_live_grandchild(tmp_path):
-    (
-        store,
-        signer,
-        genesis,
-        operator,
-        worker,
-        _verifier,
-        root,
-        policy,
-    ) = _world(tmp_path)
-    child = _declare_child(
-        store,
-        signer,
-        genesis,
-        operator,
-        parent=root,
-        name="historically terminal intermediate",
-        output="child_output",
-        budget=5,
-    )
-    grandchild = _declare_child(
-        store,
-        signer,
-        genesis,
-        operator,
-        parent=child,
-        name="live descendant",
-        output="grandchild_output",
-        budget=2,
-    )
-    sibling = _declare_child(
-        store,
-        signer,
-        genesis,
-        operator,
-        parent=root,
-        name="already terminal sibling",
-        output="sibling_output",
-        budget=1,
-    )
-    _submit_output(store, signer, genesis, _verifier, root, "final")
-    prior_terminal = create_runtime_record(
-        "lifecycle.terminal",
-        {"contract_id": child.id, "terminal": "complete"},
-    )
-    store.append_runtime_record(prior_terminal)
-    prior_sibling_terminal = create_runtime_record(
-        "lifecycle.terminal",
-        {"contract_id": sibling.id, "terminal": "failed"},
-    )
-    store.append_runtime_record(prior_sibling_terminal)
-    claim = store.claim_contract(
-        grandchild.id, worker.actor_id, package_id="pkg:live-descendant"
-    )
-    assert claim is not None
-
-    _qualify_root(store, signer, genesis, operator, root, policy)
-
-    child_terminals = [
-        record
-        for _, record in store.scan_runtime_records(record_type="lifecycle.terminal")
-        if record.payload.get("contract_id") == child.id
-    ]
-    descendant_terminals = [
-        record
-        for _, record in store.scan_runtime_records(record_type="lifecycle.terminal")
-        if record.payload.get("contract_id") == grandchild.id
-    ]
-    sibling_terminals = [
-        record
-        for _, record in store.scan_runtime_records(record_type="lifecycle.terminal")
-        if record.payload.get("contract_id") == sibling.id
-    ]
-    assert [record.id for record in child_terminals] == [prior_terminal.id]
-    assert [record.id for record in sibling_terminals] == [prior_sibling_terminal.id]
-    assert sibling_terminals[0].payload["terminal"] == "failed"
-    assert len(descendant_terminals) == 1
-    assert descendant_terminals[0].payload["terminal"] == "cancelled"
-    assert store.get_claim(grandchild.id)["status"] == "released"
     store.close()

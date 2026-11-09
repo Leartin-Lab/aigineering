@@ -231,69 +231,37 @@ def test_signed_submitted_independent_outputs_are_a_qualification_blocker(
 
 
 def test_pending_view_accepts_admitted_graph_without_a_target_claim(tmp_path):
-    import test_task_review as review
-    from aigineering.core.projection_context import load_effect_projection_context
-    from aigineering.core.publication_history import validate_published_member
+    from test_shared_definition_output import _world, _graph_output_effects
 
-    env = review._workspace(
-        tmp_path,
-        graph_target=True,
+    store, publisher, actors = _world(tmp_path)
+    policy = {
+        "mode": "independent",
+        "policy_version": "any-source-view",
+        "verifier_capabilities": ["policy.review"],
+        "required_attestations": 1,
+    }
+    task = _publish_task(
+        store, publisher, name="any-source target", outputs=("final",), policy=policy
     )
-    store = env["store"]
-    try:
-        fake = review._publish_unclaimed_graph(
-            env,
-            content_text='{"answer":"looks shaped but has no claim"}',
-        )
-        assert store.get_claim(env["source"].id) is None
-        before_claim = project_task_status(env["source"], store)
-        assert before_claim["status"] != "submitted"
-        assert before_claim["qualification_pending_outputs"] == {"final": fake.id}
-        assert "qualification:independent_acceptance" in before_claim["blockers"]
-        context = load_effect_projection_context(store)
-        fake_committed = next(
-            record
-            for record in context.runtime_records
-            if record.record_type == "asset.committed"
-            and record.payload.get("asset", {}).get("id") == fake.id
-        )
-        fake_assertion = next(
-            record
-            for record in context.runtime_records
-            if record.id == fake_committed.causal_parents[0]
-        )
-        validate_published_member(context.runtime_records, fake_assertion)
-        fake_definition_id = fake_assertion.payload["assertion"]["definition_id"]
-        fake_definition = next(
-            record.payload["definition"]
-            for record in context.runtime_records
-            if record.record_type == "asset.definition.published"
-            and record.payload.get("definition", {}).get("id") == fake_definition_id
-        )
-        assert fake_definition["source_uri"] == env["source"].id
-
-        canonical = review._publish_unclaimed_graph(
-            env,
-            claimed=True,
-            content_text='{"answer":"claim-bound output"}',
-        )
-        env["target"] = canonical
-        same_name_assets = store.get_assets_by_name("final")
-        same_name_ids = [asset.id for asset in same_name_assets]
-        assert same_name_ids[0] == fake.id
-        assert same_name_ids.index(canonical.id) > 0
-        submitted = store.scan_runtime_records(record_type="claim.submitted")
-        assert len(submitted) == 1
-        assert submitted[0][1].payload["contract_id"] == env["source"].id
-        assert canonical.content == '{"answer":"claim-bound output"}'
-
-        status = project_task_status(env["source"], store)
-        assert status["status"] == "submitted"
-        assert status["outputs_satisfied"] is False
-        assert status["qualification_pending_outputs"] == {"final": fake.id}
-        assert "qualification:independent_acceptance" in status["blockers"]
-    finally:
-        store.close()
+    _definition, _content, _assertion, effects = _graph_output_effects(
+        publisher,
+        actors["worker:external"],
+        name="final",
+        content_text="Admitted external output",
+        source_uri="independent-external-task",
+    )
+    publication = publisher.publisher.publish(effects, idempotency_key="external-graph")
+    assert publication.accepted
+    asset = publication.assets[0]
+    assert store.get_claim(task.id) is None
+    before = tuple(store.scan_runtime_records())
+    status = project_task_status(task, store)
+    assert status["status"] != "completed"
+    assert status["qualification_pending_outputs"] == {"final": asset.id}
+    assert "qualification:independent_acceptance" in status["blockers"]
+    assert tuple(store.scan_runtime_records()) == before
+    assert status["outputs_satisfied"] is False
+    store.close()
 
 
 def test_incomplete_outputs_and_foreign_or_tool_assets_are_not_qualification_pending(
@@ -434,7 +402,7 @@ def test_aggregate_parent_view_reuses_snapshot_for_submitted_child_risk(
     store.close()
 
 
-def test_legacy_orphan_projection_keeps_risk_and_state_precedence():
+def test_legacy_orphan_projection_trace_does_not_change_state():
     store = SQLiteStore(":memory:")
     publisher = candidate_runtime(store)
     orphan = _publish_task(store, publisher, name="orphan", outputs=("report",))
@@ -449,8 +417,9 @@ def test_legacy_orphan_projection_keeps_risk_and_state_precedence():
         )
     )
     status = project_task_status(orphan, store)
-    assert status["status"] == "submitted"
-    assert "submitted_without_recovery" in {
+    assert status["status"] == "ready"
+    assert status["trace_event_count"] == 1
+    assert "submitted_without_recovery" not in {
         risk["code"] for risk in status["silent_failure_risks"]
     }
     store.close()
@@ -459,7 +428,7 @@ def test_legacy_orphan_projection_keeps_risk_and_state_precedence():
 def test_terminal_expansion_active_claim_and_unclaimed_ready_precedence():
     from types import SimpleNamespace
 
-    from aigineering.task_views import _status_from_entries
+    from aigineering.task_views import _status_from_facts
 
     store = SQLiteStore(":memory:")
     contract = build_control_plane_contract(
@@ -473,28 +442,23 @@ def test_terminal_expansion_active_claim_and_unclaimed_ready_precedence():
         budget_remaining=1,
         blockers=(),
     )
-    assert _status_from_entries(contract, store, [], "", base_view, "") == "ready"
+    assert _status_from_facts(contract, store, base_view, "") == "ready"
     assert (
-        _status_from_entries(
+        _status_from_facts(
             contract,
             store,
-            [],
-            "",
             base_view.__class__(**{**base_view.__dict__, "claim_status": "active"}),
             "",
         )
         == "claimed"
     )
-    assert (
-        _status_from_entries(contract, store, [], "", base_view, "expanded")
-        == "expanded"
-    )
+    assert _status_from_facts(contract, store, base_view, "expanded") == "expanded"
     failed_view = base_view.__class__(**{**base_view.__dict__, "terminal": "failed"})
-    assert _status_from_entries(contract, store, [], "", failed_view, "") == "failed"
+    assert _status_from_facts(contract, store, failed_view, "") == "failed"
     conflict_view = base_view.__class__(
         **{**base_view.__dict__, "terminal": "conflict"}
     )
-    assert _status_from_entries(contract, store, [], "", conflict_view, "") == "stalled"
+    assert _status_from_facts(contract, store, conflict_view, "") == "stalled"
     store.close()
 
 
@@ -572,93 +536,68 @@ def test_cancelled_submitted_task_does_not_advertise_pending_qualification(
     store.close()
 
 
-def test_accepted_review_removes_only_its_exact_output_from_pending_map(tmp_path):
-    from unittest.mock import patch
+def test_accepted_attestation_removes_only_its_exact_output_from_pending_map(
+    tmp_path, monkeypatch
+):
+    from aigineering.core.acceptance import acceptance_policy_id
+    from aigineering.core.candidate_publisher import CandidatePublisher
+    from aigineering.core.signing import Ed25519Signer
+    from aigineering.protocol.candidate import ActorKey
+    from aigineering.protocol.effect_builders import asset_attestation_effect
 
-    import test_task_review as review
-    from aigineering.core.commitment import CandidateCommitter
-    from aigineering.protocol.candidate import (
-        CandidateClaimBinding,
-        create_candidate_proposal,
+    store = SQLiteStore(tmp_path / "partial-qualification.sqlite")
+    publisher = candidate_runtime(store)
+    policy, _context_ids = _independent_policy(publisher)
+    task = _publish_task(
+        store,
+        publisher,
+        name="partial review",
+        outputs=("summary", "appendix"),
+        policy=policy,
     )
-    from aigineering.protocol.effect_builders import asset_proposal_effect
-    from aigineering.protocol.types import Asset
-
-    original_builder = review.build_control_plane_contract
-
-    def two_output_contract(*args, **kwargs):
-        kwargs["outputs"] = ("final", "appendix")
-        return original_builder(*args, **kwargs)
-
-    def publish_both_outputs(store, signer, genesis, actor, contract, name, content):
-        del name, content
-        store.register_worker(
-            review.WorkerRegistration(
-                actor.actor_id, actor_id=actor.actor_id, key_id=actor.key_id
-            )
-        )
-        claim = store.claim_contract(
-            contract.id, actor.actor_id, package_id="pkg:partial-qualification"
-        )
-        assert claim is not None
-        effects = tuple(
-            asset_proposal_effect(
-                Asset(id=f"unused-{output}", name=output, content=f"{output} result")
-            )
-            for output in contract.outputs
-        )
-        candidate = create_candidate_proposal(
-            domain_id=genesis.id,
-            actor_id=actor.actor_id,
-            key_id=actor.key_id,
-            effects=effects,
-            signer=signer,
-            idempotency_key=f"submit-both:{contract.id}",
-            claim_binding=CandidateClaimBinding(
-                contract.id,
-                claim["claim_id"],
-                claim["epoch"],
-                claim["package_id"],
+    result = _run(
+        store,
+        publisher,
+        _OutputWorker(
+            "worker:producer", {"summary": "Summary", "appendix": "Appendix"}
+        ),
+        task,
+        monkeypatch,
+    )
+    assert result["status"] == "accepted"
+    target = store.get_assets_by_name("summary")[0]
+    appendix = store.get_assets_by_name("appendix")[0]
+    signer = Ed25519Signer()
+    key = ActorKey(
+        "operator:verifier",
+        "verifier-key",
+        signer.kind,
+        signer.signer_id,
+        ("asset.attest", "verify.human"),
+    )
+    publisher.authorize_actor(key)
+    decision = CandidatePublisher(store, store, publisher.genesis, key, signer).publish(
+        (
+            asset_attestation_effect(
+                task.id,
+                "summary",
+                target.id,
+                policy_id=acceptance_policy_id(policy),
+                policy_version=policy["policy_version"],
+                verdict="accepted",
+                rubric_asset_ids=tuple(policy["rubric_asset_ids"]),
+                evidence_asset_ids=tuple(policy["evidence_asset_ids"]),
             ),
-        )
-        result = CandidateCommitter(store, store).commit(candidate, genesis)
-        assert result.accepted, result
-        return next(asset for asset in result.assets if asset.name == "final")
-
-    with (
-        patch.object(review, "build_control_plane_contract", two_output_contract),
-        patch.object(review, "_publish_output", publish_both_outputs),
-    ):
-        env = review._workspace(tmp_path)
-    store = env["store"]
-    try:
-        _, request_decision = review._request(env, reason="Review final only")
-        assert request_decision.accepted, request_decision
-        request = review.project_task_reviews(request_decision.runtime_records)[0]
-        _, report = review._review_report(env, request)
-        _, decision = review._decide(
-            env, env["verifier"], request, report, verdict="accept"
-        )
-        assert decision.accepted, decision
-
-        status = project_task_status(env["source"], store)
-        qualified = store.scan_runtime_records(record_type="output.qualified")
-        assert len(qualified) == 1
-        assert qualified[0][1].payload["contract_id"] == env["source"].id
-        assert qualified[0][1].payload["output_name"] == "final"
-        assert qualified[0][1].payload["asset_id"] == env["target"].id
-        assert status["status"] == "submitted"
-        assert status["outputs_satisfied"] is False
-        assert status["qualification_pending_outputs"] == {
-            "appendix": next(
-                asset.id
-                for asset in store.get_assets_by_name("appendix")
-                if asset.created_by == env["source"].id
-            )
-        }
-        assert "qualification:independent_acceptance" in status["blockers"]
-        assert "submitted_without_recovery" not in {
-            risk["code"] for risk in status["silent_failure_risks"]
-        }
-    finally:
-        store.close()
+        ),
+        idempotency_key="accept-summary-only",
+    )
+    assert decision.accepted
+    status = project_task_status(task, store)
+    assert status["status"] == "submitted"
+    assert status["outputs_satisfied"] is False
+    assert status["qualification_pending_outputs"] == {"appendix": appendix.id}
+    assert "qualification:independent_acceptance" in status["blockers"]
+    assert "submitted_without_recovery" not in {
+        risk["code"] for risk in status["silent_failure_risks"]
+    }
+    store.close()

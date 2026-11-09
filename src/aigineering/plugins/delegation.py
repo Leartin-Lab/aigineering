@@ -8,7 +8,7 @@ from aigineering.core.ids import compute_content_hash, contract_from_fields
 from aigineering.protocol.immutability import deep_thaw
 from aigineering.plugins.continuation import allocate_continuation_budget
 from aigineering.plugins.planning_roles import without_planning_stage_labels
-from aigineering.plugins.task_semantics import method_contract
+from aigineering.plugins.task_semantics import continuation_contract, method_contract
 from aigineering.protocol.actions import WorkerAction
 from aigineering.protocol.effect_builders import contract_declaration_effect
 from aigineering.protocol.types import Contract
@@ -69,6 +69,26 @@ class TaskDelegationPlugin:
             children = _parallel_tool_contracts(parent, action, child_allowance)
             return PluginProposal(
                 effects=tuple(contract_declaration_effect(child) for child in children)
+            )
+        if action.type == "tool":
+            first_recovery_demand = min(1, max(0, allowance - 2))
+            continuation_budget, _reserve = allocate_continuation_budget(
+                parent,
+                max(0, allowance - 1),
+                recovery_demand=first_recovery_demand,
+            )
+            method_task = _claimed_method_contract(parent, action)
+            continuation = continuation_contract(
+                parent,
+                method_task,
+                method="tool",
+                budget=continuation_budget,
+            )
+            return PluginProposal(
+                effects=tuple(
+                    contract_declaration_effect(child)
+                    for child in (method_task, continuation)
+                )
             )
         child = (
             _claimed_retry_contract(parent, allowance)

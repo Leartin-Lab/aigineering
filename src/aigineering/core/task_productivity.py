@@ -13,7 +13,7 @@ from collections import Counter, defaultdict
 from collections.abc import Iterable, Mapping
 from typing import Any, Protocol
 
-from aigineering.core.runtime_projection import TERMINAL_EVENTS
+from aigineering.core.lifecycle_facts import TERMINAL_EVENTS
 from aigineering.core.store_capabilities import (
     AssetReader,
     ContractReader,
@@ -53,7 +53,7 @@ def project_task_productivity(
         )
     )
     traces = _trace_entries(records, contract_ids)
-    terminal_by_contract = _terminal_states(records, traces, contract_ids)
+    terminal_by_contract = _terminal_states(records, contract_ids)
 
     contract_states: list[dict[str, Any]] = []
     status_counts: Counter[str] = Counter()
@@ -176,13 +176,8 @@ def _trace_entries(records: Iterable[Any], contract_ids: set[str]) -> list[Trace
     return traces
 
 
-def _terminal_states(
-    records: Iterable[Any], traces: Iterable[TraceEntry], contract_ids: set[str]
-) -> dict[str, str]:
+def _terminal_states(records: Iterable[Any], contract_ids: set[str]) -> dict[str, str]:
     states: dict[str, str] = {}
-    for trace in traces:
-        if trace.event_type in TERMINAL_EVENTS:
-            states[trace.contract_id] = trace.event_type
     for record in records:
         if record.record_type != "lifecycle.terminal":
             continue

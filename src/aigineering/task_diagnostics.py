@@ -587,6 +587,14 @@ def _release_terminal_is_valid(
         or not _record_is_valid(terminal)
     ):
         return False
+    if terminal.payload.get("terminal") == "complete" and _asset_completion_is_valid(
+        terminal, by_id, indexed
+    ):
+        return True
+    if terminal.payload.get(
+        "terminal"
+    ) == "cancelled" and _descendant_cancellation_is_valid(terminal, by_id, indexed):
+        return True
     parents = terminal.causal_parents
     payload_keys = set(terminal.payload)
     if not parents:
@@ -726,11 +734,17 @@ def _submission_proof(
         issues.append(_issue("submitted_candidate_id_missing", transition.id))
         return None, None
     committed_heads = [
-        by_id[parent][1]
-        for parent in transition.causal_parents
-        if parent in by_id
-        and by_id[parent][1].record_type == "candidate.committed"
-        and by_id[parent][1].payload.get("candidate_id") == candidate_id
+        record
+        for _revision, record in indexed
+        if record.record_type == "candidate.committed"
+        and record.payload.get("candidate_id") == candidate_id
+        and (
+            record.id in transition.causal_parents
+            or (
+                record.payload.get("closure_version") == 1
+                and transition.id in record.payload.get("committed_record_ids", ())
+            )
+        )
     ]
     if len(committed_heads) == 1:
         head = committed_heads[0]
@@ -739,20 +753,20 @@ def _submission_proof(
         receipt = _receipt_for_candidate(
             candidate_id, grant, indexed, issues, evidence_ids
         )
+        from aigineering.core.publication_history import committed_member_ids
+
+        try:
+            member_ids = committed_member_ids(head)
+        except ValueError:
+            member_ids = ()
+        closed = head.payload.get("closure_version") == 1
         if (
             receipt is None
-            or grant_record.id not in transition.causal_parents
-            or receipt.id not in head.causal_parents
-            or set(head.payload) != {"candidate_id", "committed_record_ids"}
-            or not isinstance(head.payload.get("committed_record_ids"), (list, tuple))
-            or any(
-                not isinstance(member, str)
-                for member in head.payload.get("committed_record_ids", ())
-            )
-            or len(set(head.payload.get("committed_record_ids", ())))
-            != len(head.payload.get("committed_record_ids", ()))
-            or tuple(head.causal_parents)
-            != (receipt.id, *tuple(head.payload.get("committed_record_ids", ())))
+            or not member_ids
+            or transition.causal_parents
+            != (grant_record.id, receipt.id if closed else head.id)
+            or head.causal_parents != (receipt.id, *member_ids)
+            or (closed and transition.id not in member_ids)
         ):
             issues.append(
                 _issue("accepted_submission_proof_invalid", transition.id, head.id)
@@ -785,7 +799,8 @@ def _submission_proof(
             and record.payload.get("candidate_id") == candidate_id
             and record.payload.get("claim_id") == grant["claim_id"]
             and record.payload.get("contract_id") == grant["contract_id"]
-            and record.causal_parents == (head.id,)
+            and record.causal_parents == (receipt.id if closed else head.id,)
+            and (not closed or record.id in member_ids)
         ]
         if len(closures) != 1 or not _is_one_of(
             closures[0].payload.get("outcome"), {"output_asserted", "expanded"}
@@ -798,7 +813,15 @@ def _submission_proof(
             return candidate_id, None
         return candidate_id, str(closures[0].payload["outcome"])
 
-    if committed_heads or transition.causal_parents != (grant_record.id,):
+    rejection_receipt = _receipt_for_candidate(
+        candidate_id, grant, indexed, issues, evidence_ids
+    )
+    if committed_heads or transition.causal_parents not in (
+        (grant_record.id,),
+        (grant_record.id, rejection_receipt.id)
+        if rejection_receipt is not None
+        else (),
+    ):
         issues.append(_issue("submission_causal_shape_invalid", transition.id))
         return candidate_id, None
     rejected = [
@@ -1776,6 +1799,186 @@ def task_recovery_ancestor_source_bindings(
         target_id = source_id
 
 
+def _asset_completion_is_valid(terminal, by_id, indexed, *, fulfilled_contract_id=None):
+    """Read the reducer's actual requirement witnesses; never reconstruct facts."""
+    from aigineering.core.output_satisfaction import selected_output_assets
+    from aigineering.core.projection_context import EffectProjectionContext
+    from aigineering.core.projection_store_view import ProjectionStoreView
+    from aigineering.core.publication_history import (
+        committed_candidate_decision,
+        committed_member_ids,
+        validate_published_member,
+    )
+    from aigineering.protocol.wire import asset_from_dict, contract_from_dict
+
+    try:
+        records = tuple(row for _, row in indexed)
+
+        def publication(member):
+            heads = [
+                row
+                for row in records
+                if row.record_type == "candidate.committed"
+                and isinstance(row.payload.get("committed_record_ids"), (tuple, list))
+                and member.id in row.payload["committed_record_ids"]
+            ]
+            if len(heads) != 1:
+                raise ValueError("derived fact has no unique publication head")
+            head = heads[0]
+            if head.payload.get("closure_version") != 1:
+                return validate_published_member(records, member)
+            if member.id not in committed_member_ids(head) or not head.causal_parents:
+                raise ValueError("derived fact is outside its exact closure")
+            receipt = by_id[head.causal_parents[0]][1]
+            committed_candidate_decision(receipt, records)
+            return receipt, head
+
+        _receipt, terminal_head = publication(terminal)
+        terminal_revision = by_id[terminal.id][0]
+        if any(
+            by_id[parent][0] >= terminal_revision for parent in terminal.causal_parents
+        ):
+            return False
+        causes = tuple(by_id[parent][1] for parent in terminal.causal_parents)
+        for cause in causes:
+            _cause_receipt, cause_head = publication(cause)
+            if (
+                cause_head.id != terminal_head.id
+                and by_id[cause_head.id][0] >= terminal_revision
+            ):
+                return False
+        if not causes or any(not _record_is_valid(row) for row in causes):
+            return False
+        if any(
+            row.record_type
+            not in {"contract.declared", "asset.committed", "output.qualified"}
+            for row in causes
+        ):
+            return False
+        if any(
+            row.record_type == "contract.declared"
+            and not isinstance(row.payload.get("contract"), Mapping)
+            or row.record_type == "asset.committed"
+            and not isinstance(row.payload.get("asset"), Mapping)
+            for row in causes
+        ):
+            return False
+        declarations = [
+            contract_from_dict(row.payload["contract"])
+            for row in causes
+            if row.record_type == "contract.declared"
+        ]
+        if not declarations or any(
+            task.id != (fulfilled_contract_id or terminal.payload["contract_id"])
+            or task != declarations[0]
+            for task in declarations
+        ):
+            return False
+        assets = tuple(
+            asset_from_dict(row.payload["asset"])
+            for row in causes
+            if row.record_type == "asset.committed"
+        )
+        view = ProjectionStoreView(
+            EffectProjectionContext(assets=assets, runtime_records=causes)
+        )
+        task = declarations[0]
+        selected = selected_output_assets(task, view)
+        if not task.outputs or len(selected) != len(set(task.outputs)):
+            return False
+        selected_ids = {asset.id for asset in selected.values()}
+        expected = {
+            row.id
+            for row in causes
+            if row.record_type == "contract.declared"
+            or row.record_type == "asset.committed"
+            and row.payload["asset"]["id"] in selected_ids
+        }
+        if (task.acceptance_policy or {}).get("mode") == "independent":
+            expected.update(
+                row.id
+                for row in causes
+                if row.record_type == "output.qualified"
+                and row.payload.get("contract_id") == task.id
+                and row.payload.get("output_name") in selected
+                and row.payload.get("asset_id")
+                == selected[row.payload["output_name"]].id
+            )
+        return expected == set(terminal.causal_parents) and len(expected) == len(
+            terminal.causal_parents
+        )
+
+    except (AttributeError, KeyError, TypeError, ValueError):
+        return False
+
+
+def _descendant_cancellation_is_valid(terminal, by_id, indexed):
+    """Prove cancellation from actual ancestor declarations and fulfillment."""
+    from aigineering.core.publication_history import validate_published_member
+
+    if set(terminal.payload) != {"contract_id", "terminal"}:
+        return False
+    records = tuple(row for _, row in indexed)
+    try:
+        revision = by_id[terminal.id][0]
+        ancestors = set()
+        task_id = terminal.payload["contract_id"]
+        visited = set()
+        while task_id and task_id not in visited:
+            visited.add(task_id)
+            declarations = [
+                row
+                for number, row in indexed
+                if number < revision
+                and row.record_type == "contract.declared"
+                and row.payload.get("contract", {}).get("id") == task_id
+            ]
+            if not declarations or any(
+                row.payload["contract"] != declarations[0].payload["contract"]
+                for row in declarations
+            ):
+                return False
+            for declaration in declarations:
+                validate_published_member(records, declaration)
+            task_id = declarations[0].payload["contract"].get("parent_id")
+            if task_id:
+                ancestors.add(task_id)
+        if len(terminal.causal_parents) == 1:
+            number, source = by_id[terminal.causal_parents[0]]
+            return (
+                number < revision
+                and source.record_type == "lifecycle.terminal"
+                and source.payload.get("terminal") == "complete"
+                and source.payload.get("contract_id") in ancestors
+                and _asset_completion_is_valid(source, by_id, indexed)
+            )
+        declarations = [
+            by_id[parent][1]
+            for parent in terminal.causal_parents
+            if by_id[parent][1].record_type == "contract.declared"
+        ]
+        source_ids = {row.payload["contract"]["id"] for row in declarations}
+        if len(source_ids) != 1:
+            return False
+        ancestor = next(iter(source_ids))
+        return (
+            ancestor in ancestors
+            and any(
+                number < revision
+                and row.record_type == "lifecycle.terminal"
+                and row.payload.get("contract_id") == ancestor
+                and row.payload.get("terminal") == "failed"
+                and _record_is_valid(row)
+                for number, row in indexed
+            )
+            and _asset_completion_is_valid(
+                terminal, by_id, indexed, fulfilled_contract_id=ancestor
+            )
+        )
+    except (AttributeError, KeyError, TypeError, ValueError):
+        return False
+
+
 def _diagnostic_events(
     contract_id: str,
     claim_id: str,
@@ -1822,6 +2025,10 @@ def _diagnostic_events(
                     record, contract_id, by_id, indexed
                 ):
                     continue
+                if record.payload.get(
+                    "terminal"
+                ) == "complete" and _asset_completion_is_valid(record, by_id, indexed):
+                    continue
                 candidate_id = selected.get("candidate_id")
                 receipts = [
                     by_id[fact_id][1]
@@ -1850,6 +2057,15 @@ def _diagnostic_events(
                 parent for parent in record.causal_parents if parent in source_ids
             ]
             if not matching_parents:
+                continue
+            if record.payload.get("contract_id") != contract_id and (
+                record.payload.get("terminal") == "complete"
+                and _asset_completion_is_valid(record, by_id, indexed)
+                or record.payload.get("terminal") == "cancelled"
+                and _descendant_cancellation_is_valid(record, by_id, indexed)
+            ):
+                # A shared Asset or fulfilled ancestor may legitimately close
+                # other Tasks; it is not a malformed transition of this claim.
                 continue
             source_pair = by_id.get(matching_parents[0])
             source_type = source_pair[1].record_type if source_pair else None

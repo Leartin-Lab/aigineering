@@ -6,14 +6,10 @@ import json
 from collections.abc import Mapping
 
 from aigineering.core.runtime_projection import (
-    TERMINAL_EVENTS,
     ContractView,
     RuntimeProjection,
 )
-from aigineering.core.claim_constraints import (
-    claim_constraint_blockers,
-    open_claim_constraints,
-)
+from aigineering.core.lifecycle_facts import TERMINAL_EVENTS
 from aigineering.core.store import require_operational_store
 from aigineering.core.acceptance import validate_asset_publication
 from aigineering.core.contract_admission import validate_acceptance_policy
@@ -24,7 +20,6 @@ from aigineering.core.output_satisfaction import (
 )
 from aigineering.core.worker_routing import eligible_workers
 from aigineering.core.claim_assignments import (
-    assignment_blocker,
     assignment_context_from_projection,
     assignment_head,
     effective_assignment,
@@ -99,14 +94,6 @@ def project_task_status(
         if query_context is not None
         else RuntimeProjection(store, store).contract_view(contract)
     )
-    runtime_records = tuple(
-        record for _revision, record in store.scan_runtime_records()
-    )
-    open_dependencies = open_claim_constraints(runtime_records, contract_id=contract.id)
-    dependency_blockers = claim_constraint_blockers(
-        runtime_records, contract_id=contract.id
-    )
-    terminal = _latest_terminal(entries) or _runtime_terminal(store, contract.id)
     attempt_outcome = _latest_attempt_outcome(store, contract.id)
     output_assets = _output_assets(contract, store)
     projection_context = projection_context or (
@@ -120,7 +107,6 @@ def project_task_status(
     assignment_context = assignment_context_from_projection(projection_context)
     assignment_fact = assignment_head(assignment_context, contract_id=contract.id)
     effective_worker = effective_assignment(assignment_context, contract_id=contract.id)
-    assignment_issue = assignment_blocker(assignment_context, contract_id=contract.id)
     if priority_facts is None:
         priority_facts = task_priority_histories(projection_context, (contract.id,))[
             contract.id
@@ -138,14 +124,11 @@ def project_task_status(
         if entry.usage_metadata is not None
     ]
 
-    status = _status_from_entries(
+    status = _status_from_facts(
         contract,
         store,
-        entries,
-        terminal,
         view,
         attempt_outcome,
-        assignment_blocker=assignment_issue,
     )
     qualification_pending_outputs = (
         candidate_qualification_outputs
@@ -161,10 +144,6 @@ def project_task_status(
     blockers = list(view.blockers)
     if qualification_pending and "qualification:independent_acceptance" not in blockers:
         blockers.append("qualification:independent_acceptance")
-    if assignment_issue is not None:
-        marker = f"assignment:{assignment_issue['assignment_id']}:{assignment_issue['reason']}"
-        if marker not in blockers:
-            blockers.append(marker)
     if status not in {"completed", "failed", "cancelled", "unreachable"}:
         blockers.extend(
             f"descendant_{item['status']}:{item['contract_id']}"
@@ -192,20 +171,6 @@ def project_task_status(
         "ok": status == "completed",
         "outputs_satisfied": all_outputs_satisfied(contract, store),
         "blockers": blockers,
-        "dependency_blockers": list(dependency_blockers),
-        "dependencies": [
-            {
-                "constraint_id": record.id,
-                "prerequisite_contract_id": str(
-                    record.payload["prerequisite_contract_id"]
-                ),
-                "predicate": str(record.payload["predicate"]),
-                "required_terminal": str(record.payload["required_terminal"]),
-                "reason": str(record.payload["reason"]),
-                "active": True,
-            }
-            for record in open_dependencies
-        ],
         "budget_remaining": view.budget_remaining,
         "projection_hash": view.projection_hash,
         "outputs": output_assets,
@@ -218,7 +183,7 @@ def project_task_status(
         "trace_event_count": len(entries),
         "token_usage": usage,
         "failure_details": failure_details,
-        "assignment": (
+        "historical_assignment": (
             {
                 "assignment_id": assignment_fact.id,
                 "worker_id": (
@@ -226,15 +191,16 @@ def project_task_status(
                     if effective_worker is not None
                     else None
                 ),
-                "blocker": dict(assignment_issue) if assignment_issue else None,
             }
             if assignment_fact is not None
             else None
         ),
-        "priority": (
+        "historical_priority": (
             int(priority_fact.payload["priority"]) if priority_fact is not None else 0
         ),
-        "priority_fact_id": priority_fact.id if priority_fact is not None else None,
+        "historical_priority_fact_id": priority_fact.id
+        if priority_fact is not None
+        else None,
     }
     if check_integrity:
         from aigineering.core.integrity import check_store_integrity
@@ -309,25 +275,6 @@ def recovery_successor_map(
     }
 
 
-def _latest_terminal(entries: list[TraceEntry]) -> str:
-    terminal = ""
-    for entry in entries:
-        if entry.event_type in TERMINAL_EVENTS:
-            terminal = entry.event_type
-    return terminal
-
-
-def _runtime_terminal(store, contract_id: str) -> str:
-    terminals = {
-        str(record.payload["terminal"])
-        for _, record in store.scan_runtime_records(record_type="lifecycle.terminal")
-        if record.payload.get("contract_id") == contract_id
-    }
-    if len(terminals) > 1:
-        return "stalled"
-    return next(iter(terminals), "")
-
-
 def _latest_attempt_outcome(store, contract_id: str) -> str:
     outcomes = [
         str(record.payload.get("outcome", ""))
@@ -359,57 +306,28 @@ def _output_assets(contract: Contract, store) -> dict[str, str]:
     return outputs
 
 
-def _status_from_entries(
+def _status_from_facts(
     contract: Contract,
     store,
-    entries: list[TraceEntry],
-    terminal: str,
     view: ContractView,
     attempt_outcome: str,
-    *,
-    assignment_blocker: dict | None = None,
 ) -> str:
     if view.terminal == "conflict":
         return "stalled"
     if view.terminal is not None:
         return "completed" if view.terminal == "complete" else view.terminal
-    if terminal == "complete":
-        return "completed"
-    if terminal:
-        return terminal
     if all_outputs_satisfied(contract, store):
         return "completed"
     if attempt_outcome == "expanded":
         return "expanded"
     if view.claim_status == "active":
         return "claimed"
-    if view.claim_status == "submitted":
+    if view.claim_status == "submitted" and attempt_outcome != "failed":
         return "submitted"
-    if any(entry.event_type == "projection" for entry in entries):
-        return "submitted"
-    suspended = False
-    for entry in entries:
-        if entry.event_type in {
-            "task_delegated",
-            "method_scheduled",
-            "method_continuation_scheduled",
-        }:
-            suspended = True
-        elif entry.event_type == "method_resumed":
-            suspended = False
-    if suspended:
-        return "blocked_delegation"
-    if any(
-        blocker.startswith(("claim_hold:", "prerequisite:"))
-        for blocker in view.blockers
-    ):
-        return "blocked"
     if not view.inputs_satisfied or not view.activation_satisfied:
         return "blocked"
     if view.budget_remaining <= 0:
         return "stalled"
-    if assignment_blocker is not None:
-        return "blocked_assignment"
     if contract.worker_capabilities or contract.worker_pools:
         if not eligible_workers(contract, store.get_worker_registrations()):
             return "blocked_capability"
@@ -599,12 +517,9 @@ def _descendant_failure_risks(
             visited.add(child.id)
             entries = _trace_entries(store, child.id)
             view = projection.contract_view(child)
-            terminal = _latest_terminal(entries)
-            status = _status_from_entries(
+            status = _status_from_facts(
                 child,
                 store,
-                entries,
-                terminal,
                 view,
                 _latest_attempt_outcome(store, child.id),
             )
@@ -667,13 +582,10 @@ def _descendant_failure_details(
         if child.id in visited:
             continue
         visited.add(child.id)
-        entries = _trace_entries(store, child.id)
         view = projection.contract_view(child)
-        status = _status_from_entries(
+        status = _status_from_facts(
             child,
             store,
-            entries,
-            _latest_terminal(entries),
             view,
             _latest_attempt_outcome(store, child.id),
         )

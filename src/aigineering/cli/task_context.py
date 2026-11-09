@@ -53,13 +53,9 @@ def register_task_context_command(group: click.Group) -> None:
         click.echo(
             f"Task context for {json.dumps(data['contract_id'], ensure_ascii=True)}"
         )
-        for key, title in (
-            ("disclosed_assets", "Disclosed assets"),
-            ("method_context_assets", "Method context assets"),
-        ):
-            click.echo(f"{title}:")
-            for asset in data[key]:
-                click.echo("  " + json.dumps(asset, ensure_ascii=True, sort_keys=True))
+        click.echo("Disclosed assets:")
+        for asset in data["disclosed_assets"]:
+            click.echo("  " + json.dumps(asset, ensure_ascii=True, sort_keys=True))
         selected = data.get("selected_asset")
         if selected is not None:
             click.echo("Selected content:")

@@ -478,7 +478,7 @@ def test_bad_signature_reusing_committed_candidate_id_still_gets_audit(tmp_path)
     store.close()
 
 
-def test_signed_projection_rejection_keeps_attempt_and_recovery(tmp_path):
+def test_signed_projection_rejection_closes_attempt_without_unfunded_recovery(tmp_path):
     store, root, host, (contract,) = _domain(tmp_path / "signed-rejection.sqlite")
     claimed = _claim(store, host, contract)
     proposal = _candidate(
@@ -509,21 +509,36 @@ def test_signed_projection_rejection_keeps_attempt_and_recovery(tmp_path):
     )
     assert rejection.causal_parents == (received.id,)
     assert attempt.causal_parents == (rejection.id,)
-    assert any(
+    assert not any(
         record.record_type == "lifecycle.terminal"
-        and record.causal_parents == (rejection.id,)
+        and record.payload.get("contract_id") == contract.id
         for record in decision.runtime_records
     )
+    extinguishments = [
+        record
+        for record in decision.runtime_records
+        if record.record_type == "allowance.extinguished"
+        and record.payload.get("contract_id") == contract.id
+    ]
+    assert len(extinguishments) == 1
+    assert extinguishments[0].payload["amount"] == contract.budget
+    grant = next(
+        record
+        for _, record in store.scan_runtime_records(record_type="claim.granted")
+        if record.record_type == "claim.granted"
+        and record.payload.get("contract_id") == contract.id
+    )
+    assert attempt.payload["claim_id"] == grant.payload["claim_id"]
+    assert attempt.payload["outcome"] == "failed"
+    assert extinguishments[0].causal_parents == (attempt.id,)
 
     recovery_registry = CandidatePublisherRegistry((("recovery.publish.v1", root),))
-    assert process_rejected_submissions(
-        store, candidate_publishers=recovery_registry
-    ) == [contract.id]
-    assert store.scan_runtime_records(
+    assert (
+        process_rejected_submissions(store, candidate_publishers=recovery_registry)
+        == []
+    )
+    assert not store.scan_runtime_records(
         record_type="candidate_rejection.recovery_scheduled"
     )
-    assert any(
-        item.origin == "recovery" and item.name == f"{contract.name}.recover"
-        for item in store.get_all_contracts()
-    )
+    assert not any(item.parent_id == contract.id for item in store.get_all_contracts())
     store.close()

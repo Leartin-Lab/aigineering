@@ -1,70 +1,60 @@
 # Support and limits
 
-The current development branch is **dev**, scoped to bounded local single-machine
-CLI workflows. Snapshots are identified by commit; each delivery
-claim depends on evidence for the applicable case and scope. This is an
-unreleased development snapshot; existing Python integrations should consult
-the [import migration notes](../../changes/133-cli-guidance-and-runtime-contraction.md#python-import-migration).
+The current development branch is **dev**, scoped to bounded local
+single-machine workflows. This is an unreleased snapshot; delivery claims
+depend on evidence for the exact artifact and case. Python integrations should
+consult the [primitive runtime migration](../../changes/137-closed-primitive-task-runtime.md#public-compatibility)
+and [earlier import changes](../../changes/133-cli-guidance-and-runtime-contraction.md#python-import-migration).
 
 | Area | Current scope |
 | --- | --- |
-| Local runtime | Signed Candidates, transactional SQLite facts/claims, rebuildable views; Redis is required application infrastructure. |
-| CLI and task board | Explicit file inputs, configured runs, task discovery, status, claim inspection, holds, assignment, review, successors and exact export. |
-| Dynamic work | Staged `/plan`, recursive replanning, tools, continuation and bounded recovery through ordinary tasks. |
-| Skills | A `skill.toml` manifest plus selected content Assets; context does not grant capability or authority. |
-| Existing Harnesses | Signed claim/renew/submit adapter; internal model/tool orchestration may remain with the Harness. |
-| MCP | Capability metadata and callable adapters; `mcp add` does not connect a server. General production transport is not supplied. |
-| Evidence | Exact Asset versions and recorded lineage; business truth and complete semantic dependencies are not inferred automatically. |
-| Acceptance | Frozen task policies can require distinct authorized verifiers; different identities can still share model and source biases. |
-| Workspace delegation | Explicit Engine Fleet profiles can delegate to another initialized local domain under the same trusted operator; receiver Fleets cannot contain Engine adapters. |
+| Runtime | Signed Candidates, transactional SQLite facts and claims, rebuildable views; Redis is required application infrastructure. |
+| Tasks and CLI | Create, run, inspect, cancel, retry, review and export ordinary tasks and Assets. |
+| Output matching | Any admitted Asset may meet frozen name, Definition, content, producer and shape conditions. No root, origin or task-tree completion gate. |
+| Planning and tools | Bounded ordinary child tasks; tool calls require real causal funding. Scope permits but does not require a call. |
+| Skills | A manifest and selected context Assets; context does not grant capability or authority. |
+| Harness | Signed claim, renewal and submission adapter; private model/tool orchestration may remain in the Harness. |
+| MCP | Capability metadata and callable adapters; `mcp add` does not connect a server. Production transport is not supplied. |
+| Review | Ordinary reviewer Task and request Asset; decision commits canonical attestation and a descriptive decision Asset. |
+| Evidence | Exact Asset identity and frozen selectors; business truth and complete semantic dependencies are not inferred automatically. |
 
 ## Operational boundaries
 
-- Use a fresh workspace for an independent configured run. Resume freezes the
-  committed task and inputs; it does not replace them with current local files.
-- New application Contracts use mechanical output conditions. Without explicit
-  selectors, matching same-name business Assets retain the coarse compatibility
-  behavior. `acceptance_policy.output_requirements` can bind exact Definition,
-  Content and producer actor IDs; an admitted Asset from another task can meet
-  those conditions without a claim on the target Contract. Independent policy
-  still requires exact qualification. Historical `output_source` fields remain
-  readable but do not impose a producer-tree rule. Schema23 prevents old readers
-  from reopening these workspaces; stop older Workers and back up before
-  upgrading.
+- Schema 24 is the current reader floor. Stop older Workers and back up before
+  upgrading. The floor cannot constrain a connection already opened by an old
+  process.
+- Output requirements can select exact Definition, content, producer actor
+  and shape. A matching admitted Asset from another Task can satisfy an
+  output. Historical `output_source` metadata remains readable but does not
+  impose a producer-tree rule. Independent acceptance still requires exact
+  qualification.
 - Engine bridge output Definitions describe the frozen goal and exact mapped
-  inputs. Existing signed bridge history is not rewritten; a replay whose
-  outputs do not match the current goal conditions may require new ordinary
-  work.
-- Independent qualification can bind an exact admitted output from any source;
-  the target Contract need not have a claim. Same-name assets alone do not
-  establish qualification.
-- Tool scope is permission: repeated calls remain separate funded tasks, and
-  scope alone does not require a call. Recovery names do not set a retry limit;
-  causal funding still applies. Method recovery checks the complete finite
-  source-history chain with cycle detection and no fixed three-level cutoff.
-- Submission and invocation finish do not establish business completion.
-  Scheduled recovery must be claimed and completed as new work.
-- Provider request timeout, run wait timeout, retries, causal allowance and
-  token usage are separate limits. Unknown usage is not zero or a known bill.
-- Required Redis outages are visible. Accepted SQLite facts are preserved;
-  restore relay synchronization before replaying the exact intent.
-- Root retry funding has explicit limits. A retry cannot mint a fresh grant;
-  general transfer/freezing semantics remain unresolved.
-- An earlier intermittent Fleet stop remains unexplained. A later passing run
-  does not resolve that observation or establish general long-run stability.
-- Three historical calibration trials yielded zero qualified deliveries. Keep
-  that result visible; later source changes do not retroactively qualify them.
-- Tools run locally without a production process-isolation guarantee. The
+  inputs. Existing signed bridge history is not rewritten; an old publication
+  that does not match current output conditions may require new ordinary work.
+- Failure is recorded at the attempt and audit level. Retry or recovery
+  requires an actually available causal grant. No root grant is fabricated.
+  Bounded deterministic and installed CLI cases verify these paths; broad
+  real-provider reliability remains unestablished.
+- Planning, tool continuation, review and recovery publish ordinary Tasks and
+  Assets. There is no post-completion controller or runtime execution DAG.
+- The current fresh writer surface does not include handoff, revision/edit,
+  mutable assignment, dependency edges, holds/promotion, priority writes,
+  comments or attachment links. Historical records may be inspected where
+  supported; they do not change current claim or fulfillment eligibility.
+- Provider request timeout, run wait timeout, retry count, causal allowance
+  and token usage are separate. Unknown usage is not zero or a known bill.
+- Redis outages are visible. Accepted SQLite facts remain durable while relay
+  synchronization is pending.
+- Local tools do not provide a production process-isolation guarantee. The
   reference HTTP service requires deployment-level security controls.
 
-General task reliability, unattended long runs, history-independent hot paths,
-cross-machine deployment, exactly-once external effects and measured quality or
-cost advantages are not established. A bounded successful case does not qualify
-those broader claims. Historical failed cases are not erased by later fixes.
-Case reports remain tied to their tested artifacts; the [current bounded 0.5.14
-CLI case](../../reports/cli-research.md) describes its scope and limits.
+General unattended reliability, cross-machine deployment, exactly-once
+external effects, measured quality or cost improvements and broad semantic
+correctness are not established. Historical failures remain part of the
+evidence. Case reports stay tied to their tested artifacts; see the [CLI
+research case](../../reports/cli-research.md) and
+[calibration review](../../reports/calibration-review.md).
 
-Start with the [CLI research recipe](../../examples/cli_research/README.md),
-and use [task operations](task-board.md) for blockers and recovery. The
-[calibration case](../../reports/calibration-review.md) illustrates a retained
-unqualified outcome and the limits of model protocol compliance.
+Start with the [CLI research recipe](../../examples/cli_research/README.md) and
+the [task operations](task-board.md). The calibration case illustrates an
+unqualified result and limits of model protocol compliance.

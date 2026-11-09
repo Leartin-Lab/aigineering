@@ -2,11 +2,8 @@ from __future__ import annotations
 
 import inspect
 
-import pytest
-
 from aigineering.core.effect_projection import (
     BUILTIN_EFFECTS,
-    freeze_additional_effects,
 )
 from aigineering.core.effect_projectors import project_asset_proposal
 from aigineering.core.commitment import CandidateCommitter
@@ -33,26 +30,21 @@ def test_asset_projection_reader_is_optional_and_sql_stays_in_sqlite_adapter():
     assert AssetProposalProjectionInputs.__dataclass_params__.frozen
 
 
-def test_builtin_asset_propose_cannot_be_overridden_by_injected_effects():
-    with pytest.raises(ValueError, match="cannot replace built-in 'asset.propose'"):
-        freeze_additional_effects(
-            {"asset.propose": ("asset.publish", lambda *_args: None)}
-        )
+def test_builtin_asset_propose_has_no_injection_registry():
     assert BUILTIN_EFFECTS["asset.propose"][0] == "asset.publish"
+    assert "additional_effects" not in inspect.signature(CandidateCommitter).parameters
 
 
-def test_commitment_dispatch_stays_before_authentication_and_reduction_owners():
-    source = inspect.getsource(CandidateCommitter.commit)
-    dispatch = source.index("load_candidate_projection_context")
-    reduction = source.index("reduce_candidate(")
-    authentication_rejection = source.index(
-        "record_unreceipted_authentication_rejection("
+def test_commitment_authenticates_before_readonly_replay_and_fresh_projection():
+    source = inspect.getsource(CandidateCommitter._commit_locked)
+    assert source.index("candidate_received_record(") < source.index(
+        "read_candidate_publication("
     )
-    assert source.count("load_candidate_projection_context(") == 1
-    assert "build_asset_proposal_projection_request" not in source
-    assert "load_asset_proposal_projection_context" not in source
-    assert "load_contract_declaration_projection_context" not in source
-    assert dispatch < reduction < authentication_rejection
+    assert source.index("read_candidate_publication(") < source.index(
+        "load_candidate_projection_context("
+    )
+    assert source.count("_reduce_received_candidate(") == 1
+    assert source.count("commit_ingress_batch(") == 1
 
 
 def test_generic_context_facade_and_direct_loaders_are_owned_by_projection_context():
@@ -69,8 +61,7 @@ def test_sql_selectors_are_owned_by_the_sqlite_reader():
 
     projection_source = inspect.getsource(projection_context)
     assert "SELECT * FROM runtime_records" not in projection_source
-    assert "SELECT * FROM runtime_records" in inspect.getsource(
-        SQLiteStore.read_asset_proposal_projection_inputs
-    ) or "SELECT * FROM runtime_records" in inspect.getsource(
+    assert "self.get_contract(" in inspect.getsource(
         SQLiteStore._read_asset_proposal_projection_inputs
     )
+    assert "SELECT * FROM contracts" in inspect.getsource(SQLiteStore.get_contract)

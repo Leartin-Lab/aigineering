@@ -11,7 +11,6 @@ import pytest
 from aigineering.core.commitment import CandidateCommitter, reduce_candidate
 from aigineering.core.control_plane import build_control_plane_contract
 from aigineering.core.ids import contract_identity_v3
-from aigineering.core.injected_fact_replay import exact_single_effect_head_replay
 from aigineering.core.projection_context import (
     AssetProposalProjectionInputs,
     AssetProposalProjectionRequest,
@@ -31,7 +30,6 @@ from aigineering.protocol.effect_builders import (
     asset_proposal_effect,
     contract_declaration_effect,
 )
-from aigineering.protocol.runtime_record import create_runtime_record
 from aigineering.protocol.types import Asset, Contract
 from conftest import candidate_runtime
 from conftest import hosted_worker
@@ -128,14 +126,8 @@ def test_builder_freezes_only_exact_homogeneous_builtin_asset_proposals():
             key="many",
         )
         request = build_asset_proposal_projection_request(one)
-        assert request == AssetProposalProjectionRequest(
-            candidate_id=one.id,
-            claim_bound_contract_id=None,
-            include_candidate_replay=True,
-        )
-        assert build_asset_proposal_projection_request(many) == replace(
-            request, candidate_id=many.id, include_candidate_replay=False
-        )
+        assert request == AssetProposalProjectionRequest(claim_bound_contract_id=None)
+        assert build_asset_proposal_projection_request(many) == request
 
         mixed = replace(
             one,
@@ -179,106 +171,6 @@ def test_builder_freezes_only_exact_homogeneous_builtin_asset_proposals():
         assert build_asset_proposal_projection_request(wrong_binding) is None
 
 
-def test_candidate_context_facade_is_called_once_and_builds_asset_hint_once(
-    temp_sqlite_store, monkeypatch
-):
-    from aigineering.core import commitment, projection_context
-
-    runtime = candidate_runtime(temp_sqlite_store)
-    candidate = _candidate(runtime, (_asset_effect(),), key="facade-asset")
-    original_builder = projection_context.build_asset_proposal_projection_request
-    builder_calls = []
-
-    def build_once(value):
-        builder_calls.append(value.id)
-        return original_builder(value)
-
-    monkeypatch.setattr(
-        projection_context, "build_asset_proposal_projection_request", build_once
-    )
-    original_facade = commitment.context_inputs.load_candidate_projection_context
-    facade_calls = []
-
-    def observe_facade(*args, **kwargs):
-        facade_calls.append(args[1].id)
-        return original_facade(*args, **kwargs)
-
-    monkeypatch.setattr(
-        commitment.context_inputs, "load_candidate_projection_context", observe_facade
-    )
-    original_reader = temp_sqlite_store.read_asset_proposal_projection_inputs
-    reader_calls = []
-
-    def read_once(request):
-        reader_calls.append(request)
-        return original_reader(request)
-
-    monkeypatch.setattr(
-        temp_sqlite_store, "read_asset_proposal_projection_inputs", read_once
-    )
-    decision = CandidateCommitter(temp_sqlite_store, temp_sqlite_store).commit(
-        candidate, runtime.genesis
-    )
-    assert decision.accepted
-    assert facade_calls == [candidate.id]
-    assert builder_calls == [candidate.id]
-    assert len(reader_calls) == 1
-    assert reader_calls[0].candidate_id == candidate.id
-
-
-def test_candidate_context_facade_routes_declaration_and_mixed_candidates(
-    temp_sqlite_store, monkeypatch
-):
-    from aigineering.core import projection_context
-
-    runtime = candidate_runtime(temp_sqlite_store)
-    contract = build_control_plane_contract(
-        name="facade-declaration", inputs=(), outputs=(), activation="", budget=1
-    )
-    declaration = _candidate(
-        runtime,
-        (contract_declaration_effect(contract),),
-        key="facade-declaration",
-    )
-    mixed = _candidate(
-        runtime,
-        (_asset_effect("facade-mixed"), contract_declaration_effect(contract)),
-        key="facade-mixed",
-    )
-    old_declaration = projection_context.load_contract_declaration_projection_context
-    declaration_calls = []
-
-    def observe_declaration(store, candidate, **kwargs):
-        declaration_calls.append(candidate.id)
-        return old_declaration(store, candidate, **kwargs)
-
-    old_full = projection_context.load_effect_projection_context
-    full_calls = []
-
-    def observe_full(*args, **kwargs):
-        full_calls.append(True)
-        return old_full(*args, **kwargs)
-
-    monkeypatch.setattr(
-        projection_context,
-        "load_contract_declaration_projection_context",
-        observe_declaration,
-    )
-    monkeypatch.setattr(
-        projection_context, "load_effect_projection_context", observe_full
-    )
-    declaration_context = load_candidate_projection_context(
-        temp_sqlite_store, declaration
-    )
-    assert declaration_context.contracts == ()
-    assert declaration_calls == [declaration.id]
-    assert full_calls == []
-
-    load_candidate_projection_context(temp_sqlite_store, mixed)
-    assert declaration_calls == [declaration.id, mixed.id]
-    assert full_calls == [True]
-
-
 def test_unsupported_candidate_shape_uses_legacy_full_context(
     monkeypatch, temp_sqlite_store
 ):
@@ -307,7 +199,7 @@ def test_unsupported_candidate_shape_uses_legacy_full_context(
     assert facade_context.runtime_records == context.runtime_records
 
 
-def test_request_selects_no_unrelated_facts_and_skips_multi_effect_replay_reads(
+def test_fresh_request_selects_no_unrelated_facts_for_single_or_multi_effect(
     temp_sqlite_store,
 ):
     runtime = candidate_runtime(temp_sqlite_store)
@@ -320,14 +212,13 @@ def test_request_selects_no_unrelated_facts_and_skips_multi_effect_replay_reads(
     )
 
     request = build_asset_proposal_projection_request(one)
-    assert request is not None and request.include_candidate_replay
+    assert request == AssetProposalProjectionRequest(claim_bound_contract_id=None)
     selected, sql, _vm = _measure_reader(temp_sqlite_store, request)
     assert selected == AssetProposalProjectionInputs()
-    assert len(sql) == 2
-    assert all("runtime_records" in statement for statement, _ in sql)
+    assert sql == []
 
     request_many = build_asset_proposal_projection_request(many)
-    assert request_many is not None and not request_many.include_candidate_replay
+    assert request_many == request
     selected_many, sql_many, _vm_many = _measure_reader(temp_sqlite_store, request_many)
     assert selected_many == AssetProposalProjectionInputs()
     assert sql_many == []
@@ -466,11 +357,16 @@ def test_claim_bound_rejections_match_full_context_for_output_creator_and_shape(
         assert semantic_result(narrow)[0] is False, key
 
 
-def test_claim_bound_commit_and_exact_replay_keep_writer_claim_checks(
-    temp_sqlite_store,
+def test_claim_bound_commit_and_generic_replay_keep_writer_claim_checks(
+    temp_sqlite_store, monkeypatch
 ):
     from aigineering.core.worker_routing import WorkerRegistration
     from aigineering.runtime import claim_next_package
+    import aigineering.runtime_services as runtime_services
+
+    monkeypatch.setattr(
+        runtime_services, "sync_runtime", lambda *_args, **_kwargs: None
+    )
 
     class ClaimWorker:
         worker_id = "worker:asset-projection"
@@ -558,217 +454,23 @@ def test_claim_bound_commit_and_exact_replay_keep_writer_claim_checks(
     )
     assert temp_sqlite_store.get_claim(contract.id)["status"] == "submitted"
 
+    revision_before_replay = temp_sqlite_store.get_runtime_revision()
+    original_head = next(
+        record
+        for record in decision.runtime_records
+        if record.record_type == "candidate.committed"
+    )
     replay = committer.commit(candidate, host.genesis)
     assert replay.accepted
     assert replay.assets == decision.assets
-    assert temp_sqlite_store.get_claim(contract.id)["status"] == "submitted"
-
-
-def test_single_effect_replay_context_contains_all_exact_heads_and_members(
-    temp_sqlite_store,
-):
-    runtime = candidate_runtime(temp_sqlite_store)
-    candidate = _candidate(runtime, (_asset_effect("replay", "same"),), key="replay")
-    first = CandidateCommitter(temp_sqlite_store, temp_sqlite_store).commit(
-        candidate, runtime.genesis
-    )
-    assert first.accepted
-
-    context = load_asset_proposal_projection_context(temp_sqlite_store, candidate)
-    assert {record.record_type for record in context.runtime_records} == {
-        "candidate.received",
-        "candidate.committed",
-        "asset.committed",
-        "asset.legacy-graph.migrated",
-    }
-    replay = reduce_candidate(
-        candidate,
-        runtime.genesis,
-        verifier_factory=create_verifier,
-        actor_keys=(runtime.actor_key,),
-        projection_context=context,
-    )
-    full = reduce_candidate(
-        candidate,
-        runtime.genesis,
-        verifier_factory=create_verifier,
-        actor_keys=(runtime.actor_key,),
-        projection_context=load_effect_projection_context(temp_sqlite_store),
-    )
-    assert replay.accepted == full.accepted
-    assert replay.assets == full.assets
-    assert replay.contracts == full.contracts
-    assert replay.trace_entries == full.trace_entries
-    assert tuple(record.id for record in replay.runtime_records) == tuple(
-        record.id for record in full.runtime_records
-    )
-    selected_ids = {record.id for record in context.runtime_records}
-    expected_revision_order = tuple(
+    replayed_head = next(
         record
-        for _revision, record in temp_sqlite_store.scan_runtime_records()
-        if record.id in selected_ids
-    )
-    assert context.runtime_records == expected_revision_order
-    receipt = next(
-        r for r in context.runtime_records if r.record_type == "candidate.received"
-    )
-    head = next(
-        r for r in context.runtime_records if r.record_type == "candidate.committed"
-    )
-    projected_records = tuple(
-        record
-        for record in first.runtime_records
-        if record.id in set(head.payload["committed_record_ids"])
-    )
-    assert exact_single_effect_head_replay(
-        candidate,
-        receipt.id,
-        projected_records,
-        context.runtime_records,
-    )
-
-    changed = _candidate(
-        runtime, (_asset_effect("replay", "changed"),), key="replay-changed"
-    )
-    changed_context = load_asset_proposal_projection_context(temp_sqlite_store, changed)
-    assert changed_context.runtime_records == ()
-    changed_narrow = reduce_candidate(
-        changed,
-        runtime.genesis,
-        verifier_factory=create_verifier,
-        actor_keys=(runtime.actor_key,),
-        projection_context=changed_context,
-    )
-    changed_full = reduce_candidate(
-        changed,
-        runtime.genesis,
-        verifier_factory=create_verifier,
-        actor_keys=(runtime.actor_key,),
-        projection_context=load_effect_projection_context(temp_sqlite_store),
-    )
-    assert _reduction_semantics(changed_narrow) == _reduction_semantics(changed_full)
-    assert changed_narrow.assets[0].id != replay.assets[0].id
-
-
-def test_selector_preserves_duplicate_receipts_and_heads_for_generic_rejection(
-    temp_sqlite_store,
-):
-    runtime = candidate_runtime(temp_sqlite_store)
-    candidate = _candidate(
-        runtime, (_asset_effect("duplicate", "same"),), key="duplicate"
-    )
-    committed = CandidateCommitter(temp_sqlite_store, temp_sqlite_store).commit(
-        candidate, runtime.genesis
-    )
-    assert committed.accepted
-    original = load_asset_proposal_projection_context(temp_sqlite_store, candidate)
-    receipt = next(
-        r for r in original.runtime_records if r.record_type == "candidate.received"
-    )
-    head = next(
-        r for r in original.runtime_records if r.record_type == "candidate.committed"
-    )
-
-    # These deliberately malformed duplicate records test selection fidelity only;
-    # exact_single_effect_head_replay remains the generic proof/rejection owner.
-    duplicate_receipt_payload = dict(receipt.payload)
-    duplicate_receipt_payload["actor_id"] = "duplicate-untrusted-actor"
-    duplicate_receipt = create_runtime_record(
-        "candidate.received",
-        duplicate_receipt_payload,
-        causal_parents=receipt.causal_parents,
-    )
-    duplicate_head = create_runtime_record(
-        "candidate.committed",
-        {"candidate_id": candidate.id, "committed_record_ids": []},
-        causal_parents=(receipt.id,),
-    )
-    with temp_sqlite_store._conn:
-        temp_sqlite_store._insert_runtime_record(duplicate_receipt)
-        temp_sqlite_store._insert_runtime_record(duplicate_head)
-
-    context = load_asset_proposal_projection_context(temp_sqlite_store, candidate)
-    assert (
-        sum(r.record_type == "candidate.received" for r in context.runtime_records) == 2
-    )
-    assert (
-        sum(r.record_type == "candidate.committed" for r in context.runtime_records)
-        == 2
-    )
-    assert {
-        r.id
-        for r in context.runtime_records
-        if r.id in head.payload["committed_record_ids"]
-    } == set(head.payload["committed_record_ids"])
-    projected = tuple(
-        record
-        for record in committed.runtime_records
-        if record.id in set(head.payload["committed_record_ids"])
-    )
-    assert not exact_single_effect_head_replay(
-        candidate, receipt.id, projected, context.runtime_records
-    )
-
-
-def test_malformed_replay_member_shapes_are_selected_without_becoming_proof(
-    temp_sqlite_store,
-):
-    runtime = candidate_runtime(temp_sqlite_store)
-    candidate = _candidate(runtime, (_asset_effect("members", "same"),), key="members")
-    committed = CandidateCommitter(temp_sqlite_store, temp_sqlite_store).commit(
-        candidate, runtime.genesis
-    )
-    assert committed.accepted
-    original = load_asset_proposal_projection_context(temp_sqlite_store, candidate)
-    receipt = next(
-        record
-        for record in original.runtime_records
-        if record.record_type == "candidate.received"
-    )
-    original_head = next(
-        record
-        for record in original.runtime_records
+        for record in replay.runtime_records
         if record.record_type == "candidate.committed"
     )
-    member_id = original_head.payload["committed_record_ids"][0]
-    malformed_heads = (
-        ("missing", ["record:missing-member"], (receipt.id, "record:missing-member")),
-        ("duplicate", [member_id, member_id], (receipt.id, member_id, member_id)),
-        ("opaque", {"member": member_id}, (receipt.id,)),
-    )
-    for label, member_ids, causal_parents in malformed_heads:
-        malformed_head = create_runtime_record(
-            "candidate.committed",
-            {"candidate_id": candidate.id, "committed_record_ids": member_ids},
-            causal_parents=causal_parents,
-        )
-        with temp_sqlite_store._conn:
-            temp_sqlite_store._insert_runtime_record(malformed_head)
-        context = load_asset_proposal_projection_context(temp_sqlite_store, candidate)
-        selected = next(
-            record
-            for record in context.runtime_records
-            if record.id == malformed_head.id
-        )
-        expected_member_ids = (
-            tuple(member_ids) if isinstance(member_ids, list) else member_ids
-        )
-        assert selected.payload["committed_record_ids"] == expected_member_ids
-        if label == "missing":
-            assert not any(
-                record.id == "record:missing-member"
-                for record in context.runtime_records
-            )
-        if label == "opaque":
-            assert len(context.runtime_records) == 7
-        projected = tuple(
-            record
-            for record in committed.runtime_records
-            if record.id in set(original_head.payload["committed_record_ids"])
-        )
-        assert not exact_single_effect_head_replay(
-            candidate, receipt.id, projected, context.runtime_records
-        )
+    assert replayed_head.id == original_head.id
+    assert temp_sqlite_store.get_runtime_revision() == revision_before_replay
+    assert temp_sqlite_store.get_claim(contract.id)["status"] == "submitted"
 
 
 def test_optional_reader_fallback_and_reader_errors_are_not_hidden(
@@ -977,233 +679,7 @@ def test_parent_delegated_protected_name_stays_policy_owned(temp_sqlite_store):
     assert "asset.publish.protected" in str(rejection.payload.get("reason", ""))
 
 
-def test_h_matrix_keeps_returned_objects_fixed_and_candidate_selectors_indexed(
-    tmp_path, monkeypatch
-):
-    from aigineering.core.domain import initialize_genesis
-    from aigineering.core.sqlite_store import SQLiteStore
-
-    vm_by_h = {}
-    signed_candidates = []
-    signed_batches = []
-    frozen_runtime = None
-    for history in (0, 16, 64):
-        store = SQLiteStore(str(tmp_path / f"history-{history}.sqlite"))
-        try:
-            if frozen_runtime is None:
-                runtime = candidate_runtime(store)
-                frozen_runtime = runtime
-            else:
-                initialize_genesis(store, frozen_runtime.genesis)
-                runtime = candidate_runtime(
-                    store,
-                    genesis=frozen_runtime.genesis,
-                    actor_key=frozen_runtime.actor_key,
-                    signer=frozen_runtime.signer,
-                )
-            _closed_history(store, runtime, history)
-            candidate = _candidate(
-                runtime, (_asset_effect(),), key="missing-replay-fixed"
-            )
-            signed_candidates.append(candidate)
-            request = build_asset_proposal_projection_request(candidate)
-            assert request is not None
-            decoder_counts = {"runtime": 0, "contract": 0, "asset": 0}
-            for label, method_name in (
-                ("runtime", "_row_to_runtime_record"),
-                ("contract", "_row_to_contract"),
-                ("asset", "_row_to_asset"),
-            ):
-                original_decoder = getattr(store, method_name)
-
-                def count_decoder(row, *, label=label, original=original_decoder):
-                    decoder_counts[label] += 1
-                    return original(row)
-
-                monkeypatch.setattr(store, method_name, count_decoder)
-            selected, sql, vm = _measure_reader(store, request)
-            assert selected == AssetProposalProjectionInputs()
-            assert len(sql) == 2
-            assert all("runtime_records" in statement for statement, _ in sql)
-
-            batch = _candidate(
-                runtime,
-                tuple(_asset_effect(f"batch-{index}") for index in range(64)),
-                key="asset-projection-p64-fixed",
-            )
-            signed_batches.append(batch)
-            batch_request = build_asset_proposal_projection_request(batch)
-            assert (
-                batch_request is not None and not batch_request.include_candidate_replay
-            )
-            batch_inputs, batch_sql, _batch_vm = _measure_reader(store, batch_request)
-            assert batch_inputs == AssetProposalProjectionInputs()
-            assert batch_sql == []
-            assert decoder_counts == {"runtime": 0, "contract": 0, "asset": 0}
-            plans = []
-            for record_type in ("candidate.received", "candidate.committed"):
-                plans.extend(
-                    store._conn.execute(
-                        "EXPLAIN QUERY PLAN SELECT * FROM runtime_records WHERE "
-                        "record_type = ? AND json_extract(payload_json, '$.candidate_id') = ? ORDER BY revision",
-                        (record_type, candidate.id),
-                    ).fetchall()
-                )
-            assert plans and all("SEARCH" in row[3].upper() for row in plans)
-            by_record_type = {
-                "candidate.received": next(
-                    steps
-                    for statement, steps in sql
-                    if "candidate.received" in statement
-                ),
-                "candidate.committed": next(
-                    steps
-                    for statement, steps in sql
-                    if "candidate.committed" in statement
-                ),
-            }
-            vm_by_h[history] = by_record_type
-            parent_plan = store._conn.execute(
-                "EXPLAIN QUERY PLAN SELECT * FROM contracts WHERE id = ?",
-                ("task:v6:exact-parent",),
-            ).fetchone()
-            member_plan = store._conn.execute(
-                "EXPLAIN QUERY PLAN SELECT * FROM runtime_records WHERE record_id IN (?, ?)",
-                ("record:one", "record:two"),
-            ).fetchone()
-            assert "SEARCH" in parent_plan[3].upper()
-            assert "SEARCH" in member_plan[3].upper()
-        finally:
-            store.close()
-    for selector in ("candidate.received", "candidate.committed"):
-        assert vm_by_h[64][selector] <= 2 * vm_by_h[0][selector] + 64
-    assert all(candidate == signed_candidates[0] for candidate in signed_candidates)
-    assert all(batch == signed_batches[0] for batch in signed_batches)
-
-
-def test_parent_and_fixed_replay_bundle_have_bounded_indexed_selectors(
-    tmp_path, monkeypatch
-):
-    from aigineering.core.domain import initialize_genesis
-    from aigineering.core.sqlite_store import SQLiteStore
-
-    parent_vm = {}
-    replay_vm = {}
-    replay_sizes = {}
-    frozen_runtime = None
-    for history in (0, 16, 64):
-        store = SQLiteStore(str(tmp_path / f"selector-history-{history}.sqlite"))
-        try:
-            if frozen_runtime is None:
-                runtime = candidate_runtime(store)
-                frozen_runtime = runtime
-            else:
-                initialize_genesis(store, frozen_runtime.genesis)
-                runtime = candidate_runtime(
-                    store,
-                    genesis=frozen_runtime.genesis,
-                    actor_key=frozen_runtime.actor_key,
-                    signer=frozen_runtime.signer,
-                )
-            parent = build_control_plane_contract(
-                name="selector-exact-parent",
-                inputs=(),
-                outputs=(),
-                activation="",
-                budget=1,
-            )
-            assert runtime.publisher.publish(
-                (contract_declaration_effect(parent),),
-                idempotency_key="selector-parent",
-            ).accepted
-            _closed_history(store, runtime, history)
-
-            bound = _candidate(
-                runtime,
-                (_asset_effect("report", "ok", created_by=parent.id),),
-                key="selector-bound-no-history",
-                claim_binding=CandidateClaimBinding(
-                    parent.id, "claim:selector", 1, "pkg:selector"
-                ),
-            )
-            bound_request = build_asset_proposal_projection_request(bound)
-            assert bound_request is not None
-            decoder_counts = {"runtime": 0, "contract": 0, "asset": 0}
-            for label, method_name in (
-                ("runtime", "_row_to_runtime_record"),
-                ("contract", "_row_to_contract"),
-                ("asset", "_row_to_asset"),
-            ):
-                original_decoder = getattr(store, method_name)
-
-                def count_decoder(row, *, label=label, original=original_decoder):
-                    decoder_counts[label] += 1
-                    return original(row)
-
-                monkeypatch.setattr(store, method_name, count_decoder)
-            selected_bound, bound_sql, _ = _measure_reader(store, bound_request)
-            assert selected_bound.contracts == (parent,)
-            assert selected_bound.runtime_records == ()
-            assert decoder_counts == {"runtime": 0, "contract": 1, "asset": 0}
-            assert len(bound_sql) == 3
-            parent_entry = next(item for item in bound_sql if "contracts" in item[0])
-            parent_vm[history] = parent_entry[1]
-            parent_plan = store._conn.execute(
-                "EXPLAIN QUERY PLAN SELECT * FROM contracts WHERE id = ?",
-                (parent.id,),
-            ).fetchone()
-            assert "SEARCH" in parent_plan[3].upper()
-
-            replay_candidate = _candidate(
-                runtime,
-                (_asset_effect("fixed-replay", "same"),),
-                key="selector-fixed-replay",
-            )
-            committed = CandidateCommitter(store, store).commit(
-                replay_candidate, runtime.genesis
-            )
-            assert committed.accepted
-            replay_request = build_asset_proposal_projection_request(replay_candidate)
-            assert replay_request is not None
-            decoder_counts = {"runtime": 0, "contract": 0, "asset": 0}
-            selected_replay, replay_sql, _ = _measure_reader(store, replay_request)
-            assert len(selected_replay.runtime_records) == 4
-            assert decoder_counts == {"runtime": 4, "contract": 0, "asset": 0}
-            assert len(replay_sql) == 3
-            replay_sizes[history] = len(selected_replay.runtime_records)
-            replay_vm[history] = {
-                "candidate.received": next(
-                    steps
-                    for statement, steps in replay_sql
-                    if "candidate.received" in statement
-                ),
-                "candidate.committed": next(
-                    steps
-                    for statement, steps in replay_sql
-                    if "candidate.committed" in statement
-                ),
-                "members": next(
-                    steps
-                    for statement, steps in replay_sql
-                    if "record_id IN" in statement
-                ),
-            }
-            member_plan = store._conn.execute(
-                "EXPLAIN QUERY PLAN SELECT * FROM runtime_records WHERE record_id IN (?, ?)",
-                ("record:one", "record:two"),
-            ).fetchone()
-            assert "SEARCH" in member_plan[3].upper()
-        finally:
-            store.close()
-
-    assert replay_sizes == {0: 4, 16: 4, 64: 4}
-    for history in (16, 64):
-        assert parent_vm[history] <= 2 * parent_vm[0] + 64
-        for selector in ("candidate.received", "candidate.committed", "members"):
-            assert replay_vm[history][selector] <= 2 * replay_vm[0][selector] + 64
-
-
-def test_multi_effect_commit_uses_new_context_without_changing_asset_facts(
+def test_signed_multi_effect_commit_preserves_asset_facts(
     temp_sqlite_store, monkeypatch
 ):
     from aigineering.core import projection_context
@@ -1232,15 +708,12 @@ def test_multi_effect_commit_uses_new_context_without_changing_asset_facts(
         return old_full(*args, **kwargs)
 
     monkeypatch.setattr(projection_context, "load_effect_projection_context", full)
-    decision = CandidateCommitter(
-        temp_sqlite_store,
-        temp_sqlite_store,
-        additional_effects={"custom.unused": ("asset.publish", lambda *_args: None)},
-    ).commit(candidate, runtime.genesis)
+    decision = CandidateCommitter(temp_sqlite_store, temp_sqlite_store).commit(
+        candidate, runtime.genesis
+    )
     assert decision.accepted
     assert len(decision.assets) == 2
-    assert requests and requests[0].candidate_id == candidate.id
-    assert requests[0].include_candidate_replay is False
+    assert requests == [AssetProposalProjectionRequest(claim_bound_contract_id=None)]
     assert full_calls == []
     assert len(temp_sqlite_store.get_all_assets()) == 2
     assert not any(

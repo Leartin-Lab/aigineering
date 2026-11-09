@@ -10,15 +10,16 @@ and policy-bound acceptance. Worker output is an untrusted Candidate;
 authenticated, authorized effects become durable facts through transactional
 commitment.
 
-Content-addressed Assets fix the versions being checked. Recorded lineage helps
-you revisit evidence and revise questionable results without reconstructing a
-model's private reasoning. Content correctness still needs appropriate checks.
+Content-addressed Assets fix the versions being checked. Ordinary output
+requirements can bind exact definitions, content and producer identities;
+matching Assets may come from any source. Content correctness still needs
+appropriate checks.
 
 ## What you can use
 
 - Run a task from explicit files, or a configured fleet with Skills and tools.
 - Let `/plan` and `/replan` expand work into ordinary, bounded runtime tasks.
-- Inspect the CLI task board, blockers, claims, evidence and recovery successors.
+- Inspect the CLI task board, blockers, claims and exact Asset evidence.
 - Review exact output Assets and export results that satisfy the task's policy.
 - Keep an existing Harness's model and tool loop behind the signed Worker API.
 
@@ -68,10 +69,10 @@ aig -C workspaces/quick task audit TASK_ID --json
 
 ## Planning, tools and independent acceptance
 
-The [CLI research example](examples/cli_research/README.md) starts from one root
-task, frozen input and a Skill. The model plans the work; two tools compute a
-sample mean and unit conversion, then a different authorized Worker checks the
-exact report. There is no example-owned task scheduler.
+The [CLI research example](examples/cli_research/README.md) starts from one
+task, frozen input and a Skill. The model plans ordinary bounded work; tools
+compute a sample mean and unit conversion, then a different authorized Worker
+checks the exact report. There is no separate task scheduler.
 
 Its preset selects `deepseek-flash`; edit `workers.toml` for another compatible
 provider. The example adapter must also be importable:
@@ -90,11 +91,12 @@ and [Harness integration](docs/reference/agent-harness-migration.md).
 
 ## When work stops
 
-Read `task status` first. Use `task runs`, `diagnostics`, `lineage` and `logs` only
-for the relevant task and claim. Submission, tool observations and scheduled
-recovery are not business completion. Continue an eligible task with the same
-configuration and `--resume TASK_ID`; a published recovery successor has its own
-ID. Do not rerun a submitted producer just because acceptance is pending.
+Read `task status` first. Use `task runs`, `diagnostics`, `lineage` and `logs`
+for the relevant task and claim. Submission and tool observations are not
+business completion. Continue only the exact task ID the runtime reports as
+eligible. Recovery needs an actual causal grant; if funding is unavailable,
+the blocker remains visible. Do not rerun a submitted producer just because
+acceptance is pending.
 
 `--timeout` bounds one provider request; `--wait-timeout` is for target/configured
 runs, not quick-goal execution.

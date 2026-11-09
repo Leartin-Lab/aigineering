@@ -13,9 +13,7 @@ from aigineering.agent.tool_worker import ToolWorker
 from aigineering.runtime import WorkerInvocationError
 from aigineering.run_failure_diagnostics import invocation_failure_detail
 from aigineering.task_diagnostics import task_diagnostics, task_runs
-from aigineering.application import default_completion_registry
 from aigineering.core.capability_descriptors import create_tool_descriptor
-from aigineering.core.candidate_publisher import CandidatePublisherRegistry
 from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.core.tools import ToolRegistry
 from aigineering.protocol.immutability import deep_thaw
@@ -23,7 +21,6 @@ from aigineering.protocol.types import Contract, ToolSpec
 from aigineering.runtime import (
     claim_next_package,
     execute_claimed_package,
-    process_task_completions,
 )
 
 
@@ -74,8 +71,19 @@ def test_signed_tool_schema_failure_is_local_and_commits_no_observation(
         assert root_claim is not None
         delegated = execute_claimed_package(root_claim, root_host, store)
         assert delegated["status"] == "task_delegated"
-        successful_tool = store.get_contract(delegated["child_contract_id"])
-        assert successful_tool is not None
+        declared_children = [
+            store.get_contract(item) for item in delegated["child_contract_ids"]
+        ]
+        successful_tool = next(
+            item
+            for item in declared_children
+            if item is not None and "plugin:tool" in item.labels
+        )
+        continuation = next(
+            item
+            for item in declared_children
+            if item is not None and item.origin == "continuation"
+        )
 
         registry = ToolRegistry()
         registry.register(
@@ -93,9 +101,6 @@ def test_signed_tool_schema_failure_is_local_and_commits_no_observation(
             authority_key=ingress.actor_key,
             authority_signer=ingress.signer,
         )
-        publishers = CandidatePublisherRegistry(
-            (("continuation.publish.v1", ingress.publisher),)
-        )
         successful_claim = claim_next_package(
             store, worker_id=tool_host.worker_id, contract_id=successful_tool.id
         )
@@ -103,17 +108,6 @@ def test_signed_tool_schema_failure_is_local_and_commits_no_observation(
         assert (
             execute_claimed_package(successful_claim, tool_host, store)["status"]
             == "accepted"
-        )
-        assert process_task_completions(
-            store,
-            default_completion_registry(),
-            candidate_publishers=publishers,
-        ) == [successful_tool.id]
-
-        continuation = next(
-            contract
-            for contract in store.get_all_contracts()
-            if contract.origin == "continuation" and contract.parent_id == root.id
         )
         root_worker.set_output(
             continuation.name,
@@ -127,8 +121,14 @@ def test_signed_tool_schema_failure_is_local_and_commits_no_observation(
             continuation_claim, root_host, store
         )
         assert delegated_failure["status"] == "task_delegated"
-        failed_tool = store.get_contract(delegated_failure["child_contract_id"])
-        assert failed_tool is not None
+        failure_children = [
+            store.get_contract(item) for item in delegated_failure["child_contract_ids"]
+        ]
+        failed_tool = next(
+            item
+            for item in failure_children
+            if item is not None and "plugin:tool" in item.labels
+        )
 
         claim_request_id = "signed-tool-schema-failure-claim"
         claim_proposal = tool_host.claim_candidate(

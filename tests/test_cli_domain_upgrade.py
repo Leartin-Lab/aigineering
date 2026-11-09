@@ -153,11 +153,13 @@ def test_failed_migration_keeps_source_version_and_completed_backup(
     database, _records = _published_store(tmp_path, monkeypatch)
     old_version = CURRENT_SCHEMA_VERSION - 1
     _set_schema_version(database, old_version)
-    migration_name = f"_migrate_to_v{CURRENT_SCHEMA_VERSION}"
+    migration_name = "_record_schema_version"
     original_migration = getattr(SQLiteMigrator, migration_name)
 
-    def fail_migration(self):
-        raise RuntimeError("fixture migration failure")
+    def fail_migration(self, version):
+        if version == CURRENT_SCHEMA_VERSION:
+            raise RuntimeError("fixture migration failure")
+        return original_migration(self, version)
 
     monkeypatch.setattr(SQLiteMigrator, migration_name, fail_migration)
     with pytest.raises(RuntimeError, match="fixture migration failure"):

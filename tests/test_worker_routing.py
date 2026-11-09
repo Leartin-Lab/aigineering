@@ -54,13 +54,36 @@ def _contract(**overrides) -> Contract:
     return Contract(**values)
 
 
-def _recovery_publishers(store, suffix: str) -> CandidatePublisherRegistry:
-    signer = Ed25519Signer()
-    actor = ActorKey(
-        f"plugin:recovery.publish.{suffix}",
+def _signed_contract(store, contract: Contract):
+    setup = candidate_runtime(store)
+    return setup, setup.accept_contract(contract)
+
+
+def _host_for(setup, store, worker):
+    return hosted_worker(
+        store,
+        worker,
+        genesis=setup.genesis,
+        authority_key=setup.actor_key,
+        authority_signer=setup.signer,
+    )
+
+
+def _recovery_environment(store, suffix: str):
+    setup_signer = Ed25519Signer()
+    setup_key = ActorKey(
+        f"human:recovery-test-{suffix}",
+        f"setup-{suffix}",
+        setup_signer.kind,
+        setup_signer.signer_id,
+        ("actor.authorize", "worker.register", "contract.publish"),
+    )
+    recovery_signer = Ed25519Signer()
+    recovery_key = ActorKey(
+        "plugin:recovery.publish.v1",
         f"recovery-{suffix}",
-        signer.kind,
-        signer.signer_id,
+        recovery_signer.kind,
+        recovery_signer.signer_id,
         (
             "asset.publish",
             "asset.publish.protected",
@@ -69,17 +92,23 @@ def _recovery_publishers(store, suffix: str) -> CandidatePublisherRegistry:
         ),
     )
     genesis = create_genesis_manifest(
-        f"recovery-{suffix}", (actor,), f"policy:recovery-{suffix}"
+        f"recovery-{suffix}", (setup_key, recovery_key), f"policy:recovery-{suffix}"
     )
     initialize_genesis(store, genesis)
-    return CandidatePublisherRegistry(
+    setup = candidate_runtime(
+        store, genesis=genesis, actor_key=setup_key, signer=setup_signer
+    )
+    publishers = CandidatePublisherRegistry(
         (
             (
                 "recovery.publish.v1",
-                CandidatePublisher(store, store, genesis, actor, signer),
+                CandidatePublisher(
+                    store, store, genesis, recovery_key, recovery_signer
+                ),
             ),
         )
     )
+    return setup, publishers
 
 
 def test_eligibility_requires_all_capabilities_and_one_permitted_pool():
@@ -319,9 +348,10 @@ def test_long_worker_invocation_renews_claim_before_submit():
             return Candidate(worker_id=self.worker_id, raw_output="report: done")
 
     store = SQLiteStore(":memory:")
-    contract = Contract(id="task:slow", outputs=("report",), budget=1)
-    store.add_contract(contract)
-    host = hosted_worker(store, SlowWorker())
+    setup, contract = _signed_contract(
+        store, Contract(id="task:slow", outputs=("report",), budget=1)
+    )
+    host = _host_for(setup, store, SlowWorker())
     claimed = claim_next_package(store, worker_id=host.worker_id, lease_seconds=1)
     assert claimed is not None
 
@@ -344,9 +374,10 @@ def test_renewal_failure_discards_worker_result(monkeypatch):
             return Candidate(worker_id=self.worker_id, raw_output="report: forbidden")
 
     store = SQLiteStore(":memory:")
-    contract = Contract(id="task:lost-lease", outputs=("report",), budget=1)
-    store.add_contract(contract)
-    host = hosted_worker(store, SlowWorker())
+    setup, contract = _signed_contract(
+        store, Contract(id="task:lost-lease", outputs=("report",), budget=1)
+    )
+    host = _host_for(setup, store, SlowWorker())
     claimed = claim_next_package(store, worker_id=host.worker_id, lease_seconds=1)
     assert claimed is not None
     monkeypatch.setattr(store, "renew_claim", lambda *args, **kwargs: None)
@@ -358,8 +389,11 @@ def test_renewal_failure_discards_worker_result(monkeypatch):
     assert store.get_claim(contract.id)["status"] == "released"
     failure = store.scan_runtime_records(record_type="worker.invocation_failed")[-1][1]
     assert failure.payload["category"] == "worker_error:claim_renewal_failed"
-    terminal = store.scan_runtime_records(record_type="lifecycle.terminal")[-1][1]
-    assert terminal.payload == {"contract_id": contract.id, "terminal": "failed"}
+    assert not store.scan_runtime_records(record_type="lifecycle.terminal")
+    extinguished = store.scan_runtime_records(record_type="allowance.extinguished")
+    assert len(extinguished) == 1
+    assert extinguished[0][1].payload["contract_id"] == contract.id
+    assert extinguished[0][1].payload["amount"] == contract.budget
     store.close()
 
 
@@ -372,9 +406,10 @@ def test_unexpected_worker_adapter_failure_durably_closes_claim():
             raise RuntimeError("private adapter detail")
 
     store = SQLiteStore(":memory:")
-    contract = Contract(id="task:broken-adapter", outputs=("report",), budget=1)
-    store.add_contract(contract)
-    host = hosted_worker(store, BrokenWorker())
+    setup, contract = _signed_contract(
+        store, Contract(id="task:broken-adapter", outputs=("report",), budget=1)
+    )
+    host = _host_for(setup, store, BrokenWorker())
     claimed = claim_next_package(store, worker_id=host.worker_id)
     assert claimed is not None
 
@@ -385,8 +420,10 @@ def test_unexpected_worker_adapter_failure_durably_closes_claim():
     failure = store.scan_runtime_records(record_type="worker.invocation_failed")[-1][1]
     assert failure.payload["category"] == "worker_error:invocation_failure"
     assert "private adapter detail" not in str(failure.payload)
-    terminal = store.scan_runtime_records(record_type="lifecycle.terminal")[-1][1]
-    assert terminal.payload["terminal"] == "failed"
+    assert not store.scan_runtime_records(record_type="lifecycle.terminal")
+    extinguished = store.scan_runtime_records(record_type="allowance.extinguished")
+    assert len(extinguished) == 1
+    assert extinguished[0][1].payload["amount"] == contract.budget
     store.close()
 
 
@@ -415,17 +452,6 @@ def test_rejected_submission_recovery_replays_after_crash_gap():
     )
     store.append_runtime_record(candidate)
     store.append_runtime_record(projection)
-    store.append_runtime_record(
-        create_runtime_record(
-            "lifecycle.terminal",
-            {"contract_id": contract.id, "terminal": "failed"},
-            causal_parents=(projection.id,),
-        )
-    )
-
-    terminal_records = store.scan_runtime_records(record_type="lifecycle.terminal")
-    assert terminal_records[-1][1].payload["terminal"] == "failed"
-
     signer = Ed25519Signer()
     actor = ActorKey(
         "plugin:recovery.publish.v1",
@@ -452,560 +478,16 @@ def test_rejected_submission_recovery_replays_after_crash_gap():
         )
     )
 
-    assert process_rejected_submissions(store, candidate_publishers=publishers) == [
-        contract.id
-    ]
     assert process_rejected_submissions(store, candidate_publishers=publishers) == []
-    terminal_records = store.scan_runtime_records(record_type="lifecycle.terminal")
-    assert terminal_records[-1][1].payload["terminal"] == "failed"
-    contracts = store.get_all_contracts()
-    assert any(
-        child.name == f"{contract.name or contract.id}.recover"
-        and child.origin == "recovery"
-        for child in contracts
-    ), contracts
+    assert process_rejected_submissions(store, candidate_publishers=publishers) == []
     recovery_receipts = [
         record
         for _, record in store.scan_runtime_records(record_type="candidate.received")
         if record.payload.get("actor_id") == actor.actor_id
     ]
-    assert len(recovery_receipts) == 1
+    assert recovery_receipts == []
+    assert not store.scan_runtime_records(record_type="lifecycle.terminal")
     store.close()
-
-
-def test_recovery_builder_recognizes_exact_accepted_publication():
-    from aigineering.core.trace_manager import TraceManager
-    from aigineering.plugins.completion_projection import TaskCompletionContext
-    from aigineering.plugins.recovery import schedule_projection_recovery
-
-    store = SQLiteStore(":memory:")
-    failed = Contract(
-        id="task:exact-recovery-replay",
-        name="exact-recovery-replay",
-        outputs=("report",),
-        budget=1,
-    )
-    store.add_contract(failed)
-    publishers = _recovery_publishers(store, "exact-recovery-replay")
-    context = TaskCompletionContext(store, TraceManager(store), publishers)
-    args = {
-        "runtime": context,
-        "failed_contract": failed,
-        "candidate_raw": "malformed output",
-        "rejections": [
-            {"category": "fixture", "name": "report", "reject_reason": "invalid"}
-        ],
-    }
-
-    first = schedule_projection_recovery(**args)
-    second = schedule_projection_recovery(**args)
-
-    assert first is not None
-    assert second == first, [
-        (entry.event_type, entry.rejected_fragments) for entry in store.get_all()
-    ]
-    assert (
-        len(
-            [
-                record
-                for _, record in store.scan_runtime_records(
-                    record_type="candidate.received"
-                )
-                if str(record.payload.get("actor_id", "")).startswith(
-                    "plugin:recovery.publish."
-                )
-            ]
-        )
-        == 1
-    )
-    store.close()
-
-
-def test_same_id_unpublished_recovery_contract_is_not_recognized_as_success():
-    from aigineering.core.candidate_publisher import (
-        CandidatePublisher,
-        CandidatePublisherRegistry,
-    )
-    from aigineering.core.domain import initialize_genesis
-    from aigineering.core.signing import Ed25519Signer
-    from aigineering.core.trace_manager import TraceManager
-    from aigineering.plugins.completion_projection import TaskCompletionContext
-    from aigineering.plugins.recovery import schedule_projection_recovery
-    from aigineering.protocol.candidate import ActorKey, create_genesis_manifest
-
-    failed = Contract(
-        id="task:unpublished-recovery",
-        name="unpublished-recovery",
-        outputs=("report",),
-        budget=1,
-    )
-    seed_store = SQLiteStore(":memory:")
-    seed_store.add_contract(failed)
-    seed_signer = Ed25519Signer()
-    seed_actor = ActorKey(
-        "plugin:recovery.publish.v1",
-        "seed-recovery",
-        seed_signer.kind,
-        seed_signer.signer_id,
-        (
-            "asset.publish",
-            "asset.publish.protected",
-            "contract.publish",
-            "contract.publish.protected",
-        ),
-    )
-    seed_genesis = create_genesis_manifest(
-        "seed-recovery", (seed_actor,), "policy:seed"
-    )
-    initialize_genesis(seed_store, seed_genesis)
-    seed_publishers = CandidatePublisherRegistry(
-        (
-            (
-                "recovery.publish.v1",
-                CandidatePublisher(
-                    seed_store, seed_store, seed_genesis, seed_actor, seed_signer
-                ),
-            ),
-        )
-    )
-    seed_context = TaskCompletionContext(
-        seed_store, TraceManager(seed_store), seed_publishers
-    )
-    existing = schedule_projection_recovery(
-        seed_context,
-        failed_contract=failed,
-        candidate_raw="malformed output",
-        rejections=[
-            {"category": "fixture", "name": "report", "reject_reason": "invalid"}
-        ],
-    )
-    assert existing is not None
-    seed_store.close()
-
-    store = SQLiteStore(":memory:")
-    store.add_contract(failed)
-    store.add_contract(existing)
-    signer = Ed25519Signer()
-    actor = ActorKey(
-        "plugin:recovery.publish.v1",
-        "unpublished-recovery",
-        signer.kind,
-        signer.signer_id,
-        (
-            "asset.publish",
-            "asset.publish.protected",
-            "contract.publish",
-            "contract.publish.protected",
-        ),
-    )
-    genesis = create_genesis_manifest(
-        "unpublished-recovery", (actor,), "policy:unpublished"
-    )
-    initialize_genesis(store, genesis)
-    publishers = CandidatePublisherRegistry(
-        (
-            (
-                "recovery.publish.v1",
-                CandidatePublisher(store, store, genesis, actor, signer),
-            ),
-        )
-    )
-    context = TaskCompletionContext(store, TraceManager(store), publishers)
-
-    result = schedule_projection_recovery(
-        context,
-        failed_contract=failed,
-        candidate_raw="malformed output",
-        rejections=[
-            {"category": "fixture", "name": "report", "reject_reason": "invalid"}
-        ],
-    )
-
-    assert result is None
-    assert not any(
-        record.record_type == "candidate.received"
-        for _, record in store.scan_runtime_records()
-    )
-    store.close()
-
-
-def test_existing_child_recovery_is_recognized_after_parent_allowance_is_spent():
-    from aigineering.core.trace_manager import TraceManager
-    from aigineering.plugins.completion_projection import TaskCompletionContext
-    from aigineering.plugins.recovery import schedule_projection_recovery
-    from aigineering.protocol.candidate import ActorKey, create_genesis_manifest
-
-    store = SQLiteStore(":memory:")
-    setup_signer = Ed25519Signer()
-    setup_key = ActorKey(
-        "test:recovery-allowance",
-        "setup",
-        setup_signer.kind,
-        setup_signer.signer_id,
-        ("contract.publish",),
-    )
-    recovery_signer = Ed25519Signer()
-    recovery_key = ActorKey(
-        "plugin:recovery.publish.allowance",
-        "recovery",
-        recovery_signer.kind,
-        recovery_signer.signer_id,
-        (
-            "asset.publish",
-            "asset.publish.protected",
-            "contract.publish",
-            "contract.publish.protected",
-        ),
-    )
-    genesis = create_genesis_manifest(
-        "recovery-allowance", (setup_key, recovery_key), "policy:recovery-allowance"
-    )
-    initialize_genesis(store, genesis)
-    setup = candidate_runtime(
-        store, genesis=genesis, actor_key=setup_key, signer=setup_signer
-    )
-    root = setup.accept_contract(
-        Contract(id="task:allowance-root", name="allowance-root", budget=3)
-    )
-    failed = setup.accept_contract(
-        Contract(
-            id="task:allowance-child",
-            name="allowance-child",
-            parent_id=root.id,
-            outputs=("report",),
-            budget=1,
-        )
-    )
-    recovery_publishers = CandidatePublisherRegistry(
-        (
-            (
-                "recovery.publish.v1",
-                CandidatePublisher(
-                    store, store, genesis, recovery_key, recovery_signer
-                ),
-            ),
-        )
-    )
-    context = TaskCompletionContext(store, TraceManager(store), recovery_publishers)
-    args = {
-        "runtime": context,
-        "failed_contract": failed,
-        "candidate_raw": "malformed child output",
-        "rejections": [
-            {"category": "fixture", "name": "report", "reject_reason": "invalid"}
-        ],
-    }
-    first = schedule_projection_recovery(**args)
-    assert first is not None
-    setup.accept_contract(
-        Contract(
-            id="task:allowance-sibling",
-            name="allowance-sibling",
-            parent_id=root.id,
-            outputs=("sibling",),
-            budget=1,
-        )
-    )
-    receipts_before = len(
-        [
-            record
-            for _, record in store.scan_runtime_records(
-                record_type="candidate.received"
-            )
-            if record.payload.get("actor_id") == recovery_key.actor_id
-        ]
-    )
-    allowance_records_before = [
-        record.record_type
-        for _, record in store.scan_runtime_records()
-        if record.record_type in {"allowance.granted", "allowance.reserved"}
-    ]
-
-    second = schedule_projection_recovery(**args)
-
-    assert second == first
-    assert (
-        len(
-            [
-                record
-                for _, record in store.scan_runtime_records(
-                    record_type="candidate.received"
-                )
-                if record.payload.get("actor_id") == recovery_key.actor_id
-            ]
-        )
-        == receipts_before
-    )
-    assert [
-        record.record_type
-        for _, record in store.scan_runtime_records()
-        if record.record_type in {"allowance.granted", "allowance.reserved"}
-    ] == allowance_records_before
-    store.close()
-
-
-@pytest.mark.parametrize(
-    ("revoke_after_publish", "read_failure", "unstable_capture"),
-    [
-        (False, False, False),
-        (True, False, False),
-        (False, True, False),
-        (False, False, True),
-    ],
-)
-def test_signed_worker_failure_reconciles_accepted_recovery_after_reopen(
-    tmp_path, monkeypatch, revoke_after_publish, read_failure, unstable_capture
-):
-    from aigineering.agent.worker import WorkerExecutionError
-    from aigineering.agent.worker import WorkerHost
-    from aigineering.core.domain import initialize_genesis
-    from aigineering.core.worker_routing import WorkerRegistration
-    from aigineering.protocol.effect_builders import (
-        actor_authorization_effect,
-        worker_registration_effect,
-    )
-    from aigineering.protocol.effect_builders import actor_revocation_effect
-    from aigineering.runtime import execute_claimed_package
-
-    class FailingWorker:
-        worker_id = "worker:recovery-crash-gap"
-
-        def invoke(self, contract, disclosed_assets):
-            del contract, disclosed_assets
-            raise WorkerExecutionError("fixture_failure", "safe fixture failure")
-
-    db_path = tmp_path / f"recovery-crash-gap-{revoke_after_publish}.db"
-    store = SQLiteStore(str(db_path))
-    setup_signer = Ed25519Signer()
-    setup_key = ActorKey(
-        "test:recovery-crash-gap",
-        "setup",
-        setup_signer.kind,
-        setup_signer.signer_id,
-        (
-            "actor.authorize",
-            "actor.revoke",
-            "contract.publish",
-            "worker.register",
-        ),
-    )
-    recovery_signer = Ed25519Signer()
-    recovery_key = ActorKey(
-        "plugin:recovery.publish.crash-gap",
-        "recovery",
-        recovery_signer.kind,
-        recovery_signer.signer_id,
-        (
-            "asset.publish",
-            "asset.publish.protected",
-            "contract.publish",
-            "contract.publish.protected",
-        ),
-    )
-    genesis = create_genesis_manifest(
-        "recovery-crash-gap", (setup_key, recovery_key), "policy:recovery-crash-gap"
-    )
-    initialize_genesis(store, genesis)
-    setup = candidate_runtime(
-        store, genesis=genesis, actor_key=setup_key, signer=setup_signer
-    )
-    failed = setup.accept_contract(
-        Contract(
-            id="task:signed-recovery-crash-gap",
-            name="signed-recovery-crash-gap",
-            outputs=("report",),
-            budget=1,
-        )
-    )
-    worker_signer = Ed25519Signer()
-    worker_key = ActorKey(
-        "worker:recovery-crash-gap",
-        "worker-key",
-        worker_signer.kind,
-        worker_signer.signer_id,
-        ("worker.submit",),
-    )
-    registration = WorkerRegistration(
-        worker_key.actor_id,
-        version="1",
-        actor_id=worker_key.actor_id,
-        key_id=worker_key.key_id,
-    )
-    registration_decision = setup.publisher.publish(
-        (
-            actor_authorization_effect(worker_key),
-            worker_registration_effect(registration),
-        ),
-        idempotency_key="register:signed-recovery-crash-gap",
-    )
-    assert registration_decision.accepted
-    host = WorkerHost(
-        FailingWorker(),
-        genesis,
-        worker_key,
-        worker_signer,
-        registration_version="1",
-    )
-    claim = host.claim_candidate(
-        request_id="claim:signed-recovery-crash-gap", contract_id=failed.id
-    )
-    claimed = claim_next_package(
-        store,
-        worker_id=host.worker_id,
-        contract_id=failed.id,
-        expected_registration_version=host.registration_version,
-        claim_candidate=claim,
-    )
-    assert claimed is not None
-    publishers = CandidatePublisherRegistry(
-        (
-            (
-                "recovery.publish.v1",
-                CandidatePublisher(
-                    store, store, genesis, recovery_key, recovery_signer
-                ),
-            ),
-        )
-    )
-
-    import aigineering.runtime as runtime_module
-
-    def crash_before_outcome(*args, **kwargs):
-        del args, kwargs
-        raise RuntimeError("injected crash before recovery outcome")
-
-    monkeypatch.setattr(
-        runtime_module, "_commit_recovery_outcome", crash_before_outcome
-    )
-    with pytest.raises(RuntimeError, match="injected crash"):
-        execute_claimed_package(claimed, host, store, candidate_publishers=publishers)
-    monkeypatch.undo()
-    recovery_contracts = [
-        contract
-        for contract in store.get_all_contracts()
-        if contract.origin == "recovery"
-    ]
-    assert len(recovery_contracts) == 1
-    assert store.get_assets_by_name(f"_fail_context_{failed.id}")
-    assert any(
-        record.record_type == "worker.invocation_failed"
-        for _, record in store.scan_runtime_records()
-    )
-    assert not any(
-        record.record_type
-        in {
-            "worker_failure.recovery_scheduled",
-            "worker_failure.recovery_unavailable",
-        }
-        for _, record in store.scan_runtime_records()
-    )
-    if revoke_after_publish:
-        revocation = setup.publisher.publish(
-            (
-                actor_revocation_effect(
-                    recovery_key.actor_id, recovery_key.key_id, "fixture rotation"
-                ),
-            ),
-            idempotency_key="revoke:recovery-crash-gap",
-        )
-        assert revocation.accepted
-    receipt_count = len(
-        [
-            record
-            for _, record in store.scan_runtime_records(
-                record_type="candidate.received"
-            )
-            if record.payload.get("actor_id") == recovery_key.actor_id
-        ]
-    )
-    store.close()
-
-    reopened = SQLiteStore(str(db_path))
-    reopened_publishers = CandidatePublisherRegistry(
-        (
-            (
-                "recovery.publish.v1",
-                CandidatePublisher(
-                    reopened, reopened, genesis, recovery_key, recovery_signer
-                ),
-            ),
-        )
-    )
-    if read_failure:
-        monkeypatch.setattr(
-            reopened,
-            "get_runtime_revision",
-            lambda: (_ for _ in ()).throw(OSError("fixture Store read failure")),
-        )
-        with pytest.raises(OSError, match="fixture Store read failure"):
-            process_worker_failures(reopened, candidate_publishers=reopened_publishers)
-        assert not any(
-            record.record_type
-            in {
-                "worker_failure.recovery_scheduled",
-                "worker_failure.recovery_unavailable",
-            }
-            for _, record in reopened.scan_runtime_records()
-        )
-        monkeypatch.undo()
-    if unstable_capture:
-        revisions = iter((1, 2, 3, 4, 5, 6))
-        monkeypatch.setattr(reopened, "get_runtime_revision", lambda: next(revisions))
-        assert process_worker_failures(
-            reopened, candidate_publishers=reopened_publishers
-        ) == [failed.id]
-        assert (
-            len(
-                reopened.scan_runtime_records(
-                    record_type="worker_failure.recovery_unavailable"
-                )
-            )
-            == 1
-        )
-        assert not reopened.scan_runtime_records(
-            record_type="worker_failure.recovery_scheduled"
-        )
-        assert (
-            process_worker_failures(reopened, candidate_publishers=reopened_publishers)
-            == []
-        )
-        reopened.close()
-        return
-    assert process_worker_failures(
-        reopened, candidate_publishers=reopened_publishers
-    ) == [failed.id]
-    assert (
-        process_worker_failures(reopened, candidate_publishers=reopened_publishers)
-        == []
-    )
-    assert (
-        len(
-            [
-                record
-                for _, record in reopened.scan_runtime_records(
-                    record_type="candidate.received"
-                )
-                if record.payload.get("actor_id") == recovery_key.actor_id
-            ]
-        )
-        == receipt_count
-    )
-    assert (
-        len(
-            [
-                record
-                for _, record in reopened.scan_runtime_records(
-                    record_type="worker_failure.recovery_scheduled"
-                )
-            ]
-        )
-        == 1
-    )
-    assert not any(
-        record.record_type == "candidate.authentication_rejected"
-        for _, record in reopened.scan_runtime_records()
-    )
-    reopened.close()
 
 
 def test_rejected_projection_without_raw_candidate_fails_loudly():
@@ -1077,37 +559,46 @@ def test_recovery_replayers_never_silently_skip_missing_contracts(
 
 def test_provider_failure_releases_claim_without_persisting_secret():
     class FailingWorker:
+        worker_id = "worker"
+
         def invoke(self, contract, disclosed_assets):
             del contract, disclosed_assets
             raise ProviderError(503, "provider-secret-must-not-be-persisted")
 
     store = SQLiteStore(":memory:")
-    contract = Contract(id="task:provider-failure", outputs=("report",), budget=1)
-    store.add_contract(contract)
-    claimed = claim_next_package(store, worker_id="worker")
+    setup, publishers = _recovery_environment(store, "provider-failure")
+    contract = setup.accept_contract(
+        Contract(id="task:provider-failure", outputs=("report",), budget=1)
+    )
+    host = _host_for(setup, store, FailingWorker())
+    claimed = claim_next_package(store, worker_id=host.worker_id)
     assert claimed is not None
-    publishers = _recovery_publishers(store, "provider-failure")
 
     with pytest.raises(WorkerInvocationError, match="claim was released"):
         execute_claimed_package(
             claimed,
-            FailingWorker(),
+            host,
             store,
             candidate_publishers=publishers,
         )
 
     assert store.get_claim(contract.id)["status"] == "released"
-    assert process_worker_failures(store) == []
+    assert process_worker_failures(store, candidate_publishers=publishers) == []
     records = [record for _, record in store.scan_runtime_records()]
     record_types = [record.record_type for record in records]
     assert "worker.invocation_failed" in record_types
-    assert "worker_failure.recovery_scheduled" in record_types
+    assert "worker_failure.recovery_scheduled" not in record_types
     assert "claim.released" in record_types
-    assert any(
+    assert not any(
         record.record_type == "lifecycle.terminal"
-        and record.payload["terminal"] == "failed"
+        and record.payload.get("terminal") == "failed"
         for record in records
     )
+    extinguishments = [
+        record for record in records if record.record_type == "allowance.extinguished"
+    ]
+    assert len(extinguishments) == 1
+    assert extinguishments[0].payload["amount"] == contract.budget
     persisted = repr(
         (
             [dict(record.payload) for record in records],
@@ -1115,42 +606,50 @@ def test_provider_failure_releases_claim_without_persisting_secret():
         )
     )
     assert "provider-secret-must-not-be-persisted" not in persisted
-    assert any(child.origin == "recovery" for child in store.get_all_contracts())
+    assert not any(
+        child.parent_id == contract.id for child in store.get_all_contracts()
+    )
     store.close()
 
 
-def test_provider_failure_records_when_recovery_has_no_causal_allowance():
-    """A rejected recovery publication must not be reported as scheduled."""
+def test_provider_failure_with_exhausted_parent_does_not_mint_recovery():
+    """A failed child cannot reuse its exhausted parent's reserved allowance."""
 
     class FailingWorker:
+        worker_id = "worker:no-allowance"
+
         def invoke(self, contract, disclosed_assets):
             del contract, disclosed_assets
             raise ProviderError(503, "unavailable")
 
     store = SQLiteStore(":memory:")
-    parent = Contract(id="task:recovery-parent", outputs=("report",), budget=0)
-    child = Contract(
-        id="task:recovery-child",
-        parent_id=parent.id,
-        outputs=("report",),
-        budget=1,
+    setup, publishers = _recovery_environment(store, "no-allowance")
+    parent = setup.accept_contract(
+        Contract(id="task:recovery-parent", outputs=("parent",), budget=1)
     )
-    store.add_contract(parent)
-    store.add_contract(child)
-    claimed = claim_next_package(store, worker_id="worker", contract_id=child.id)
+    child = setup.accept_contract(
+        Contract(
+            id="task:recovery-child",
+            parent_id=parent.id,
+            origin="plan",
+            outputs=("report",),
+            budget=1,
+        )
+    )
+    host = _host_for(setup, store, FailingWorker())
+    claimed = claim_next_package(store, worker_id=host.worker_id, contract_id=child.id)
     assert claimed is not None
-    publishers = _recovery_publishers(store, "no-allowance")
 
     with pytest.raises(WorkerInvocationError, match="recovery was evaluated"):
         execute_claimed_package(
             claimed,
-            FailingWorker(),
+            host,
             store,
             candidate_publishers=publishers,
         )
 
     record_types = [record.record_type for _, record in store.scan_runtime_records()]
-    assert "worker_failure.recovery_unavailable" in record_types
+    assert "worker_failure.recovery_unavailable" not in record_types
     assert "worker_failure.recovery_scheduled" not in record_types
     assert (
         process_worker_failures(
@@ -1160,16 +659,24 @@ def test_provider_failure_records_when_recovery_has_no_causal_allowance():
         == []
     )
     assert not any(
-        contract.origin == "recovery" for contract in store.get_all_contracts()
+        contract.parent_id == child.id for contract in store.get_all_contracts()
     )
+    extinguished = store.scan_runtime_records(record_type="allowance.extinguished")
+    assert any(row.payload.get("contract_id") == child.id for _, row in extinguished)
     store.close()
 
 
 def test_stale_provider_failure_cannot_release_a_different_claim():
     store = SQLiteStore(":memory:")
-    contract = Contract(id="task:fenced-provider-failure", outputs=("report",))
-    store.add_contract(contract)
-    claimed = claim_next_package(store, worker_id="worker")
+    setup = candidate_runtime(store)
+    contract = setup.accept_contract(
+        Contract(id="task:fenced-provider-failure", outputs=("report",), budget=1)
+    )
+    idle_worker = type("IdleWorker", (), {"worker_id": "worker"})()
+    host = _host_for(setup, store, idle_worker)
+    claimed = claim_next_package(
+        store, worker_id=host.worker_id, contract_id=contract.id
+    )
     assert claimed is not None
 
     with pytest.raises(
@@ -1191,8 +698,10 @@ def test_stale_provider_failure_cannot_release_a_different_claim():
 
 def test_malformed_provider_response_releases_claim_and_recovers():
     store = SQLiteStore(":memory:")
-    contract = Contract(id="task:malformed-response", outputs=("report",), budget=1)
-    store.add_contract(contract)
+    setup, publishers = _recovery_environment(store, "malformed-response")
+    contract = setup.accept_contract(
+        Contract(id="task:malformed-response", outputs=("report",), budget=1)
+    )
     claimed = claim_next_package(store, worker_id="llm:test")
     assert claimed is not None
     worker = LLMWorker(
@@ -1202,7 +711,6 @@ def test_malformed_provider_response_releases_claim_and_recovers():
             "usage": {"prompt_tokens": 11, "completion_tokens": 3, "total_tokens": 14}
         },
     )
-    publishers = _recovery_publishers(store, "malformed-response")
 
     with pytest.raises(WorkerInvocationError, match="claim was released"):
         execute_claimed_package(
@@ -1227,7 +735,12 @@ def test_malformed_provider_response_releases_claim_and_recovers():
             "total_tokens": 14,
         }
     ]
-    assert any(child.origin == "recovery" for child in store.get_all_contracts())
+    assert not any(
+        child.parent_id == contract.id for child in store.get_all_contracts()
+    )
+    assert not store.scan_runtime_records(record_type="lifecycle.terminal")
+    extinguished = store.scan_runtime_records(record_type="allowance.extinguished")
+    assert any(row.payload.get("contract_id") == contract.id for _, row in extinguished)
     store.close()
 
 
@@ -1316,60 +829,18 @@ def test_worker_encoding_failure_preserves_repairable_output_and_budget():
             )
 
     store = SQLiteStore(":memory:")
-    authority_signer = Ed25519Signer()
-    authority_key = ActorKey(
-        "test:authority",
-        "test-authority-invalid-structure",
-        authority_signer.kind,
-        authority_signer.signer_id,
-        ("actor.authorize", "worker.register"),
-    )
-    recovery_signer = Ed25519Signer()
-    recovery_key = ActorKey(
-        "plugin:recovery.publish.v1",
-        "recovery-invalid-structure",
-        recovery_signer.kind,
-        recovery_signer.signer_id,
-        (
-            "asset.publish",
-            "asset.publish.protected",
-            "contract.publish",
-            "contract.publish.protected",
-        ),
-    )
-    genesis = create_genesis_manifest(
-        "invalid-structure",
-        (authority_key, recovery_key),
-        "policy:invalid-structure",
-    )
-    initialize_genesis(store, genesis)
-    contract = Contract(
-        id="task:invalid-structure",
-        outputs=("report",),
-        budget=3,
-        tool_scope=("lookup",),
-    )
-    store.add_contract(contract)
-    host = hosted_worker(
-        store,
-        StructurallyInvalidWorker(),
-        genesis=genesis,
-        authority_key=authority_key,
-        authority_signer=authority_signer,
-    )
-    claimed = claim_next_package(store, worker_id=host.worker_id)
-    assert claimed is not None
-    publishers = CandidatePublisherRegistry(
-        (
-            (
-                "recovery.publish.v1",
-                CandidatePublisher(
-                    store, store, genesis, recovery_key, recovery_signer
-                ),
-            ),
+    setup, publishers = _recovery_environment(store, "invalid-structure")
+    contract = setup.accept_contract(
+        Contract(
+            id="task:invalid-structure",
+            outputs=("report",),
+            budget=3,
+            tool_scope=("lookup",),
         )
     )
-
+    host = _host_for(setup, store, StructurallyInvalidWorker())
+    claimed = claim_next_package(store, worker_id=host.worker_id)
+    assert claimed is not None
     with pytest.raises(WorkerInvocationError, match="recovery was evaluated"):
         execute_claimed_package(
             claimed,
@@ -1387,46 +858,45 @@ def test_worker_encoding_failure_preserves_repairable_output_and_budget():
         "total_tokens": 19,
     }
     assert project_task_status(contract, store)["token_usage"][-1]["total_tokens"] == 19
-    recovery = next(
-        child for child in store.get_all_contracts() if child.origin == "recovery"
+    assert not any(
+        child.parent_id == contract.id for child in store.get_all_contracts()
     )
-    assert recovery.budget == contract.budget
-    assert recovery.tool_scope == contract.tool_scope
-    context = store.get_assets_by_name(f"_fail_context_{contract.id}")[-1]
-    assert "/parallel_tool" in context.content
-    assert "between 2 and 8" in context.content
+    assert not store.scan_runtime_records(record_type="lifecycle.terminal")
+    assert len(store.scan_runtime_records(record_type="allowance.extinguished")) == 1
     store.close()
 
 
-def test_expired_claim_becomes_terminal_and_schedules_new_recovery_contract():
+def test_expired_claim_extinguishes_grant_without_minting_recovery():
     store = SQLiteStore(":memory:")
-    contract = Contract(id="task:expired-claim", outputs=("report",), budget=1)
-    store.add_contract(contract)
-    claimed = claim_next_package(store, worker_id="worker", lease_seconds=1)
+    setup, publishers = _recovery_environment(store, "expired-claim")
+    contract = setup.accept_contract(
+        Contract(id="task:expired-claim", outputs=("report",), budget=1)
+    )
+    host = _host_for(setup, store, type("IdleWorker", (), {"worker_id": "worker"})())
+    claimed = claim_next_package(store, worker_id=host.worker_id, lease_seconds=1)
     assert claimed is not None
-    publishers = _recovery_publishers(store, "expired-claim")
     time.sleep(1.05)
 
-    assert process_expired_claims(store, candidate_publishers=publishers) == [
-        contract.id
-    ]
+    assert process_expired_claims(store, candidate_publishers=publishers) == []
     assert process_expired_claims(store, candidate_publishers=publishers) == []
     assert store.get_claim(contract.id)["status"] == "expired"
     assert (
-        claim_next_package(store, worker_id="replacement", contract_id=contract.id)
+        claim_next_package(
+            store,
+            worker_id="replacement",
+            contract_id=contract.id,
+            candidate_publishers=publishers,
+        )
         is None
     )
-    terminal = [
-        record
-        for _, record in store.scan_runtime_records(record_type="lifecycle.terminal")
-        if record.payload["contract_id"] == contract.id
-    ]
-    assert len(terminal) == 1
-    assert terminal[0].payload["terminal"] == "failed"
-    assert any(
-        child.origin == "recovery" and child.name == f"{contract.id}.recover"
-        for child in store.get_all_contracts()
+    assert not store.scan_runtime_records(record_type="lifecycle.terminal")
+    assert not any(
+        child.parent_id == contract.id for child in store.get_all_contracts()
     )
+    extinguished = store.scan_runtime_records(record_type="allowance.extinguished")
+    assert len(extinguished) == 1
+    assert extinguished[0][1].payload["contract_id"] == contract.id
+    assert extinguished[0][1].payload["amount"] == contract.budget
     store.rebuild_claim_projection()
     assert store.get_claim(contract.id)["status"] == "expired"
     store.close()

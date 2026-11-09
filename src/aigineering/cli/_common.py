@@ -21,7 +21,6 @@ from aigineering.core.ids import (
 from aigineering.core.session import runtime_record_contract_references
 from aigineering.application import (
     build_worker,
-    default_completion_registry,
     find_trace_for_session,
     latest_session_file,
     persistent_store,
@@ -29,7 +28,6 @@ from aigineering.application import (
 )
 from aigineering.cli._candidate import commit_local_effect, require_accepted
 from aigineering.local_identity import ensure_local_domain
-from aigineering.plugins import CompletionRegistry
 from aigineering.core.store import StoreProtocol
 from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.core.store import require_operational_store
@@ -270,11 +268,6 @@ def _query_projection(store: StoreProtocol):
     return query_projection(store)
 
 
-def _default_completion_registry() -> CompletionRegistry:
-    """Return the transitional completion registry for CLI execution."""
-    return default_completion_registry()
-
-
 def _session_id() -> str:
     """Return a nanosecond-timestamp session identifier to avoid same-second collisions."""
     return f"session_{time.time_ns()}"
@@ -474,7 +467,6 @@ def _run_demo(
     from aigineering.runtime import (
         WorkerInvocationError,
         execute_claimed_package,
-        process_task_completions,
         run_runtime_maintenance_step,
     )
     from aigineering.local_identity import (
@@ -486,11 +478,10 @@ def _run_demo(
 
     host = ensure_local_worker_host(store, worker)
     publishers = ensure_local_runtime_publishers(store)
-    registry = default_completion_registry()
     last_submission = "none"
     capture_warnings: list[str] = []
     for _ in range(64):
-        run_runtime_maintenance_step(store, registry, candidate_publishers=publishers)
+        run_runtime_maintenance_step(store, candidate_publishers=publishers)
         sync_runtime(store)
         status = project_task_status(contract, store)
         if status["terminal"]:
@@ -524,7 +515,6 @@ def _run_demo(
             last_submission = "worker_failed"
             continue
         last_submission = str(result.get("status", "unknown"))
-    process_task_completions(store, registry, candidate_publishers=publishers)
     sync_runtime(store)
     status = project_task_status(contract, store)
     if status["status"] != "completed" and raise_on_incomplete:

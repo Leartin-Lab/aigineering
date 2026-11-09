@@ -6,7 +6,7 @@ from decimal import Decimal
 
 import pytest
 
-from conftest import hosted_worker
+from conftest import candidate_runtime, hosted_worker
 from aigineering.core.task_productivity import _usage_projection
 from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.protocol.envelope import CandidateEnvelope
@@ -171,7 +171,8 @@ def test_custom_worker_usage_is_filtered_before_signing_and_commit(monkeypatch):
     store = SQLiteStore(":memory:")
     try:
         contract = Contract(id="task:custom-usage", outputs=("report",), budget=1)
-        store.add_contract(contract)
+        setup = candidate_runtime(store)
+        contract = setup.accept_contract(contract)
         host = hosted_worker(
             store,
             _MetadataWorker(
@@ -183,6 +184,9 @@ def test_custom_worker_usage_is_filtered_before_signing_and_commit(monkeypatch):
                     "api_key": "secret-marker",
                 }
             ),
+            genesis=setup.genesis,
+            authority_key=setup.actor_key,
+            authority_signer=setup.signer,
         )
         claimed = claim_next_package(
             store,
@@ -223,7 +227,8 @@ def test_claim_renewal_failure_keeps_returned_candidate_usage(monkeypatch):
     store = SQLiteStore(":memory:")
     try:
         contract = Contract(id="task:renewal-usage", outputs=("report",), budget=1)
-        store.add_contract(contract)
+        setup = candidate_runtime(store)
+        contract = setup.accept_contract(contract)
 
         class FailedKeeper:
             def __init__(self, claimed, _store, worker_host=None):
@@ -262,7 +267,8 @@ def test_unsigned_adapter_failure_keeps_returned_candidate_usage(monkeypatch):
     store = SQLiteStore(":memory:")
     try:
         contract = Contract(id="task:unsigned-usage", outputs=("report",), budget=1)
-        store.add_contract(contract)
+        setup = candidate_runtime(store)
+        contract = setup.accept_contract(contract)
         worker = _MetadataWorker({"tool": "lookup", "duration_ms": 0})
         claimed = claim_next_package(
             store, worker_id=worker.worker_id, contract_id=contract.id
@@ -290,8 +296,15 @@ def test_empty_worker_error_usage_does_not_fall_back_to_candidate_usage(monkeypa
     store = SQLiteStore(":memory:")
     try:
         contract = Contract(id="task:empty-error-usage", outputs=("report",), budget=1)
-        store.add_contract(contract)
-        host = hosted_worker(store, _MetadataWorker({"total_tokens": 17}))
+        setup = candidate_runtime(store)
+        contract = setup.accept_contract(contract)
+        host = hosted_worker(
+            store,
+            _MetadataWorker({"total_tokens": 17}),
+            genesis=setup.genesis,
+            authority_key=setup.actor_key,
+            authority_signer=setup.signer,
+        )
         claimed = claim_next_package(
             store, worker_id=host.worker_id, contract_id=contract.id
         )

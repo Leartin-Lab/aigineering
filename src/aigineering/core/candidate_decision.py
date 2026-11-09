@@ -8,11 +8,6 @@ from aigineering.core.trace import create_entry, trace_record_from_entry
 from aigineering.protocol.candidate import CandidateProposal, candidate_usage_metadata
 from aigineering.protocol.runtime_record import RuntimeRecord, create_runtime_record
 from aigineering.protocol.types import Asset, Contract, TraceEntry
-from aigineering.core.claim_assignments import (
-    AssignmentIntent,
-    EffectFactOwner,
-    SuccessorAssignmentWitness,
-)
 
 
 @dataclass(frozen=True)
@@ -25,98 +20,11 @@ class CommitmentDecision:
     trace_entries: tuple[TraceEntry, ...]
     contracts: tuple[Contract, ...] = ()
     assets: tuple[Asset, ...] = ()
-    effect_fact_owners: tuple[EffectFactOwner, ...] = ()
-    assignment_intents: tuple[AssignmentIntent, ...] = ()
-    successor_assignment_witnesses: tuple[SuccessorAssignmentWitness, ...] = ()
 
     @property
     def contract(self) -> Contract | None:
         """Compatibility view for a Candidate declaring exactly one Contract."""
         return self.contracts[0] if len(self.contracts) == 1 else None
-
-
-class ProjectionSnapshotConflict(ValueError):
-    """An injected effect no longer projects to the facts admitted earlier."""
-
-    def __init__(self, reason: str, *, authentication_rejected: bool = False) -> None:
-        self.authentication_rejected = authentication_rejected
-        super().__init__(reason)
-
-
-def decision_projection_fingerprint(decision: CommitmentDecision) -> tuple:
-    """Return stable identities for the pure portion of a Candidate decision."""
-    return (
-        tuple(contract.id for contract in decision.contracts),
-        tuple(asset.id for asset in decision.assets),
-        tuple(record.id for record in decision.runtime_records),
-        tuple(entry.id for entry in decision.trace_entries),
-        tuple(
-            (owner.record_id, owner.effect_type, owner.assignment_admission.value)
-            for owner in decision.effect_fact_owners
-        ),
-        tuple(
-            (
-                item.assignment_record_id,
-                item.target_contract_id,
-                item.target_declaration_record_id,
-                item.mode.value,
-            )
-            for item in decision.assignment_intents
-        ),
-        tuple(
-            (
-                item.source_contract_id,
-                item.source_assignment_head_id,
-                item.source_terminal_record_id,
-                item.successor_contract_id,
-                item.successor_declaration_record_id,
-                item.successor_assignment_record_id,
-                item.successor_link_record_id,
-                item.assignment_mode.value,
-            )
-            for item in decision.successor_assignment_witnesses
-        ),
-    )
-
-
-def require_same_projection(
-    expected: CommitmentDecision, actual: CommitmentDecision
-) -> None:
-    """Reject when current facts change a previously accepted pure projection."""
-    if not actual.accepted:
-        authentication_rejection = next(
-            (
-                record
-                for record in actual.runtime_records
-                if record.record_type == "candidate.authentication_rejected"
-            ),
-            None,
-        )
-        rejection = next(
-            (
-                record
-                for record in actual.runtime_records
-                if record.record_type == "candidate.rejected"
-            ),
-            None,
-        )
-        reason = (
-            str(authentication_rejection.payload.get("reason", ""))[:256]
-            if authentication_rejection is not None
-            else str(rejection.payload.get("reason", ""))[:256]
-            if rejection is not None
-            else "current projection is no longer admissible"
-        )
-        raise ProjectionSnapshotConflict(
-            f"commit-time projection rejected: {reason}",
-            authentication_rejected=authentication_rejection is not None,
-        )
-    if decision_projection_fingerprint(expected) != decision_projection_fingerprint(
-        actual
-    ):
-        raise ProjectionSnapshotConflict(
-            "commit-time projection changed before transactional commitment"
-        )
 
 
 def trace_record(

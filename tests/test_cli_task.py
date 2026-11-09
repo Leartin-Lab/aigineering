@@ -399,7 +399,7 @@ def test_parent_status_projects_staged_descendants_without_wait_state():
         )
 
 
-def test_parent_status_names_failed_descendant_and_limits_cause_claims():
+def test_parent_status_keeps_fail_report_as_unmet_descendant():
     runner = CliRunner()
     with runner.isolated_filesystem():
         created = runner.invoke(
@@ -444,11 +444,12 @@ def test_parent_status_names_failed_descendant_and_limits_cause_claims():
         payload = json.loads(status.output)
 
         assert payload["status"] == "expanded"
+        assert "claim:submitted" in payload["blockers"]
         assert any(
-            item.startswith("descendant_failed:") for item in payload["blockers"]
+            item.startswith("descendant_stalled:") for item in payload["blockers"]
         )
         assert payload["failure_details"]
-        assert payload["failure_details"][0]["status"] == "failed"
+        assert payload["failure_details"][0]["status"] == "stalled"
         assert "cause_events" in payload["failure_details"][0]
         assert "related_tool_failures" in payload["failure_details"][0]
 
@@ -478,7 +479,7 @@ def test_run_once_provider_failure_is_json_and_has_no_traceback(monkeypatch):
         assert result.exit_code == 1
         data = json.loads(result.output)
         assert data["ok"] is False
-        assert data["status"] == "failed"
+        assert data["status"] == "stalled"
         assert "claim was released" in data["error"]
         assert "Traceback" not in result.output
         assert "upstream-secret-detail" not in result.output
@@ -577,7 +578,7 @@ def test_plan_attempt_is_expanded_without_method_lifecycle():
         assert "task_delegated" not in event_types
 
 
-def test_run_task_rejected_output_closes_failed_and_publishes_new_recovery():
+def test_run_task_rejected_output_is_stalled_without_unfunded_recovery():
     runner = CliRunner()
     with runner.isolated_filesystem():
         create = runner.invoke(
@@ -612,15 +613,19 @@ def test_run_task_rejected_output_closes_failed_and_publishes_new_recovery():
         )
 
         assert result.exit_code == 1, result.output
-        assert json.loads(result.output)["status"] == "failed"
+        assert json.loads(result.output)["status"] == "stalled"
         audit = runner.invoke(cli, ["task", "audit", contract_id, "--json"])
         data = json.loads(audit.output)
         event_types = {entry["event_type"] for entry in data["trace"]}
-        assert "failed" in event_types
-        assert data["task"]["recovery_count"] == 1
+        assert (
+            "candidate_rejected" in event_types or "candidate_received" in event_types
+        )
+        assert data["task"]["recovery_count"] == 0
+        assert data["task"]["terminal"] is False
+        assert data["task"]["status"] == "stalled"
 
 
-def test_task_status_reports_submitted_without_recovery_risk():
+def test_orphan_trace_does_not_change_task_status_or_readiness():
     runner = CliRunner()
     with runner.isolated_filesystem():
         create = runner.invoke(
@@ -659,8 +664,10 @@ def test_task_status_reports_submitted_without_recovery_risk():
         status = runner.invoke(cli, ["task", "status", contract_id, "--json"])
         assert status.exit_code == 0, status.output
         data = json.loads(status.output)
-        assert data["status"] == "submitted"
+        assert data["status"] == "ready"
         assert data["ok"] is False
+        assert data["outputs_satisfied"] is False
+        assert data["budget_remaining"] > 0
         codes = {risk["code"] for risk in data["silent_failure_risks"]}
-        assert "submitted_without_recovery" in codes
+        assert "submitted_without_recovery" not in codes
         assert "budget_exhausted" not in codes

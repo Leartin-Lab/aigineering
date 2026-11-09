@@ -19,6 +19,14 @@ from aigineering.protocol.types import Asset, Contract
 
 
 class _AssetLookup:
+    def read_task_facts(self, contract_id, record_types):
+        return tuple(
+            row
+            for _, row in self.scan_runtime_records()
+            if row.record_type in record_types
+            and row.payload.get("contract_id") == contract_id
+        )
+
     def __init__(self, assets: Sequence[Asset], records=()) -> None:
         self.assets = tuple(assets)
         self.records = tuple(records)

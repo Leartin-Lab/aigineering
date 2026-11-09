@@ -200,7 +200,7 @@ def test_run_failure_exposes_only_exact_proven_claim_details(
 
         assert result.exit_code == 1, result.output
         payload = json.loads(result.output)
-        expected_status = "blocked" if target_mode else "failed"
+        expected_status = "blocked" if target_mode else "stalled"
         assert payload["status"] == expected_status
         assert payload["ok"] is False
         details = payload["worker_failure_details"]
@@ -257,7 +257,7 @@ def test_human_run_failure_includes_safe_diagnostic_not_raw_exception(
         )
 
         assert result.exit_code == 1, result.output
-        assert "run failed" in result.output
+        assert "run stalled" in result.output
         assert f'task "{task_id}" claim "lease:' in result.output
         assert "inspect task runs/diagnostics" in result.output
         assert "PRIVATE_RUN_FAILURE_MARKER" not in result.output
@@ -467,7 +467,7 @@ def test_configured_truncation_reports_only_matching_current_worker_limit(
     }
     result = SimpleNamespace(
         contract_id="task:failed",
-        status="failed",
+        status="stalled",
         completed=False,
         timed_out=False,
         worker_errors=("PRIVATE_TRUNCATION_FAILURE_MARKER",),
@@ -476,7 +476,7 @@ def test_configured_truncation_reports_only_matching_current_worker_limit(
         stop_reason="worker_failure",
         cycles=(),
         submission_status=None,
-        projection={"status": "failed", "blockers": ["terminal:failed"]},
+        projection={"status": "stalled", "blockers": ["claim:released"]},
     )
     monkeypatch.setattr(
         "aigineering.cli.run.prepare_configured_run",
@@ -513,8 +513,8 @@ def test_configured_failure_rendering_uses_exact_safe_details_only():
         }
     ]
     projection = {
-        "status": "failed",
-        "blockers": ["terminal:failed"],
+        "status": "stalled",
+        "blockers": ["claim:released"],
         "rejections": [
             "[recovery] worker_error:fixture_provider_failure (provider): "
             "PRIVATE_RUN_FAILURE_MARKER"
@@ -561,7 +561,7 @@ def test_configured_failure_rendering_uses_exact_safe_details_only():
     assert safe_worker_error_messages((), details) == []
 
 
-def test_terminal_resume_redacts_historical_recovery_text_without_current_proof():
+def test_stalled_resume_redacts_historical_failure_text_without_current_proof():
     marker = "PRIVATE_RUN_FAILURE_MARKER"
     result = type(
         "Result",
@@ -574,12 +574,12 @@ def test_terminal_resume_redacts_historical_recovery_text_without_current_proof(
             "worker_errors": (),
             "worker_failure_details": (),
             "capture_warnings": (),
-            "stop_reason": "terminal",
+            "stop_reason": "worker_failure",
             "cycles": (),
             "submission_status": None,
             "projection": {
-                "status": "failed",
-                "blockers": ["terminal:failed"],
+                "status": "stalled",
+                "blockers": ["claim:released"],
                 "rejections": ["[recovery] provider diagnostic: " + marker],
             },
         },

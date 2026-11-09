@@ -8,15 +8,10 @@ from conftest import candidate_runtime, hosted_worker
 
 from aigineering.agent.mock import MockWorker
 from aigineering.agent.worker import WorkerHost
-from aigineering.application import default_completion_registry
-from aigineering.core.candidate_publisher import (
-    CandidatePublisher,
-    CandidatePublisherRegistry,
-)
+from aigineering.core.candidate_publisher import CandidatePublisher
 from aigineering.core.capability_descriptors import create_tool_descriptor
 from aigineering.core.control_plane import build_control_plane_contract
 from aigineering.core.domain import initialize_genesis
-from aigineering.core.lifecycle_facts import commit_terminal_outcome
 from aigineering.core.runtime_projection import RuntimeProjection
 from aigineering.core.signing import Ed25519Signer
 from aigineering.core.sqlite_store import SQLiteStore
@@ -30,7 +25,6 @@ from aigineering.runtime import (
     WorkerInvocationError,
     claim_next_package,
     execute_claimed_package,
-    process_task_completions,
 )
 
 
@@ -156,11 +150,10 @@ def test_tool_scope_permission_allows_output_but_underfunded_call_is_observable(
     store.close()
 
 
-@pytest.mark.parametrize("parent_terminal", [False, True])
-def test_legacy_negative_tool_observation_preserves_parent_lifecycle(
-    parent_terminal, tmp_path
+def test_negative_tool_observation_uses_predeclared_ordinary_continuations(
+    tmp_path,
 ):
-    db_path = tmp_path / f"legacy-tool-parent-terminal-{parent_terminal}.db"
+    db_path = tmp_path / "ordinary-tool-continuations.db"
     store = SQLiteStore(str(db_path))
     plugin_signer = Ed25519Signer()
     worker_signer = Ed25519Signer()
@@ -172,11 +165,12 @@ def test_legacy_negative_tool_observation_preserves_parent_lifecycle(
         ("worker.submit",),
     )
     plugin_key = ActorKey(
-        "plugin:continuation.publish.v1",
-        "continuation-1",
+        "plugin:test-ordinary-continuations",
+        "ordinary-continuations-1",
         plugin_signer.kind,
         plugin_signer.signer_id,
         (
+            "actor.authorize",
             "asset.publish",
             "asset.publish.protected",
             "contract.publish",
@@ -210,8 +204,7 @@ def test_legacy_negative_tool_observation_preserves_parent_lifecycle(
         ),
         idempotency_key="register-tool-worker",
     )
-    assert registration.accepted is True
-    publishers = CandidatePublisherRegistry((("continuation.publish.v1", publisher),))
+    assert registration.accepted
     ingress = candidate_runtime(
         store, genesis=genesis, actor_key=plugin_key, signer=plugin_signer
     )
@@ -226,211 +219,155 @@ def test_legacy_negative_tool_observation_preserves_parent_lifecycle(
     )
     worker = MockWorker(worker_id="worker")
     host = WorkerHost(worker, genesis, worker_key, worker_signer)
-    worker.set_output(
-        root.name,
-        '/tool {"name":"lookup","args":{"key":"x"}}',
-    )
+    worker.set_output(root.name, '/tool {"name":"lookup","args":{"key":"x"}}')
     root_claim = claim_next_package(store, worker_id="worker", contract_id=root.id)
     assert root_claim is not None
-    scheduled = execute_claimed_package(root_claim, host, store)
-    tool_contract = store.get_contract(scheduled["child_contract_id"])
-    assert tool_contract is not None
+    delegated = execute_claimed_package(root_claim, host, store)
+    assert delegated["status"] == "task_delegated"
+    children = [store.get_contract(item) for item in delegated["child_contract_ids"]]
+    tool_contract = next(
+        item for item in children if item is not None and "plugin:tool" in item.labels
+    )
+    continuation = next(
+        item for item in children if item is not None and item.origin == "continuation"
+    )
+    assert continuation.inputs[-1] == tool_contract.outputs[0]
+    assert continuation.activation == tool_contract.outputs[0]
+    assert continuation.tool_scope == root.tool_scope
+
     observation = json.dumps(
-        {"ok": False, "tool": "lookup", "result": "", "error": "legacy"},
+        {"ok": False, "tool": "lookup", "result": "", "error": "fixture"},
         sort_keys=True,
     )
     worker.set_output(
         tool_contract.name,
         "/exec " + json.dumps({tool_contract.outputs[0]: observation}),
     )
-    tool_view = RuntimeProjection(store, store).contract_view(tool_contract)
-    assert tool_view.enabled, tool_view.blockers
+    assert RuntimeProjection(store, store).contract_view(tool_contract).enabled
     registration_view = store.get_worker_registration("worker")
-    assert registration_view is not None
-    assert is_eligible(tool_contract, registration_view)
+    assert registration_view is not None and is_eligible(
+        tool_contract, registration_view
+    )
     tool_claim = claim_next_package(
         store, worker_id="worker", contract_id=tool_contract.id
     )
     assert tool_claim is not None
     assert execute_claimed_package(tool_claim, host, store)["status"] == "accepted"
-    legacy_asset = store.get_assets_by_name(tool_contract.outputs[0])[0]
-    if parent_terminal:
-        assert commit_terminal_outcome(store, root, "failed") is True
-
-    processed = process_task_completions(
-        store,
-        default_completion_registry(),
-        candidate_publishers=publishers,
-    )
-
-    assert processed == [tool_contract.id]
-    continuations = [
-        contract
-        for contract in store.get_all_contracts()
-        if contract.origin == "continuation"
-    ]
-    assert len(continuations) == (0 if parent_terminal else 1)
-    assert store.get_asset(legacy_asset.id).content == observation
+    assert store.get_assets_by_name(tool_contract.outputs[0])[0].content == observation
+    assert RuntimeProjection(store, store).contract_view(continuation).enabled
     assert store.get_assets_by_name("final_report") == []
-    root_view = RuntimeProjection(store, store).contract_view(root)
-    assert root_view.terminal == ("failed" if parent_terminal else None)
-    if not parent_terminal:
-        assert continuations[0].tool_scope == root.tool_scope
-        scheduled_entries = [
-            entry
-            for entry in store.get_by_contract(root.id)
-            if entry.event_type == "method_continuation_scheduled"
-        ]
-        assert len(scheduled_entries) == 1
-        assert scheduled_entries[0].relation_target == continuations[0].id
-        continuation = continuations[0]
-        worker.set_output(
-            continuation.name,
-            '/tool {"name":"lookup","args":{"key":"second"}}',
-        )
-        continuation_claim = claim_next_package(
-            store, worker_id="worker", contract_id=continuation.id
-        )
-        assert continuation_claim is not None
-        repeated = execute_claimed_package(continuation_claim, host, store)
-        assert repeated["status"] == "task_delegated", repeated
-        repeated_tool = store.get_contract(repeated["child_contract_id"])
-        assert repeated_tool is not None
-        assert repeated_tool.parent_id == continuation.id
-        assert repeated_tool.tool_scope == continuation.tool_scope
-        repeated_observation = json.dumps(
-            {"ok": True, "tool": "lookup", "result": "second", "error": None},
-            sort_keys=True,
-        )
-        worker.set_output(
-            repeated_tool.name,
-            "/exec " + json.dumps({repeated_tool.outputs[0]: repeated_observation}),
-        )
-        repeated_claim = claim_next_package(
-            store, worker_id="worker", contract_id=repeated_tool.id
-        )
-        assert repeated_claim is not None
-        assert execute_claimed_package(repeated_claim, host, store)["status"] == (
-            "accepted"
-        )
-        repeated_assets = [
-            asset
-            for asset in store.get_assets_by_name(repeated_tool.outputs[0])
-            if asset.created_by == repeated_tool.id
-        ]
-        assert [asset.content for asset in repeated_assets] == [repeated_observation]
-        assert store.get_assets_by_name("final_report") == []
-        assert process_task_completions(
-            store,
-            default_completion_registry(),
-            candidate_publishers=publishers,
-        ) == [repeated_tool.id]
-        repeated_continuations = [
-            task
-            for task in store.get_all_contracts()
-            if task.parent_id == continuation.id and task.origin == "continuation"
-        ]
-        assert len(repeated_continuations) == 1
-        assert repeated_continuations[0].tool_scope == root.tool_scope
-    receipts = [
-        record
-        for _, record in store.scan_runtime_records(record_type="candidate.received")
-        if record.payload.get("actor_id") == plugin_key.actor_id
-        and record.payload.get("effect_types") == ("contract.declare",)
+    assert RuntimeProjection(store, store).contract_view(root).terminal is None
+
+    worker.set_output(
+        continuation.name, '/tool {"name":"lookup","args":{"key":"second"}}'
+    )
+    continuation_claim = claim_next_package(
+        store, worker_id="worker", contract_id=continuation.id
+    )
+    assert continuation_claim is not None
+    repeated = execute_claimed_package(continuation_claim, host, store)
+    assert repeated["status"] == "task_delegated"
+    repeated_children = [
+        store.get_contract(item) for item in repeated["child_contract_ids"]
     ]
-    assert len(receipts) == (1 if parent_terminal else 3)
+    repeated_tool = next(
+        item
+        for item in repeated_children
+        if item is not None and "plugin:tool" in item.labels
+    )
+    repeated_continuation = next(
+        item
+        for item in repeated_children
+        if item is not None and item.origin == "continuation"
+    )
+    assert repeated_tool.parent_id == continuation.id
+    assert repeated_tool.tool_scope == continuation.tool_scope
+    assert repeated_continuation.activation == repeated_tool.outputs[0]
+    assert repeated_continuation.inputs[-1] == repeated_tool.outputs[0]
+
+    repeated_observation = json.dumps(
+        {"ok": True, "tool": "lookup", "result": "second", "error": None},
+        sort_keys=True,
+    )
+    worker.set_output(
+        repeated_tool.name,
+        "/exec " + json.dumps({repeated_tool.outputs[0]: repeated_observation}),
+    )
+    repeated_claim = claim_next_package(
+        store, worker_id="worker", contract_id=repeated_tool.id
+    )
+    assert repeated_claim is not None
+    assert execute_claimed_package(repeated_claim, host, store)["status"] == "accepted"
+    assert [
+        asset.content
+        for asset in store.get_assets_by_name(repeated_tool.outputs[0])
+        if asset.created_by == repeated_tool.id
+    ] == [repeated_observation]
+    assert store.get_assets_by_name("final_report") == []
     before_digest = store.runtime_materialization_digest()
     store.close()
 
     reopened = SQLiteStore(str(db_path))
     try:
         assert reopened.rebuild_runtime_materializations() == before_digest
-        assert reopened.get_asset(legacy_asset.id).content == observation
-        assert len(
-            [
-                contract
-                for contract in reopened.get_all_contracts()
-                if contract.origin == "continuation"
-            ]
-        ) == (0 if parent_terminal else 2)
-        assert RuntimeProjection(reopened, reopened).contract_view(root).terminal == (
-            "failed" if parent_terminal else None
+        assert (
+            len(
+                [
+                    item
+                    for item in reopened.get_all_contracts()
+                    if item.parent_id in {root.id, continuation.id}
+                    and item.origin == "continuation"
+                ]
+            )
+            == 2
         )
+        assert (
+            RuntimeProjection(reopened, reopened).contract_view(root).terminal is None
+        )
+        assert reopened.get_assets_by_name("final_report") == []
     finally:
         reopened.close()
 
 
-def test_fail_completion_plugin_closes_parent_and_publishes_report_candidate():
+def test_fail_action_report_does_not_complete_unsatisfied_parent():
     store = SQLiteStore(":memory:")
-    signer = Ed25519Signer()
-    actor = ActorKey(
-        "plugin:fail.report.v1",
-        "fail-report-1",
-        signer.kind,
-        signer.signer_id,
-        (
-            "actor.authorize",
-            "asset.publish",
-            "asset.publish.protected",
-            "contract.publish",
-            "worker.register",
-        ),
-    )
-    genesis = create_genesis_manifest("runtime-fail", (actor,), "policy:runtime-fail")
-    initialize_genesis(store, genesis)
-    publisher = CandidatePublisher(store, store, genesis, actor, signer)
-    ingress = candidate_runtime(store, genesis=genesis, actor_key=actor, signer=signer)
+    ingress = candidate_runtime(store)
     root = ingress.accept_contract(
         build_control_plane_contract(
-            name="failing_task",
-            outputs=("unreachable_output",),
-            budget=3,
+            name="failing_task", outputs=("unreachable_output",), budget=3
         )
     )
-    worker = MockWorker(worker_id="worker")
+    worker = MockWorker(worker_id="worker:fail-report")
     host = hosted_worker(
         store,
         worker,
-        genesis=genesis,
-        authority_key=actor,
-        authority_signer=signer,
+        genesis=ingress.genesis,
+        authority_key=ingress.actor_key,
+        authority_signer=ingress.signer,
     )
     worker.set_output(root.name, '/fail {"reason":"source unavailable"}')
-    root_claim = claim_next_package(store, worker_id="worker", contract_id=root.id)
+    root_claim = claim_next_package(
+        store, worker_id=worker.worker_id, contract_id=root.id
+    )
     assert root_claim is not None
-    scheduled = execute_claimed_package(root_claim, host, store)
-    fail_contract = store.get_contract(scheduled["child_contract_id"])
-    assert fail_contract is not None
+    delegated = execute_claimed_package(root_claim, host, store)
+    assert delegated["status"] == "task_delegated"
+    report_contract = store.get_contract(delegated["child_contract_ids"][0])
+    assert report_contract is not None
     worker.set_output(
-        fail_contract.name,
+        report_contract.name,
         "/exec "
-        + json.dumps({fail_contract.outputs[0]: '{"reason":"source unavailable"}'}),
+        + json.dumps({report_contract.outputs[0]: '{"reason":"source unavailable"}'}),
     )
-    fail_claim = claim_next_package(
-        store, worker_id="worker", contract_id=fail_contract.id
+    report_claim = claim_next_package(
+        store, worker_id=worker.worker_id, contract_id=report_contract.id
     )
-    assert fail_claim is not None
-    assert execute_claimed_package(fail_claim, host, store)["status"] == "accepted"
+    assert report_claim is not None
+    assert execute_claimed_package(report_claim, host, store)["status"] == "accepted"
 
-    processed = process_task_completions(
-        store,
-        default_completion_registry(),
-        candidate_publishers=CandidatePublisherRegistry(
-            (("fail.report.v1", publisher),)
-        ),
-    )
-
-    assert processed == [fail_contract.id]
     root_view = RuntimeProjection(store, store).contract_view(root)
-    assert root_view.terminal == "failed"
-    assert root_view.enabled is False
-    assert root_view.blockers == ("terminal:failed",)
-    reports = store.get_assets_by_name(f"_fail_report_{fail_contract.id}")
-    assert len(reports) == 1
-    receipts = [
-        record
-        for _, record in store.scan_runtime_records(record_type="candidate.received")
-        if record.payload.get("actor_id") == actor.actor_id
-        and record.payload.get("effect_types") == ("asset.propose",)
-    ]
-    assert len(receipts) == 1
+    assert root_view.terminal is None
+    assert root_view.outputs_satisfied is False
+    assert store.get_assets_by_name(root.outputs[0]) == []
+    assert store.get_assets_by_name(report_contract.outputs[0])
+    store.close()

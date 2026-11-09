@@ -32,7 +32,7 @@ from aigineering.protocol.wire import (
     trace_entry_to_dict,
 )
 
-CURRENT_SCHEMA_VERSION = 23
+CURRENT_SCHEMA_VERSION = 24
 
 
 class SQLiteMigrator:
@@ -172,6 +172,9 @@ class SQLiteMigrator:
             if current < 23:
                 self._migrate_to_v23()
                 self._record_schema_version(23)
+            if current < 24:
+                # Complete Candidate heads and receipt-bound claim transitions.
+                self._record_schema_version(24)
 
     def _migrate_to_v17(self) -> None:
         """Separate Contract execution requirements from delegation scope."""

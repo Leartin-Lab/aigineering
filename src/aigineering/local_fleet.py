@@ -30,7 +30,6 @@ from aigineering.agent.worker import WorkerHost
 from aigineering.core.runtime_projection import RuntimeProjection
 from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.local_identity import ensure_local_runtime_publishers
-from aigineering.plugins import default_completion_registry
 from aigineering.runtime import (
     WorkerInvocationError,
     run_runtime_maintenance_step,
@@ -183,11 +182,8 @@ def run_local_fleet(
         store = SQLiteStore(db_path)
         try:
             publishers = ensure_local_runtime_publishers(store)
-            registry = default_completion_registry()
             while True:
-                run_runtime_maintenance_step(
-                    store, registry, candidate_publishers=publishers
-                )
+                run_runtime_maintenance_step(store, candidate_publishers=publishers)
                 sync_runtime(store)
                 contract = store.get_contract(target_contract_id)
                 if contract is None:
@@ -237,7 +233,6 @@ def run_local_fleet(
     try:
         run_runtime_maintenance_step(
             store,
-            default_completion_registry(),
             candidate_publishers=ensure_local_runtime_publishers(store),
         )
         sync_runtime(store)
@@ -295,10 +290,9 @@ def run_local_cycle(
     deadline = time.monotonic() + float(timeout) if timeout is not None else None
     require_redis()
     publishers = ensure_local_runtime_publishers(store)
-    registry = default_completion_registry()
     initial_revision = store.get_runtime_revision()
     maintenance_before = run_runtime_maintenance_step(
-        store, registry, candidate_publishers=publishers
+        store, candidate_publishers=publishers
     )
     sync_runtime(store)
 
@@ -367,7 +361,7 @@ def run_local_cycle(
         break
 
     maintenance_after = run_runtime_maintenance_step(
-        store, registry, candidate_publishers=publishers
+        store, candidate_publishers=publishers
     )
     sync_runtime(store)
     end_revision = store.get_runtime_revision()
@@ -396,10 +390,8 @@ def run_local_cycle(
         (
             maintenance_before.worker_failures,
             maintenance_before.rejected_submissions,
-            maintenance_before.task_completions,
             maintenance_after.worker_failures,
             maintenance_after.rejected_submissions,
-            maintenance_after.task_completions,
         )
     ):
         stop_reason = "idle"
@@ -416,8 +408,6 @@ def run_local_cycle(
                         len(store.get_by_contract(claim.contract.id))
                         for claim in claims
                     ),
-                    "tasks_processed": list(maintenance_before.task_completions)
-                    + list(maintenance_after.task_completions),
                     "rejections_recovered": list(
                         maintenance_before.rejected_submissions
                     )
@@ -433,8 +423,6 @@ def run_local_cycle(
                 "submission_status": submissions[-1].get("status")
                 if submissions
                 else None,
-                "tasks_processed": list(maintenance_before.task_completions)
-                + list(maintenance_after.task_completions),
                 "rejections_recovered": list(maintenance_before.rejected_submissions)
                 + list(maintenance_after.rejected_submissions),
             }

@@ -13,8 +13,6 @@ from aigineering.agent.worker import (
     WorkerExecutionError,
     compile_worker_envelope,
 )
-from aigineering.application import default_completion_registry
-from aigineering.core.candidate_publisher import CandidatePublisherRegistry
 from aigineering.core.capability_descriptors import create_tool_descriptor
 from aigineering.core.control_plane import build_control_plane_contract
 from aigineering.core.domain import initialize_genesis
@@ -46,7 +44,6 @@ from aigineering.protocol.types import Candidate, Contract, ToolSpec
 from aigineering.runtime import (
     claim_next_package,
     execute_claimed_package,
-    process_task_completions,
 )
 
 
@@ -158,8 +155,13 @@ def test_signed_compile_tool_observation_continuation_and_blueprint(monkeypatch)
     assert claim is not None
     result = execute_claimed_package(claim, compile_host, store)
     assert result["status"] == "task_delegated", result
-    method = store.get_contract(result["child_contract_id"])
-    assert method is not None
+    declared = [store.get_contract(item) for item in result["child_contract_ids"]]
+    method = next(
+        item for item in declared if item is not None and "plugin:tool" in item.labels
+    )
+    continuation = next(
+        item for item in declared if item is not None and item.origin == "continuation"
+    )
     assert not set(method.labels) & PLANNING_STAGE_LABELS
     assert "plugin:tool" in method.labels
     assert active_planning_stage(method) is None
@@ -182,17 +184,7 @@ def test_signed_compile_tool_observation_continuation_and_blueprint(monkeypatch)
     assert len(observations) == 1
     assert json.loads(observations[0].content)["ok"] is True
 
-    publishers = CandidatePublisherRegistry(
-        (("continuation.publish.v1", ingress.publisher),)
-    )
-    assert process_task_completions(
-        store, default_completion_registry(), candidate_publishers=publishers
-    ) == [method.id]
-    continuation = next(
-        item
-        for item in store.get_all_contracts()
-        if item.origin == "continuation" and item.parent_id == stage.id
-    )
+    assert continuation.parent_id == stage.id
     assert "plugin:plan.compile" in continuation.labels
     assert active_planning_stage(continuation) == "plugin:plan.compile"
     assert continuation.tool_scope == stage.tool_scope

@@ -8,19 +8,7 @@ import pytest
 import aigineering.core.sqlite_store as sqlite_store_module
 from aigineering.core.sqlite_store import CURRENT_SCHEMA_VERSION, SQLiteStore
 from aigineering.core.causal_allowance import allowance_available
-from aigineering.core.candidate_publisher import (
-    CandidatePublisherRegistry,
-    publish_effect,
-)
-from aigineering.core.domain import initialize_genesis
-from aigineering.core.signing import Ed25519Signer
-from aigineering.plugins.handoff import HANDOFF_EFFECTS
-from aigineering.protocol.candidate import ActorKey, create_genesis_manifest
-from aigineering.protocol.effect_builders import (
-    contract_declaration_effect,
-    task_handoff_effect,
-)
-from aigineering.protocol.identity import contract_from_fields
+from aigineering.core.candidate_publisher import CandidatePublisherRegistry
 from aigineering.protocol.types import Contract
 from aigineering.protocol.identity import contract_identity_v3
 from aigineering.protocol.runtime_record import create_runtime_record
@@ -44,7 +32,7 @@ def _identified(contract):
     return Contract(**{**contract.__dict__, "id": contract_identity_v3(contract)})
 
 
-def test_signed_publication_materializes_checkpoint_without_schema_floor_change():
+def test_signed_publication_materializes_checkpoint_at_schema24_floor():
     store = SQLiteStore(":memory:")
     runtime = candidate_runtime(store)
     parent = runtime.accept_contract(_identified(Contract(id="", budget=40)))
@@ -63,7 +51,7 @@ def test_signed_publication_materializes_checkpoint_without_schema_floor_change(
         ).fetchone()
         is not None
     )
-    assert CURRENT_SCHEMA_VERSION == 23
+    assert CURRENT_SCHEMA_VERSION == 24
     store.close()
 
 
@@ -756,236 +744,6 @@ def test_two_sqlite_writers_keep_checkpoint_equal_to_accepted_facts(tmp_path: Pa
         store.close()
 
 
-def test_signed_handoff_return_updates_both_checkpoint_accounts_and_replay():
-    store = SQLiteStore(":memory:")
-    signer = Ed25519Signer()
-    actor = ActorKey(
-        "human:checkpoint-handoff",
-        "checkpoint-handoff-key",
-        signer.kind,
-        signer.signer_id,
-        ("contract.cancel", "contract.publish", "task.handoff", "task.block"),
-    )
-    genesis = create_genesis_manifest(
-        "checkpoint-handoff", (actor,), "policy:checkpoint-handoff"
-    )
-    initialize_genesis(store, genesis)
-
-    def contract(name, *, parent_id=None, budget=5):
-        return contract_from_fields(
-            name=name,
-            description=name,
-            parent_id=parent_id,
-            inputs=(),
-            outputs=(f"{name}.out",),
-            activation="",
-            budget=budget,
-            tool_scope=(),
-            labels=(),
-            origin="human",
-        )
-
-    source = contract("checkpoint-handoff-source")
-    source_result = publish_effect(
-        store,
-        store,
-        genesis,
-        actor,
-        signer,
-        contract_declaration_effect(source),
-        idempotency_key="checkpoint-handoff-source",
-    )
-    assert source_result.accepted
-    source = source_result.contract
-    child = contract("checkpoint-handoff-child", parent_id=source.id, budget=5)
-    child_result = publish_effect(
-        store,
-        store,
-        genesis,
-        actor,
-        signer,
-        contract_declaration_effect(child),
-        idempotency_key="checkpoint-handoff-child",
-    )
-    assert child_result.accepted
-    child = child_result.contract
-
-    def handoff():
-        return publish_effect(
-            store,
-            store,
-            genesis,
-            actor,
-            signer,
-            task_handoff_effect(source.id, "Continue the root obligation"),
-            idempotency_key="checkpoint-handoff-return",
-            additional_effects=HANDOFF_EFFECTS,
-        )
-
-    accepted = handoff()
-    assert accepted.accepted
-    returned = tuple(
-        record
-        for _, record in store.scan_runtime_records(record_type="allowance.returned")
-    )
-    assert len(returned) == 1
-    source_snapshot = store.read_raw_allowance_checkpoint(source.id)
-    child_snapshot = store.read_raw_allowance_checkpoint(child.id)
-    records = tuple(record for _, record in store.scan_runtime_records())
-    assert source_snapshot.totals.returned_in_total == 5
-    assert child_snapshot.totals.returned_out_total == 5
-    assert source_snapshot.totals.returned_in_total == sum(
-        int(record.payload["amount"])
-        for record in returned
-        if record.payload["source_contract_id"] == source.id
-    )
-    assert child_snapshot.totals.returned_out_total == sum(
-        int(record.payload["amount"])
-        for record in returned
-        if record.payload["from_contract_id"] == child.id
-    )
-    assert (
-        allowance_available(source, records)
-        == source_snapshot.totals.granted_total
-        - source_snapshot.totals.reserved_total
-        + source_snapshot.totals.returned_in_total
-        - source_snapshot.totals.returned_out_total
-        - source_snapshot.totals.extinguished_total
-    )
-    assert (
-        allowance_available(child, records)
-        == child_snapshot.totals.granted_total
-        - child_snapshot.totals.reserved_total
-        + child_snapshot.totals.returned_in_total
-        - child_snapshot.totals.returned_out_total
-        - child_snapshot.totals.extinguished_total
-    )
-
-    replay = handoff()
-    assert replay.accepted
-    assert (
-        tuple(
-            record
-            for _, record in store.scan_runtime_records(
-                record_type="allowance.returned"
-            )
-        )
-        == returned
-    )
-    assert (
-        store.read_raw_allowance_checkpoint(source.id).totals == source_snapshot.totals
-    )
-    assert store.read_raw_allowance_checkpoint(child.id).totals == child_snapshot.totals
-    assert store.audit_allowance_checkpoints() == ()
-    store.close()
-
-
-def test_paired_return_checkpoint_second_account_failure_rolls_back_both(
-    monkeypatch,
-):
-    store = SQLiteStore(":memory:")
-    signer = Ed25519Signer()
-    actor = ActorKey(
-        "human:checkpoint-return-rollback",
-        "checkpoint-return-rollback-key",
-        signer.kind,
-        signer.signer_id,
-        ("contract.cancel", "contract.publish", "task.handoff", "task.block"),
-    )
-    genesis = create_genesis_manifest(
-        "checkpoint-return-rollback", (actor,), "policy:checkpoint-return-rollback"
-    )
-    initialize_genesis(store, genesis)
-
-    def contract(name, *, parent_id=None, budget=5):
-        return contract_from_fields(
-            name=name,
-            description=name,
-            parent_id=parent_id,
-            inputs=(),
-            outputs=(f"{name}.out",),
-            activation="",
-            budget=budget,
-            tool_scope=(),
-            labels=(),
-            origin="human",
-        )
-
-    source_result = publish_effect(
-        store,
-        store,
-        genesis,
-        actor,
-        signer,
-        contract_declaration_effect(contract("checkpoint-rollback-source")),
-        idempotency_key="checkpoint-rollback-source",
-    )
-    assert source_result.accepted
-    source = source_result.contract
-    child_result = publish_effect(
-        store,
-        store,
-        genesis,
-        actor,
-        signer,
-        contract_declaration_effect(
-            contract("checkpoint-rollback-child", parent_id=source.id)
-        ),
-        idempotency_key="checkpoint-rollback-child",
-    )
-    assert child_result.accepted
-    child = child_result.contract
-    before = {
-        source.id: store.read_raw_allowance_checkpoint(source.id).totals,
-        child.id: store.read_raw_allowance_checkpoint(child.id).totals,
-    }
-    original_refresh = store._refresh_allowance_checkpoint_for_record
-    original_write = store._write_allowance_checkpoint
-    touched = []
-
-    def wrapped_refresh(record, revision):
-        if record.record_type != "allowance.returned":
-            return original_refresh(record, revision)
-
-        def fail_second_account(account_id, through, totals):
-            if account_id in {source.id, child.id}:
-                touched.append(account_id)
-                if len(touched) == 2:
-                    raise RuntimeError(
-                        "injected paired checkpoint second-account failure"
-                    )
-            return original_write(account_id, through, totals)
-
-        monkeypatch.setattr(store, "_write_allowance_checkpoint", fail_second_account)
-        try:
-            return original_refresh(record, revision)
-        finally:
-            monkeypatch.setattr(store, "_write_allowance_checkpoint", original_write)
-
-    monkeypatch.setattr(
-        store, "_refresh_allowance_checkpoint_for_record", wrapped_refresh
-    )
-    with pytest.raises(RuntimeError, match="second-account failure"):
-        publish_effect(
-            store,
-            store,
-            genesis,
-            actor,
-            signer,
-            task_handoff_effect(source.id, "Continue after return failure"),
-            idempotency_key="checkpoint-return-rollback-handoff",
-            additional_effects=HANDOFF_EFFECTS,
-        )
-
-    assert set(touched) == {source.id, child.id}
-    assert not store.scan_runtime_records(record_type="allowance.returned")
-    assert not store.scan_runtime_records(record_type="task.handed_off")
-    assert store.read_raw_allowance_checkpoint(source.id).totals == before[source.id]
-    assert store.read_raw_allowance_checkpoint(child.id).totals == before[child.id]
-    assert store.audit_allowance_checkpoints() == ()
-    store.close()
-
-
 def test_signed_worker_failure_writer_updates_terminal_checkpoint(monkeypatch):
     store = SQLiteStore(":memory:")
     setup = candidate_runtime(store)
@@ -1042,20 +800,27 @@ def test_signed_worker_failure_writer_updates_terminal_checkpoint(monkeypatch):
         execute_claimed_package(claimed, host, store)
 
     snapshot = store.read_raw_allowance_checkpoint(contract.id)
-    terminal = store.scan_runtime_records(record_type="lifecycle.terminal")[-1][1]
-    extinguishment = store.scan_runtime_records(record_type="allowance.extinguished")[
-        -1
-    ][1]
-    assert terminal.payload["contract_id"] == contract.id
-    assert extinguishment.payload["contract_id"] == contract.id
+    failures = store.scan_runtime_records(record_type="worker.invocation_failed")
+    assert len(failures) == 1
+    assert failures[0][1].payload["contract_id"] == contract.id
+    assert not store.scan_runtime_records(record_type="lifecycle.terminal")
+    extinguishments = store.scan_runtime_records(record_type="allowance.extinguished")
+    assert len(extinguishments) == 1
+    assert extinguishments[0][1].payload["contract_id"] == contract.id
     assert snapshot.status == "valid"
     assert snapshot.totals.extinguished_total == 3
     assert snapshot.totals.granted_total == 3
+    assert (
+        allowance_available(
+            contract, tuple(record for _, record in store.scan_runtime_records())
+        )
+        == 0
+    )
     assert store.audit_allowance_checkpoints() == ()
     store.close()
 
 
-def test_signed_claim_expiration_writer_updates_terminal_checkpoint(monkeypatch):
+def test_expired_claim_without_funded_recovery_keeps_allowance_blocker(monkeypatch):
     store = SQLiteStore(":memory:")
     setup = candidate_runtime(store)
     contract = setup.accept_contract(
@@ -1102,18 +867,23 @@ def test_signed_claim_expiration_writer_updates_terminal_checkpoint(monkeypatch)
     recovery_publishers = CandidatePublisherRegistry(
         (("recovery.publish.v1", setup.publisher),)
     )
-    assert process_expired_claims(store, candidate_publishers=recovery_publishers) == [
-        contract.id
-    ]
+    assert process_expired_claims(store, candidate_publishers=recovery_publishers) == []
 
     snapshot = store.read_raw_allowance_checkpoint(contract.id)
-    extinguishment = store.scan_runtime_records(record_type="allowance.extinguished")[
-        -1
-    ][1]
-    assert extinguishment.payload["contract_id"] == contract.id
+    assert len(store.scan_runtime_records(record_type="claim.expired")) == 1
+    assert not store.scan_runtime_records(record_type="lifecycle.terminal")
+    extinguishments = store.scan_runtime_records(record_type="allowance.extinguished")
+    assert len(extinguishments) == 1
+    assert extinguishments[0][1].payload["contract_id"] == contract.id
     assert snapshot.status == "valid"
     assert snapshot.totals.extinguished_total == 5
     assert snapshot.totals.granted_total == 5
+    assert (
+        allowance_available(
+            contract, tuple(record for _, record in store.scan_runtime_records())
+        )
+        == 0
+    )
     assert store.audit_allowance_checkpoints() == ()
     store.close()
 

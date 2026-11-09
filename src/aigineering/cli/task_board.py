@@ -34,13 +34,11 @@ from aigineering.task_publication import (
 from aigineering.task_views import (
     contract_tree_ids,
     project_task_status,
-    task_priority_histories,
 )
 from aigineering.task_view_query import (
     TaskViewQueryMismatch,
     load_task_view_query_context,
 )
-from aigineering.task_priority import order_task_contract_ids
 
 
 def register_task_board_commands(task_group: click.Group) -> None:
@@ -133,13 +131,12 @@ def _root_id(contract, by_id: dict[str, object]) -> str:
 
 
 def _safe_status(
-    contract, store, *, projection_context=None, priority_facts=None, query_context=None
+    contract, store, *, projection_context=None, query_context=None
 ) -> dict:
     status = project_task_status(
         contract,
         store,
         projection_context=projection_context,
-        priority_facts=priority_facts,
         query_context=query_context,
     )
     return {
@@ -156,15 +153,10 @@ def _safe_status(
         "recoveries": list(status["recoveries"]),
         "rejection_count": status["rejection_count"],
         "trace_event_count": status["trace_event_count"],
-        "assignment": status["assignment"],
-        "priority": status["priority"],
-        "priority_fact_id": status["priority_fact_id"],
     }
 
 
-def _cards(
-    store, contracts, query_context, priority_histories_by_contract
-) -> list[dict]:
+def _cards(store, contracts, query_context) -> list[dict]:
     by_id = {contract.id: contract for contract in contracts}
     cards = []
     for contract in sorted(contracts, key=lambda item: item.id):
@@ -172,7 +164,6 @@ def _cards(
             contract,
             store,
             projection_context=query_context.effect_projection,
-            priority_facts=priority_histories_by_contract[contract.id],
             query_context=query_context,
         )
         cards.append(
@@ -187,9 +178,6 @@ def _cards(
                 "budget_remaining": status["budget_remaining"],
                 "outputs_satisfied": status["outputs_satisfied"],
                 "recoveries": status["recoveries"],
-                "assignment": status["assignment"],
-                "priority": status["priority"],
-                "priority_fact_id": status["priority_fact_id"],
             }
         )
     return cards
@@ -206,14 +194,6 @@ def _select_cards(cards, contracts, *, statuses, root_id):
         selected_ids = contract_tree_ids(contracts, root_id)
         selected = [item for item in selected if item["contract_id"] in selected_ids]
     return selected
-
-
-def _sort_cards(store, cards, sort_by: str) -> list[dict]:
-    if sort_by == "declaration":
-        return cards
-    ids = order_task_contract_ids(store, tuple(item["contract_id"] for item in cards))
-    by_id = {item["contract_id"]: item for item in cards}
-    return [by_id[contract_id] for contract_id in ids]
 
 
 def _fetch_cards(store, projection, contracts, revision: int) -> list[dict]:
@@ -233,10 +213,7 @@ def _fetch_cards(store, projection, contracts, revision: int) -> list[dict]:
     # ``contracts`` is the already-read Redis index from _snapshot_context.
     # Compare complete values without another Redis lookup or order assumption.
     del projection
-    histories = task_priority_histories(
-        query_context.effect_projection, tuple(contract.id for contract in contracts)
-    )
-    return _cards(store, contracts, query_context, histories)
+    return _cards(store, contracts, query_context)
 
 
 @click.command("list")
@@ -250,7 +227,6 @@ def _fetch_cards(store, projection, contracts, revision: int) -> list[dict]:
             "blocked",
             "blocked_capability",
             "blocked_delegation",
-            "blocked_assignment",
             "claimed",
             "submitted",
             "expanded",
@@ -272,20 +248,11 @@ def _fetch_cards(store, projection, contracts, revision: int) -> list[dict]:
 @click.option(
     "--limit", type=click.IntRange(min=1, max=1000), default=50, show_default=True
 )
-@click.option(
-    "--sort",
-    "sort_by",
-    type=click.Choice(("declaration", "priority")),
-    default="declaration",
-    show_default=True,
-    help="Optional advisory ordering; eligibility and claim authority are unchanged.",
-)
 @click.option("--json", "as_json", is_flag=True, help="Output a JSON envelope.")
 def task_list(
     statuses: tuple[str, ...],
     root_id: str | None,
     limit: int,
-    sort_by: str,
     as_json: bool,
 ) -> None:
     """List task summaries from the Redis index and committed task facts."""
@@ -295,7 +262,6 @@ def task_list(
         store, projection, contracts, revision = context
         cards = _fetch_cards(store, projection, contracts, revision)
         matching = _select_cards(cards, contracts, statuses=statuses, root_id=root_id)
-        matching = _sort_cards(store, matching, sort_by)
         selected = matching[:limit]
     except LookupError as exc:
         _emit_failure(
@@ -330,8 +296,7 @@ def task_list(
         for item in selected:
             click.echo(
                 f"{item['contract_id']}  {item['status']:<20} "
-                f"{item['name']}  budget={item['budget_remaining']} "
-                f"priority={item['priority']}"
+                f"{item['name']}  budget={item['budget_remaining']}"
             )
         if len(matching) > len(selected):
             click.echo(f"Showing {len(selected)} of {len(matching)} matching tasks.")
@@ -344,16 +309,8 @@ def task_list(
     default=None,
     help="Exact root Contract ID; include its descendants.",
 )
-@click.option(
-    "--sort",
-    "sort_by",
-    type=click.Choice(("declaration", "priority")),
-    default="declaration",
-    show_default=True,
-    help="Optional advisory ordering within each status column.",
-)
 @click.option("--json", "as_json", is_flag=True, help="Output a JSON envelope.")
-def task_board(root_id: str | None, sort_by: str, as_json: bool) -> None:
+def task_board(root_id: str | None, as_json: bool) -> None:
     """Show a Kanban-style grouping of projected task states."""
     context = None
     try:
@@ -361,7 +318,6 @@ def task_board(root_id: str | None, sort_by: str, as_json: bool) -> None:
         store, projection, contracts, revision = context
         cards = _fetch_cards(store, projection, contracts, revision)
         selected = _select_cards(cards, contracts, statuses=(), root_id=root_id)
-        selected = _sort_cards(store, selected, sort_by)
     except LookupError as exc:
         _emit_failure(
             str(exc), context[3] if context else None, as_json, code="not_found"
@@ -387,9 +343,7 @@ def task_board(root_id: str | None, sort_by: str, as_json: bool) -> None:
     for status, rows in sorted(columns.items()):
         click.echo(f"{status} ({len(rows)})")
         for row in rows:
-            click.echo(
-                f"  {row['contract_id']}  {row['name']}  priority={row['priority']}"
-            )
+            click.echo(f"  {row['contract_id']}  {row['name']}")
 
 
 @click.command("stats")
@@ -479,10 +433,7 @@ def task_show(contract_id: str, as_json: bool) -> None:
     if as_json:
         _emit_success(data, revision, True)
     else:
-        click.echo(
-            f"{contract.id}  {status['status']}  {contract.name}  "
-            f"priority={status['priority']}"
-        )
+        click.echo(f"{contract.id}  {status['status']}  {contract.name}")
         click.echo(f"parent: {contract.parent_id or '-'}")
         click.echo(f"inputs: {list(contract.inputs)}")
         click.echo(f"outputs: {list(contract.outputs)}")

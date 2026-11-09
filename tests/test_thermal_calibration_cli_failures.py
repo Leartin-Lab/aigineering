@@ -17,7 +17,6 @@ from aigineering.core.ids import compute_content_hash
 from aigineering.core.provenance import verify_asset_seal
 from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.protocol.immutability import deep_thaw
-from aigineering.task_lineage import task_lineage
 from aigineering.task_views import contract_tree_ids, project_task_status
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -168,17 +167,29 @@ def _tool_action_failure_witness(contracts, records, root_id):
             and record.payload.get("package_id") == failure.payload.get("package_id")
             and record.payload.get("worker_id") == failure.payload.get("worker_id")
         ]
-        terminals = [
+        extinguishments = [
             record
             for record in records
-            if record.record_type == "lifecycle.terminal"
+            if record.record_type == "allowance.extinguished"
             and record.payload.get("contract_id") == continuation.id
-            and record.payload.get("terminal") == "failed"
-            and record.causal_parents == (failure.id,)
+            and failure.id in record.causal_parents
         ]
-        if len(grants) == len(terminals) == 1:
+        releases = [
+            record
+            for record in records
+            if record.record_type == "claim.released"
+            and record.payload.get("contract_id") == continuation.id
+            and record.payload.get("claim_id") == failure.payload.get("claim_id")
+        ]
+        if len(grants) == len(releases) == len(extinguishments) == 1:
             witnesses.append(
-                (continuation.id, grants[0].id, failure.id, terminals[0].id)
+                (
+                    continuation.id,
+                    grants[0].id,
+                    failure.id,
+                    releases[0].id,
+                    extinguishments[0].id,
+                )
             )
     return witnesses[0] if len(witnesses) == 1 else None
 
@@ -228,12 +239,31 @@ def _run_until_committed_fence(monkeypatch, workspace, config, evidence_dir, *, 
                 and contract.name == "calibration_verifier"
                 and "calibration.verify" in contract.worker_capabilities
             }
-            matched = len(verifier_ids) == 1 and any(
-                record.record_type == "lifecycle.terminal"
-                and record.payload.get("contract_id") in verifier_ids
-                and record.payload.get("terminal") == "failed"
-                for record in records
-            )
+            matched = False
+            if len(verifier_ids) == 1:
+                verifier_id = next(iter(verifier_ids))
+                for action in records:
+                    if (
+                        action.record_type != "candidate.received"
+                        or action.payload.get("contract_id") != verifier_id
+                        or not str(action.payload.get("raw_output", "")).startswith(
+                            "/fail "
+                        )
+                    ):
+                        continue
+                    fail_children = [
+                        contract
+                        for contract in contracts.values()
+                        if contract.parent_id == verifier_id
+                        and "plugin:fail" in contract.labels
+                    ]
+                    if len(fail_children) == 1 and any(
+                        row.record_type == "asset.committed"
+                        and row.payload.get("contract_id") == fail_children[0].id
+                        for row in records
+                    ):
+                        matched = True
+                        break
         else:
             matched = (
                 _tool_action_failure_witness(contracts, records, root_id) is not None
@@ -422,7 +452,7 @@ def _assert_rejected_export_is_read_only(workspace, root_id, tmp_path, evidence_
         reopened.close()
 
 
-def test_malformed_root_candidate_schedules_but_does_not_execute_recovery(
+def test_malformed_root_candidate_records_attempt_without_fabricating_recovery(
     tmp_path, monkeypatch
 ):
     workspace, config, _workers = _configure(tmp_path, monkeypatch, "malformed-root")
@@ -431,7 +461,7 @@ def test_malformed_root_candidate_schedules_but_does_not_execute_recovery(
     assert result.exit_code == 1, result.output
     payload = json.loads(result.output)
     assert payload["completed"] is False
-    assert payload["status"] == "failed"
+    assert payload["status"] == "timed_out"
     root_id = payload["contract_id"]
 
     store = SQLiteStore(workspace / ".aig" / "store.db")
@@ -468,46 +498,25 @@ def test_malformed_root_candidate_schedules_but_does_not_execute_recovery(
             and record.payload.get("claim_id") == grant.payload.get("claim_id")
         ]
         assert len(releases) == 1
-        terminals = [
-            record
-            for _, record in store.scan_runtime_records(
-                record_type="lifecycle.terminal"
-            )
-            if record.payload.get("contract_id") == root_id
-        ]
-        assert len(terminals) == 1
-        assert terminals[0].payload["terminal"] == "failed"
-
-        schedules = [
-            record
-            for _, record in store.scan_runtime_records(
-                record_type="worker_failure.recovery_scheduled"
-            )
-            if record.payload.get("contract_id") == root_id
-            and record.payload.get("failure_id") == failure.id
-        ]
-        assert len(schedules) == 1
-        # The read-only history owner proves which recovery publication belongs
-        # to the authenticated failed claim; the schedule itself has no target ID.
-        lineage = task_lineage(store, root_id)
-        recovery_edges = [
-            edge
-            for edge in lineage["data"]["edges"]
-            if edge["kind"] == "recovery_publication"
-            and edge["source_contract_id"] == root_id
-            and schedules[0].id in edge["diagnostic_schedule_record_ids"]
-        ]
-        assert len(recovery_edges) == 1
-        recovery = contracts[recovery_edges[0]["target_contract_id"]]
-        assert recovery.origin == "recovery"
-        assert not any(
-            record.payload.get("contract_id") == recovery.id
-            for _, record in store.scan_runtime_records(record_type="claim.submitted")
+        assert not store.scan_runtime_records(record_type="lifecycle.terminal")
+        assert not store.scan_runtime_records(
+            record_type="worker_failure.recovery_scheduled"
         )
+        assert not any(contract.parent_id == root_id for contract in contracts.values())
+        root_extinguishments = [
+            record
+            for _, record in store.scan_runtime_records(
+                record_type="allowance.extinguished"
+            )
+            if record.payload.get("contract_id") == root_id
+        ]
+        assert len(root_extinguishments) == 1
+        assert root_extinguishments[0].payload["amount"] == root.budget
         assert not store.get_assets_by_name("calibration_report")
-        assert (
-            project_task_status(root, store, check_integrity=True)["status"] == "failed"
-        )
+        assert project_task_status(root, store, check_integrity=True)["status"] in {
+            "stalled",
+            "blocked_capability",
+        }
         _assert_readonly_rebuild(store, before)
     finally:
         store.close()
@@ -672,24 +681,22 @@ def test_missing_copied_observation_fails_claimed_verifier_and_blocks_export(
             )
             if record.payload.get("contract_id") == fail_child.id
         ]
-        fail_terminals = [
+        fail_child_terminals = [
             record
             for _, record in store.scan_runtime_records(
                 record_type="lifecycle.terminal"
             )
             if record.payload.get("contract_id") == fail_child.id
         ]
-        assert len(fail_terminals) == 1
-        assert fail_terminals[0].payload["terminal"] == "complete"
-        verifier_terminals = [
+        assert len(fail_child_terminals) == 1
+        assert fail_child_terminals[0].payload["terminal"] == "complete"
+        assert not [
             record
             for _, record in store.scan_runtime_records(
                 record_type="lifecycle.terminal"
             )
             if record.payload.get("contract_id") == verifier_contract.id
         ]
-        assert len(verifier_terminals) == 1
-        assert verifier_terminals[0].payload["terminal"] == "failed"
         assert not store.get_assets_by_name("calibration_receipt")
         assert not [
             record
@@ -705,7 +712,6 @@ def test_missing_copied_observation_fails_claimed_verifier_and_blocks_export(
         ]
         status = project_task_status(root, store, check_integrity=True)
         assert status["status"] == "expanded"
-        assert f"descendant_failed:{verifier_contract.id}" in status["blockers"]
         assert "claim:submitted" in status["blockers"]
         _assert_readonly_rebuild(store, before)
     finally:
@@ -765,23 +771,29 @@ def test_budget_two_fails_second_tool_action_before_dispatch(tmp_path, monkeypat
         assert set(tool_history) == {"normalize_calibration"}
         witnesses = _tool_action_failure_witness(contracts, records, root_id)
         assert witnesses is not None
-        continuation_id, grant_id, failure_id, terminal_id = witnesses
+        continuation_id, grant_id, failure_id, release_id, extinguished_id = witnesses
         continuation = contracts[continuation_id]
         assert continuation.parent_id == research.id
         assert continuation.budget == 1
         continuation_grant = next(record for record in records if record.id == grant_id)
         failure = next(record for record in records if record.id == failure_id)
-        terminal = next(record for record in records if record.id == terminal_id)
+        release = next(record for record in records if record.id == release_id)
+        extinguishment = next(
+            record for record in records if record.id == extinguished_id
+        )
         assert continuation_grant.payload["claim_id"] == failure.payload["claim_id"]
         assert continuation_grant.payload["package_id"] == failure.payload["package_id"]
         assert continuation_grant.payload["worker_id"] == "test-calibration-researcher"
         assert failure.payload["contract_id"] == continuation.id
+        assert failure.payload["claim_id"] == continuation_grant.payload["claim_id"]
+        assert failure.payload["package_id"] == continuation_grant.payload["package_id"]
         assert failure.payload["diagnostic"] == (
             "tool action lacks allowance for its tool task and continuation"
         )
         assert '"name": "analyze_calibration"' in failure.payload["raw_output"]
-        assert terminal.payload["terminal"] == "failed"
-        assert terminal.causal_parents == (failure.id,)
+        assert extinguishment.payload["amount"] == continuation.budget
+        assert failure.id in release.causal_parents
+        assert failure.id in extinguishment.causal_parents
         releases = [
             record
             for record in records
@@ -792,7 +804,7 @@ def test_budget_two_fails_second_tool_action_before_dispatch(tmp_path, monkeypat
             and record.payload.get("worker_id") == failure.payload["worker_id"]
         ]
         assert len(releases) == 1
-        assert failure.id in releases[0].causal_parents
+        assert releases[0].id == release.id
         second_action_observations = [
             record
             for record in records
@@ -824,10 +836,11 @@ def test_budget_two_fails_second_tool_action_before_dispatch(tmp_path, monkeypat
             and record.payload.get("contract_id") == root_id
         ]
         status = project_task_status(root, store, check_integrity=True)
-        assert status["status"] == "expanded"
-        assert "claim:submitted" in status["blockers"]
+        assert status["status"] in {"stalled", "expanded"}
         assert any(
-            blocker.startswith("descendant_failed:") for blocker in status["blockers"]
+            blocker in {"claim:released", "claim:submitted"}
+            or blocker.startswith("descendant_")
+            for blocker in status["blockers"]
         )
         _assert_readonly_rebuild(store, before)
     finally:

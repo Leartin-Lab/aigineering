@@ -19,27 +19,24 @@ from aigineering.core.disclosure import (
     compute_disclosure,
 )
 from aigineering.core.store import require_operational_store
-from aigineering.plugins.completion_projection import (
-    TaskCompletionContext,
-    TaskCompletionProjector,
+from aigineering.plugins.recovery import (
+    RecoveryDisposition,
+    schedule_projection_recovery,
 )
-from aigineering.plugins.recovery import schedule_projection_recovery
 from aigineering.plugins.task_semantics import method_payload
 from aigineering.core.runtime_projection import RuntimeProjection
-from aigineering.core.projection_context import EffectProjectionContext
-from aigineering.core.lifecycle_facts import create_terminal_record
 from aigineering.core.commitment import (
     CandidateCommitRejected,
     CandidateCommitter,
     record_candidate_rejection,
 )
 from aigineering.core.candidate_decision import trace_record
+from aigineering.core.publication_history import CandidateHistoryError
 from aigineering.core.worker_routing import is_eligible
 from aigineering.core.worker_coordination import (
     authenticate_worker_command,
     same_worker_command_records,
 )
-from aigineering.core.trace_manager import TraceManager
 from aigineering.core.trace import create_entry
 from aigineering.protocol.candidate import CandidateClaimBinding
 from aigineering.protocol.envelope import CandidateEnvelope
@@ -51,7 +48,6 @@ from aigineering.protocol.wire import (
     asset_to_dict,
     contract_to_dict,
 )
-from aigineering.task_context import method_context_assets_for
 from aigineering.planning_diagnostics import (
     build_compile_diagnostics,
     is_compile_failure,
@@ -86,11 +82,10 @@ class RuntimeMaintenanceResult:
 
     worker_failures: tuple[str, ...]
     rejected_submissions: tuple[str, ...]
-    task_completions: tuple[str, ...]
 
 
 def run_runtime_maintenance_step(
-    store, completion_registry, *, candidate_publishers=None
+    store, *, candidate_publishers=None
 ) -> RuntimeMaintenanceResult:
     """Run the canonical, stateless maintenance sequence once."""
     worker_failures = process_worker_failures(
@@ -99,15 +94,9 @@ def run_runtime_maintenance_step(
     rejected_submissions = process_rejected_submissions(
         store, candidate_publishers=candidate_publishers
     )
-    task_completions = process_task_completions(
-        store,
-        completion_registry,
-        candidate_publishers=candidate_publishers,
-    )
     return RuntimeMaintenanceResult(
         worker_failures=tuple(worker_failures),
         rejected_submissions=tuple(rejected_submissions),
-        task_completions=tuple(task_completions),
     )
 
 
@@ -250,32 +239,7 @@ def claim_next_package(
     ]
     if not routed_contracts:
         return None
-    from aigineering.core.claim_assignments import (
-        assignment_context_from_projection,
-        effective_assignment,
-    )
-
-    assignment_context = assignment_context_from_projection(
-        EffectProjectionContext(
-            runtime_records=tuple(record for _, record in store.scan_runtime_records())
-        )
-    )
     policy_blockers: list[DisclosurePolicyError] = []
-    routed_contracts = [
-        contract
-        for contract in routed_contracts
-        if (
-            (
-                assigned := effective_assignment(
-                    assignment_context, contract_id=contract.id
-                )
-            )
-            is None
-            or assigned.payload.get("worker_id") == worker_id
-        )
-    ]
-    if not routed_contracts:
-        return None
     if contract_id is None and order_contract_ids is not None:
         if not callable(order_contract_ids):
             raise ValueError("claim order hook must be callable")
@@ -311,7 +275,7 @@ def claim_next_package(
                 authority_result="rejected",
             )
             continue
-        method_context_assets = _method_context_assets_for(contract, store)
+        method_context_assets = ()
         package = _build_worker_package(
             contract,
             disclosed,
@@ -696,7 +660,7 @@ def submit_worker_proposal(
     )
     try:
         decision = CandidateCommitter(store, trace).commit(proposal)
-    except CandidateCommitRejected:
+    except (CandidateCommitRejected, CandidateHistoryError):
         raise
     except sqlite3.IntegrityError as exc:
         record_candidate_rejection(proposal, str(exc), store, trace)
@@ -749,17 +713,18 @@ def _schedule_rejected_recovery(
     candidate_raw: str,
     rejections: list[dict],
     store,
-    trace,
     *,
+    source_record_ids: tuple[str, ...],
     candidate_publishers=None,
     source_binding=None,
-) -> Contract | None:
+) -> RecoveryDisposition:
     if candidate_publishers is None:
         raise RuntimeError(
             "recovery replay requires an authenticated recovery Candidate publisher"
         )
-    trace_manager = TraceManager(trace)
-    runtime = TaskCompletionContext(store, trace_manager, candidate_publishers)
+    publisher = candidate_publishers.get("recovery.publish.v1")
+    from aigineering.plugins.recovery_history import capture_recovery_history
+
     ancestor_source_bindings = None
     recovery_snapshot = None
     if source_binding is not None:
@@ -782,15 +747,8 @@ def _schedule_rejected_recovery(
             raise TaskDiagnosticError("recovery_source_integrity_error")
         snapshot_factory = getattr(store, "snapshot", None)
         proof_store = snapshot_factory() if callable(snapshot_factory) else store
-        proof_runtime = (
-            runtime
-            if proof_store is store
-            else TaskCompletionContext(
-                proof_store, TraceManager(proof_store), candidate_publishers
-            )
-        )
         try:
-            snapshot = proof_runtime.capture_recovery_history()
+            snapshot = capture_recovery_history(proof_store, publisher)
             if snapshot is None or snapshot.query_context is None:
                 raise TaskDiagnosticError("recovery_source_snapshot_unavailable")
             query = snapshot.query_context
@@ -815,6 +773,7 @@ def _schedule_rejected_recovery(
                 if source_binding.get(key) != proven_binding.get(key):
                     raise TaskDiagnosticError("recovery_source_snapshot_mismatch")
             source_binding = proven_binding
+            source_record_ids = tuple(proven_binding["witness_record_ids"])
             try:
                 ancestor_source_bindings = task_recovery_ancestor_source_bindings(
                     proof_store, contract.id, query_context=query
@@ -830,7 +789,9 @@ def _schedule_rejected_recovery(
             if proof_store is not store:
                 proof_store.close()
     recovery = schedule_projection_recovery(
-        runtime,
+        store,
+        publisher=publisher,
+        source_record_ids=source_record_ids,
         failed_contract=contract,
         candidate_raw=candidate_raw,
         rejections=rejections,
@@ -891,115 +852,6 @@ def _recovery_source_binding(store, contract: Contract, source_record) -> dict |
         raise TaskDiagnosticError("recovery_source_integrity_error") from exc
 
 
-def _commit_recovery_outcome(
-    store,
-    contract: Contract,
-    recovery,
-    *,
-    source_record,
-    record_prefix: str,
-    source_field: str,
-    record_terminal: bool,
-) -> None:
-    from aigineering.plugins.recovery import RecoveryDisposition
-    from aigineering.plugins.task_semantics import method_payload
-
-    disposition = (
-        recovery
-        if isinstance(recovery, RecoveryDisposition)
-        else RecoveryDisposition(recovery)
-    )
-    recovery_contract = disposition.contract
-    method_fields = method_payload(contract)
-    include_method_details = method_fields.get("method") in {
-        "tool",
-        "parallel_tool_item",
-    }
-    entry = create_entry(
-        contract.id,
-        "failed",
-        relation_type="projection",
-        relation_target=(
-            recovery_contract.id
-            if recovery_contract is not None
-            else disposition.recovery_contract_id or "unrecoverable"
-        ),
-        authority_result="rejected",
-        budget_remaining=contract.budget,
-    )
-    records = []
-    if record_terminal:
-        records.append(
-            create_terminal_record(
-                contract.id,
-                "failed",
-                causal_parents=[source_record.id],
-            )
-        )
-    records.extend(
-        (
-            trace_record(entry, causal_parents=[source_record.id]),
-            create_runtime_record(
-                f"{record_prefix}.recovery_"
-                f"{'scheduled' if recovery_contract is not None else 'unavailable'}",
-                {
-                    "contract_id": contract.id,
-                    source_field: source_record.id,
-                    **(
-                        {"reason": disposition.reason}
-                        if include_method_details and disposition.reason
-                        else {}
-                    ),
-                    **(
-                        {"recovery_contract_id": recovery_contract.id}
-                        if include_method_details and recovery_contract is not None
-                        else {}
-                    ),
-                    **(
-                        {"recovery_contract_id": disposition.recovery_contract_id}
-                        if include_method_details and disposition.recovery_contract_id
-                        else {}
-                    ),
-                },
-                causal_parents=[source_record.id],
-            ),
-        )
-    )
-    store.commit_ingress_batch(
-        accepted_assets=[],
-        trace_entries=[entry],
-        runtime_records=tuple(records),
-    )
-
-
-def _commit_terminal_preserved_outcome(
-    store,
-    *,
-    contract_id: str,
-    terminal: str,
-    source_record,
-    record_prefix: str,
-    source_field: str,
-) -> None:
-    """Record that terminal work cannot be recovered without changing it."""
-    store.commit_ingress_batch(
-        accepted_assets=[],
-        trace_entries=[],
-        runtime_records=(
-            create_runtime_record(
-                f"{record_prefix}.recovery_unavailable",
-                {
-                    "contract_id": contract_id,
-                    source_field: source_record.id,
-                    "reason": "terminal_preserved",
-                    "terminal": terminal,
-                },
-                causal_parents=(source_record.id,),
-            ),
-        ),
-    )
-
-
 def process_rejected_submissions(store, *, candidate_publishers=None) -> list[str]:
     """Replay recovery from every durable claim-bound Candidate rejection."""
     processed: list[str] = []
@@ -1015,20 +867,10 @@ def process_rejected_submissions(store, *, candidate_publishers=None) -> list[st
         for record in records
         if record.record_type == "lifecycle.terminal"
     }
-    recovered_source_ids = {
-        str(
-            record.payload.get("projection_id")
-            or record.payload.get("rejection_id")
-            or ""
-        )
+    known_contract_ids = {
+        record.payload["contract"]["id"]
         for record in records
-        if record.record_type
-        in {
-            "projection_rejection.recovery_scheduled",
-            "projection_rejection.recovery_unavailable",
-            "candidate_rejection.recovery_scheduled",
-            "candidate_rejection.recovery_unavailable",
-        }
+        if record.record_type == "contract.declared"
     }
     for record in records:
         is_projection_rejection = (
@@ -1042,8 +884,6 @@ def process_rejected_submissions(store, *, candidate_publishers=None) -> list[st
             continue
         payload = record.payload
         contract_id = str(payload["contract_id"])
-        if record.id in recovered_source_ids:
-            continue
         contract = store.get_contract(contract_id)
         if contract is None:
             raise RuntimeError(
@@ -1067,22 +907,6 @@ def process_rejected_submissions(store, *, candidate_publishers=None) -> list[st
             raise TaskDiagnosticError("recovery_source_binding_missing")
         terminal = terminal_contracts.get(contract_id)
         if terminal is not None and terminal != "failed":
-            _commit_terminal_preserved_outcome(
-                store,
-                contract_id=contract_id,
-                terminal=terminal,
-                source_record=record,
-                record_prefix=(
-                    "projection_rejection"
-                    if is_projection_rejection
-                    else "candidate_rejection"
-                ),
-                source_field=(
-                    "projection_id" if is_projection_rejection else "rejection_id"
-                ),
-            )
-            recovered_source_ids.add(record.id)
-            processed.append(contract_id)
             continue
         rejections = (
             [dict(rejection) for rejection in payload["rejections"]]
@@ -1100,26 +924,16 @@ def process_rejected_submissions(store, *, candidate_publishers=None) -> list[st
             str(candidate.payload["raw_output"]),
             rejections,
             store,
-            store,
+            source_record_ids=(record.id,),
             candidate_publishers=candidate_publishers,
             source_binding=source_binding,
         )
-        _commit_recovery_outcome(
-            store,
-            contract,
-            recovery,
-            source_record=record,
-            record_prefix=(
-                "projection_rejection"
-                if is_projection_rejection
-                else "candidate_rejection"
-            ),
-            source_field="projection_id" if is_projection_rejection else "rejection_id",
-            record_terminal=terminal is None,
-        )
-        recovered_source_ids.add(record.id)
-        terminal_contracts[contract_id] = "failed"
-        processed.append(contract_id)
+        if (
+            recovery.contract is not None
+            and recovery.contract.id not in known_contract_ids
+        ):
+            known_contract_ids.add(recovery.contract.id)
+            processed.append(contract_id)
     return processed
 
 
@@ -1127,8 +941,8 @@ def process_expired_claims(store, *, candidate_publishers=None) -> list[str]:
     """Materialize expired leases and replay their recovery subtasks.
 
     Claim leases are sufficient evidence; runtime heartbeat ownership is not
-    required.  The original contract is terminal and recovery always creates
-    a new contract, preserving the no-reclaim invariant.
+    required. Recovery publishes new work; the original claim stays closed
+    while the original Asset obligation remains unmet.
     """
     operational = require_operational_store(store)
     observed = datetime.now(timezone.utc)
@@ -1185,18 +999,12 @@ def process_expired_claims(store, *, candidate_publishers=None) -> list[str]:
             causal_parents=[grant_id],
             recorded_at=observed_at,
         )
-        terminal = create_terminal_record(
-            contract.id,
-            "failed",
-            causal_parents=[expiration.id],
-            recorded_at=observed_at,
-        )
         trace_fact = trace_record(
             entry, causal_parents=[expiration.id], recorded_at=observed_at
         )
         operational.commit_claim_expiration(
             trace_entry=entry,
-            runtime_records=(expiration, terminal, trace_fact),
+            runtime_records=(expiration, trace_fact),
             claim_id=str(claim["claim_id"]),
             claim_epoch=int(claim["epoch"]),
             expected_lease_until=lease_until,
@@ -1204,21 +1012,14 @@ def process_expired_claims(store, *, candidate_publishers=None) -> list[str]:
         )
 
     records = [record for _, record in store.scan_runtime_records()]
-    processed_expiration_ids = {
-        str(record.payload["expiration_id"])
+    known_contract_ids = {
+        record.payload["contract"]["id"]
         for record in records
-        if record.record_type
-        in {
-            "claim_expiration.recovery_scheduled",
-            "claim_expiration.recovery_unavailable",
-        }
+        if record.record_type == "contract.declared"
     }
     processed: list[str] = []
     for expiration in records:
-        if (
-            expiration.record_type != "claim.expired"
-            or expiration.id in processed_expiration_ids
-        ):
+        if expiration.record_type != "claim.expired":
             continue
         contract_id = str(expiration.payload["contract_id"])
         contract = store.get_contract(contract_id)
@@ -1248,21 +1049,16 @@ def process_expired_claims(store, *, candidate_publishers=None) -> list[str]:
                 }
             ],
             store,
-            store,
+            source_record_ids=(expiration.id,),
             candidate_publishers=candidate_publishers,
             source_binding=source_binding,
         )
-        _commit_recovery_outcome(
-            store,
-            contract,
-            recovery,
-            source_record=expiration,
-            record_prefix="claim_expiration",
-            source_field="expiration_id",
-            record_terminal=False,
-        )
-        processed_expiration_ids.add(expiration.id)
-        processed.append(contract_id)
+        if (
+            recovery.contract is not None
+            and recovery.contract.id not in known_contract_ids
+        ):
+            known_contract_ids.add(recovery.contract.id)
+            processed.append(contract_id)
     return processed
 
 
@@ -1317,15 +1113,10 @@ def _record_worker_invocation_failure(
         "worker.invocation_failed",
         payload,
     )
-    terminal = create_terminal_record(
-        claimed.contract.id,
-        "failed",
-        causal_parents=[failure.id],
-    )
     trace_fact = trace_record(entry, causal_parents=[failure.id])
     require_operational_store(store).commit_worker_invocation_failure(
         trace_entry=entry,
-        runtime_records=(failure, terminal, trace_fact),
+        runtime_records=(failure, trace_fact),
         claim_id=claimed.package.claim_id,
         worker_id=claimed.worker_id,
         package_id=claimed.package.package_id,
@@ -1336,21 +1127,14 @@ def _record_worker_invocation_failure(
 def process_worker_failures(store, *, candidate_publishers=None) -> list[str]:
     """Replay recovery scheduling for durably failed provider invocations."""
     records = [record for _, record in store.scan_runtime_records()]
-    processed_failure_ids = {
-        str(record.payload["failure_id"])
+    known_contract_ids = {
+        record.payload["contract"]["id"]
         for record in records
-        if record.record_type
-        in {
-            "worker_failure.recovery_scheduled",
-            "worker_failure.recovery_unavailable",
-        }
+        if record.record_type == "contract.declared"
     }
     processed: list[str] = []
     for failure in records:
-        if (
-            failure.record_type != "worker.invocation_failed"
-            or failure.id in processed_failure_ids
-        ):
+        if failure.record_type != "worker.invocation_failed":
             continue
         contract_id = str(failure.payload["contract_id"])
         contract = store.get_contract(contract_id)
@@ -1389,73 +1173,14 @@ def process_worker_failures(store, *, candidate_publishers=None) -> list[str]:
             ),
             [summary],
             store,
-            store,
+            source_record_ids=(failure.id,),
             candidate_publishers=candidate_publishers,
             source_binding=_recovery_source_binding(store, contract, failure),
         )
-        _commit_recovery_outcome(
-            store,
-            contract,
-            recovery,
-            source_record=failure,
-            record_prefix="worker_failure",
-            source_field="failure_id",
-            record_terminal=False,
-        )
-        processed_failure_ids.add(failure.id)
-        processed.append(contract_id)
+        if (
+            recovery.contract is not None
+            and recovery.contract.id not in known_contract_ids
+        ):
+            known_contract_ids.add(recovery.contract.id)
+            processed.append(contract_id)
     return processed
-
-
-def process_task_completions(
-    store, completion_registry, *, candidate_publishers=None
-) -> list[str]:
-    """Project completed plugin tasks into their deterministic effects."""
-    processed: list[str] = []
-    projector = TaskCompletionProjector(
-        store,
-        completion_registry,
-        candidate_publishers=candidate_publishers,
-    )
-    projected = {
-        str(record.payload["source_contract_id"])
-        for _, record in store.scan_runtime_records(
-            record_type="task_completion.projected"
-        )
-    }
-    for contract in store.get_all_contracts():
-        if contract.parent_id is None or contract.origin != "system":
-            continue
-        entries = store.get_by_contract(contract.id)
-        if not any(entry.event_type == "complete" for entry in entries):
-            continue
-        if contract.id in projected:
-            continue
-        if not projector.project(contract):
-            continue
-        marker = create_entry(
-            contract_id=contract.id,
-            event_type="task_completion_projected",
-            relation_type="task_completion",
-            relation_target=contract.parent_id,
-        )
-        marker_record = trace_record(marker)
-        projected_record = create_runtime_record(
-            "task_completion.projected",
-            {
-                "source_contract_id": contract.id,
-                "parent_contract_id": contract.parent_id,
-            },
-        )
-        store.commit_ingress_batch(
-            accepted_assets=[],
-            trace_entries=[marker],
-            runtime_records=(marker_record, projected_record),
-        )
-        projected.add(contract.id)
-        processed.append(contract.id)
-    return processed
-
-
-def _method_context_assets_for(contract: Contract, store) -> tuple[Asset, ...]:
-    return method_context_assets_for(contract, store)

@@ -21,9 +21,10 @@ def test_new_method_children_and_nested_stages_drop_inherited_stage_controls():
     assert "PLANNING_STAGE_LABELS" in inspect.getsource(planning_roles)
 
 
-def test_read_only_recovery_recognizes_current_and_legacy_method_shapes():
-    recovery_source = inspect.getsource(recovery)
-    assert "_claimed_method_contract" in recovery_source
-    assert "_legacy_claimed_method_contract" in recovery_source
-    assert "_parallel_tool_contracts" in recovery_source
-    assert "_legacy_parallel_tool_contracts" in recovery_source
+def test_recovery_uses_actual_publications_without_legacy_contract_makers():
+    source = inspect.getsource(recovery)
+    assert "_claimed_method_contract" not in source
+    assert "_legacy_parallel_tool_contracts" not in source
+    assert "_canonical_method_source" not in source
+    assert "_capture_recovery_history(" in source
+    assert "source_binding" in source

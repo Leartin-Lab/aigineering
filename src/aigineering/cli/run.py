@@ -41,7 +41,6 @@ from aigineering.agent.tool_worker import ToolWorker
 from aigineering.cli._common import (
     _asset_names_for,
     _contract_tree_ids,
-    _default_completion_registry,
     _get_trace_dir,
     _load_quick_goal_inputs,
     _output_json,
@@ -61,7 +60,6 @@ from aigineering.local_identity import (
 from aigineering.application import build_worker, validate_worker_id
 from aigineering.runtime import (
     WorkerInvocationError,
-    process_task_completions,
     run_runtime_maintenance_step,
 )
 from aigineering.task_logs import execute_captured_package
@@ -788,7 +786,6 @@ def _run_task_pool(
             )
         deadline = time.monotonic() + wait_timeout
         candidate_publishers = ensure_local_runtime_publishers(store)
-        registry = _default_completion_registry()
         if target_task_id is None:
             result = run_local_cycle(
                 store,
@@ -851,7 +848,6 @@ def _run_task_pool(
             store,
             hosts,
             candidate_publishers,
-            registry,
             target_task_id=target_task_id,
             deadline=deadline,
             interval=interval,
@@ -968,7 +964,6 @@ def _run_target_pool(
     store,
     hosts,
     candidate_publishers,
-    registry,
     *,
     target_task_id: str,
     deadline: float,
@@ -1008,10 +1003,9 @@ def _run_target_pool(
 
         before_revision = store.get_runtime_revision()
         maintenance = run_runtime_maintenance_step(
-            store, registry, candidate_publishers=candidate_publishers
+            store, candidate_publishers=candidate_publishers
         )
         recovered = list(maintenance.rejected_submissions)
-        processed_before = list(maintenance.task_completions)
         claimed_packages = []
         submissions = []
         for pool_host in hosts:
@@ -1038,9 +1032,7 @@ def _run_target_pool(
             except WorkerInvocationError:
                 worker_failure_details.append(invocation_failure_detail(store, claimed))
                 raise
-        processed_after = process_task_completions(
-            store, registry, candidate_publishers=candidate_publishers
-        )
+
         end_revision = store.get_runtime_revision()
         window_records = list(
             store.scan_runtime_records(
@@ -1060,7 +1052,6 @@ def _run_target_pool(
                     "submission_status": (
                         submissions[-1].get("status") if submissions else None
                     ),
-                    "tasks_processed": processed_before + processed_after,
                     "rejections_recovered": recovered,
                 }
             )
@@ -1080,12 +1071,7 @@ def _run_target_pool(
             return
 
         timed_out = time.monotonic() >= deadline
-        idle = (
-            not claimed_packages
-            and not processed_before
-            and not processed_after
-            and not recovered
-        )
+        idle = not claimed_packages and not recovered
         if timed_out or (
             idle and not _has_active_unfinished_tree_claim(store, target_task_id)
         ):
@@ -1190,34 +1176,10 @@ def _target_next_step(status: dict, stop_reason: str) -> str:
             "was published."
         )
     task_status = status.get("status")
-    if task_status in {"blocked", "blocked_delegation"}:
-        return (
-            "Resolve the listed input, activation, or delegation blockers, then "
-            "rerun this task."
-        )
+    if task_status == "blocked":
+        return "Resolve the listed input or activation blockers, then rerun this task."
     if task_status == "blocked_capability":
         return "Register a Worker with the required capability, then rerun this task."
-    if task_status == "blocked_assignment":
-        assignment = status.get("assignment") or {}
-        blocker = assignment.get("blocker") or {}
-        reason = blocker.get("reason", "assignment unavailable")
-        worker_id = blocker.get("worker_id") or assignment.get("worker_id")
-        if reason == "worker_at_capacity":
-            cause = f"assigned Worker {worker_id} is at capacity"
-        elif reason == "disabled_worker":
-            cause = f"assigned Worker {worker_id} is disabled"
-        elif reason == "missing_registration":
-            cause = f"assigned Worker {worker_id} has no active registration"
-        else:
-            cause = f"assigned Worker {worker_id} is unavailable ({reason})"
-        return (
-            f"Resolve the assignment blocker: {cause}. Restore that Worker’s "
-            "registration or capacity; another Worker cannot take over this "
-            "assignment. Use `aig task assignments <CONTRACT_ID>` to copy the "
-            "head. Only if this Contract has never been claimed can you use "
-            "`aig task reassign <CONTRACT_ID> --worker <WORKER_ID> --previous "
-            "<HEAD> --reason <TEXT>`."
-        )
     if task_status == "claimed":
         return "Wait for the active claim to finish, then inspect status and rerun if work remains."
     if task_status == "submitted":
@@ -1226,9 +1188,10 @@ def _target_next_step(status: dict, stop_reason: str) -> str:
                 "The signed Worker claim is already submitted and the exact declared "
                 "business outputs await independent qualification. Inspect `aig task "
                 "reviews <CONTRACT_ID>` and task audit for an existing decision. If "
-                "that decision requests changes, publish its explicit successor with "
-                "`aig task request-changes <DECISION_ID> --reason <TEXT>`; request a "
-                "review only when no exact review exists. Do not rerun or reset this claim."
+                "that decision requests changes, publish ordinary funded follow-up "
+                "work with the frozen requirements and exact report as input "
+                "(see `aig task create --help`). Request review for the exact new Asset. "
+                "Do not rerun or reset this claim."
             )
         return (
             "The Worker claim is already submitted. Inspect task audit for incomplete "

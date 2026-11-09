@@ -1,56 +1,21 @@
-"""Task-producing plugins outside the runtime kernel."""
+"""Methods compile ordinary task and Asset effects before Candidate signing."""
 
 from aigineering.plugins.base import PluginProposal, PluginRequest, TaskPlugin
-from aigineering.plugins.completion import CompletionPlugin, CompletionRegistry
-from aigineering.plugins.completion_projection import (
-    TaskCompletionContext,
-    TaskCompletionProjector,
-)
-from aigineering.plugins.continuation import ContinuationTaskPlugin
 from aigineering.plugins.delegation import TaskDelegationPlugin
-from aigineering.plugins.fail_completion import FailCompletionPlugin
 from aigineering.plugins.planning import PlanningExpansionPlugin
 from aigineering.plugins.staged_planning import (
     PlanningStages,
     StagedPlanningPlugin,
     StagedReplanningPlugin,
 )
-from aigineering.plugins.planning_completion import (
-    PlanningCompletionPlugin,
-    ReplanningCompletionPlugin,
-)
-from aigineering.plugins.tool_completion import ToolCompletionPlugin
-
-
-def default_completion_registry() -> CompletionRegistry:
-    """Compose the supported completion plugins without legacy handlers."""
-    registry = CompletionRegistry()
-    registry.register("plan", PlanningCompletionPlugin())
-    registry.register("replan", ReplanningCompletionPlugin())
-    tool_completion = ToolCompletionPlugin()
-    registry.register("tool", tool_completion)
-    registry.register("parallel_tool_item", tool_completion)
-    registry.register("fail", FailCompletionPlugin())
-    return registry
-
 
 __all__ = (
     "PlanningExpansionPlugin",
     "PlanningStages",
-    "PlanningCompletionPlugin",
-    "ContinuationTaskPlugin",
-    "CompletionPlugin",
-    "CompletionRegistry",
-    "TaskCompletionContext",
-    "TaskCompletionProjector",
-    "default_completion_registry",
-    "FailCompletionPlugin",
     "PluginProposal",
     "PluginRequest",
-    "ReplanningCompletionPlugin",
     "TaskPlugin",
     "StagedPlanningPlugin",
     "StagedReplanningPlugin",
-    "ToolCompletionPlugin",
     "TaskDelegationPlugin",
 )

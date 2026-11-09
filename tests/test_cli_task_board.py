@@ -10,8 +10,6 @@ from types import SimpleNamespace
 from click.testing import CliRunner
 
 from aigineering.cli import task_board as board
-from aigineering.cli.run import _finish_target_run
-from aigineering.core.candidate_publisher import CandidatePublisher, publish_effect
 from aigineering.core.control_plane import (
     build_control_plane_asset,
     build_control_plane_contract,
@@ -21,9 +19,7 @@ from aigineering.core.commitment import CandidateCommitter
 from aigineering.core.domain import initialize_genesis
 from aigineering.core.signing import Ed25519Signer
 from aigineering.core.sqlite_store import SQLiteStore
-from aigineering.core.projection_context import load_effect_projection_context
 from aigineering.core.worker_routing import WorkerRegistration
-from aigineering.plugins.task_assignment import TASK_ASSIGNMENT_EFFECTS
 from aigineering.protocol.candidate import (
     ActorKey,
     create_candidate_proposal,
@@ -33,7 +29,6 @@ from aigineering.protocol.effect_builders import (
     asset_attestation_effect,
     asset_proposal_effect,
     contract_declaration_effect,
-    task_assign_effect,
     worker_registration_effect,
 )
 from aigineering.protocol.types import Candidate
@@ -139,95 +134,6 @@ def _signed_fixture(
     return parent, child, services, open_store
 
 
-def _disabled_assignee_fixture(tmp_path, monkeypatch):
-    db_path = tmp_path / "assigned.sqlite"
-    store = SQLiteStore(db_path=str(db_path))
-    signer = Ed25519Signer()
-    actor_key = ActorKey(
-        "worker:assigned",
-        "assignment-1",
-        signer.kind,
-        signer.signer_id,
-        ("contract.publish", "task.assignment.manage", "worker.register"),
-    )
-    genesis = create_genesis_manifest(
-        "task-board-assignment", (actor_key,), "policy:task-board"
-    )
-    initialize_genesis(store, genesis)
-    contract = build_control_plane_contract(
-        name="assigned target",
-        description="Blocked because its exact assignee is disabled.",
-        outputs=("assigned-result",),
-        budget=3,
-    )
-    declared = publish_effect(
-        store,
-        store,
-        genesis,
-        actor_key,
-        signer,
-        contract_declaration_effect(contract),
-        idempotency_key="board-assigned-contract",
-    )
-    assert declared.accepted
-    registration = WorkerRegistration(
-        "worker:assigned",
-        capacity=1,
-        actor_id=actor_key.actor_id,
-        key_id=actor_key.key_id,
-    )
-    enabled = publish_effect(
-        store,
-        store,
-        genesis,
-        actor_key,
-        signer,
-        worker_registration_effect(registration),
-        idempotency_key="board-assigned-worker-enabled",
-    )
-    assert enabled.accepted, [
-        (record.record_type, dict(record.payload)) for record in enabled.runtime_records
-    ]
-    assigned = publish_effect(
-        store,
-        store,
-        genesis,
-        actor_key,
-        signer,
-        task_assign_effect(contract.id, registration.worker_id, "", "initial owner"),
-        idempotency_key="board-assignment",
-        additional_effects=TASK_ASSIGNMENT_EFFECTS,
-    )
-    assert assigned.accepted
-    disabled = publish_effect(
-        store,
-        store,
-        genesis,
-        actor_key,
-        signer,
-        worker_registration_effect(
-            WorkerRegistration(
-                registration.worker_id,
-                capacity=1,
-                enabled=False,
-                version="2",
-                actor_id=actor_key.actor_id,
-                key_id=actor_key.key_id,
-            )
-        ),
-        idempotency_key="board-assigned-worker-disabled",
-    )
-    assert disabled.accepted, disabled.trace_entries
-    store.close()
-
-    services = _attach_cli(monkeypatch, db_path)
-
-    def open_store():
-        return SQLiteStore(db_path=str(db_path))
-
-    return contract, services, open_store
-
-
 def _attach_cli(monkeypatch, db_path):
     services = []
 
@@ -259,21 +165,16 @@ def test_list_board_stats_and_show_use_signed_committed_facts(tmp_path, monkeypa
     envelope = json.loads(listed.output)
     assert envelope["ok"] is True
     assert [item["contract_id"] for item in envelope["data"]["tasks"]] == [root.id]
-    assert envelope["data"]["tasks"][0]["priority"] == 0
-    assert envelope["data"]["tasks"][0]["priority_fact_id"] is None
     assert envelope["revision"] > 0
 
     board_result = _invoke(["board", "--json"])
     assert board_result.exit_code == 0, board_result.output
     assert json.loads(board_result.output)["data"]["total"] == 2
     assert all(
-        row["priority"] == 0 and row["priority_fact_id"] is None
+        "priority" not in row and "assignment" not in row
         for rows in json.loads(board_result.output)["data"]["columns"].values()
         for row in rows
     )
-    sorted_board = _invoke(["board", "--sort", "priority", "--json"])
-    assert sorted_board.exit_code == 0, sorted_board.output
-    assert json.loads(sorted_board.output)["data"]["total"] == 2
 
     stats = _invoke(["stats", "--json"])
     assert stats.exit_code == 0, stats.output
@@ -290,7 +191,7 @@ def test_list_board_stats_and_show_use_signed_committed_facts(tmp_path, monkeypa
     assert all(service.sync_count == 1 for service in services)
 
 
-def test_aggregate_query_uses_one_revision_scan_and_matches_legacy_cards(
+def test_aggregate_query_uses_one_revision_scan_and_preserves_declaration_order(
     tmp_path, monkeypatch
 ):
     _root, _child, _services, open_store = _signed_fixture(tmp_path, monkeypatch)
@@ -298,61 +199,25 @@ def test_aggregate_query_uses_one_revision_scan_and_matches_legacy_cards(
     try:
         contracts = store.get_all_contracts()
         revision = store.get_runtime_revision()
-        scans = []
         original_scan = store.scan_runtime_records
         fact_fingerprint = tuple(
             (record_revision, record.record_type, record.id)
             for record_revision, record in original_scan()
         )
+        scans = []
 
         def counted_scan(**kwargs):
             scans.append(kwargs)
             return original_scan(**kwargs)
 
         store.scan_runtime_records = counted_scan
-        effect_context = load_effect_projection_context(store)
-        histories = board.task_priority_histories(
-            effect_context, tuple(item.id for item in contracts)
+        cards = board._fetch_cards(store, None, list(reversed(contracts)), revision)
+        assert [item["contract_id"] for item in cards] == sorted(
+            contract.id for contract in contracts
         )
-        legacy_cards = []
-        by_id = {item.id: item for item in contracts}
-        for contract in sorted(contracts, key=lambda item: item.id):
-            status = board.project_task_status(
-                contract,
-                store,
-                projection_context=effect_context,
-                priority_facts=histories[contract.id],
-            )
-            current = contract
-            seen = set()
-            while (
-                current.parent_id
-                and current.parent_id in by_id
-                and current.id not in seen
-            ):
-                seen.add(current.id)
-                current = by_id[current.parent_id]
-            legacy_cards.append(
-                {
-                    "contract_id": contract.id,
-                    "root_contract_id": current.id,
-                    "parent_id": contract.parent_id,
-                    "name": contract.name,
-                    "status": status["status"],
-                    "terminal": status["terminal"],
-                    "blockers": status["blockers"],
-                    "budget_remaining": status["budget_remaining"],
-                    "outputs_satisfied": status["outputs_satisfied"],
-                    "recoveries": status["recoveries"],
-                    "assignment": status["assignment"],
-                    "priority": status["priority"],
-                    "priority_fact_id": status["priority_fact_id"],
-                }
-            )
-
-        scans.clear()
-        actual = board._fetch_cards(store, None, list(reversed(contracts)), revision)
-        assert actual == legacy_cards
+        assert all(
+            "priority" not in item and "assignment" not in item for item in cards
+        )
         assert scans == [{}]
         assert store.get_runtime_revision() == revision
         assert (
@@ -364,111 +229,6 @@ def test_aggregate_query_uses_one_revision_scan_and_matches_legacy_cards(
         )
     finally:
         store.close()
-
-
-def test_priority_values_and_sort_use_signed_nonzero_history(tmp_path, monkeypatch):
-    from aigineering.plugins.task_priority import TASK_PRIORITY_EFFECTS
-    from aigineering.protocol.effect_builders import task_priority_effect
-
-    db_path = tmp_path / "priority-board.sqlite"
-    store = SQLiteStore(db_path=str(db_path))
-    runtime = candidate_runtime(store)
-    tasks = [
-        runtime.accept_contract(
-            build_control_plane_contract(name=f"priority {index}", description="")
-        )
-        for index in range(2)
-    ]
-    signer = Ed25519Signer()
-    priority_actor = ActorKey(
-        "operator:priority-board",
-        "priority-board-key",
-        signer.kind,
-        signer.signer_id,
-        ("task.priority.manage",),
-    )
-    runtime.authorize_actor(priority_actor)
-    priority_publisher = CandidatePublisher(
-        store,
-        store,
-        runtime.genesis,
-        priority_actor,
-        signer,
-        additional_effects=TASK_PRIORITY_EFFECTS,
-    )
-    declarations = {
-        record.payload["contract"]["id"]: record.id
-        for _revision, record in store.scan_runtime_records(
-            record_type="contract.declared"
-        )
-    }
-    default_ids = [item.id for item in sorted(tasks, key=lambda item: item.id)]
-    low_id, high_id = default_ids
-    for contract_id, value, reason in (
-        (low_id, -6, "lower board priority"),
-        (high_id, 9, "higher board priority"),
-    ):
-        decision = priority_publisher.publish(
-            (task_priority_effect(contract_id, value, "", reason),),
-            idempotency_key=f"board-priority-{value}",
-            causal_parents=(declarations[contract_id],),
-        )
-        assert decision.accepted, decision
-    store.close()
-
-    _attach_cli(monkeypatch, db_path)
-    default_list = _invoke(["list", "--json"])
-    assert default_list.exit_code == 0, default_list.output
-    default_rows = json.loads(default_list.output)["data"]["tasks"]
-    assert [item["contract_id"] for item in default_rows] == default_ids
-    assert [item["priority"] for item in default_rows] == [-6, 9]
-    assert all(item["priority_fact_id"].startswith("record:") for item in default_rows)
-
-    sorted_list = _invoke(["list", "--sort", "priority", "--json"])
-    assert sorted_list.exit_code == 0, sorted_list.output
-    sorted_rows = json.loads(sorted_list.output)["data"]["tasks"]
-    assert [item["contract_id"] for item in sorted_rows] == list(reversed(default_ids))
-    assert [item["priority"] for item in sorted_rows] == [9, -6]
-
-    default_board = _invoke(["board", "--json"])
-    priority_board = _invoke(["board", "--sort", "priority", "--json"])
-    assert default_board.exit_code == priority_board.exit_code == 0
-    board_rows = [
-        row
-        for rows in json.loads(priority_board.output)["data"]["columns"].values()
-        for row in rows
-    ]
-    assert [item["contract_id"] for item in board_rows] == list(reversed(default_ids))
-    show = _invoke(["show", high_id, "--json"])
-    assert show.exit_code == 0, show.output
-    shown = json.loads(show.output)["data"]["task"]
-    assert shown["priority"] == 9
-    assert shown["priority_fact_id"] == next(
-        item["priority_fact_id"]
-        for item in sorted_rows
-        if item["contract_id"] == high_id
-    )
-
-
-def test_legacy_materialized_task_views_default_priority_without_fact_history(
-    tmp_path, monkeypatch
-):
-    db_path = tmp_path / "legacy-priority-board.sqlite"
-    store = SQLiteStore(db_path=str(db_path))
-    contract = build_control_plane_contract(name="legacy task", description="")
-    store.add_contract(contract)
-    store.close()
-    _attach_cli(monkeypatch, db_path)
-
-    listed = _invoke(["list", "--json"])
-    assert listed.exit_code == 0, listed.output
-    row = json.loads(listed.output)["data"]["tasks"][0]
-    assert row["contract_id"] == contract.id
-    assert row["priority"] == 0
-    assert row["priority_fact_id"] is None
-    shown = _invoke(["show", contract.id, "--json"])
-    assert shown.exit_code == 0, shown.output
-    assert json.loads(shown.output)["data"]["task"]["priority"] == 0
 
 
 def test_list_uses_exact_root_id_and_json_not_found_is_nonzero(tmp_path, monkeypatch):
@@ -485,49 +245,6 @@ def test_list_uses_exact_root_id_and_json_not_found_is_nonzero(tmp_path, monkeyp
     missing = _invoke(["show", "not-a-contract", "--json"])
     assert missing.exit_code == 1
     assert json.loads(missing.output)["error"]["code"] == "not_found"
-
-
-def test_list_filters_derived_disabled_assignment_and_run_guidance_is_actionable(
-    tmp_path, monkeypatch
-):
-    contract, _services, open_store = _disabled_assignee_fixture(tmp_path, monkeypatch)
-
-    filtered = _invoke(["list", "--status", "blocked_assignment", "--json"])
-    assert filtered.exit_code == 0, filtered.output
-    tasks = json.loads(filtered.output)["data"]["tasks"]
-    assert [item["contract_id"] for item in tasks] == [contract.id]
-    assert tasks[0]["status"] == "blocked_assignment"
-    assert any("assignment:" in item for item in tasks[0]["blockers"])
-
-    ready = _invoke(["list", "--status", "ready", "--json"])
-    assert ready.exit_code == 0, ready.output
-    assert all(
-        item["contract_id"] != contract.id
-        for item in json.loads(ready.output)["data"]["tasks"]
-    )
-
-    store = open_store()
-    try:
-        status = board._safe_status(contract, store)
-    finally:
-        store.close()
-    assert status["status"] == "blocked_assignment"
-    import click
-
-    @click.command()
-    def target_run_result():
-        _finish_target_run(status, 0, stop_reason="idle", json_output=True)
-
-    result = CliRunner().invoke(target_run_result)
-    assert result.exit_code == 1
-    run_payload = json.loads(result.output)
-    assert run_payload["status"] == "blocked_assignment"
-    guidance = run_payload["next_step"]
-    assert "worker:assigned" in guidance
-    assert "disabled" in guidance
-    assert "another Worker cannot take over" in guidance
-    assert "never been claimed" in guidance
-    assert "aig task assignments" in guidance
 
 
 def test_exact_root_filter_includes_only_immutable_descendants():

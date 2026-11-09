@@ -1,137 +1,135 @@
 ---
 name: aigineering
-description: Use Aigineering to turn agent work into signed, claim-bound task results with declared outputs, exact Asset evidence, policy acceptance, and observable recovery.
+description: Use Aigineering to run signed, bounded tasks with exact Asset evidence, policy acceptance and observable blockers.
 ---
 
 # Aigineering agent workflow
 
-Use Aigineering as the durable task and evidence boundary around an agent. Keep
-the model loop and tools in the harness; publish only work that must be
-independently claimed, budgeted, reviewed, or recovered. A committed output is
-an authorized assertion. It is not automatically true or independently
+Use Aigineering as a durable boundary around agent work. A committed output is
+an authorized assertion; it is not automatically true or independently
 accepted.
 
-## 1. Establish explicit inputs and authority
+## 1. Declare inputs and authority
 
 - Use a selected workspace and its signed domain. Redis is required for normal
-  discovery, event feeds, and Worker wakeups; SQLite remains the signed fact
-  and claim authority. There is no operational offline fallback.
-- Publish or select exact input Asset IDs. Declare input roles, output names,
-  capability requirements, labels, and budget in the task definition. Give
-  children only scope already allowed by their parent.
-- A Skill supplies instructions and context. It does not grant capability or
-  authority. Labels resolve to frozen Assets; they are not dynamic permissions.
-- MCP descriptors contain capability metadata; they do not provide an MCP
-  transport. An operator must configure the executable adapter/registry.
+  discovery, event feeds and Worker wakeups; SQLite stores signed facts and
+  claim state.
+- Publish or select exact input Assets. Freeze input roles, output
+  requirements, capabilities and a real causal budget in the Contract.
+- Give child work only scope and funding available from its parent.
+- Skills and labels select context; they do not grant capability or authority.
+- MCP descriptors describe capability. They do not connect a transport or
+  provide a tool executable.
 - Keep credentials and undisclosed values out of prompts and task metadata.
-  Never infer missing evidence or fabricate tool observations.
 
-For local routing, use `aig board list/show/switch` or pass `--board NAME`;
-explicit `-C PATH` selects a workspace directly. See [named workspaces](docs/reference/task-board.md#named-local-workspaces).
+## 2. Find and inspect ordinary tasks
 
-## 2. Plan ordinary work
+Planning and delegation publish ordinary bounded Contracts. A tool scope
+permits use but does not force a call. A single-tool action declares its tool
+task and continuation in the same signed Candidate. Tool observations alone
+cannot satisfy business outputs.
 
-For an existing root obligation, request a plan with `/plan` (or `/replan` on
-an eligible task). The planner publishes bounded ordinary child tasks through
-the runtime. Review their exact inputs, outputs, capabilities, labels, and
-budgets before execution. Planning does not create a second scheduler or grant
-new authority. Tool use, continuation, retry, review, and recovery must also be
-ordinary runtime tasks.
+Use the task board to find work, then inspect the exact task and inputs before
+acting:
 
-Use `aig task list/board/show` to discover work, then inspect `aig task status
-ID --json` and `aig task context ID --json` before acting. Context preview is
-metadata-only by default; select an exact listed Asset and opt into content
-only when needed. Read the [task operations reference](docs/reference/task-board.md)
-for command options and specialized workflows.
+```bash
+aig task list --json
+aig task status TASK_ID --json
+aig task context TASK_ID --json
+```
 
-## 3. Claim, execute, sign, and submit
+Context preview is metadata-only by default. Select an exact Asset and opt into
+content only when needed. See [task operations](docs/reference/task-board.md).
 
-Use a configured Worker or harness through the normal claim flow. For a
-Harness, use `HarnessCandidateAdapter`: claim the exact package, produce one
-protocol action, create the signed result Candidate, and submit that Candidate
-through the worker submission interface. Never submit raw model text as if it
-were a signed Candidate. `aig worker next` only acquires/signs a claim; it does
-not execute a model or produce task output.
+## 3. Execute and submit signed work
 
-The action command envelope is distinct from provider response JSON. CLI
-`--json` controls CLI output formatting; it does not request JSON from the
-provider. Provider wire formatting is configured separately (for example,
-`--response-format json_object`). Use `/exec` only for declared outputs,
-`/tool` or `/parallel_tool` for tool work, `/plan` for bounded child work, and
-the supported lifecycle action for retry/failure. Tool observations are local
-evidence and cannot by themselves satisfy business outputs.
+Use a configured Worker or Harness through the normal claim flow. A Harness
+must submit the original signed claim provenance through
+`HarnessCandidateAdapter`. Never submit raw model text as if it were a signed
+Candidate. `aig worker next` acquires a claim; it does not run a model or
+produce output.
 
-`HarnessCandidateAdapter` is the supported harness signing bridge. Keep its
-key private and supply original signed claim provenance on submit. Never edit
-the Store directly or invent IDs, signatures, observations, or evidence. Mock
-workers are for tests/dry-runs; never present mock output as production or
-acceptance evidence. See [harness migration](docs/reference/agent-harness-migration.md).
+Use `/exec` for declared output publication, `/tool` or `/parallel_tool` for
+authorized tool work, and `/plan` for bounded child work. The runtime checks
+the current signing key, capability, registration, claim, scope and funding in
+the writer transaction. Do not edit the Store or invent IDs, signatures,
+observations or evidence. Mock Workers are for tests and dry runs only; never
+present mock output as production.
 
-## 4. Check status and exact Asset evidence
+## 4. Check output requirements
 
-After submission, inspect `aig task status ID --json`, `aig task audit ID
---json`, and the exact output Assets with `aig asset show --id ASSET_ID
---json`. Match each required output to its committed Asset ID. Do not rely on
-name-only lookup when version identity matters. A successful submission is
-not the same as a completed task, and `completed` alone does not establish
-independent acceptance or semantic truth.
+Inspect status, audit and exact Asset records after a publication:
 
-Statuses such as `ready`, `claimed`, `submitted`, `expanded`, `blocked`, or
-`stalled` are not success. Do not rerun a submitted or complete task. If a
-submitted result awaits independent acceptance, use the exact review flow;
-if changes are required, continue through the published revision successor.
-See [review and revision](docs/reference/task-board.md#request-an-exact-independent-review).
+```bash
+aig task status TASK_ID --json
+aig task audit TASK_ID --json
+aig asset show --id ASSET_ID --json
+```
 
-## 5. Apply policy acceptance, then export
+An admitted Asset from any source can satisfy the Contract's frozen name,
+Definition, content, producer and shape conditions. Historical origin or tree
+metadata does not add another completion gate. Independent acceptance still
+requires its exact canonical qualification. A successful Candidate submission
+does not by itself establish completion, qualification or semantic truth.
 
-When the Contract requires independent acceptance, use a distinct authorized
-reviewer and the frozen acceptance policy. Inspect the exact report and record
-an operator decision through the canonical review command. A review report is
-ordinary output, not qualification by itself. Export only the exact output
-Asset that status and policy identify as qualified:
+Do not rerun a submitted producer just because independent acceptance is
+pending. Export only the exact output Asset selected by status and policy:
 
 ```bash
 aig task result TASK_ID --output OUTPUT_NAME --to PATH
 ```
 
-Do not substitute a later same-name Asset, reviewer recommendation, or
-unverified file for the bound evidence. Policy acceptance means the configured
-criteria accepted that assertion; it does not prove universal truth.
+## 5. Request policy review when required
 
-## 6. Diagnose failure and continue with new work
+Review request creates an ordinary bounded reviewer Task and descriptive
+request Asset. A decision publishes the canonical attestation and a
+descriptive decision Asset. Use the exact request and report Asset IDs:
 
-On a nonzero command, timeout, rejection, or blocker, preserve the exact task
-ID and inspect status, audit, runs, and (when needed) diagnostics:
+```bash
+aig task request-review TARGET_ID --output OUTPUT_NAME \
+  --asset OUTPUT_ASSET_ID --reason "Check the result."
+aig task reviews TARGET_ID --json
+aig task review decide REQUEST_ASSET_ID --report REPORT_ASSET_ID \
+  --verdict accept --reason "Policy checks passed."
+```
+
+Use a distinct authorized reviewer when the frozen policy requires it. A
+report or relation Asset is not itself a qualification fact; only canonical
+`asset.attest` produces qualification. Policy acceptance is not universal
+truth.
+
+## 6. Diagnose blockers and continue with funded work
+
+On a rejection, timeout or blocker, keep the exact task and claim IDs and
+inspect the committed facts:
 
 ```bash
 aig task status TASK_ID --json
-aig task audit TASK_ID --json
 aig task runs TASK_ID --json
+aig task diagnostics TASK_ID --claim CLAIM_ID --json
+aig task audit TASK_ID --json
 ```
 
-Use `aig task diagnostics TASK_ID --claim CLAIM_ID --json` with the exact claim
-from `task runs`; use `task logs` only for available local invocation
-observations. These views are diagnostic evidence, not authority to retry. Fix
-the reported service/configuration issue, restore Redis and synchronize when
-needed, then follow the exact `next_step` or published retry/recovery successor.
-Recovery is new ordinary work: run its returned task ID. Never reset a claim,
-rerun a submitted/complete producer, or describe a scheduled recovery as
-completed. If necessary evidence is absent, report the blocker or fail with a
-concrete reason; do not guess or fill the gap with generated evidence.
+An invocation failure is an attempt observation, not by itself a permanent
+business failure. Retry and recovery publish new ordinary work only when an
+actual causal grant is available. They do not reset claims or mint a root
+grant. If no funded work can be published, report the blocker and the evidence
+needed to resolve it; do not describe a proposed or rejected recovery as
+scheduled.
 
-Accepted `redis_sync_pending` means SQLite retained the signed operation.
-Keep its exact IDs/key and original arguments, restore Redis, and replay only
-through the same owner as directed. Inspect partial bulk results individually;
-an overall nonzero exit does not erase accepted members. See the [operations
-reference](docs/reference/task-board.md) for exact replay and bulk recovery.
+Redis synchronization failures preserve any accepted SQLite facts. Restore
+Redis and replay the exact original intent through the same command owner when
+the result says synchronization is pending. Provider timeout, run timeout,
+retry count, causal allowance and usage are separate; unknown usage is not
+zero.
 
 ## Further references
 
-- [Task operations](docs/reference/task-board.md): lifecycle, assignment,
-  review, retry, recovery, diagnostics, and exact command forms.
+- [Task operations](docs/reference/task-board.md): create, run, inspect, retry,
+  review and export.
 - [Harness migration](docs/reference/agent-harness-migration.md): signed
-  claim/submission protocol and adapter example.
-- [Configured runs](docs/reference/configured-runs.md): explicit Worker/Fleet
-  profiles and resumable configured execution.
-- [Task attachments](docs/reference/task-attachments.md): signed attachment
-  links and verified-byte export.
+  claim and submission protocol.
+- [Configured runs](docs/reference/configured-runs.md): explicit Worker and
+  Fleet profiles.
+- [Support and limits](docs/reference/development-status.md): current scope
+  and evidence limits.

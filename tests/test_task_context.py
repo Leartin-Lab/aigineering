@@ -230,16 +230,12 @@ def test_method_context_rows_keep_shared_selector_order_and_safe_body_fence():
     )
 
     result = task_context(store, contract.id)
-    rows = result["data"]["method_context_assets"]
-    assert [row["id"] for row in rows] == [first.id, hidden.id, redacted.id]
-    assert next(row for row in rows if row["id"] == hidden.id)["promptable"] is False
-    with pytest.raises(TaskContextError) as denied:
-        task_context(store, contract.id, asset_id=hidden.id, include_content=True)
-    assert denied.value.code == "asset_content_forbidden"
-    redacted_body = task_context(
-        store, contract.id, asset_id=redacted.id, include_content=True
-    )
-    assert redacted_body["data"]["selected_asset"]["content"] == REDACTED_CONTENT
+    assert result["data"]["disclosed_assets"] == []
+    assert "method_context_assets" not in result["data"]
+    for asset in (first, hidden, redacted):
+        with pytest.raises(TaskContextError) as denied:
+            task_context(store, contract.id, asset_id=asset.id, include_content=True)
+        assert denied.value.code == "asset_not_disclosed"
 
 
 def test_sensitive_policy_rejection_does_not_return_policy_reasons():

@@ -64,16 +64,16 @@ def test_sqlite_reducer_sees_new_fact_inside_atomic_commit(store):
     from aigineering.core.trace import MemoryTraceStore
 
     trace = MemoryTraceStore()
-    store.add_contract(Contract(id="c1", outputs=["report"]))
     ingress = candidate_runtime(store, trace)
+    task = ingress.accept_contract(Contract(id="fixture-task", outputs=("report",)))
 
     ingress.accept_asset(
         Asset(id="report-a", name="report", content="done", origin="worker")
     )
 
-    event_types = [entry.event_type for entry in store.get_trace_events("c1")]
-    assert event_types == ["output_satisfied", "complete"]
-    assert [entry.event_type for entry in trace.get_by_contract("c1")] == event_types
+    event_types = [entry.event_type for entry in store.get_trace_events(task.id)]
+    assert event_types[-2:] == ["output_satisfied", "complete"]
+    assert [entry.event_type for entry in trace.get_by_contract(task.id)] == event_types
 
 
 # ---------------------------------------------------------------------------
@@ -319,7 +319,7 @@ def test_schema21_upgrade_to23_changes_only_reader_floor(tmp_path):
 
     upgraded = SQLiteStore(database)
     try:
-        assert upgraded.schema_version == 23
+        assert upgraded.schema_version == CURRENT_SCHEMA_VERSION
         after_tables = {
             row["name"]
             for row in upgraded._conn.execute(
@@ -344,7 +344,7 @@ def test_schema23_store_is_refused_by_schema22_reader(tmp_path, monkeypatch):
 
     database = str(tmp_path / "schema23.db")
     current = SQLiteStore(database)
-    assert current.schema_version == 23
+    assert current.schema_version == CURRENT_SCHEMA_VERSION
     current.close()
 
     monkeypatch.setattr(migrations, "CURRENT_SCHEMA_VERSION", 22)
@@ -706,6 +706,7 @@ def test_released_claim_rebuilds_from_lifecycle_facts(store):
 
 
 def test_submitted_contract_cannot_be_reclaimed_and_old_lease_is_fenced(store):
+    store.add_contract(Contract(id="c1", outputs=("unmet",), budget=1))
     first = store.claim_contract("c1", "worker", lease_seconds=30)
     assert first is not None
     assert first["epoch"] == 1
@@ -748,6 +749,7 @@ def test_claim_contract_rejects_second_connection_active_claim(tmp_path):
     first = SQLiteStore(db_path)
     second = SQLiteStore(db_path)
 
+    first.add_contract(Contract(id="c1", outputs=("unmet",), budget=1))
     claim1 = first.claim_contract("c1", "worker-1", package_id="pkg:first")
     claim2 = second.claim_contract("c1", "worker-2", package_id="pkg:second")
 
@@ -779,6 +781,7 @@ def test_claim_contract_rejects_reclaim_after_expired_claim(store):
 
 
 def test_claim_contract_does_not_mask_operational_schema_errors(store):
+    store.add_contract(Contract(id="c1", outputs=("unmet",), budget=1))
     with store._conn:
         store._conn.execute("DROP TABLE worker_claims")
 

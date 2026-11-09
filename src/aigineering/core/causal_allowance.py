@@ -26,7 +26,7 @@ from aigineering.protocol.runtime_record import (
 )
 from aigineering.protocol.types import Contract
 from aigineering.protocol.wire import contract_from_dict
-from aigineering.core.terminal_types import TERMINAL_EVENTS
+from aigineering.core.lifecycle_facts import TERMINAL_EVENTS
 
 
 class CausalAllowanceConflict(ValueError):
@@ -332,6 +332,93 @@ def allowance_reservation_id(
     )
 
 
+def _allowance_closure_reason(record: RuntimeRecord) -> str | None:
+    if record.record_type == "lifecycle.terminal":
+        value = record.payload.get("terminal")
+        return value if value in TERMINAL_EVENTS else None
+    if record.record_type in {"worker.invocation_failed", "claim.expired"}:
+        return record.record_type
+    if (
+        record.record_type == "attempt.closed"
+        and record.payload.get("outcome") == "failed"
+    ):
+        return "attempt.failed"
+    return None
+
+
+def _validate_failure_closure(cause, records, contract_id):
+    """Prove a failed allocation from its exact admitted claim transition."""
+
+    def unique(kind, **fields):
+        matches = [
+            row
+            for row in records.values()
+            if row.record_type == kind
+            and all(row.payload.get(key) == value for key, value in fields.items())
+        ]
+        if len(matches) != 1:
+            raise CausalAllowanceConflict(
+                "allowance failure requires exact claim closure proof"
+            )
+        return matches[0]
+
+    claim_id = cause.payload.get("claim_id")
+    if not isinstance(claim_id, str) or not claim_id:
+        raise CausalAllowanceConflict("allowance failure requires a claim ID")
+    grant = unique("claim.granted", claim_id=claim_id, contract_id=contract_id)
+    binding = {
+        key: grant.payload.get(key)
+        for key in ("claim_id", "contract_id", "worker_id", "package_id", "epoch")
+    }
+    if cause.record_type == "claim.expired":
+        if any(
+            cause.payload.get(key) != value for key, value in binding.items()
+        ) or cause.causal_parents != (grant.id,):
+            raise CausalAllowanceConflict(
+                "allowance expiry must bind its original grant"
+            )
+    elif cause.record_type == "worker.invocation_failed":
+        if any(
+            cause.payload.get(key) != value
+            for key, value in binding.items()
+            if key != "epoch"
+        ):
+            raise CausalAllowanceConflict(
+                "allowance failure must bind its original grant"
+            )
+        released = unique("claim.released", **binding)
+        if released.causal_parents != (grant.id, cause.id):
+            raise CausalAllowanceConflict(
+                "allowance failure requires exact grant/failure release parents"
+            )
+    else:
+        candidate_id = cause.payload.get("candidate_id")
+        rejection = unique(
+            "candidate.rejected",
+            candidate_id=candidate_id,
+            claim_id=claim_id,
+            contract_id=contract_id,
+        )
+        receipt = unique(
+            "candidate.received",
+            candidate_id=candidate_id,
+            claim_id=claim_id,
+            contract_id=contract_id,
+            actor_id=binding["worker_id"],
+        )
+        submitted = unique("claim.submitted", **binding, candidate_id=candidate_id)
+        if (
+            cause.causal_parents != (rejection.id,)
+            or rejection.causal_parents != (receipt.id,)
+            or submitted.causal_parents != (grant.id, receipt.id)
+        ):
+            raise CausalAllowanceConflict(
+                "allowance rejected attempt requires receipt-bound claim closure"
+            )
+    for row in (cause, grant):
+        validate_runtime_record(row)
+
+
 def terminal_allowance_records(
     contracts: Sequence[Contract],
     existing_records: Sequence[RuntimeRecord],
@@ -349,7 +436,7 @@ def terminal_allowance_records(
     terminals = {
         str(record.payload.get("contract_id", "")): record
         for record in pending_records
-        if record.record_type == "lifecycle.terminal"
+        if _allowance_closure_reason(record) is not None
     }
     consequences: list[RuntimeRecord] = []
     for contract_id, terminal in sorted(terminals.items()):
@@ -373,7 +460,7 @@ def terminal_allowance_records(
                 {
                     "amount": amount,
                     "contract_id": contract_id,
-                    "reason": str(terminal.payload.get("terminal", "terminal")),
+                    "reason": _allowance_closure_reason(terminal),
                 },
                 causal_parents=(terminal.id,),
             )
@@ -388,23 +475,39 @@ def materialize_terminal_allowance(
 ) -> tuple[RuntimeRecord, ...]:
     """Load the append-only snapshot needed by terminal allowance projection."""
     if not any(
-        record.record_type == "lifecycle.terminal" for record in pending_records
+        _allowance_closure_reason(record) is not None for record in pending_records
     ):
         return ()
-    existing_records = tuple(record for _, record in store.scan_runtime_records())
     by_id = {contract.id: contract for contract in contracts}
     for record in pending_records:
-        if record.record_type != "lifecycle.terminal":
+        if _allowance_closure_reason(record) is None:
             continue
         contract_id = str(record.payload.get("contract_id", ""))
         if contract_id not in by_id:
             contract = store.get_contract(contract_id)
             if contract is not None:
                 by_id[contract_id] = contract
+    kinds = (
+        "allowance.granted",
+        "allowance.reserved",
+        "allowance.returned",
+        "allowance.extinguished",
+        "lifecycle.terminal",
+    )
+    target_ids = {
+        str(row.payload.get("contract_id", ""))
+        for row in pending_records
+        if _allowance_closure_reason(row) is not None
+    }
+    existing_records = tuple(
+        {
+            row.id: row
+            for task_id in target_ids
+            for row in store.read_task_facts(task_id, kinds)
+        }.values()
+    )
     return terminal_allowance_records(
-        tuple(by_id.values()),
-        existing_records,
-        pending_records,
+        tuple(by_id.values()), existing_records, pending_records
     )
 
 
@@ -468,6 +571,7 @@ def validate_allowance_commit(
         str(record.payload.get("contract_id", ""))
         for record in existing_records
         if record.record_type == "lifecycle.terminal"
+        and record.payload.get("terminal") != "failed"
     }
     requested: dict[str, int] = defaultdict(int)
     for record in new_pending:
@@ -545,35 +649,35 @@ def validate_allowance_commit(
             raise CausalAllowanceConflict(
                 "Contract allowance may be extinguished only once"
             )
-        terminal_records = {
-            item.id: item
-            for item in (*existing_records, *new_pending)
-            if item.record_type == "lifecycle.terminal"
-            and item.payload.get("contract_id") == contract_id
-        }
-        if len(terminal_records) != 1:
+        by_record_id = {item.id: item for item in (*existing_records, *new_pending)}
+        if len(record.causal_parents) != 1:
             raise CausalAllowanceConflict(
-                "allowance extinguishment requires one matching contract terminal fact"
+                "allowance extinguishment requires one exact closure parent"
             )
-        terminal = next(iter(terminal_records.values()))
-        terminal_value = terminal.payload.get("terminal")
-        try:
-            validate_runtime_record(terminal)
-        except ValueError as exc:
-            raise CausalAllowanceConflict(
-                "allowance extinguishment requires a canonical terminal fact"
-            ) from exc
-        if not isinstance(terminal_value, str) or terminal_value not in TERMINAL_EVENTS:
-            raise CausalAllowanceConflict(
-                "allowance extinguishment requires a valid terminal event"
-            )
+        cause = by_record_id.get(record.causal_parents[0])
         if (
-            record.causal_parents != (terminal.id,)
-            or record.payload.get("reason") != terminal_value
+            cause is None
+            or cause.payload.get("contract_id") != contract_id
+            or _allowance_closure_reason(cause) is None
+            or record.payload.get("reason") != _allowance_closure_reason(cause)
         ):
             raise CausalAllowanceConflict(
-                "allowance extinguishment must name its exact terminal parent and reason"
+                "allowance extinguishment must name its exact closure parent and reason"
             )
+        validate_runtime_record(cause)
+        if cause.record_type == "lifecycle.terminal":
+            terminals = {
+                item.id
+                for item in by_record_id.values()
+                if item.record_type == "lifecycle.terminal"
+                and item.payload.get("contract_id") == contract_id
+            }
+            if len(terminals) != 1:
+                raise CausalAllowanceConflict(
+                    "allowance extinguishment requires one matching contract terminal fact"
+                )
+        else:
+            _validate_failure_closure(cause, by_record_id, contract_id)
         projected = raw_amount
         available = allowance_available(contract, without_extinguishment)
         if projected != available:
@@ -1529,8 +1633,9 @@ def _validate_candidate_head(
     *,
     proof_context: _AllowanceGrantProofContext | None = None,
 ) -> RuntimeRecord:
-    if set(head.payload) != {"candidate_id", "committed_record_ids"}:
-        raise ValueError("Candidate committed head fields are invalid")
+    from aigineering.core.publication_history import committed_member_ids
+
+    committed_member_ids(head)
     candidate_id = head.payload.get("candidate_id")
     committed_ids = head.payload.get("committed_record_ids")
     if (

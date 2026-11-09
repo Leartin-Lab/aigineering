@@ -58,7 +58,5 @@ def claim_next_application_package(store, **claim_options):
 
 
 def order_application_contract_ids(store, contract_ids):
-    """Reorder only the supplied application scope using signed priority facts."""
-    from aigineering.task_priority import order_task_contract_ids
-
-    return order_task_contract_ids(store, contract_ids)
+    """Keep the declared application scope in its existing stable order."""
+    return tuple(contract_ids)

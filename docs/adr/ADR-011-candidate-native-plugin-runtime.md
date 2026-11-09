@@ -1,5 +1,10 @@
 # ADR-011: Candidate-native plugin runtime
 
+> Current implementation: conflicting fresh-write, injected-projector and
+> task-completion mechanisms in this historical decision are superseded by
+> [change 137](../../changes/137-closed-primitive-task-runtime.md).
+> Consult [DESIGN](../../DESIGN.md) for the supported primitive surface.
+
 Status: Accepted
 Date: 2026-07-15
 Scope: v0.5 commitment boundary and v1 protocol direction

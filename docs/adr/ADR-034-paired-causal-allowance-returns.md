@@ -1,5 +1,10 @@
 # ADR-034: Return unused causal allowance along its original funding path
 
+> Current implementation: conflicting fresh-write, injected-projector and
+> task-completion mechanisms in this historical decision are superseded by
+> [change 137](../../changes/137-closed-primitive-task-runtime.md).
+> Consult [DESIGN](../../DESIGN.md) for the supported primitive surface.
+
 Status: Accepted
 Date: 2026-10-04
 Related: ADR-013, ADR-030

@@ -2,26 +2,17 @@
 
 from __future__ import annotations
 
-import pytest
-
 from aigineering.cli.task_board import _qualified_outputs
-from aigineering.core.causal_allowance import allowance_available
 from aigineering.core.acceptance import acceptance_policy_id
-from aigineering.core.commitment import CandidateCommitter
-from aigineering.core.projection_context import load_effect_projection_context
-from aigineering.plugins.task_review import TASK_REVIEW_EFFECTS
 from aigineering.protocol.effect_builders import (
     asset_attestation_effect,
     asset_proposal_effect,
-    contract_declaration_effect,
-    task_review_request_effect,
 )
 from aigineering.protocol.identity import contract_from_fields
 from aigineering.protocol.types import Asset
 from aigineering.task_views import project_task_status
 
 from test_shared_definition_output import _graph_output_effects, _world
-from test_task_review import _publish_unclaimed_graph, _workspace
 
 
 def test_system_and_recovery_export_exact_cross_source_asset_and_skip_name_twins(
@@ -166,104 +157,4 @@ def test_independent_export_uses_exact_cross_source_qualified_asset(tmp_path):
     assert exported[0]["asset_id"] == target.id
     assert exported[0]["created_by"] != contract.id
     assert project_task_status(contract, store)["outputs"]["report"] == target.id
-    store.close()
-
-
-def _with_policy(source, policy):
-    return contract_from_fields(
-        name=source.name,
-        description=source.description,
-        parent_id=source.parent_id,
-        inputs=source.inputs,
-        outputs=source.outputs,
-        activation=source.activation,
-        budget=source.budget,
-        tool_scope=source.tool_scope,
-        labels=source.labels,
-        worker_capabilities=source.worker_capabilities,
-        worker_pools=source.worker_pools,
-        delegation_capabilities=source.delegation_capabilities,
-        delegation_pools=source.delegation_pools,
-        minting_authority=source.minting_authority,
-        sensitive_input_policy=source.sensitive_input_policy,
-        acceptance_policy=policy,
-        origin=source.origin,
-    )
-
-
-def test_wrong_selector_review_target_rejected_before_allowance_or_child_changes(
-    tmp_path,
-):
-    from aigineering.task_policy_review import validate_task_review_request
-
-    env = _workspace(tmp_path, graph_target=True)
-    store = env["store"]
-    wrong_target = _publish_unclaimed_graph(env, content_text="wrong content")
-    # The selector is valid but deliberately names content not published by the
-    # target. A same-name Asset must not enter the review workflow.
-    from aigineering.protocol.asset_graph import create_content_object
-
-    required_content = create_content_object("required content")
-    policy = {
-        **env["policy"],
-        "output_requirements": {"final": {"content_id": required_content.id}},
-    }
-    source = _with_policy(env["source"], policy)
-    from aigineering.core.candidate_publisher import publish_effect
-
-    published = publish_effect(
-        store,
-        store,
-        env["genesis"],
-        env["operator"],
-        env["signer"],
-        contract_declaration_effect(source),
-        idempotency_key="declare-selector-review-source",
-    )
-    assert published.accepted
-    allowance_before = allowance_available(
-        source, (record for _, record in store.scan_runtime_records())
-    )
-    tasks_before = len(store.get_all_contracts())
-
-    with pytest.raises(ValueError, match="eligible business output"):
-        validate_task_review_request(
-            store, source.id, "final", wrong_target.id, "selector mismatch"
-        )
-
-    reviewer_candidate = env["operator"]
-    effect = task_review_request_effect(
-        source.id, "final", wrong_target.id, "selector mismatch", budget=1
-    )
-    from aigineering.protocol.candidate import create_candidate_proposal
-
-    candidate = create_candidate_proposal(
-        domain_id=env["genesis"].id,
-        actor_id=reviewer_candidate.actor_id,
-        key_id=reviewer_candidate.key_id,
-        effects=(effect,),
-        signer=env["signer"],
-        idempotency_key="signed-selector-mismatch-request",
-    )
-    committed = CandidateCommitter(
-        store, store, additional_effects=TASK_REVIEW_EFFECTS
-    ).commit(candidate, env["genesis"])
-    assert not committed.accepted
-    context = load_effect_projection_context(store)
-    with pytest.raises(ValueError, match="eligible source output"):
-        from aigineering.plugins.task_review import project_task_review_request_effect
-
-        project_task_review_request_effect(
-            effect,
-            candidate,
-            "receipt:uncommitted-review-request",
-            context,
-        )
-
-    allowance_after = allowance_available(
-        source, (record for _, record in store.scan_runtime_records())
-    )
-    assert allowance_after == allowance_before
-    assert len(store.get_all_contracts()) == tasks_before
-    assert not store.scan_runtime_records(record_type="task.review.requested")
     store.close()
