@@ -214,7 +214,9 @@ original signed relation and pinned bytes. New attachment-link publication has
 been removed. Give a Worker input through explicit immutable Contract bindings.
 
 Artifact lineage/export select publication metadata by exact Asset IDs and
-causal-parent record IDs after opening the Store. Store initialization currently
-rebuilds its asset projection from history, so this does not establish bounded
-startup cost. Exported metadata omits raw receipt payloads and is not a portable
-signature proof.
+causal-parent record IDs under one read snapshot. Opening a current-schema
+Store reuses its persisted projections without replaying history or repairing
+missing rows. Genuine schema upgrades and explicit reconstruction retain their
+rebuild paths. This removes one startup history scan; it does not establish
+bounded complexity for every CLI path. Exported metadata omits raw receipt
+payloads and is not a portable signature proof.

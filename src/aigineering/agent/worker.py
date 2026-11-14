@@ -352,7 +352,7 @@ def compile_worker_envelope(
         else:
             if contract is None or contract.id != envelope.contract_id:
                 raise ValueError("claim-bound output requires the claimed Contract")
-            effects = _compile_claim_bound_outputs(
+            effects = claim_bound_graph_output_effects(
                 parsed_envelope,
                 contract,
                 domain_id=domain_id,
@@ -430,7 +430,7 @@ def _compile_attestation_action(
         envelope,
         parsed_action={"type": "exec", "outputs": outputs},
     )
-    output_effects = _compile_claim_bound_outputs(
+    output_effects = claim_bound_graph_output_effects(
         output_envelope,
         contract,
         domain_id=domain_id,
@@ -450,23 +450,3 @@ def _compile_attestation_action(
         atomic_group=f"output:{contract.id}",
     )
     return (*output_effects, attestation)
-
-
-def _compile_claim_bound_outputs(
-    envelope: CandidateEnvelope,
-    contract: Contract,
-    *,
-    domain_id: str,
-    actor_id: str,
-    key_id: str,
-    signer: Signer,
-) -> tuple[CandidateEffect, ...]:
-    """Keep ordinary and attested outputs on one canonical graph compiler."""
-    return claim_bound_graph_output_effects(
-        envelope,
-        contract,
-        domain_id=domain_id,
-        actor_id=actor_id,
-        key_id=key_id,
-        signer=signer,
-    )

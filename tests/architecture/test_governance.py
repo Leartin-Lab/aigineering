@@ -121,7 +121,32 @@ def test_harness_adapter_delegates_to_the_workerhost_compiler():
     assert "compile_worker_envelope" in harness
     assert "claim_bound_graph_output_effects" not in harness
     assert worker.count("def compile_worker_envelope(") == 1
-    assert worker.count("claim_bound_graph_output_effects(") == 1
+    tree = ast.parse(worker)
+    graph_owner = "claim_bound_graph_output_effects"
+    owners = [
+        node.module
+        for node in tree.body
+        if isinstance(node, ast.ImportFrom)
+        and any((item.asname or item.name) == graph_owner for item in node.names)
+    ]
+    assert owners == ["aigineering.protocol.effect_builders"]
+    assert not any(
+        isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.name == graph_owner
+        for node in ast.walk(tree)
+    )
+    callers = {
+        node.name
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef)
+        and any(
+            isinstance(call, ast.Call)
+            and isinstance(call.func, ast.Name)
+            and call.func.id == "claim_bound_graph_output_effects"
+            for call in ast.walk(node)
+        )
+    }
+    assert callers == {"compile_worker_envelope", "_compile_attestation_action"}
 
 
 def test_public_markdown_local_links_resolve():

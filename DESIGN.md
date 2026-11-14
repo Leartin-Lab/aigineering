@@ -48,6 +48,9 @@ receipt, head and effect membership under current key authorization. Replay is
 read-only; it never calls a maker to reconstruct effects or writes a replay
 marker. Historical facts remain immutable. Rebuild reconstructs read views and
 does not repair or publish state.
+Opening a current-schema Store reuses its persisted projections; it does not
+replay history to repair them. Initialization of new or older schemas and
+explicit reconstruction retain their existing migration/rebuild paths.
 
 The current Store reader floor is schema 24. Stop older Workers and back up
 before upgrading. This prevents an older process from opening an upgraded

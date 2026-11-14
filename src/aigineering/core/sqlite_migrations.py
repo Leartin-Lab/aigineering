@@ -511,6 +511,8 @@ def initialize_sqlite_schema(connection: sqlite3.Connection, store) -> None:
             "this build cannot read a newer database."
         )
     migrator.create_tables()
+    if current == CURRENT_SCHEMA_VERSION:
+        return
     migrator.run_migrations(current)
     store.rebuild_asset_graph_projection()
 
