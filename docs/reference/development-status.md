@@ -47,9 +47,10 @@ and [earlier import changes](../../changes/133-cli-guidance-and-runtime-contract
   synchronization is pending.
 - Slice creation commits the Asset and its lineage assertion together;
   demo and quick GOAL creation commit configuration, inputs and root together.
-  Configured-run setup still publishes resources before final root validation
-  and publication. A failure there can leave resources without a root; this
-  remaining composite-publication defect is not a completed repair.
+  Configured setup likewise commits its inputs, Skills and exact-bound Contract
+  in one Candidate. Same-name Tasks or historical outputs do not block creation;
+  ordinary requirements determine satisfaction. Identical setup is exact replay,
+  while changed resources produce a distinct intent and Contract.
 - Local tools do not provide a production process-isolation guarantee. The
   reference HTTP service requires deployment-level security controls.
 

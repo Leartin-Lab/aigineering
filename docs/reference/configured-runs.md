@@ -197,12 +197,17 @@ JSON action wire mode for an LLM profile and cannot be combined with a
 `tool_registry`; ordinary parsing and commitment still apply. Configuration mode rejects goal, mock, tool and provider flag overrides;
 edit the explicit profile instead.
 
-A new preset launch refuses roots and output slots present at its startup check.
-That check is an application guard, not an atomic output namespace reservation.
-Use distinct workspaces for independent concurrent runs. Use `--resume` to continue
-that fact domain or a fresh workspace for an independent run. Setup publication
-and execution are separate signed transactions; a failed start can leave
-accepted setup evidence. Task audit and the runtime records remain authoritative.
+Setup commits inputs, Skills and the exact-bound Contract in one signed Candidate.
+Rejected or interrupted setup leaves none of those effects. An identical setup
+replays its original publication; changed resources or requirements produce a
+distinct intent and Contract, even when the display name is unchanged.
+Existing matching Assets can satisfy the declared requirements; a historical
+output name alone neither rejects creation nor grants qualification. Express
+required content, producer or independent policy through ordinary selectors.
+Use `--resume` to select an existing Contract without reloading its source files,
+or a fresh workspace for a separate fact domain. Worker execution and identity
+registration are separate actions; failure after accepted setup preserves its
+facts. Task audit and runtime records remain authoritative.
 
 ## Example coverage
 

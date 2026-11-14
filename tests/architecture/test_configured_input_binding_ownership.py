@@ -27,8 +27,7 @@ def test_configured_run_uses_shared_input_binding_owner_for_new_roots_only():
         for node in ast.walk(publish_root)
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
     }
-    assert "_validate_prepared_input_assets" in called
-    assert "_published_input_asset_bindings" in called
+    assert "_prepared_input_bindings" in called
     assert "input_asset_bindings" in called
 
     run_configured = _function(tree, "run_configured")

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from pathlib import Path
+from dataclasses import replace
 
 from aigineering.core.capability_descriptors import create_tool_descriptor
 from aigineering.application import persistent_store, require_redis
@@ -12,7 +13,6 @@ from aigineering.core.input_bindings import input_asset_bindings
 from aigineering.core.contract_admission import validate_contract_commitment
 from aigineering.core.control_plane import (
     bind_contract_label_assets,
-    build_control_plane_contract,
 )
 from aigineering.local_fleet import (
     FleetHost,
@@ -29,8 +29,16 @@ from aigineering.local_publication import commit_local_effects, require_accepted
 from aigineering.protocol.effect_builders import (
     asset_proposal_effect,
     contract_declaration_effect,
+    local_asset_reference,
 )
 from aigineering.run_config import PreparedConfiguredRun, prepare_configured_run
+from aigineering.protocol.identity import (
+    canonical_json,
+    compute_content_hash,
+    contract_from_fields,
+)
+from aigineering.protocol.immutability import deep_thaw
+from aigineering.protocol.wire import contract_to_dict
 
 __all__ = [
     "PreparedConfiguredRun",
@@ -72,29 +80,6 @@ def publish_tool_descriptors(store, registry, *, key_path: Path | None = None) -
     )
 
 
-def _assert_new_run_not_already_present(store, prepared: PreparedConfiguredRun) -> None:
-    contract = prepared.contract
-    if contract is None:
-        return
-    same_id = store.get_contract(contract.id)
-    same_name = [
-        item for item in store.get_all_contracts() if item.name == contract.name
-    ]
-    output_names = set(contract.outputs)
-    historical_outputs = {
-        asset.name
-        for asset in store.get_all_assets()
-        if asset.name in output_names and not asset.tombstoned
-    }
-    ready_outputs = output_names & historical_outputs
-    if same_id is not None or same_name or ready_outputs:
-        raise ValueError(
-            f"configured root {contract.name!r} already exists or has historical outputs; "
-            "resume it with --resume <contract_id>, or use a fresh workspace "
-            "for a new run"
-        )
-
-
 def _validate_resume_target(store, target_id: str) -> None:
     if store.get_contract(target_id) is None:
         raise ValueError(f"resume target Contract {target_id!r} does not exist")
@@ -129,7 +114,6 @@ def run_configured(
             target = prepared.contract
             if target is None:
                 raise ValueError("new configured run has no prepared root Contract")
-            _assert_new_run_not_already_present(store, prepared)
             target_id = _publish_root(store, prepared).id
 
         ensure_local_runtime_publishers(store)
@@ -168,91 +152,68 @@ def run_configured(
 def _publish_root(store, prepared: PreparedConfiguredRun):
     prepared_contract = prepared.contract
     assert prepared_contract is not None
-    _validate_prepared_input_assets(prepared_contract, prepared)
-    ensure_local_runtime_publishers(store)
-    effects = tuple(
-        asset_proposal_effect(asset)
-        for asset in (*prepared.input_assets, *prepared.skill_assets)
+    resources = (*prepared.input_assets, *prepared.skill_assets)
+    if len({asset.name for asset in resources}) != len(resources):
+        raise ValueError("prepared input and Skill Asset names must be unique")
+    local_resources = tuple(
+        replace(asset, id=local_asset_reference(index))
+        for index, asset in enumerate(resources)
     )
-    resource_decision = require_accepted(
-        commit_local_effects(
-            store,
-            effects,
-            idempotency_key=f"configured-run-resources:{prepared_contract.id}",
+    policy = dict(prepared_contract.sensitive_input_policy or {})
+    bindings = input_asset_bindings(policy)
+    for role in prepared_contract.inputs:
+        if role in bindings:
+            raise ValueError(
+                f"sensitive_input_policy.input_asset_bindings[{role!r}] conflicts "
+                "with the published configured input Asset"
+            )
+    bindings.update(
+        _prepared_input_bindings(
+            prepared_contract.inputs, local_resources[: len(prepared.input_assets)]
         )
     )
-    committed_by_name = {asset.name: asset for asset in resource_decision.assets}
-    sensitive_input_policy = prepared_contract.sensitive_input_policy
-    if prepared_contract.inputs:
-        committed_input_bindings = _published_input_asset_bindings(
-            prepared_contract.inputs, resource_decision.assets
-        )
-        bindings = input_asset_bindings(sensitive_input_policy)
-        for role, asset_ids in committed_input_bindings.items():
-            if role in bindings and bindings[role] != asset_ids:
-                raise ValueError(
-                    f"sensitive_input_policy.input_asset_bindings[{role!r}] conflicts "
-                    "with the published configured input Asset"
-                )
-        bindings.update(committed_input_bindings)
-        policy = dict(sensitive_input_policy or {})
-        policy["input_asset_bindings"] = {
-            role: asset_ids for role, asset_ids in sorted(bindings.items())
-        }
-        sensitive_input_policy = policy
-    policy = prepared_contract.acceptance_policy
+    policy["input_asset_bindings"] = bindings
+    acceptance = deep_thaw(prepared_contract.acceptance_policy)
     if prepared.acceptance_evidence_inputs:
-        if policy is None:
+        if acceptance is None:
             raise ValueError("acceptance evidence inputs require an acceptance policy")
-        policy = dict(policy)
+        by_name = {asset.name: asset.id for asset in local_resources}
         try:
-            policy["evidence_asset_ids"] = sorted(
-                committed_by_name[name].id
-                for name in prepared.acceptance_evidence_inputs
+            acceptance["evidence_asset_ids"] = sorted(
+                by_name[name] for name in prepared.acceptance_evidence_inputs
             )
         except KeyError as exc:
             raise ValueError(
-                f"acceptance evidence input was not published: {exc.args[0]}"
+                f"acceptance evidence input was not prepared: {exc.args[0]}"
             ) from exc
-
-    contract = build_control_plane_contract(
-        name=prepared_contract.name,
-        description=prepared_contract.description,
-        inputs=prepared_contract.inputs,
-        outputs=prepared_contract.outputs,
-        activation=prepared_contract.activation,
-        budget=prepared_contract.budget,
-        labels=prepared_contract.labels,
-        tool_scope=prepared_contract.tool_scope,
-        worker_capabilities=prepared_contract.worker_capabilities,
-        worker_pools=prepared_contract.worker_pools,
-        delegation_capabilities=prepared_contract.delegation_capabilities,
-        delegation_pools=prepared_contract.delegation_pools,
-        sensitive_input_policy=sensitive_input_policy,
-        acceptance_policy=policy,
-    )
-    for label in contract.labels:
-        if label.startswith("plugin:"):
-            continue
-        if not any(
-            asset.name == label and asset.promptable
-            for asset in resource_decision.assets
+    fields = contract_to_dict(prepared_contract)
+    fields.pop("id")
+    fields.update(sensitive_input_policy=policy, acceptance_policy=acceptance)
+    template = contract_from_fields(**fields)
+    for label in template.labels:
+        if not label.startswith("plugin:") and not any(
+            asset.name == label and asset.promptable for asset in local_resources
         ):
             raise ValueError(
-                f"task label {label!r} did not resolve after Asset publication"
+                f"task label {label!r} did not resolve to a prepared Asset"
             )
 
-    class _PublishedResources:
+    class _PreparedResources:
         def get_assets_by_name(self, name: str):
-            return [asset for asset in resource_decision.assets if asset.name == name]
+            return [asset for asset in local_resources if asset.name == name]
 
-    contract = bind_contract_label_assets(contract, _PublishedResources())
-    validate_contract_commitment(contract)
+    template = bind_contract_label_assets(template, _PreparedResources())
+    validate_contract_commitment(template)
+    effects = tuple(asset_proposal_effect(asset) for asset in resources) + (
+        contract_declaration_effect(template, bind_local_assets=True),
+    )
+    intent_hash = compute_content_hash(
+        canonical_json([deep_thaw(effect.payload) for effect in effects])
+    )
+    ensure_local_runtime_publishers(store)
     committed = require_accepted(
         commit_local_effects(
-            store,
-            (contract_declaration_effect(contract),),
-            idempotency_key=f"configured-run-root:{contract.id}",
+            store, effects, idempotency_key=f"configured-run:{intent_hash}"
         )
     )
     if committed.contract is None:
@@ -260,27 +221,8 @@ def _publish_root(store, prepared: PreparedConfiguredRun):
     return committed.contract
 
 
-def _validate_prepared_input_assets(contract, prepared: PreparedConfiguredRun) -> None:
-    """Ensure every configured root input role has one source Asset."""
-    if not contract.inputs and contract.sensitive_input_policy is None:
-        return
-    if contract.sensitive_input_policy is not None:
-        input_asset_bindings(contract.sensitive_input_policy)
-    prepared_by_name: dict[str, list[str]] = {}
-    for asset in prepared.input_assets:
-        if asset.name in contract.inputs:
-            prepared_by_name.setdefault(asset.name, []).append(asset.id)
-
-    for role in contract.inputs:
-        asset_ids = tuple(sorted(prepared_by_name.get(role, ())))
-        if len(asset_ids) != 1:
-            raise ValueError(
-                f"configured input role {role!r} must resolve to exactly one prepared Asset"
-            )
-
-
-def _published_input_asset_bindings(roles, assets):
-    """Resolve configured input roles from this publication's exact result."""
+def _prepared_input_bindings(roles, assets):
+    """Resolve each configured input role to one prepared resource reference."""
     by_name: dict[str, list[str]] = {}
     role_set = set(roles)
     for asset in assets:
@@ -293,7 +235,7 @@ def _published_input_asset_bindings(roles, assets):
         if len(asset_ids) != 1:
             raise ValueError(
                 f"configured input role {role!r} did not resolve to exactly one "
-                "published Asset"
+                "prepared Asset"
             )
         bindings[role] = asset_ids
     return bindings

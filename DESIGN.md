@@ -32,6 +32,17 @@ IDs; there is no name lookup, cross-Candidate alias or replay-time resolution.
 This lets slice publication include its lineage assertion atomically without
 changing Asset identity or disclosure. See [change 138](changes/138-atomic-local-asset-publication.md).
 
+Configured setup publishes its input/Skill Assets and Contract atomically.
+A `contract.declare` effect may explicitly opt into `bind_local_assets`:
+`candidate-asset:N` references a preceding `asset.propose` only in active exact
+input bindings, context IDs and acceptance evidence IDs. Its signed template
+must contain an active local input binding, so an older writer rejects it at
+the existing missing-Asset fence. Pure compilation produces an ordinary
+canonical Contract containing exact IDs. Callers use the committed Contract
+ID, not the template ID. Read hints calculate scalar identities; they neither
+project effects nor load unrelated history. See
+[change 139](changes/139-atomic-configured-publication.md).
+
 Replay verifies and returns the original accepted publication using its exact
 receipt, head and effect membership under current key authorization. Replay is
 read-only; it never calls a maker to reconstruct effects or writes a replay

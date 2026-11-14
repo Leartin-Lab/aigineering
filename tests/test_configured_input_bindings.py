@@ -9,7 +9,7 @@ from aigineering.plugins.task_semantics import contracts_from_plan_asset
 from aigineering.protocol.types import Asset
 from aigineering.run_config import prepare_configured_run
 from aigineering.configured_run import run_configured
-from aigineering.configured_run import _published_input_asset_bindings
+from aigineering.configured_run import _prepared_input_bindings
 
 
 class _UnusedWorker:
@@ -169,16 +169,16 @@ def test_configured_new_root_rejects_conflicting_active_binding_before_declarati
     store = SQLiteStore(tmp_path / ".aig/store.db")
     try:
         assert not store.get_all_contracts()
-        assert [asset.name for asset in store.get_all_assets()] == ["source"]
+        assert store.get_all_assets() == []
     finally:
         store.close()
 
 
-def test_configured_input_missing_from_publication_result_fails_closed():
+def test_configured_input_missing_from_prepared_resources_fails_closed():
     with pytest.raises(
-        ValueError, match="did not resolve to exactly one published Asset"
+        ValueError, match="did not resolve to exactly one prepared Asset"
     ):
-        _published_input_asset_bindings(("source",), ())
+        _prepared_input_bindings(("source",), ())
 
 
 def test_configured_root_without_sensitive_policy_pins_input_and_excludes_history(

@@ -94,14 +94,22 @@ def build_contract_declaration_projection_request(
         return None
 
     from aigineering.core.effect_projectors import _contract_from_payload
+    from aigineering.core.declaration_bindings import bind_declaration_assets
     from aigineering.core.input_bindings import input_asset_bindings
 
     incoming_contract_ids: list[str] = []
     parent_contract_ids: list[str] = []
     allowance_source_contract_ids: list[str] = []
     asset_ids: list[str] = []
-    for effect in declarations:
-        contract = _contract_from_payload(effect.payload)
+    local_ids: dict[int, str] = {}
+    for effect_index, effect in enumerate(candidate.effects):
+        if effect.effect_type != "contract.declare":
+            continue
+        contract = bind_declaration_assets(
+            effect, candidate, effect_index, asset_id_cache=local_ids
+        )
+        if contract is None:
+            contract = _contract_from_payload(effect.payload)
         version = _VERSIONED_TASK_ID.match(contract.id)
         if version is not None and version.group(1) not in _KNOWN_TASK_ID_VERSIONS:
             return None

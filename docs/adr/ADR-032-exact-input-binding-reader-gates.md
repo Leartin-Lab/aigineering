@@ -25,6 +25,13 @@ fail closed, with no name fallback. Unmapped roles retain existing authorized
 name selection. Unused inherited bindings remain inert. The map narrows selection;
 it grants neither capabilities nor permission to introduce new input roles.
 
+For atomic configured setup, [change 139](../../changes/139-atomic-configured-publication.md)
+adds explicit batch-local compilation in `contract.declare`. The signed template
+retains a canonical identity and an active local input reference that an older
+writer rejects as a missing Asset. Compilation binds the actual proposed Asset
+IDs and derives an ordinary canonical Contract. Accepted facts and replay
+contain exact active bindings; they do not retain a mutable name lookup.
+
 A shared pure input-selection owner supplies disclosure and verification.
 Original trust, signer, derivation and redaction rules continue to apply to the
 selected inputs. The guard does not make sealed content promptable or convert

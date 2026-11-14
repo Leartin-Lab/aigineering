@@ -26,6 +26,46 @@ class _WritingWorker:
         )
 
 
+class _CountingWritingWorker(_WritingWorker):
+    def __init__(self):
+        self.invocations = 0
+
+    def invoke(self, contract, disclosed_assets):
+        self.invocations += 1
+        return super().invoke(contract, disclosed_assets)
+
+
+def _write_basic_config(tmp_path, *, content="source evidence", task_fields=""):
+    (tmp_path / "input.txt").write_text(content, encoding="utf-8")
+    (tmp_path / "workers.toml").write_text(
+        '[fleet]\ndb_path=".aig/store.db"\npoll_interval=0.02\n'
+        '[[workers]]\nid="configured-test-worker"\nkind="local"\n'
+        'worker_factory="unused:factory"\n',
+        encoding="utf-8",
+    )
+    preset = tmp_path / "run.toml"
+    preset.write_text(
+        '[run]\nfleet="workers.toml"\n'
+        '[[inputs]]\nname="source"\npath="input.txt"\n'
+        '[task]\nname="same-visible-root"\ninputs=["source"]\n'
+        'activation="source"\noutputs=["result"]\n' + task_fields,
+        encoding="utf-8",
+    )
+    return preset
+
+
+def _publication_counts(store):
+    records = [record for _, record in store.scan_runtime_records()]
+    return (
+        sum(record.record_type == "candidate.committed" for record in records),
+        sum(
+            record.record_type.startswith(("claim.", "allowance."))
+            and record.record_type.endswith(".granted")
+            for record in records
+        ),
+    )
+
+
 def test_configured_run_publishes_signed_inputs_root_and_runs(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv(
@@ -97,6 +137,23 @@ def test_configured_run_publishes_signed_inputs_root_and_runs(tmp_path, monkeypa
     finally:
         store.close()
 
+    first_root_id = result.contract_id
+    store = SQLiteStore(".aig/store.db")
+    try:
+        before_repeat = (store.get_runtime_revision(), _publication_counts(store))
+    finally:
+        store.close()
+    repeated = run_configured(prepared, timeout=1)
+    assert repeated.contract_id == first_root_id
+    store = SQLiteStore(".aig/store.db")
+    try:
+        assert (
+            store.get_runtime_revision(),
+            _publication_counts(store),
+        ) == before_repeat
+    finally:
+        store.close()
+
     (tmp_path / "input.txt").unlink()
     import shutil
 
@@ -106,8 +163,7 @@ def test_configured_run_publishes_signed_inputs_root_and_runs(tmp_path, monkeypa
     assert resumed.contract_id == result.contract_id
     assert resumed.completed
 
-    with pytest.raises(ValueError, match="resume it"):
-        run_configured(prepared, timeout=1)
+    assert run_configured(prepared, timeout=1).contract_id == first_root_id
 
 
 def test_configured_run_publishes_relative_file_registry_outside_workspace(
@@ -257,7 +313,7 @@ def test_resume_requires_existing_store_before_creating_one(tmp_path, monkeypatc
     assert not (tmp_path / "identity" / "root.ed25519").exists()
 
 
-def test_unrelated_historical_output_refuses_new_setup_without_publication(
+def test_historical_matching_output_satisfies_new_configured_task_without_worker(
     tmp_path, monkeypatch
 ):
     from aigineering.core.control_plane import build_control_plane_asset
@@ -267,21 +323,11 @@ def test_unrelated_historical_output_refuses_new_setup_without_publication(
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("AIG_ACTOR_KEY_FILE", str(tmp_path / "root.ed25519"))
+    preset = _write_basic_config(tmp_path, content="new source")
+    worker = _CountingWritingWorker()
     monkeypatch.setattr(
-        "aigineering.fleet_config.build_fleet_worker", lambda spec: _WritingWorker()
-    )
-    (tmp_path / "input.txt").write_text("new source", encoding="utf-8")
-    (tmp_path / "workers.toml").write_text(
-        '[fleet]\ndb_path=".aig/store.db"\n'
-        '[[workers]]\nid="configured-test-worker"\nkind="local"\n'
-        'worker_factory="unused:factory"\n',
-        encoding="utf-8",
-    )
-    (tmp_path / "run.toml").write_text(
-        '[run]\nfleet="workers.toml"\n'
-        '[[inputs]]\nname="source"\npath="input.txt"\n'
-        '[task]\nname="new-root"\ninputs=["source"]\noutputs=["result"]\n',
-        encoding="utf-8",
+        "aigineering.fleet_config.build_fleet_worker",
+        lambda spec, **_kwargs: worker,
     )
     store = SQLiteStore(".aig/store.db")
     try:
@@ -297,16 +343,129 @@ def test_unrelated_historical_output_refuses_new_setup_without_publication(
                 idempotency_key="historical-result",
             )
         )
-        records_before = store.get_runtime_revision()
     finally:
         store.close()
-    prepared = prepare_configured_run(tmp_path / "run.toml")
-    with pytest.raises(ValueError, match="fresh workspace"):
-        run_configured(prepared, timeout=1)
+    prepared = prepare_configured_run(preset)
+    result = run_configured(prepared, timeout=3)
+    assert result.completed
+    assert worker.invocations == 0
     store = SQLiteStore(".aig/store.db")
     try:
-        assert store.get_runtime_revision() == records_before
-        assert not store.get_assets_by_name("source")
-        assert not store.get_all_contracts()
+        root = store.get_contract(result.contract_id)
+        assert root is not None
+        assert root.name == "same-visible-root"
+        assert root.sensitive_input_policy["input_asset_bindings"]["source"]
+        assert {asset.content for asset in store.get_assets_by_name("result")} == {
+            "unrelated old result"
+        }
+    finally:
+        store.close()
+
+
+def test_historical_same_name_output_that_fails_frozen_producer_selector_stays_open(
+    tmp_path, monkeypatch
+):
+    from aigineering.core.control_plane import build_control_plane_asset
+    from aigineering.local_fleet import FleetRunResult
+    from aigineering.local_identity import ensure_local_runtime_publishers
+    from aigineering.local_publication import commit_local_effect, require_accepted
+    from aigineering.protocol.effect_builders import asset_proposal_effect
+    from aigineering.task_views import project_task_status
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("AIG_ACTOR_KEY_FILE", str(tmp_path / "root.ed25519"))
+    preset = _write_basic_config(
+        tmp_path,
+        content="new source",
+        task_fields=(
+            '[task.acceptance_policy]\nmode="mechanical"\n'
+            "[task.acceptance_policy.output_requirements.result]\n"
+            'producer_actor_ids=["actor:required-producer"]\n'
+        ),
+    )
+    monkeypatch.setattr(
+        "aigineering.fleet_config.build_fleet_worker",
+        lambda spec, **_kwargs: _WritingWorker(),
+    )
+    store = SQLiteStore(".aig/store.db")
+    try:
+        ensure_local_runtime_publishers(store)
+        old_result = require_accepted(
+            commit_local_effect(
+                store,
+                asset_proposal_effect(
+                    build_control_plane_asset(
+                        name="result", content="old but wrong producer"
+                    )
+                ),
+                idempotency_key="historical-result-wrong-producer",
+            )
+        ).assets[0]
+    finally:
+        store.close()
+
+    observed = {}
+
+    def inspect_live_root(
+        db_path, hosts, *, target_contract_id, timeout, poll_interval
+    ):
+        del hosts, timeout, poll_interval
+        store = SQLiteStore(db_path)
+        try:
+            root = store.get_contract(target_contract_id)
+            assert root is not None
+            status = project_task_status(root, store)
+            observed.update(status)
+            observed["old_asset_present"] = store.get_asset(old_result.id) is not None
+            assert not status["outputs_satisfied"]
+            return FleetRunResult(
+                target_contract_id, status["status"], status["ok"], False
+            )
+        finally:
+            store.close()
+
+    monkeypatch.setattr("aigineering.configured_run.run_local_fleet", inspect_live_root)
+    result = run_configured(prepare_configured_run(preset), timeout=1)
+    assert result.contract_id == observed["contract_id"]
+    assert not result.completed
+    assert observed["status"] != "completed"
+    assert observed["old_asset_present"]
+
+
+def test_same_visible_name_changed_input_creates_new_exact_root_and_replays_idempotently(
+    tmp_path, monkeypatch
+):
+    import aigineering.configured_run as configured_run
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("AIG_ACTOR_KEY_FILE", str(tmp_path / "root.ed25519"))
+    monkeypatch.setattr(
+        "aigineering.fleet_config.build_fleet_worker",
+        lambda spec, **_kwargs: _WritingWorker(),
+    )
+    preset = _write_basic_config(tmp_path, content="source version one")
+    prepared_one = prepare_configured_run(preset)
+    store = SQLiteStore(".aig/store.db")
+    try:
+        first = configured_run._publish_root(store, prepared_one)
+        after_first = (store.get_runtime_revision(), _publication_counts(store))
+        exact_replay = configured_run._publish_root(store, prepared_one)
+        assert exact_replay.id == first.id
+        assert (store.get_runtime_revision(), _publication_counts(store)) == after_first
+        first_source_id = first.sensitive_input_policy["input_asset_bindings"][
+            "source"
+        ][0]
+        assert store.get_asset(first_source_id).content == "source version one"
+
+        (tmp_path / "input.txt").write_text("source version two", encoding="utf-8")
+        prepared_two = prepare_configured_run(preset)
+        second = configured_run._publish_root(store, prepared_two)
+        assert second.name == first.name == "same-visible-root"
+        assert second.id != first.id
+        second_source_id = second.sensitive_input_policy["input_asset_bindings"][
+            "source"
+        ][0]
+        assert second_source_id != first_source_id
+        assert store.get_asset(second_source_id).content == "source version two"
     finally:
         store.close()

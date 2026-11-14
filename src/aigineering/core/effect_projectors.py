@@ -151,22 +151,10 @@ def project_asset_proposal(
             raise ValueError("claim-bound Asset created_by must equal its Contract")
         created_by = contract.id
     else:
-        created_by = (
-            proposed_creator
-            if prefix is not None and proposed_creator
-            else candidate.actor_id
-        )
+        created_by = proposed_asset_creator(candidate, data)
     content_hash = hash_asset_content(name, content)
-    asset_id = "asset:v1:" + compute_content_hash(
-        canonical_json(
-            {
-                "candidate_id": candidate.id,
-                "candidate_signature": candidate.signature,
-                "content_hash": content_hash,
-                "created_by": created_by,
-                "definition": data,
-            }
-        )
+    asset_id = proposed_asset_identity(
+        candidate, data, created_by, content_hash=content_hash
     )
     asset = sign_asset(
         Asset(
@@ -200,6 +188,43 @@ def project_asset_proposal(
         additional_capabilities=(
             ("asset.publish.protected",) if prefix is not None else ()
         ),
+    )
+
+
+def proposed_asset_creator(candidate: CandidateProposal, data: Mapping) -> str:
+    """Shared scalar identity input; this does not admit or project an Asset."""
+    if candidate.claim_binding is not None:
+        return candidate.claim_binding.contract_id
+    proposed = str(data.get("created_by", ""))
+    return (
+        proposed
+        if matched_reserved_prefix(str(data.get("name", ""))) is not None and proposed
+        else candidate.actor_id
+    )
+
+
+def proposed_asset_identity(
+    candidate: CandidateProposal,
+    data: Mapping,
+    creator: str,
+    *,
+    content_hash: str | None = None,
+) -> str:
+    """Calculate the existing proposal identity without creating any facts."""
+    return "asset:v1:" + compute_content_hash(
+        canonical_json(
+            {
+                "candidate_id": candidate.id,
+                "candidate_signature": candidate.signature,
+                "content_hash": content_hash
+                if content_hash is not None
+                else hash_asset_content(
+                    str(data.get("name", "")), str(data.get("content", ""))
+                ),
+                "created_by": creator,
+                "definition": data,
+            }
+        )
     )
 
 

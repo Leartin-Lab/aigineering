@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from collections.abc import Mapping
 
 from aigineering.core.effect_projectors import (
@@ -24,9 +24,12 @@ from aigineering.core.causal_allowance import (
 )
 from aigineering.core.fact_materialization import asset_committed_record
 from aigineering.core.projection_context import EffectProjectionContext
+from aigineering.core.declaration_bindings import bind_declaration_assets
+from aigineering.core.input_bindings import input_asset_bindings
 from aigineering.protocol.candidate import CandidateEffect, CandidateProposal
 from aigineering.protocol.runtime_record import RuntimeRecord, validate_runtime_record
 from aigineering.protocol.types import Asset, Contract
+from aigineering.protocol.wire import contract_to_dict
 
 
 @dataclass(frozen=True)
@@ -59,7 +62,9 @@ def project_effect_batch(
         candidate, actor_capabilities, effective_context
     )
     projections: list[tuple[CandidateEffect, EffectProjection]] = []
-    for effect in candidate.effects:
+    proposed_assets: dict[int, Asset] = {}
+    assets_by_id = {asset.id: asset for asset in effective_context.assets}
+    for effect_index, effect in enumerate(candidate.effects):
         handler = BUILTIN_EFFECTS.get(effect.effect_type)
         if handler is None:
             raise ValueError(f"unsupported effect type {effect.effect_type!r}")
@@ -74,7 +79,27 @@ def project_effect_batch(
         if not claim_delegated and required_capability not in actor_capabilities:
             raise ValueError(f"actor lacks required capability {required_capability!r}")
         effect = _resolve_replacement_reference(effect, projections)
-        projection = projector(effect, candidate, receipt_id, effective_context)
+        bound = bind_declaration_assets(
+            effect, candidate, effect_index, projected_assets=proposed_assets
+        )
+        projection_context = effective_context
+        if bound is not None:
+            effect = CandidateEffect(
+                effect.effect_type,
+                {"contract": contract_to_dict(bound)},
+                effect.atomic_group,
+            )
+            wanted = set(bound.context_asset_ids)
+            bindings = input_asset_bindings(bound.sensitive_input_policy)
+            for role in bound.inputs:
+                wanted.update(bindings.get(role, ()))
+            projection_context = replace(
+                effective_context,
+                assets=tuple(
+                    assets_by_id[key] for key in sorted(wanted) if key in assets_by_id
+                ),
+            )
+        projection = projector(effect, candidate, receipt_id, projection_context)
         if not isinstance(projection, EffectProjection):
             raise ValueError(
                 f"projector for {effect.effect_type!r} returned an invalid projection"
@@ -109,6 +134,9 @@ def project_effect_batch(
         if missing:
             raise ValueError(f"actor lacks required capabilities {missing!r}")
         projections.append((effect, projection))
+        if effect.effect_type == "asset.propose" and len(projection.assets) == 1:
+            proposed_assets[effect_index] = projection.assets[0]
+            assets_by_id[projection.assets[0].id] = projection.assets[0]
 
     _validate_graph_batch(projections, effective_context)
 

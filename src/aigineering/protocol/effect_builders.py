@@ -39,12 +39,27 @@ class WorkerRegistrationLike(Protocol):
     key_id: str
 
 
+LOCAL_ASSET_REFERENCE_PREFIX = "candidate-asset:"
+
+
+def local_asset_reference(effect_index: int) -> str:
+    """Name an earlier Asset proposal within one signed publication."""
+    if type(effect_index) is not int or effect_index < 0:
+        raise ValueError("local Asset reference requires a non-negative effect index")
+    return f"{LOCAL_ASSET_REFERENCE_PREFIX}{effect_index}"
+
+
 def contract_declaration_effect(
-    contract: Contract, *, atomic_group: str = ""
+    contract: Contract, *, atomic_group: str = "", bind_local_assets: bool = False
 ) -> CandidateEffect:
+    if type(bind_local_assets) is not bool:
+        raise ValueError("bind_local_assets must be a boolean")
+    payload = {"contract": contract_to_dict(contract)}
+    if bind_local_assets:
+        payload["bind_local_assets"] = True
     return CandidateEffect(
         "contract.declare",
-        {"contract": contract_to_dict(contract)},
+        payload,
         atomic_group=atomic_group,
     )
 
