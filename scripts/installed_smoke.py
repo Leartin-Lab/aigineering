@@ -391,16 +391,20 @@ def configured_run_smoke(
         resumed = json_command(aig, command, cwd=cwd, env=fixture_env)
         if resumed.get("completed") is not True or resumed.get("contract_id") != target:
             raise RuntimeError("configured resume changed the committed result")
-    duplicate = subprocess.run(
-        [str(aig), *args, "--json"],
-        cwd=cwd,
-        env=fixture_env,
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-    if duplicate.returncode == 0 or "resume" not in duplicate.stderr:
-        raise RuntimeError("configured new start accepted historical output")
+    revision_command = [
+        str(python),
+        "-c",
+        "import sys\nfrom aigineering.core.sqlite_store import SQLiteStore\n"
+        "with SQLiteStore(sys.argv[1]) as store:\n"
+        "    print(store.get_runtime_revision())\n",
+        str(workspace / ".aig/store.db"),
+    ]
+    before_replay = int(run(revision_command, cwd=cwd, env=fixture_env))
+    duplicate = json_command(aig, args, cwd=cwd, env=fixture_env)
+    if duplicate.get("completed") is not True or duplicate.get("contract_id") != target:
+        raise RuntimeError("configured setup replay changed the committed result")
+    if int(run(revision_command, cwd=cwd, env=fixture_env)) != before_replay:
+        raise RuntimeError("configured setup replay created new facts")
     (config_dir / "input.txt").unlink()
     resumed_without_source = json_command(
         aig,
