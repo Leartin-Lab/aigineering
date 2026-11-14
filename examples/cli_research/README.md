@@ -32,6 +32,12 @@ provider. Credentials are environment variables and never task input Assets.
 The root's 32 units bound causal work; they are not a token quota or billing
 estimate. Provider usage can remain unknown.
 
+Planning uses Asset names for activation, not lifecycle events. For example,
+`sample` means the sample Asset must be available; `on_start` has no special
+meaning. Empty activation adds no predicate, while declared inputs remain
+required. A rejected blueprint is a failed attempt, not a partially installed
+plan; inspect its exact failure before starting another funded attempt.
+
 Use the returned exact `contract_id` for inspection, continuation and export:
 
 ```bash
