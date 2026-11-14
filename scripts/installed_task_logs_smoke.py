@@ -321,10 +321,23 @@ print(json.dumps({"contract_ids": result}))
 _SHARED_HOST_FLEET = r"""
 from concurrent.futures import ThreadPoolExecutor
 import json, sys
+from threading import RLock
 from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.fleet_config import build_fleet_worker, load_fleet_config
 from aigineering.local_fleet import FleetHost, run_local_fleet
 from aigineering.local_identity import ensure_local_runtime_publishers, ensure_local_worker_host
+from aigineering.task_logs import CaptureWriter
+# This fixture tests observer isolation, not best-effort quota-lock contention.
+# Serialize only original capture I/O; Worker invocations still overlap at the
+# two-party transport barrier. Production capture remains nonblocking.
+capture_io = RLock()
+def serialized_capture_io(operation):
+    def call(self, line):
+        with capture_io:
+            return operation(self, line)
+    return call
+CaptureWriter._create_with_quota = serialized_capture_io(CaptureWriter._create_with_quota)
+CaptureWriter._append_with_quota = serialized_capture_io(CaptureWriter._append_with_quota)
 db_path, config_path, alpha, beta = sys.argv[1:]
 store = SQLiteStore(db_path)
 try:
@@ -344,7 +357,7 @@ def execute(contract_id):
             "capture_warnings": list(result.capture_warnings)}
 with ThreadPoolExecutor(max_workers=2) as pool:
     results = list(pool.map(execute, (alpha, beta)))
-print(json.dumps({"results": results}, sort_keys=True))
+print(json.dumps({"results": results, "capture_io_fixture_serialized": True}, sort_keys=True))
 """
 
 _CONFLICT_CAPTURE_RUN = r"""
@@ -1194,12 +1207,16 @@ def installed_task_logs_smoke(
             selected_env=concurrent_env,
         )
         results = fleet_pair.get("results", [])
-        if len(results) != 2 or any(
-            item.get("completed") is not True
-            or item.get("status") != "complete"
-            or item.get("worker_errors") != []
-            or item.get("capture_warnings") != []
-            for item in results
+        if (
+            fleet_pair.get("capture_io_fixture_serialized") is not True
+            or len(results) != 2
+            or any(
+                item.get("completed") is not True
+                or item.get("status") != "complete"
+                or item.get("worker_errors") != []
+                or item.get("capture_warnings") != []
+                for item in results
+            )
         ):
             raise RuntimeError(
                 "shared WorkerHost concurrent Fleet calls did not complete"
@@ -1697,6 +1714,7 @@ def installed_task_logs_smoke(
             "isolated_capture_corruption_rejected": True,
             "live_follow": "passed",
             "shared_worker_host_concurrent_fleet": concurrency_event_statuses,
+            "shared_host_capture_io_fixture_serialized": True,
             "read_only_close_reopen": reopen["same_records"],
             "sqlite_materialization_rebuild": {
                 "immutable_records_preserved": rebuild["same_records"],

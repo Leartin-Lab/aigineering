@@ -28,6 +28,12 @@ _FAILURE_PHASES = frozenset(
         "fixture_seed",
         "root_task_smoke",
         "feature_smokes",
+        "feature_boards",
+        "feature_registration_digest",
+        "feature_task_context",
+        "feature_task_diagnostics",
+        "feature_task_logs",
+        "feature_task_attachments",
         "reconstruction",
         "configured_run",
         "evidence_write",
@@ -1174,22 +1180,18 @@ def main() -> int:
         from installed_task_logs_smoke import installed_task_logs_smoke
         from installed_task_attachment_smoke import installed_task_attachment_smoke
 
-        current_helper_results = {
-            "boards": installed_boards_smoke(aig, python, cwd=workdir, env=env),
-            "registration_digest": installed_registration_digest_smoke(
-                aig, python, cwd=workdir, env=env
-            ),
-            "task_context": installed_task_context_smoke(
-                aig, python, cwd=workdir, env=env
-            ),
-            "task_diagnostics": installed_task_diagnostics_smoke(
-                aig, python, cwd=workdir, env=env
-            ),
-            "task_logs": installed_task_logs_smoke(aig, python, cwd=workdir, env=env),
-            "task_attachments": installed_task_attachment_smoke(
-                aig, python, cwd=workdir, env=env
-            ),
-        }
+        current_helper_results = {}
+        for name, helper in (
+            ("boards", installed_boards_smoke),
+            ("registration_digest", installed_registration_digest_smoke),
+            ("task_context", installed_task_context_smoke),
+            ("task_diagnostics", installed_task_diagnostics_smoke),
+            ("task_logs", installed_task_logs_smoke),
+            ("task_attachments", installed_task_attachment_smoke),
+        ):
+            _set_phase(f"feature_{name}")
+            current_helper_results[name] = helper(aig, python, cwd=workdir, env=env)
+        _set_phase("feature_smokes")
 
         evidence_dir = (
             options.evidence_dir.resolve()
