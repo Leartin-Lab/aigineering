@@ -3256,6 +3256,18 @@ class SQLiteStore:
         return True
 
     @contextmanager
+    def read_transaction(self):
+        """Hold one deferred read snapshot and the connection across its use."""
+        with self._conn.mutex:
+            if self._conn.in_transaction:
+                raise RuntimeError("Read snapshot requires its own transaction")
+            self._conn.execute("BEGIN")
+            try:
+                yield
+            finally:
+                self._conn.rollback()
+
+    @contextmanager
     def candidate_transaction(self):
         """Authenticate, project and persist under the same writer snapshot."""
         with self._conn:

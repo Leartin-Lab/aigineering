@@ -17,6 +17,48 @@ def _key(asset_id: str) -> str:
     return hashlib.sha256(asset_id.encode("utf-8")).hexdigest()
 
 
+def _document_evidence(ev, evidence_id, get_asset, include_sources, files):
+    doc_id = ev["parents"][0]
+    doc = envelope(get_asset(doc_id))
+    source_id = doc["parents"][0]
+    source = get_asset(source_id)
+    source_meta = envelope(source)["payload"]
+    p = ev["payload"]
+    page_text = doc["payload"]["pages"][p["page"] - 1]["text"]
+    marked = (
+        html.escape(page_text[: p["start"]])
+        + "<mark>"
+        + html.escape(p["quote"])
+        + "</mark>"
+        + html.escape(page_text[p["end"] :])
+    )
+    source_link = "Original file omitted; consult source metadata."
+    if include_sources:
+        extension = "pdf" if source_meta["media_type"] == "application/pdf" else "bin"
+        filename = f"sources/{_key(source_id)}.{extension}"
+        files[filename] = attachment_bytes(source)
+        source_link = (
+            f'<a href="../{filename}#page={p["page"]}">Original file, '
+            f"page {p['page']}</a>"
+        )
+    metadata = {
+        "evidence_asset_id": evidence_id,
+        "document_asset_id": doc_id,
+        "source_asset_id": source_id,
+        "source_sha256": source_meta["sha256"],
+        "source_uri": source_meta["source_uri"],
+        "license": source_meta["license"],
+        "retrieved_at": source_meta["retrieved_at"],
+        "acquisition": source_meta.get("acquisition"),
+        "tool": doc["payload"]["tool"],
+        "version": doc["payload"]["version"],
+        "ocr": doc["payload"]["ocr"],
+        "selector": p,
+        "semantic_support": "not_evaluated",
+    }
+    return marked, source_link, metadata, f"Evidence, page {p['page']}"
+
+
 def render_bundle(
     report_id, get_asset, *, include_sources: bool = False, records=()
 ) -> dict[str, bytes]:
@@ -34,46 +76,29 @@ def render_bundle(
     definitions = []
     for anchor, evidence_id in sorted(root["payload"]["citations"].items()):
         ev = envelope(get_asset(evidence_id))
-        doc_id = ev["parents"][0]
-        doc = envelope(get_asset(doc_id))
-        source_id = doc["parents"][0]
-        source = get_asset(source_id)
-        source_meta = envelope(source)["payload"]
-        p = ev["payload"]
-        page_text = doc["payload"]["pages"][p["page"] - 1]["text"]
-        marked = (
-            html.escape(page_text[: p["start"]])
-            + "<mark>"
-            + html.escape(p["quote"])
-            + "</mark>"
-            + html.escape(page_text[p["end"] :])
-        )
-        source_link = "Original file omitted; consult source metadata."
-        if include_sources:
-            extension = (
-                "pdf" if source_meta["media_type"] == "application/pdf" else "bin"
+        if ev["payload"].get("selector") == "asset-json-pointer-v1":
+            source_id = ev["parents"][0]
+            source = get_asset(source_id)
+            p = ev["payload"]
+            marked = html.escape(p["quote"])
+            source_link = "Original JSON omitted; consult source metadata."
+            if include_sources:
+                source_name = f"sources/{_key(source_id)}.json"
+                files[source_name] = source.content.encode("utf-8")
+                source_link = f'<a href="../{source_name}">Original JSON</a>'
+            metadata = {
+                "evidence_asset_id": evidence_id,
+                "source_asset_id": source_id,
+                "source_sha256": p["source_sha256"],
+                "source_created_by_assertion": source.created_by,
+                "selector": p,
+                "semantic_support": "not_evaluated",
+            }
+            label = "Evidence, JSON value"
+        else:
+            marked, source_link, metadata, label = _document_evidence(
+                ev, evidence_id, get_asset, include_sources, files
             )
-            filename = f"sources/{_key(source_id)}.{extension}"
-            files[filename] = attachment_bytes(source)
-            source_link = (
-                f'<a href="../{filename}#page={p["page"]}">Original file, '
-                f"page {p['page']}</a>"
-            )
-        metadata = {
-            "evidence_asset_id": evidence_id,
-            "document_asset_id": doc_id,
-            "source_asset_id": source_id,
-            "source_sha256": source_meta["sha256"],
-            "source_uri": source_meta["source_uri"],
-            "license": source_meta["license"],
-            "retrieved_at": source_meta["retrieved_at"],
-            "acquisition": source_meta.get("acquisition"),
-            "tool": doc["payload"]["tool"],
-            "version": doc["payload"]["version"],
-            "ocr": doc["payload"]["ocr"],
-            "selector": p,
-            "semantic_support": "not_evaluated",
-        }
         page = (
             "<!doctype html><html><head><meta charset='utf-8'>"
             "<meta http-equiv='Content-Security-Policy' content=\"default-src 'none'; "
@@ -87,7 +112,7 @@ def render_bundle(
         )
         filename = f"evidence/{anchor}.html"
         files[filename] = page.encode("utf-8")
-        definitions.append(f"[^{anchor}]: [Evidence, page {p['page']}]({filename})")
+        definitions.append(f"[^{anchor}]: [{label}]({filename})")
     files["report.md"] = (
         root["payload"]["markdown"] + "\n\n" + "\n".join(definitions) + "\n"
     ).encode("utf-8")

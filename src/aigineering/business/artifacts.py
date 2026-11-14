@@ -192,6 +192,75 @@ def evidence(name: str, source: Asset, *, page: int, start: int, end: int) -> As
     )
 
 
+class _JSONNumber(str):
+    """Retain a JSON number's lexical value without floating-point conversion."""
+
+
+def _invalid_constant(value):
+    raise ValueError("nonfinite JSON numbers cannot be cited")
+
+
+def json_evidence(name: str, source: Asset, pointer: str) -> Asset:
+    """Select one scalar from an exact, disclosed JSON Asset (RFC 6901)."""
+    if (
+        source.disclosure_view != "original"
+        or source.tombstoned
+        or not source.promptable
+    ):
+        raise ValueError("JSON source is not available for disclosure")
+    if source.content_type not in ("text", "text/plain", "application/json"):
+        raise ValueError("JSON evidence requires a text or application/json Asset")
+    if not isinstance(pointer, str) or (pointer and not pointer.startswith("/")):
+        raise ValueError("JSON pointer must be empty or start with /")
+    try:
+        value = json.loads(
+            source.content,
+            object_pairs_hook=_unique_object,
+            parse_int=_JSONNumber,
+            parse_float=_JSONNumber,
+            parse_constant=_invalid_constant,
+        )
+    except RecursionError as exc:
+        raise ValueError("JSON source exceeds parser nesting limit") from exc
+    for token in pointer.split("/")[1:] if pointer else ():
+        if re.search(r"~(?![01])", token):
+            raise ValueError("JSON pointer escape must be ~0 or ~1")
+        token = token.replace("~1", "/").replace("~0", "~")
+        if isinstance(value, dict) and token in value:
+            value = value[token]
+        elif (
+            isinstance(value, list)
+            and re.fullmatch(r"0|[1-9][0-9]*", token)
+            and len(token) <= len(str(len(value)))
+            and int(token) < len(value)
+        ):
+            value = value[int(token)]
+        else:
+            raise ValueError("JSON pointer does not select an existing value")
+    if isinstance(value, _JSONNumber):
+        kind, quote = "number", str(value)
+    elif isinstance(value, str):
+        kind, quote = "string", value
+    elif type(value) is bool:
+        kind, quote = "boolean", "true" if value else "false"
+    elif value is None:
+        kind, quote = "null", "null"
+    else:
+        raise ValueError("JSON pointer must select a scalar, not an object or array")
+    return proposal(
+        name,
+        "evidence",
+        {
+            "selector": "asset-json-pointer-v1",
+            "pointer": pointer,
+            "value_type": kind,
+            "quote": quote,
+            "source_sha256": hashlib.sha256(source.content.encode("utf-8")).hexdigest(),
+        },
+        (source.id,),
+    )
+
+
 def report(name: str, markdown: str, citations: Mapping[str, str]) -> Asset:
     """Bind every supported footnote marker to an exact evidence Asset ID.
 
@@ -234,20 +303,40 @@ def lineage(
     nodes: dict[str, dict] = {}
     active: set[str] = set()
 
-    def visit(asset_id: str, depth: int = 0) -> None:
+    def visit(asset_id: str, depth: int = 0, *, source_only: bool = False) -> None:
         if asset_id in active:
             raise ValueError("artifact lineage contains a cycle")
-        if asset_id in nodes:
+        if asset_id in nodes and (source_only or nodes[asset_id]["kind"] != "source"):
             return
         if len(nodes) + len(active) >= MAX_NODES or depth > 100:
             raise ValueError("artifact lineage exceeds traversal limit")
         asset = get_asset(asset_id)
         if asset is None or asset.id != asset_id:
             raise ValueError("lineage asset missing or not visible")
+        if source_only:
+            # A JSON selector quotes this Asset's value, not any dependency
+            # claims embedded in its text. A later artifact role is validated
+            # separately and must not return from this leaf cache.
+            nodes[asset_id] = {
+                "id": asset_id,
+                "kind": "source",
+                "parents": [],
+                "signed_by": asset.signed_by,
+                "created_by": asset.created_by,
+                "verification": "source_content",
+                "metadata": {
+                    "sha256": hashlib.sha256(asset.content.encode("utf-8")).hexdigest()
+                },
+            }
+            return
         value = envelope(asset)
         active.add(asset_id)
+        json_selector = (
+            value["kind"] == "evidence"
+            and value["payload"].get("selector") == "asset-json-pointer-v1"
+        )
         for parent in value["parents"]:
-            visit(parent, depth + 1)
+            visit(parent, depth + 1, source_only=json_selector)
         kind, p, parents = value["kind"], value["payload"], value["parents"]
         if kind == "attachment":
             attachment_bytes(asset)
@@ -256,20 +345,29 @@ def lineage(
             if len(parents) != 1 or nodes[parents[0]]["kind"] != "attachment":
                 raise ValueError("document requires one attachment parent")
         elif kind == "evidence":
-            if len(parents) != 1 or nodes[parents[0]]["kind"] != "document":
-                raise ValueError("evidence requires one document parent")
+            if len(parents) != 1:
+                raise ValueError("evidence requires one source parent")
             parent = get_asset(parents[0])
-            expected = envelope(
-                evidence(
-                    "verify",
-                    parent,
-                    page=p.get("page"),
-                    start=p.get("start"),
-                    end=p.get("end"),
-                )
-            )["payload"]
+            if json_selector:
+                expected = envelope(json_evidence("verify", parent, p.get("pointer")))[
+                    "payload"
+                ]
+            else:
+                if nodes[parents[0]]["kind"] != "document":
+                    raise ValueError("evidence requires one document parent")
+                expected = envelope(
+                    evidence(
+                        "verify",
+                        parent,
+                        page=p.get("page"),
+                        start=p.get("start"),
+                        end=p.get("end"),
+                    )
+                )["payload"]
             if p != expected:
-                raise ValueError("evidence does not equal the exact source range")
+                raise ValueError(
+                    "evidence does not equal the exact source range or value"
+                )
         elif kind == "report":
             expected = envelope(report("verify", p.get("markdown"), p.get("citations")))
             if expected["parents"] != parents or any(
@@ -299,7 +397,9 @@ def lineage(
                 "retrieved_at",
             ),
             "document": ("tool", "version", "ocr"),
-            "evidence": ("selector", "page", "start", "end"),
+            "evidence": ("selector", "pointer", "value_type", "source_sha256")
+            if json_selector
+            else ("selector", "page", "start", "end"),
             "report": (),
         }[kind]
         nodes[asset_id]["metadata"] = {key: p[key] for key in metadata_keys}

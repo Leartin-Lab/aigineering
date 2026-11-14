@@ -1,6 +1,6 @@
-# Business artifacts (059)
+# Business artifacts
 
-The 059 artifact adapter gives local files a small, portable envelope that can
+The artifact adapter gives local files a small, portable envelope that can
 be carried through the normal Aigineering asset path. An `artifact-v1` envelope
 has a kind (`attachment`, `document`, `evidence`, or `report`), an ordered list
 of exact parent asset IDs, and a JSON payload. Attachments contain the original
@@ -15,7 +15,7 @@ operation.
 
 ## The publication boundary
 
-`attachment()`, `document()`, `evidence()`, and `report()` return unsigned
+`attachment()`, `document()`, `evidence()`, `json_evidence()`, and `report()` return unsigned
 proposals. They are pure constructors and do not write the store. Submit each
 proposal through an explicitly authorized `CandidatePublisher` using
 `asset_proposal_effect`, then take the accepted asset from
@@ -92,6 +92,39 @@ $ aig artifact report report.md --bindings bindings.json --name recall-report
 The binding must match the Markdown markers exactly. Footnote definitions in
 the input are rejected because the exporter owns their rendering.
 
+## Cite an exact tool-result value
+
+A tool observation can be an ordinary JSON Asset. Select a scalar by its exact
+Asset ID, using JSON Pointer instead of page offsets:
+
+```bash
+aig artifact cite SOURCE_ASSET_ID --pointer /result/mean --name mean-evidence
+```
+
+Bind the returned evidence ID to a Markdown footnote using `artifact report`
+as above. `--pointer ''` selects a scalar root; `/values/0` selects the first
+array element. Escape `/` in a key as `~1` and `~` as `~0`. Use either a pointer
+or all three page bounds. Missing fields, duplicate JSON keys, nonfinite numbers
+and object/array targets are refused. The source must be a visible, promptable
+text or JSON Asset; this command does not decode attachments.
+
+The `asset-json-pointer-v1` evidence selector freezes the parent Asset ID,
+source UTF-8 SHA-256, pointer, scalar type and quote. Numbers retain their JSON
+lexeme without float conversion; string quotes are decoded strings. Consumers
+recompute these fields against the exact source. A raw source is a leaf for
+this quotation: JSON fields named `parents` are data, not dependency claims.
+If that Asset is also used as a document ancestor, its artifact closure is
+validated separately.
+
+Exported footnotes open escaped evidence pages showing the selected value,
+pointer and exact source identity. Full source JSON is omitted unless
+`--include-sources` is supplied. Source `created_by` is labeled as an assertion;
+it does not authenticate a generating Task. This is a business quotation
+convention, not a kernel derivation qualification or semantic acceptance rule.
+Models still supply report wording and exact evidence bindings; automatic value
+insertion, short aliases and an interactive tool-call provenance viewer are not
+implemented by this selector.
+
 ## Validation and export
 
 `aig artifact lineage REPORT_ID` resolves every parent by exact ID and verifies
@@ -106,7 +139,7 @@ $ aig artifact export asset:v1:... --output ./paper-export-with-source --include
 ```
 
 Exports include Markdown, generated evidence pages, citation metadata, a
-lineage graph, and a manifest. Original attachments are omitted by default;
+lineage graph, and a manifest. Original attachments and JSON sources are omitted by default;
 `--include-sources` is an explicit redistribution choice and does not grant a
 license. Rendered source text is escaped for HTML.
 
@@ -179,3 +212,9 @@ bounding box in the original PDF.
 [Historical attachment list/export](reference/task-attachments.md) verifies the
 original signed relation and pinned bytes. New attachment-link publication has
 been removed. Give a Worker input through explicit immutable Contract bindings.
+
+Artifact lineage/export select publication metadata by exact Asset IDs and
+causal-parent record IDs after opening the Store. Store initialization currently
+rebuilds its asset projection from history, so this does not establish bounded
+startup cost. Exported metadata omits raw receipt payloads and is not a portable
+signature proof.
