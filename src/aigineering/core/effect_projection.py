@@ -73,6 +73,7 @@ def project_effect_batch(
         }
         if not claim_delegated and required_capability not in actor_capabilities:
             raise ValueError(f"actor lacks required capability {required_capability!r}")
+        effect = _resolve_replacement_reference(effect, projections)
         projection = projector(effect, candidate, receipt_id, effective_context)
         if not isinstance(projection, EffectProjection):
             raise ValueError(
@@ -198,6 +199,38 @@ def project_effect_batch(
             for name in projection.accepted_asset_names
         )
         + tuple(asset.name for asset, _ in graph_assets),
+    )
+
+
+def _resolve_replacement_reference(
+    effect: CandidateEffect,
+    prior: list[tuple[CandidateEffect, EffectProjection]],
+) -> CandidateEffect:
+    """Resolve a signed, batch-local proposal index to its exact Asset ID."""
+    if (
+        effect.effect_type != "asset.relate"
+        or "replacement_effect_index" not in effect.payload
+    ):
+        return effect
+    index = effect.payload["replacement_effect_index"]
+    claim = effect.payload.get("claim")
+    if not isinstance(claim, Mapping) or "replacement_asset_id" in claim:
+        raise ValueError(
+            "replacement_effect_index requires a claim without replacement_asset_id"
+        )
+    if type(index) is not int or not 0 <= index < len(prior):
+        raise ValueError(
+            "replacement_effect_index must identify a prior asset.propose effect"
+        )
+    referenced, projection = prior[index]
+    if referenced.effect_type != "asset.propose" or len(projection.assets) != 1:
+        raise ValueError(
+            "replacement_effect_index must identify a prior asset.propose effect"
+        )
+    return CandidateEffect(
+        effect.effect_type,
+        {"claim": {**claim, "replacement_asset_id": projection.assets[0].id}},
+        effect.atomic_group,
     )
 
 

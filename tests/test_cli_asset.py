@@ -545,6 +545,24 @@ class TestAssetVersionWorkflow:
                 store.get_assets_by_name("doc.middle")[0].lineage_id
                 == data["lineage_id"]
             )
+            claims = store.get_claims_for_replacement_asset(data["id"])
+            assert len(claims) == 1
+            assert claims[0].id == data["claim_id"]
+            # One user operation must not publish the slice before its relation.
+            heads = store.scan_runtime_records(record_type="candidate.committed")
+            assert len(heads) == 2  # source add, then the complete slice action
+            members = set(heads[-1][1].payload["committed_record_ids"])
+            relation = store.scan_runtime_records(record_type="replacement.claimed")[0][
+                1
+            ]
+            assert relation.id in members
+            assert any(
+                record.id in members and record.payload["asset"]["id"] == data["id"]
+                for _, record in store.scan_runtime_records(
+                    record_type="asset.committed"
+                )
+            )
+            store.close()
 
     def test_slice_invalid_range_fails_closed(self):
         runner = CliRunner()

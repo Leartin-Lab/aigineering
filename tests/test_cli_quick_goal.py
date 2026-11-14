@@ -135,8 +135,56 @@ def test_run_quick_goal_discloses_file_and_exports_markdown(monkeypatch, tmp_pat
             config = store.get_assets_by_name("_provider_config_openai")[0]
             config_payload = json.loads(config.content)
             assert config_payload["response_format"] == "json_object"
+            declaration = next(
+                record
+                for _, record in store.scan_runtime_records(
+                    record_type="contract.declared"
+                )
+                if record.payload["contract"]["id"] == contract.id
+            )
+            head = next(
+                record
+                for _, record in store.scan_runtime_records(
+                    record_type="candidate.committed"
+                )
+                if declaration.id in record.payload["committed_record_ids"]
+            )
+            members = set(head.payload["committed_record_ids"])
+            admitted = {
+                record.payload["asset"]["id"]
+                for _, record in store.scan_runtime_records(
+                    record_type="asset.committed"
+                )
+                if record.id in members
+            }
+            assert admitted == {config.id, *(asset.id for asset in disclosed)}
         finally:
             store.close()
+
+
+def test_quick_goal_publication_interruption_leaves_no_config_inputs_or_root(
+    monkeypatch,
+):
+    worker = _OutputWorker(lambda contract: "unused")
+    monkeypatch.setattr("aigineering.cli._common.build_worker", lambda *a, **k: worker)
+    insert = SQLiteStore._insert_runtime_record
+
+    def interrupted(store, record):
+        if record.record_type == "contract.declared":
+            raise RuntimeError("injected root publication interruption")
+        return insert(store, record)
+
+    monkeypatch.setattr(SQLiteStore, "_insert_runtime_record", interrupted)
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        result = runner.invoke(
+            cli, ["run", "goal", "--model", "fixture", "--save-config", "--json"]
+        )
+        assert result.exit_code != 0
+        with SQLiteStore(".aig/store.db") as store:
+            assert not store.get_all_assets()
+            assert not store.get_all_contracts()
+            assert not store.scan_runtime_records(record_type="candidate.committed")
 
 
 def test_run_without_files_uses_goal_asset_and_unique_slots(monkeypatch):

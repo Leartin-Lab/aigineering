@@ -45,6 +45,11 @@ and [earlier import changes](../../changes/133-cli-guidance-and-runtime-contract
   and token usage are separate. Unknown usage is not zero or a known bill.
 - Redis outages are visible. Accepted SQLite facts remain durable while relay
   synchronization is pending.
+- Slice creation commits the Asset and its lineage assertion together;
+  demo and quick GOAL creation commit configuration, inputs and root together.
+  Configured-run setup still publishes resources before final root validation
+  and publication. A failure there can leave resources without a root; this
+  remaining composite-publication defect is not a completed repair.
 - Local tools do not provide a production process-isolation guarantee. The
   reference HTTP service requires deployment-level security controls.
 

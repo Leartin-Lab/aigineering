@@ -24,6 +24,14 @@ leave a partial effect set. Genesis bootstrap is the only setup path before
 Candidate admission. Store transaction methods are trusted internal
 interfaces, not public ways to bypass signed admission.
 
+An `asset.relate` effect can identify its replacement by an exact Asset ID or
+by `replacement_effect_index`, a signed zero-based index of a preceding
+`asset.propose` in the same Candidate. The pure batch compiler resolves that
+index to the already projected Asset. Durable relations contain only exact
+IDs; there is no name lookup, cross-Candidate alias or replay-time resolution.
+This lets slice publication include its lineage assertion atomically without
+changing Asset identity or disclosure. See [change 138](changes/138-atomic-local-asset-publication.md).
+
 Replay verifies and returns the original accepted publication using its exact
 receipt, head and effect membership under current key authorization. Replay is
 read-only; it never calls a maker to reconstruct effects or writes a replay

@@ -177,8 +177,10 @@ def worker_claim_renewal_effect(
     )
 
 
-def replacement_claim_effect(claim: ReplacementClaim) -> CandidateEffect:
-    return CandidateEffect(
+def replacement_claim_effect(
+    claim: ReplacementClaim, *, replacement_effect_index: int | None = None
+) -> CandidateEffect:
+    effect = CandidateEffect(
         "asset.relate",
         {
             "claim": {
@@ -191,6 +193,14 @@ def replacement_claim_effect(claim: ReplacementClaim) -> CandidateEffect:
                 "source_asset_id": claim.source_asset_id,
             }
         },
+    )
+    if replacement_effect_index is None:
+        return effect
+    data = dict(effect.payload["claim"])
+    del data["replacement_asset_id"]
+    return CandidateEffect(
+        "asset.relate",
+        {"claim": data, "replacement_effect_index": replacement_effect_index},
     )
 
 

@@ -26,7 +26,7 @@ from aigineering.application import (
     persistent_store,
     query_projection,
 )
-from aigineering.cli._candidate import commit_local_effect, require_accepted
+from aigineering.cli._candidate import commit_local_effects, require_accepted
 from aigineering.local_identity import ensure_local_domain
 from aigineering.core.store import StoreProtocol
 from aigineering.core.sqlite_store import SQLiteStore
@@ -382,6 +382,7 @@ def _run_demo(
         raw_output = f"{output_name}: Report content for goal '{goal}'"
         worker.set_output("build_report", raw_output)
 
+    effects = []
     if save_config and worker_kind == "llm" and model:
         from aigineering.core.capability_descriptors import (
             create_provider_config_snapshot,
@@ -398,13 +399,7 @@ def _run_demo(
             thinking_mode=thinking_mode,
             response_format=response_format,
         )
-        require_accepted(
-            commit_local_effect(
-                store,
-                asset_proposal_effect(config_asset),
-                idempotency_key=f"demo:{publication_id}:provider-config",
-            )
-        )
+        effects.append(asset_proposal_effect(config_asset))
 
     if quick_inputs is None:
         data_file = Asset(
@@ -450,19 +445,15 @@ def _run_demo(
         acceptance_policy={"mode": "mechanical"},
     )
 
-    publications = [("contract", contract_declaration_effect(contract))]
-    publications.extend(
-        (f"input-{index}", asset_proposal_effect(asset))
-        for index, asset in enumerate(input_assets)
-    )
-    for suffix, effect in publications:
-        require_accepted(
-            commit_local_effect(
-                store,
-                effect,
-                idempotency_key=f"demo:{publication_id}:{suffix}",
-            )
+    effects.append(contract_declaration_effect(contract))
+    effects.extend(asset_proposal_effect(asset) for asset in input_assets)
+    require_accepted(
+        commit_local_effects(
+            store,
+            tuple(effects),
+            idempotency_key=f"demo:{publication_id}",
         )
+    )
 
     from aigineering.runtime import (
         WorkerInvocationError,

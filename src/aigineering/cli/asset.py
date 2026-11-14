@@ -8,11 +8,16 @@ from pathlib import Path
 import click
 
 from aigineering.cli._common import _output_json, _persistent_store, _query_projection
-from aigineering.cli._candidate import commit_local_effect, require_accepted
+from aigineering.cli._candidate import (
+    commit_local_effect,
+    commit_local_effects,
+    require_accepted,
+)
 from aigineering.core.asset_versions import (
     create_replacement_claim,
     create_slice_asset,
     list_versions,
+    replacement_claim_from_record,
     resolve_latest,
 )
 from aigineering.core.control_plane import build_control_plane_asset
@@ -224,17 +229,6 @@ def asset_slice(name: str, slice_name: str, range_spec: str, as_json: bool) -> N
         )
     except ValueError as e:
         raise click.ClickException(str(e))
-    try:
-        decision = require_accepted(
-            commit_local_effect(
-                store,
-                asset_proposal_effect(sliced),
-                idempotency_key=f"asset-slice:{sliced.id}",
-            )
-        )
-    except ValueError as exc:
-        raise click.ClickException(str(exc)) from exc
-    sliced = decision.assets[0]
     claim = create_replacement_claim(
         source_asset_id=source.id,
         replacement_asset_id=sliced.id,
@@ -243,20 +237,37 @@ def asset_slice(name: str, slice_name: str, range_spec: str, as_json: bool) -> N
         lineage_id=source.lineage_id or source.id,
         range_spec=range_spec,
     )
-    verification = verify_replacement_claims(store, [claim])
+
+    class SliceInputs:
+        def get_asset(self, asset_id):
+            return sliced if asset_id == sliced.id else store.get_asset(asset_id)
+
+        def __getattr__(self, name):
+            return getattr(store, name)
+
+    verification = verify_replacement_claims(SliceInputs(), [claim])
     if verification["fail_count"]:
         issues = verification["results"][0]["issues"]
         raise click.ClickException("; ".join(issues))
     try:
-        require_accepted(
-            commit_local_effect(
+        decision = require_accepted(
+            commit_local_effects(
                 store,
-                replacement_claim_effect(claim),
-                idempotency_key=f"asset-slice-claim:{claim.id}",
+                (
+                    asset_proposal_effect(sliced),
+                    replacement_claim_effect(claim, replacement_effect_index=0),
+                ),
+                idempotency_key=f"asset-slice:{claim.id}",
             )
         )
     except ValueError as exc:
         raise click.ClickException(str(exc)) from exc
+    sliced = decision.assets[0]
+    claim = next(
+        claim
+        for record in decision.runtime_records
+        if (claim := replacement_claim_from_record(record)) is not None
+    )
 
     if as_json:
         _output_json(
