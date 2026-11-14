@@ -229,17 +229,24 @@ def start_service(
     service_dir = _service_dir(root)
     _validated_prior_state(service_dir, root)
     lock_path = service_dir / _LOCK_NAME
+    deadline = time.monotonic() + readiness_timeout
     lock_fd = _open_lock(lock_path)
     try:
-        try:
-            fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            current = _validated_prior_state(service_dir, root)
-            if current is None:
-                raise FleetServiceError(
-                    "unsafe_state", "Fleet service lock is live but metadata is missing"
-                )
-            return _result_from_state(current, fallback="running")
+        while True:
+            try:
+                fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                current = _validated_prior_state(service_dir, root)
+                if current is not None:
+                    return _result_from_state(current, fallback="running")
+                remaining = deadline - time.monotonic()
+                if not 0 < remaining < float("inf"):
+                    raise FleetServiceError(
+                        "unsafe_state",
+                        "Fleet service lock is live but metadata is missing",
+                    )
+                time.sleep(min(0.05, remaining))
 
         # A valid stale generation may be replaced only after exclusive lock
         # acquisition and a fresh validation of the metadata it left behind.
@@ -290,7 +297,6 @@ def start_service(
         # The child owns state after launch. It may already have written ready
         # or a specific startup failure before Popen returns; never replay the
         # parent's stale starting snapshot over that result.
-        deadline = time.monotonic() + readiness_timeout
         while time.monotonic() < deadline:
             latest = read_service_metadata(service_dir / _STATE_NAME)
             if latest is None or latest.get("generation") != generation:
