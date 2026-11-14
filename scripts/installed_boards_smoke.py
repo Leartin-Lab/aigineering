@@ -577,9 +577,13 @@ print(json.dumps({
         )
         adopted_domain_id = initialized.get("domain_id")
         key_file = Path(initialized.get("key_file", ""))
+        if not key_file.is_absolute():
+            key_file = adopted_workspace / key_file
+        expected_key = adopted_workspace / ".aig" / "identity" / "root.ed25519"
         if (
             not isinstance(adopted_domain_id, str)
             or not adopted_domain_id
+            or key_file.resolve() != expected_key.resolve()
             or not key_file.is_file()
             or key_file.stat().st_mode & 0o777 != 0o600
         ):
