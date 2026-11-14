@@ -59,8 +59,10 @@ latencies, and traced Python memory. Use repeated runs on the same hardware to
 compare changes. Traced memory is not process RSS, and mock/synthetic throughput
 is not model productivity or scientific quality.
 
-The current projection context reads the full fact history. The benchmark
-establishes a baseline; the current runtime does not remove that scaling cost.
+Publication selects indexed records for the affected Tasks, Assets and funding
+chain. Whole-domain audit and rebuild still read history. A small synthetic
+benchmark verifies its exercised path; it does not qualify long-running scale
+or establish a bound for every query.
 
 ## Remaining release evidence
 

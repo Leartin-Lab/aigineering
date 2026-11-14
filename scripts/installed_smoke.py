@@ -133,6 +133,34 @@ def _write_private_json(directory: Path, prefix: str, payload: dict) -> Path:
     return path
 
 
+def _write_result_evidence(
+    *,
+    evidence_dir: Path,
+    private_results_dir: Path,
+    workdir: Path,
+    scenario: str,
+    payload: dict,
+) -> dict:
+    """Retain full results privately and emit a small upload-safe summary."""
+    private_path = _write_private_json(workdir, f"scenario-{scenario}", payload)
+    private_bytes = private_path.read_bytes()
+    private_results_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+    retained_path = private_results_dir / private_path.name
+    os.replace(private_path, retained_path)
+    summary = {
+        "scenario": scenario,
+        "status": "passed",
+        "private_result_sha256": hashlib.sha256(private_bytes).hexdigest(),
+    }
+    evidence_dir.mkdir(parents=True, exist_ok=True)
+    summary_path = evidence_dir / f"{scenario}.json"
+    descriptor = os.open(summary_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+        json.dump(summary, stream, sort_keys=True)
+        stream.write("\n")
+    return summary
+
+
 @contextmanager
 def smoke_workspace(
     evidence_dir: Path | None,
@@ -569,372 +597,6 @@ def quick_goal_smoke(
     return evidence
 
 
-def task_hold_smoke(
-    aig: Path, python: Path, contract_id: str, *, cwd: Path, env: dict[str, str]
-) -> dict:
-    """Exercise human holds before the installed fixture task is executed."""
-    placement_args = [
-        "task",
-        "block",
-        contract_id,
-        "--reason",
-        "Installed hold reason A.",
-        "--idempotency-key",
-        "installed-hold-a",
-    ]
-    first = json_command(aig, placement_args, cwd=cwd, env=env)
-    second = json_command(
-        aig,
-        [
-            "task",
-            "block",
-            contract_id,
-            "--reason",
-            "Installed hold reason B.",
-            "--idempotency-key",
-            "installed-hold-b",
-        ],
-        cwd=cwd,
-        env=env,
-    )
-    hold_ids = [first["data"]["record_id"], second["data"]["record_id"]]
-    human_placement = run([str(aig), *placement_args], cwd=cwd, env=env)
-    if (
-        hold_ids[0] not in human_placement
-        or "Installed hold reason A." not in human_placement
-    ):
-        raise RuntimeError("installed readable placement omitted its hold ID or reason")
-    human_history = run([str(aig), "task", "holds", contract_id], cwd=cwd, env=env)
-    if "ACTIVE" not in human_history or not all(
-        item in human_history for item in hold_ids
-    ):
-        raise RuntimeError("installed readable history omitted active holds")
-    replay = json_command(aig, placement_args, cwd=cwd, env=env)
-    if replay.get("data") != first["data"]:
-        raise RuntimeError("hold replay did not return the original durable placement")
-    blocked = json_command(aig, ["task", "status", contract_id], cwd=cwd, env=env)
-    if blocked.get("status") != "blocked" or not all(
-        f"claim_hold:{hold_id}" in blocked.get("blockers", []) for hold_id in hold_ids
-    ):
-        raise RuntimeError("installed task status omitted active claim holds")
-    if json_command(aig, ["worker", "next"], cwd=cwd, env=env) is not None:
-        raise RuntimeError("installed Worker pull claimed a held task")
-    direct = run(
-        [
-            str(python),
-            "-c",
-            "from aigineering.core.sqlite_store import SQLiteStore; "
-            f"s=SQLiteStore({str(cwd / '.aig' / 'store.db')!r}); "
-            f"assert s.claim_contract({contract_id!r}, 'held-fixture') is None; "
-            "s.close(); print('held')",
-        ],
-        cwd=cwd,
-        env=env,
-    )
-    if direct != "held":
-        raise RuntimeError("installed SQLite claim bypassed a hold")
-    release_args = [
-        "task",
-        "unblock",
-        contract_id,
-        "--hold",
-        hold_ids[0],
-        "--reason",
-        "Installed release A.",
-        "--idempotency-key",
-        "release-a",
-    ]
-    release = json_command(aig, release_args, cwd=cwd, env=env)
-    still_blocked = json_command(aig, ["task", "status", contract_id], cwd=cwd, env=env)
-    if still_blocked.get("status") != "blocked":
-        raise RuntimeError("releasing one hold cleared another hold")
-    json_command(
-        aig,
-        [
-            "task",
-            "unblock",
-            contract_id,
-            "--hold",
-            hold_ids[1],
-            "--reason",
-            "Installed release B.",
-        ],
-        cwd=cwd,
-        env=env,
-    )
-    released_replay = json_command(aig, release_args, cwd=cwd, env=env)
-    human_release = run([str(aig), *release_args], cwd=cwd, env=env)
-    if (
-        release["data"]["record_id"] not in human_release
-        or hold_ids[0] not in human_release
-    ):
-        raise RuntimeError("installed readable release omitted its exact records")
-    human_released = run([str(aig), "task", "holds", contract_id], cwd=cwd, env=env)
-    if "ACTIVE" in human_released or human_released.count("RELEASED") != 2:
-        raise RuntimeError("installed readable history did not retain released holds")
-    if released_replay.get("data") != release.get("data"):
-        raise RuntimeError("released hold replay did not return its original record")
-    ready = json_command(aig, ["task", "status", contract_id], cwd=cwd, env=env)
-    if ready.get("status") != "ready":
-        raise RuntimeError("releasing all holds did not restore eligibility")
-    history = json_command(aig, ["task", "holds", contract_id], cwd=cwd, env=env)
-    if len(history.get("data", [])) != 2 or any(
-        row.get("active") for row in history["data"]
-    ):
-        raise RuntimeError("installed hold history lost exact releases")
-    json_command(aig, ["redis", "rebuild"], cwd=cwd, env=env)
-    rebuilt = json_command(aig, ["task", "holds", contract_id], cwd=cwd, env=env)
-    if rebuilt.get("data") != history.get("data"):
-        raise RuntimeError("Redis rebuild changed claim hold history")
-    events = json_command(aig, ["task", "events", contract_id], cwd=cwd, env=env)
-    if not all(
-        any(item.get("record_id") == hold_id for item in events.get("data", []))
-        for hold_id in hold_ids
-    ) or "Installed hold reason" in json.dumps(events):
-        raise RuntimeError("hold event feed omitted IDs or copied reason content")
-    return {
-        "evidence_kind": "fixture",
-        "hold_ids": hold_ids,
-        "worker_pull_and_direct_claim_blocked": True,
-        "exact_release_and_replay": True,
-        "rebuild_history_equal": True,
-        "provider_calls": 0,
-    }
-
-
-def task_handoff_smoke(
-    aig: Path, python: Path, *, cwd: Path, env: dict[str, str]
-) -> dict:
-    """Verify active-claim handoff and its successor through installed processes."""
-    created = json_command(
-        aig,
-        [
-            "task",
-            "create",
-            "--name",
-            "installed-handoff",
-            "--description",
-            "Finish the two declared report outputs.",
-            "--input",
-            "source",
-            "--activation",
-            "source",
-            "--budget",
-            "3",
-            "--output",
-            "installed-handoff-done",
-            "--output",
-            "installed-handoff-next",
-            # This fixture retains an operator-published partial output under
-            # the supported legacy mechanical policy, without a Worker debit.
-            "--acceptance-policy",
-            '{"mode":"mechanical"}',
-        ],
-        cwd=cwd,
-        env=env,
-    )
-    source_id = created["contract_id"]
-    retained = json_command(
-        aig,
-        [
-            "asset",
-            "add",
-            "--name",
-            "installed-handoff-done",
-            "--content",
-            "retained result",
-        ],
-        cwd=cwd,
-        env=env,
-    )
-    proposal_file = cwd / "late-handoff-candidate.json"
-    preparation = run(
-        [
-            str(python),
-            "-c",
-            "import json,sys; from pathlib import Path; "
-            "from aigineering.core.sqlite_store import SQLiteStore; "
-            "from aigineering.local_identity import ensure_local_worker_host; "
-            "from aigineering.agent.mock import MockWorker; "
-            "from aigineering.runtime import claim_next_package; "
-            "from aigineering.runtime_services import sync_runtime; "
-            "from aigineering.protocol.envelope import CandidateEnvelope; "
-            "from aigineering.protocol.candidate import candidate_proposal_to_dict; "
-            "s=SQLiteStore(sys.argv[1]); "
-            "host=ensure_local_worker_host(s,MockWorker(worker_id='installed-handoff-old')); "
-            "claimed=claim_next_package(s,worker_id=host.worker_id,contract_id=sys.argv[2]); "
-            "assert claimed is not None; p=claimed.package; "
-            "raw='/exec '+json.dumps({'outputs':{n:'too late' for n in claimed.contract.outputs}}); "
-            "e=CandidateEnvelope(contract_id=claimed.contract.id,worker_id=host.worker_id,"
-            "raw_output=raw,package_id=p.package_id,claim_id=p.claim_id,claim_epoch=p.claim_epoch,"
-            "idempotency_key='late-installed-handoff'); "
-            "candidate=host.sign_envelope(e,contract=claimed.contract,"
-            "disclosed_assets=claimed.disclosed_assets,allowance=3); "
-            "Path(sys.argv[3]).write_text(json.dumps(candidate_proposal_to_dict(candidate))); "
-            "sync_runtime(s); print(json.dumps(s.get_claim(sys.argv[2]))); s.close()",
-            str(cwd / ".aig" / "store.db"),
-            source_id,
-            str(proposal_file),
-        ],
-        cwd=cwd,
-        env=env,
-    )
-    old_claim = json.loads(preparation)
-    args = [
-        "task",
-        "handoff",
-        source_id,
-        "--reason",
-        "Operator is handing over active work.",
-        "--hold-reason",
-        "Wait for operator confirmation.",
-        "--idempotency-key",
-        "installed-handoff",
-    ]
-    handed = json_command(aig, args, cwd=cwd, env=env)
-    data = handed["data"]
-    target_id, hold_id = data["successor_id"], data["hold_id"]
-    if data["budget"] != 3 or data["completed_outputs"] != ["installed-handoff-done"]:
-        raise RuntimeError(
-            "installed handoff did not transfer remaining work and allowance"
-        )
-    if retained["id"] not in data["retained_asset_ids"]:
-        raise RuntimeError("handoff lost the exact retained output Asset")
-    human = run([str(aig), *args], cwd=cwd, env=env)
-    if not all(value in human for value in (source_id, target_id, hold_id)):
-        raise RuntimeError("readable handoff omitted its exact continuation records")
-    replay = json_command(aig, args, cwd=cwd, env=env)
-    if replay["data"] != data:
-        raise RuntimeError("nullable-budget replay changed the original handoff")
-    history = json_command(aig, ["task", "handoffs", source_id], cwd=cwd, env=env)
-    if history.get("data") != [data]:
-        raise RuntimeError("handoff history did not preserve its durable link")
-    if (
-        json_command(aig, ["task", "status", source_id], cwd=cwd, env=env)["status"]
-        != "cancelled"
-    ):
-        raise RuntimeError("handoff did not cancel the old attempt")
-    if (
-        json_command(aig, ["task", "status", target_id], cwd=cwd, env=env)["status"]
-        != "blocked"
-    ):
-        raise RuntimeError("handoff successor bypassed its requested hold")
-    checked = run(
-        [
-            str(python),
-            "-c",
-            "import sys; from aigineering.core.sqlite_store import SQLiteStore; "
-            "from aigineering.core.runtime_projection import RuntimeProjection; "
-            "s=SQLiteStore(sys.argv[1]); old=s.get_claim(sys.argv[2]); "
-            "assert old['status']=='released' and old['claim_id']==sys.argv[4]; "
-            "assert RuntimeProjection(s,s).contract_view(s.get_contract(sys.argv[2])).terminal=='cancelled'; "
-            "assert s.get_contract(sys.argv[3]).outputs==('installed-handoff-next',); "
-            "assert s.claim_contract(sys.argv[3],'installed-held-successor') is None; "
-            "s.close(); print('fenced')",
-            str(cwd / ".aig" / "store.db"),
-            source_id,
-            target_id,
-            old_claim["claim_id"],
-        ],
-        cwd=cwd,
-        env=env,
-    )
-    if checked != "fenced":
-        raise RuntimeError("installed handoff did not fence its source claim")
-    late = subprocess.run(
-        [str(aig), "worker", "submit", "--json", proposal_file.read_text()],
-        cwd=cwd,
-        env=env,
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-    if late.returncode == 0 or json.loads(late.stdout).get("status") != "error":
-        raise RuntimeError("old handoff claim accepted a late signed output")
-    json_command(
-        aig,
-        [
-            "task",
-            "unblock",
-            target_id,
-            "--hold",
-            hold_id,
-            "--reason",
-            "Ready to continue.",
-        ],
-        cwd=cwd,
-        env=env,
-    )
-    finished = json_command(
-        aig, ["run", "--task", target_id, "--worker", "mock"], cwd=cwd, env=env
-    )
-    if finished.get("ok") is not True or finished.get("status") != "completed":
-        raise RuntimeError("installed successor did not execute its remaining output")
-    json_command(aig, ["redis", "rebuild"], cwd=cwd, env=env)
-    if json_command(aig, ["task", "handoffs", source_id], cwd=cwd, env=env)["data"] != [
-        data
-    ]:
-        raise RuntimeError("Redis rebuild changed handoff history")
-    predecessor = json_command(aig, ["task", "status", source_id], cwd=cwd, env=env)
-    if predecessor["status"] != "cancelled":
-        raise RuntimeError(
-            "successor completion changed its cancelled source: "
-            + json.dumps(predecessor)
-        )
-    if predecessor.get("recoveries"):
-        raise RuntimeError("late old-claim rejection scheduled new recovery work")
-    run(
-        [
-            str(python),
-            "-c",
-            "from aigineering.core.sqlite_store import SQLiteStore; "
-            "s=SQLiteStore('.aig/store.db'); "
-            "outcomes=[r for _,r in s.scan_runtime_records() "
-            "if r.record_type=='candidate_rejection.recovery_unavailable' "
-            f"and r.payload.get('contract_id')=={source_id!r}]; "
-            "assert len(outcomes)==1; "
-            "assert outcomes[0].payload.get('reason')=='terminal_preserved'; "
-            "assert outcomes[0].payload.get('terminal')=='cancelled'; s.close()",
-        ],
-        cwd=cwd,
-        env=env,
-    )
-    for event_target in (source_id, target_id):
-        events = json_command(
-            aig,
-            ["task", "events", event_target, "--limit", "1000"],
-            cwd=cwd,
-            env=env,
-        )
-        link_events = [
-            item
-            for item in events.get("data", [])
-            if item.get("record_id") == data["record_id"]
-        ]
-        if len(link_events) != 1 or set(link_events[0]["contract_ids"]) != {
-            source_id,
-            target_id,
-        }:
-            raise RuntimeError(
-                "handoff link is missing from source or successor event feed"
-            )
-    return {
-        "evidence_kind": "fixture",
-        "source_id": source_id,
-        "successor_id": target_id,
-        "link_id": data["record_id"],
-        "active_claim_released": True,
-        "late_signed_output_rejected": True,
-        "partial_output_retained": True,
-        "nullable_budget_replay_stable": True,
-        "held_successor_executed": True,
-        "redis_rebuild_history_equal": True,
-        "late_rejection_terminal_preserved": True,
-        "handoff_event_scoped_to_both_tasks": True,
-        "provider_calls": 0,
-    }
-
-
 def task_cli_smoke(
     aig: Path,
     python: Path,
@@ -977,49 +639,37 @@ def task_cli_smoke(
     ):
         raise RuntimeError(f"task show disagreed with task completion: {shown}")
 
-    comment_args = [
-        "task",
-        "comment",
-        contract_id,
-        "Installed conversation check.",
-        "--idempotency-key",
-        "installed-comment-1",
-    ]
-    comment = json_command(aig, comment_args, cwd=cwd, env=env)
-    replay = json_command(aig, comment_args, cwd=cwd, env=env)
-    if comment.get("ok") is not True or replay != comment:
-        raise RuntimeError("identical comment replay did not return its durable record")
-    reply = json_command(
-        aig,
-        [
-            "task",
-            "comment",
-            contract_id,
-            "Installed reply.",
-            "--reply-to",
-            comment["data"]["record_id"],
-        ],
-        cwd=cwd,
-        env=env,
-    )
+    store_path = cwd / ".aig" / "store.db"
+
+    def runtime_ids() -> list[str]:
+        output = run(
+            [
+                str(python),
+                "-c",
+                "import json,sys; from aigineering.core.sqlite_store import SQLiteStore; "
+                "s=SQLiteStore(sys.argv[1]); print(json.dumps([r.id for _,r in s.scan_runtime_records()])); s.close()",
+                str(store_path),
+            ],
+            cwd=cwd,
+            env=env,
+        )
+        return json.loads(output)
+
+    before_read_only = runtime_ids()
     comments = json_command(aig, ["task", "comments", contract_id], cwd=cwd, env=env)
-    if comments.get("data") != [comment["data"], reply.get("data")]:
-        raise RuntimeError("installed comment history did not preserve the reply")
+    if comments.get("ok") is not True or comments.get("data") != []:
+        raise RuntimeError("unlinked task comment history was not empty")
     unchanged = json_command(aig, ["task", "status", contract_id], cwd=cwd, env=env)
     if unchanged.get("status") != "completed":
-        raise RuntimeError("comment changed a terminal task's status")
+        raise RuntimeError("read-only task history changed its status")
 
     events = json_command(aig, ["task", "events", contract_id], cwd=cwd, env=env)
     if events.get("ok") is not True or not isinstance(events.get("data"), list):
         raise RuntimeError(f"task events returned an invalid envelope: {events}")
     if not any(contract_id in item.get("contract_ids", []) for item in events["data"]):
         raise RuntimeError("task events did not contain the fixture task's records")
-    if not any(
-        item.get("record_id") == comment["data"]["record_id"] for item in events["data"]
-    ):
-        raise RuntimeError("task events did not include the committed comment")
-    if "Installed conversation check." in json.dumps(events):
-        raise RuntimeError("Redis events copied comment text instead of metadata")
+    if runtime_ids() != before_read_only:
+        raise RuntimeError("task comments/events reads changed runtime facts")
 
     watch_output = run(
         [str(aig), "task", "watch", contract_id, "--timeout", "0", "--json"],
@@ -1126,7 +776,7 @@ def task_cli_smoke(
         aig, ["task", "comments", contract_id], cwd=cwd, env=env
     )
     if rebuilt_comments.get("data") != comments["data"]:
-        raise RuntimeError("Redis rebuild changed the durable conversation")
+        raise RuntimeError("Redis rebuild changed the read-only comment history")
 
     closed_env = dict(env)
     closed_env["AIGINEERING_REDIS_URL"] = "redis://127.0.0.1:1/0"
@@ -1164,12 +814,176 @@ def task_cli_smoke(
         "evidence_kind": "fixture",
         "contract_id": contract_id,
         "task_views": ["list", "board", "stats", "show", "events", "watch"],
-        "signed_comments_reply_replay": "passed",
+        "read_only_empty_comments_history": "passed",
         "result_exact_content_exported": True,
         "existing_result_preserved": True,
         "redis_status_sync_rebuild": "passed",
         "closed_port_reports_unavailable": True,
         "offline_audit": "passed",
+        "provider_calls": 0,
+    }
+
+
+def bulk_cancel_smoke(
+    aig: Path, python: Path, *, cwd: Path, env: dict[str, str]
+) -> dict:
+    """Retain installed signed batch cancellation and live-claim fencing coverage."""
+    workspace_args = []
+
+    def command(args: list[str]) -> dict:
+        return json_command(aig, [*workspace_args, *args], cwd=cwd, env=env)
+
+    created = []
+    for suffix in ("open", "claimed"):
+        task = command(
+            [
+                "task",
+                "create",
+                "--name",
+                f"installed-cancel-{suffix}",
+                "--output",
+                f"cancel_{suffix}",
+                "--budget",
+                "2",
+            ]
+        )
+        created.append(task["contract_id"])
+    open_id, claimed_id = created
+    package = command(["worker", "next", "--contract", claimed_id])
+    if package.get("contract_id") != claimed_id or not package.get("claim_id"):
+        raise RuntimeError("bulk cancellation fixture did not establish a live claim")
+
+    base_key = "installed-smoke-bulk-cancel"
+    args = [
+        "task",
+        "cancel",
+        open_id,
+        claimed_id,
+        "--reason",
+        "Installed canonical cancellation fixture.",
+        "--idempotency-key",
+        base_key,
+    ]
+    first = command(args)
+    rows = first.get("data", {}).get("results")
+    if first.get("ok") is not True or not isinstance(rows, list) or len(rows) != 2:
+        raise RuntimeError(f"bulk cancellation did not return both targets: {first}")
+    if {row.get("contract_id") for row in rows} != set(created) or any(
+        row.get("outcome") != "accepted" for row in rows
+    ):
+        raise RuntimeError("bulk cancellation did not accept every exact target")
+    keys = {row["contract_id"]: row.get("idempotency_key") for row in rows}
+    if len(set(keys.values())) != 2 or any(not key for key in keys.values()):
+        raise RuntimeError("bulk cancellation omitted unique target replay keys")
+
+    store_path = cwd / ".aig" / "store.db"
+
+    def record_ids() -> list[str]:
+        output = run(
+            [
+                str(python),
+                "-c",
+                "import json,sys; from aigineering.core.sqlite_store import SQLiteStore; "
+                "s=SQLiteStore(sys.argv[1]); print(json.dumps([r.id for _,r in s.scan_runtime_records()])); s.close()",
+                str(store_path),
+            ],
+            cwd=cwd,
+            env=env,
+        )
+        return json.loads(output)
+
+    before_replay = record_ids()
+    replay = command(
+        [
+            "task",
+            "cancel",
+            claimed_id,
+            open_id,
+            "--reason",
+            "Installed canonical cancellation fixture.",
+            "--idempotency-key",
+            base_key,
+        ]
+    )
+    replay_rows = replay.get("data", {}).get("results")
+    if not isinstance(replay_rows, list) or record_ids() != before_replay:
+        raise RuntimeError("reordered exact cancellation replay appended facts")
+    for row in replay_rows:
+        original = next(
+            item for item in rows if item["contract_id"] == row["contract_id"]
+        )
+        if any(
+            row.get(field) != original.get(field)
+            for field in ("idempotency_key", "candidate_id", "fact_ids", "data")
+        ):
+            raise RuntimeError("reordered cancellation replay changed original facts")
+    singleton = command(
+        [
+            "task",
+            "cancel",
+            open_id,
+            "--reason",
+            "Installed canonical cancellation fixture.",
+            "--idempotency-key",
+            keys[open_id],
+        ]
+    )
+    original_open = next(item for item in rows if item["contract_id"] == open_id)
+    if any(
+        singleton.get("data", {}).get(field) != original_open.get("data", {}).get(field)
+        for field in ("record_id", "candidate_id", "fact_ids", "idempotency_key")
+    ):
+        raise RuntimeError("single-target returned-key replay changed durable facts")
+
+    changed = subprocess.run(
+        [
+            str(aig),
+            "task",
+            "cancel",
+            open_id,
+            claimed_id,
+            "--reason",
+            "Changed cancellation intent must not replay.",
+            "--idempotency-key",
+            base_key,
+            "--json",
+        ],
+        cwd=cwd,
+        env=env,
+        check=False,
+        text=True,
+        capture_output=True,
+    )
+    try:
+        changed_payload = json.loads(changed.stdout)
+    except json.JSONDecodeError as error:
+        raise RuntimeError("changed cancellation did not return JSON") from error
+    changed_rows = changed_payload.get("data", {}).get("results", [])
+    if (
+        not isinstance(changed_rows, list)
+        or len(changed_rows) != 2
+        or any(row.get("outcome") == "accepted" for row in changed_rows)
+    ):
+        raise RuntimeError("changed cancellation intent was reported as accepted")
+    for row in changed_rows:
+        original = next(
+            item for item in rows if item["contract_id"] == row["contract_id"]
+        )
+        if row.get("candidate_id") == original.get("candidate_id"):
+            raise RuntimeError("changed intent reused the original Candidate identity")
+    for contract_id in created:
+        status = command(["task", "status", contract_id])
+        if status.get("status") != "cancelled":
+            raise RuntimeError("signed batch cancellation did not cancel every target")
+    no_reclaim = command(["worker", "next", "--contract", claimed_id])
+    if isinstance(no_reclaim, dict) and no_reclaim.get("contract_id"):
+        raise RuntimeError("bulk-cancelled live claim became claimable again")
+    return {
+        "cancelled_targets": len(created),
+        "live_claim_fenced": True,
+        "reordered_exact_replay_added_no_facts": True,
+        "single_target_returned_key_replay": True,
+        "changed_payload_did_not_replace_terminal_facts": True,
         "provider_calls": 0,
     }
 
@@ -1301,7 +1115,6 @@ def main() -> int:
         contract_id = task.get("contract_id")
         if not contract_id:
             raise RuntimeError("task create did not return a contract ID")
-        hold_result = task_hold_smoke(aig, python, contract_id, cwd=workdir, env=env)
         _set_phase("root_task_smoke")
         run_result = json_command(
             aig, ["run", "--once", "--worker", "mock"], cwd=workdir, env=env
@@ -1329,55 +1142,55 @@ def main() -> int:
             raise RuntimeError("task audit did not contain the completed root lineage")
         _set_phase("feature_smokes")
         task_cli_result = task_cli_smoke(aig, python, contract_id, cwd=workdir, env=env)
-        handoff_result = task_handoff_smoke(aig, python, cwd=workdir, env=env)
+        bulk_cancel_result = bulk_cancel_smoke(aig, python, cwd=workdir, env=env)
         from installed_review_smoke import task_review_smoke
 
         review_result = task_review_smoke(aig, python, cwd=workdir, env=env)
-        from installed_revision_smoke import task_revision_smoke
-
-        revision_result = task_revision_smoke(aig, python, cwd=workdir, env=env)
-        from installed_expanded_handoff_smoke import expanded_handoff_smoke
-
-        expanded_handoff_result = expanded_handoff_smoke(
-            aig, python, cwd=workdir, env=env
-        )
-
-        from installed_task_dependencies_smoke import task_dependency_smoke
-
-        dependency_result = task_dependency_smoke(aig, python, cwd=workdir, env=env)
-
         from installed_worker_coordination_smoke import worker_coordination_smoke
 
         coordination_result = worker_coordination_smoke(
             aig, python, cwd=workdir, env=env
         )
+        from installed_ordinary_tool_smoke import ordinary_tool_smoke
+        from installed_ordinary_tool_smoke import planning_declaration_smoke
+        from installed_ordinary_tool_smoke import planning_completion_smoke
 
-        from installed_assignment_smoke import task_assignment_smoke
-
-        assignment_result = task_assignment_smoke(aig, python, cwd=workdir, env=env)
-
-        from installed_worker_profile_smoke import installed_worker_profile_smoke
-
-        worker_profile_result = installed_worker_profile_smoke(
-            aig, python, cwd=workdir, env=env
+        planning_result = planning_declaration_smoke(aig, python, cwd=workdir, env=env)
+        planning_completion_result = planning_completion_smoke(
+            aig, python, source_root, cwd=workdir, env=env
         )
+        ordinary_tool_result = ordinary_tool_smoke(aig, python, cwd=workdir, env=env)
 
-        from installed_effect_ownership_smoke import installed_effect_ownership_smoke
-
-        effect_ownership_result = installed_effect_ownership_smoke(
-            python, cwd=workdir, env=env
+        from installed_boards_smoke import installed_boards_smoke
+        from installed_registration_digest_smoke import (
+            installed_registration_digest_smoke,
         )
+        from installed_task_context_smoke import installed_task_context_smoke
+        from installed_task_diagnostics_smoke import installed_task_diagnostics_smoke
+        from installed_task_logs_smoke import installed_task_logs_smoke
+        from installed_task_attachment_smoke import installed_task_attachment_smoke
 
-        from installed_task_priority_smoke import installed_task_priority_smoke
-
-        priority_result = installed_task_priority_smoke(
-            aig, python, cwd=workdir, env=env
-        )
+        current_helper_results = {
+            "boards": installed_boards_smoke(aig, python, cwd=workdir, env=env),
+            "registration_digest": installed_registration_digest_smoke(
+                aig, python, cwd=workdir, env=env
+            ),
+            "task_context": installed_task_context_smoke(
+                aig, python, cwd=workdir, env=env
+            ),
+            "task_diagnostics": installed_task_diagnostics_smoke(
+                aig, python, cwd=workdir, env=env
+            ),
+            "task_logs": installed_task_logs_smoke(aig, python, cwd=workdir, env=env),
+            "task_attachments": installed_task_attachment_smoke(
+                aig, python, cwd=workdir, env=env
+            ),
+        }
 
         evidence_dir = (
             options.evidence_dir.resolve()
             if options.evidence_dir
-            else workdir / "reconstruction-evidence"
+            else workdir.parent / f"{workdir.name}-evidence"
         )
         quick_goal_result = quick_goal_smoke(
             aig,
@@ -1401,66 +1214,96 @@ def main() -> int:
             or report.get("status") != "passed"
         ):
             raise RuntimeError("reconstruction evidence is missing or incomplete")
+        private_results_dir = workdir.parent / f"{workdir.name}-private-results"
         _set_phase("configured_run")
         configured_result = configured_run_smoke(
             aig, python, evidence_dir, cwd=workdir, env=env
         )
         _set_phase("evidence_write")
-        with (evidence_dir / "quick-goal.json").open("x", encoding="utf-8") as stream:
-            json.dump(quick_goal_result, stream, ensure_ascii=False, sort_keys=True)
-            stream.write("\n")
-        (evidence_dir / "installed-task-cli.json").write_text(
-            json.dumps(task_cli_result, sort_keys=True) + "\n", encoding="utf-8"
+        _write_result_evidence(
+            evidence_dir=evidence_dir,
+            private_results_dir=private_results_dir,
+            workdir=workdir,
+            scenario="quick-goal",
+            payload=quick_goal_result,
         )
-        (evidence_dir / "installed-task-holds.json").write_text(
-            json.dumps(hold_result, sort_keys=True) + "\n", encoding="utf-8"
+        _write_result_evidence(
+            evidence_dir=evidence_dir,
+            private_results_dir=private_results_dir,
+            workdir=workdir,
+            scenario="installed-task-cli",
+            payload=task_cli_result,
         )
-        (evidence_dir / "installed-task-handoff.json").write_text(
-            json.dumps(handoff_result, sort_keys=True) + "\n", encoding="utf-8"
+        _write_result_evidence(
+            evidence_dir=evidence_dir,
+            private_results_dir=private_results_dir,
+            workdir=workdir,
+            scenario="installed-task-bulk-cancel",
+            payload=bulk_cancel_result,
         )
-        (evidence_dir / "installed-task-review.json").write_text(
-            json.dumps(review_result, sort_keys=True) + "\n", encoding="utf-8"
+        _write_result_evidence(
+            evidence_dir=evidence_dir,
+            private_results_dir=private_results_dir,
+            workdir=workdir,
+            scenario="installed-task-review",
+            payload=review_result,
         )
-        (evidence_dir / "installed-task-revision.json").write_text(
-            json.dumps(revision_result, sort_keys=True) + "\n", encoding="utf-8"
+        _write_result_evidence(
+            evidence_dir=evidence_dir,
+            private_results_dir=private_results_dir,
+            workdir=workdir,
+            scenario="installed-worker-coordination",
+            payload=coordination_result,
         )
-        (evidence_dir / "installed-expanded-handoff.json").write_text(
-            json.dumps(expanded_handoff_result, sort_keys=True) + "\n",
-            encoding="utf-8",
+        _write_result_evidence(
+            evidence_dir=evidence_dir,
+            private_results_dir=private_results_dir,
+            workdir=workdir,
+            scenario="installed-ordinary-tool",
+            payload=ordinary_tool_result,
         )
-        (evidence_dir / "installed-task-dependencies.json").write_text(
-            json.dumps(dependency_result, sort_keys=True) + "\n", encoding="utf-8"
+        _write_result_evidence(
+            evidence_dir=evidence_dir,
+            private_results_dir=private_results_dir,
+            workdir=workdir,
+            scenario="installed-plan-stages",
+            payload=planning_result,
         )
-        with (evidence_dir / "installed-worker-coordination.json").open(
-            "x", encoding="utf-8"
-        ) as stream:
-            json.dump(coordination_result, stream, sort_keys=True)
-            stream.write("\n")
-        with (evidence_dir / "installed-task-assignments.json").open(
-            "x", encoding="utf-8"
-        ) as stream:
-            json.dump(assignment_result, stream, sort_keys=True)
-            stream.write("\n")
-        with (evidence_dir / "installed-worker-profile.json").open(
-            "x", encoding="utf-8"
-        ) as stream:
-            json.dump(worker_profile_result, stream, sort_keys=True)
-            stream.write("\n")
-        with (evidence_dir / "installed-effect-ownership.json").open(
-            "x", encoding="utf-8"
-        ) as stream:
-            json.dump(effect_ownership_result, stream, sort_keys=True)
-
-        with (evidence_dir / "installed-task-priority.json").open(
-            "x", encoding="utf-8"
-        ) as stream:
-            json.dump(priority_result, stream, sort_keys=True)
-            stream.write("\n")
-        (evidence_dir / "configured-run.json").write_text(
-            json.dumps(configured_result, sort_keys=True) + "\n", encoding="utf-8"
+        _write_result_evidence(
+            evidence_dir=evidence_dir,
+            private_results_dir=private_results_dir,
+            workdir=workdir,
+            scenario="installed-plan-completion",
+            payload=planning_completion_result,
         )
-        (evidence_dir / "method-governance.json").write_text(
-            json.dumps(method_result, sort_keys=True) + "\n", encoding="utf-8"
+        for name, result in current_helper_results.items():
+            _write_result_evidence(
+                evidence_dir=evidence_dir,
+                private_results_dir=private_results_dir,
+                workdir=workdir,
+                scenario=f"installed-{name}",
+                payload=result,
+            )
+        _write_result_evidence(
+            evidence_dir=evidence_dir,
+            private_results_dir=private_results_dir,
+            workdir=workdir,
+            scenario="configured-run",
+            payload=configured_result,
+        )
+        _write_result_evidence(
+            evidence_dir=evidence_dir,
+            private_results_dir=private_results_dir,
+            workdir=workdir,
+            scenario="method-governance",
+            payload=method_result,
+        )
+        _write_result_evidence(
+            evidence_dir=evidence_dir,
+            private_results_dir=private_results_dir,
+            workdir=workdir,
+            scenario="artifact-lineage",
+            payload={"artifact_id": artifact_id, "lineage_nodes": 4},
         )
 
         _set_phase("post_rebuild_check")

@@ -510,6 +510,21 @@ def installed_task_diagnostics_smoke(
         )
     if not set(failure_run.get("fact_ids", ())) <= set(event_ids):
         raise RuntimeError("diagnostics omitted facts named by the selected run")
+    _status_completed, failed_status = assert_read_only(
+        "failure-task-status",
+        lambda: cli("failure-task-status", "task", "status", failure_id),
+    )
+    if (
+        not isinstance(failed_status, dict)
+        or failed_status.get("contract_id") != failure_id
+        or failed_status.get("status") != "stalled"
+        or failed_status.get("terminal") is not False
+        or failed_status.get("recovery_count") != 0
+        or failed_status.get("recoveries") != []
+    ):
+        raise RuntimeError(
+            "unfunded root invocation failure did not remain stalled without a recovery successor"
+        )
     ordered = [(row.get("revision"), row.get("record_id")) for row in pages]
     if ordered != sorted(ordered):
         raise RuntimeError("diagnostic events are not chronologically ordered")

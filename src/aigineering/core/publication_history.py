@@ -211,7 +211,7 @@ def validate_published_member(
         not allow_additional_causal_parents and len(member_parents) != 1
     ):
         raise ValueError("published member causal receipt shape is unsupported")
-    if allow_additional_causal_parents:
+    if allow_additional_causal_parents and "candidate_id" in member.payload:
         candidate_id = member.payload.get("candidate_id")
         receipt_matches = index.by_type_candidate.get(
             ("candidate.received", candidate_id), ()

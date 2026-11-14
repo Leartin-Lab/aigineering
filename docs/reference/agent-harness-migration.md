@@ -34,15 +34,12 @@ The Worker registration drives eligibility. Capabilities describe what the
 harness can execute—such as `vision`, `repository.write`, or
 `compliance.review`—rather than price, persona, or prompt style.
 
-`aig worker registrations WORKER_ID --json` displays the current registration,
-full immutable history and promotion records. For canonical local identities,
-an initial pull-only registration may advance once to a concrete adapter profile
-under the same Worker ID and key; active claims or other metadata changes block
-this automatic path. Explicit external registrations keep their existing
-semantics. Local hosts bind the selected version through the claim writer fence.
-Profile describes compatibility and does not prove which code executed. Stop
-older local Worker processes before promotion. See
-[ADR-039](../adr/ADR-039-local-worker-profile-promotion.md).
+`aig worker registrations WORKER_ID --json` displays the current registration
+and immutable history. Update an external registration explicitly through the
+signed registration owner. Local hosts bind their resolved registration version
+through the claim writer fence; a profile is descriptive metadata, not proof of
+which code executed. Automatic profile promotion is no longer a publication
+path. Stop older local Worker processes before changing the registration they use.
 
 ## Pull and submit loop
 

@@ -108,7 +108,12 @@ def task_review_smoke(aig: Path, python: Path, *, cwd: Path, env: dict[str, str]
             f"installed-review-request-{verdict}",
         ]
         request = json_command(aig, args, cwd=cwd, env=env)["data"]
-        reviewer_id = request["child_contract_id"]
+        relation = request.get("relation", {})
+        reviewer_id = relation.get("reviewer_contract_id")
+        request_asset_id = request.get("asset_id")
+        report_output = relation.get("report_output")
+        if not reviewer_id or not request_asset_id or not report_output:
+            raise RuntimeError("review request omitted its reviewer or request Asset")
         review_run = json_command(
             aig,
             [
@@ -127,7 +132,7 @@ def task_review_smoke(aig: Path, python: Path, *, cwd: Path, env: dict[str, str]
             raise RuntimeError("ordinary reviewer report task did not execute")
         report = json_command(
             aig,
-            ["asset", "show", request["report_output"]],
+            ["asset", "show", report_output],
             cwd=cwd,
             env=env,
         )
@@ -135,7 +140,7 @@ def task_review_smoke(aig: Path, python: Path, *, cwd: Path, env: dict[str, str]
             "task",
             "review",
             "decide",
-            request["record_id"],
+            request_asset_id,
             "--report",
             report["id"],
             "--verdict",
@@ -146,9 +151,10 @@ def task_review_smoke(aig: Path, python: Path, *, cwd: Path, env: dict[str, str]
             f"installed-review-decision-{verdict}",
         ]
         decided = json_command(aig, decide_args, cwd=cwd, env=env)["data"]
+        decision_relation = decided.get("relation", {})
         if (
-            decided["report_asset_id"] != report["id"]
-            or decided["asset_id"] != target_id
+            decision_relation.get("report_asset_id") != report["id"]
+            or decision_relation.get("asset_id") != target_id
         ):
             raise RuntimeError("review decision lost exact target/report references")
         if json_command(aig, args, cwd=cwd, env=env)["data"] != request:
@@ -156,8 +162,18 @@ def task_review_smoke(aig: Path, python: Path, *, cwd: Path, env: dict[str, str]
         if json_command(aig, decide_args, cwd=cwd, env=env)["data"] != decided:
             raise RuntimeError("review decision replay changed its original fact")
         history = json_command(aig, ["task", "reviews", source_id], cwd=cwd, env=env)
-        if history["data"] != [request, decided]:
-            raise RuntimeError("review history did not preserve request and decision")
+        expected_history = [request, decided]
+        history_rows = history.get("data", [])
+        if len(history_rows) != len(expected_history) or any(
+            any(
+                row.get(key) != expected.get(key)
+                for key in ("asset_id", "revision", "relation")
+            )
+            for row, expected in zip(history_rows, expected_history, strict=True)
+        ):
+            raise RuntimeError(
+                "review history did not preserve its exact request and decision Assets"
+            )
         status = json_command(aig, ["task", "status", source_id], cwd=cwd, env=env)
         if (status["status"] == "completed") != (verdict == "accept"):
             raise RuntimeError(
@@ -190,10 +206,12 @@ def task_review_smoke(aig: Path, python: Path, *, cwd: Path, env: dict[str, str]
                 cwd=cwd,
                 env=env,
             )
-            ids = {item["record_id"] for item in events["data"]}
-            if not {request["record_id"], decided["record_id"]}.issubset(ids):
+            if not any(
+                item.get("record_type") == "candidate.committed"
+                for item in events["data"]
+            ):
                 raise RuntimeError(
-                    "review facts absent from source/reviewer event scope"
+                    "review source/reviewer event scope omitted committed work"
                 )
     return {
         "request_report_decision": "passed",

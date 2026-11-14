@@ -92,7 +92,7 @@ class Worker:
     def __init__(self, worker_id):
         self.worker_id = worker_id
         self._llm = LLMWorker(
-            model="AIG_PRIVATE_LOG_PROMPT_20261007",
+            model="fixture-log-model",
             api_key="AIG_PRIVATE_LOG_KEY_20261007",
             base_url="http://fixture.invalid/v1",
             worker_id=worker_id,
@@ -137,8 +137,15 @@ try:
         table_hashes[name] = hashlib.sha256(json.dumps(
             normalized, sort_keys=True, separators=(",", ":"), default=str
         ).encode()).hexdigest()
-        ignored = ({"created_at", "updated_at"} if name == "worker_claims" else
-                   {"updated_at"} if name == "worker_registrations" else set())
+        ignored = (
+            {"created_at", "updated_at"}
+            if name == "worker_claims"
+            else {"updated_at"}
+            if name == "worker_registrations"
+            else {"through_revision", "basis_record_id"}
+            if name == "allowance_checkpoints"
+            else set()
+        )
         semantic_indexes = [i for i, column in enumerate(columns) if column not in ignored]
         semantic_rows = [[row[i] for i in semantic_indexes] for row in normalized]
         semantic_rows.sort(key=lambda x: json.dumps(x, sort_keys=True, default=str))
@@ -172,15 +179,52 @@ print(json.dumps({"same_records": before == after, "count": len(before)}))
 
 _REOPEN_REBUILD = r"""
 import json, sys
+from dataclasses import asdict
+from aigineering.core.causal_allowance import allowance_available, allowance_available_from_totals, fold_raw_allowance_records
+from aigineering.core.runtime_projection import RuntimeProjection
 from aigineering.core.sqlite_store import SQLiteStore
-path = sys.argv[1]
+path, contract_id = sys.argv[1:]
 def records(store):
     return sorted((r.id, r.recorded_at) for _, r in store.scan_runtime_records())
+def semantic_snapshot(store):
+    contract = store.get_contract(contract_id)
+    if contract is None:
+        raise RuntimeError("fixture Contract disappeared during rebuild")
+    scanned = store.scan_runtime_records()
+    all_records = [record for _, record in scanned]
+    allowance = store.read_raw_allowance_checkpoint(contract_id)
+    totals = None if allowance.totals is None else asdict(allowance.totals)
+    canonical_totals = fold_raw_allowance_records(contract_id, all_records)
+    totals_from_records = (
+        None if canonical_totals is None else asdict(canonical_totals)
+    )
+    available_from_checkpoint = (
+        None if allowance.totals is None
+        else allowance_available_from_totals(contract, allowance.totals)
+    )
+    available_from_records = allowance_available(contract, all_records)
+    view = asdict(RuntimeProjection(store, store).contract_view(contract))
+    row = store._conn.execute(
+        "SELECT * FROM allowance_checkpoints WHERE contract_id = ?", (contract_id,)
+    ).fetchone()
+    cache_row = None if row is None else {key: row[key] for key in row.keys()}
+    return {
+        "cache_row": cache_row,
+        "allowance_status": allowance.status,
+        "allowance_totals": totals,
+        "allowance_totals_from_records": totals_from_records,
+        "allowance_available_from_checkpoint": available_from_checkpoint,
+        "allowance_available_from_records": available_from_records,
+        "allowance_audit_issues": list(store.audit_allowance_checkpoints()),
+        "projection": view,
+    }
 store = SQLiteStore(path)
 before = records(store)
+semantic_before = semantic_snapshot(store)
 before_digest = store.runtime_materialization_digest()
 first = store.rebuild_runtime_materializations()
 after = records(store)
+semantic_after = semantic_snapshot(store)
 after_digest = store.runtime_materialization_digest()
 store.close()
 store = SQLiteStore(path)
@@ -188,10 +232,14 @@ reopened = records(store)
 reopened_digest = store.runtime_materialization_digest()
 second = store.rebuild_runtime_materializations()
 final = records(store)
+semantic_final = semantic_snapshot(store)
 final_digest = store.runtime_materialization_digest()
 store.close()
 print(json.dumps({"same_records": before == after == reopened == final,
                   "stable_digest": before_digest == first == after_digest == reopened_digest == second == final_digest,
+                  "semantic_before": semantic_before,
+                  "semantic_after": semantic_after,
+                  "semantic_final": semantic_final,
                   "before_digest": before_digest, "first_digest": first,
                   "after_digest": after_digest, "reopened_digest": reopened_digest,
                   "second_digest": second, "final_digest": final_digest,
@@ -541,11 +589,14 @@ def installed_task_logs_smoke(
             "asset_definition_content_assertions",
             "asset_definitions",
             "assets",
+            "allowance_checkpoints",
             "claims",
             "contract_activation_refs",
             "contract_declared_outputs",
             "contracts",
             "idempotency_records",
+            "publication_head_members",
+            "publication_index_state",
             "replacement_claims",
             "runtime_lifecycle",
             "runtime_records",
@@ -559,14 +610,14 @@ def installed_task_logs_smoke(
         if (
             initial_fingerprint.get("exists") is not True
             or set(initial_fingerprint.get("table_names", [])) != expected_tables
-            or len(initial_fingerprint.get("table_names", [])) != 18
+            or len(initial_fingerprint.get("table_names", [])) != len(expected_tables)
             or set(initial_fingerprint.get("row_counts", {})) != expected_tables
             or set(initial_fingerprint.get("table_sha256", {})) != expected_tables
             or set(initial_fingerprint.get("table_semantic_sha256", {}))
             != expected_tables
         ):
             raise RuntimeError(
-                "custom Store fingerprint table inventory differs from the 18-table schema"
+                "custom Store fingerprint table inventory differs from the installed schema"
             )
 
         cursor = None
@@ -1261,13 +1312,15 @@ def installed_task_logs_smoke(
         )
         _rebuild_cp, rebuild = run(
             "sqlite-materialization-rebuild",
-            [str(python), "-c", _REOPEN_REBUILD, str(custom_db)],
+            [str(python), "-c", _REOPEN_REBUILD, str(custom_db), contract_id],
         )
         after_materialization = db_fingerprint(
             "post-sqlite-materialization-fingerprint"
         )
         materialization_before_hashes = before_materialization.get("table_sha256", {})
         materialization_after_hashes = after_materialization.get("table_sha256", {})
+        materialization_before_counts = before_materialization.get("row_counts", {})
+        materialization_after_counts = after_materialization.get("row_counts", {})
         materialization_before_semantic = before_materialization.get(
             "table_semantic_sha256", {}
         )
@@ -1302,7 +1355,12 @@ def installed_task_logs_smoke(
             or rebuild.get("stable_digest") is not True
             or changed_materialization_semantic_tables
             or set(changed_materialization_tables)
-            - {"worker_claims", "worker_registrations"}
+            - {"worker_claims", "worker_registrations", "allowance_checkpoints"}
+            or (
+                "allowance_checkpoints" in changed_materialization_tables
+                and materialization_before_counts.get("allowance_checkpoints")
+                != materialization_after_counts.get("allowance_checkpoints")
+            )
             or materialization_before_hashes.get("runtime_records")
             != materialization_after_hashes.get("runtime_records")
             or materialization_before_hashes.get("claims")
@@ -1313,6 +1371,54 @@ def installed_task_logs_smoke(
             raise RuntimeError(
                 "SQLite materialization changed immutable records or semantic table fields"
             )
+        semantic_snapshots = [
+            rebuild.get("semantic_before"),
+            rebuild.get("semantic_after"),
+            rebuild.get("semantic_final"),
+        ]
+        if any(not isinstance(item, dict) for item in semantic_snapshots):
+            raise RuntimeError("SQLite rebuild omitted exact allowance evidence")
+        cache_rows = [item.get("cache_row") for item in semantic_snapshots]
+        if any(not isinstance(row, dict) for row in cache_rows):
+            raise RuntimeError(
+                "SQLite rebuild omitted the fixture allowance checkpoint"
+            )
+        changed_cache_columns = {
+            key
+            for left, right in zip(cache_rows, cache_rows[1:])
+            for key in set(left) | set(right)
+            if left.get(key) != right.get(key)
+        }
+        if changed_cache_columns - {"through_revision", "basis_record_id"}:
+            raise RuntimeError(
+                "SQLite rebuild changed allowance fields beyond checkpoint prefix metadata"
+            )
+        semantic_baseline = {
+            key: value
+            for key, value in semantic_snapshots[0].items()
+            if key != "cache_row"
+        }
+        if any(
+            {key: value for key, value in snapshot.items() if key != "cache_row"}
+            != semantic_baseline
+            for snapshot in semantic_snapshots[1:]
+        ):
+            raise RuntimeError(
+                "SQLite rebuild changed canonical allowance totals or RuntimeProjection"
+            )
+        for snapshot in semantic_snapshots:
+            if (
+                snapshot.get("allowance_status") != "valid"
+                or snapshot.get("allowance_audit_issues") != []
+                or snapshot.get("allowance_totals") is None
+                or snapshot.get("allowance_totals")
+                != snapshot.get("allowance_totals_from_records")
+                or snapshot.get("allowance_available_from_checkpoint")
+                != snapshot.get("allowance_available_from_records")
+            ):
+                raise RuntimeError(
+                    "SQLite rebuild allowance cache disagrees with immutable-record fold"
+                )
         redis_rebuild_before = db_fingerprint("pre-redis-rebuild-fingerprint")
         _redis_rebuild_cp, redis_rebuild = run(
             "isolated-redis-and-query-rebuild",
@@ -1443,7 +1549,10 @@ def installed_task_logs_smoke(
             sock.bind(("127.0.0.1", 0))
             dead_port = sock.getsockname()[1]
         outage_env = dict(local_env)
-        outage_env["AIGINEERING_REDIS_URL"] = f"redis://127.0.0.1:{dead_port}/12"
+        redis_database = redis_url.rsplit("/", 1)[-1]
+        outage_env["AIGINEERING_REDIS_URL"] = (
+            f"redis://127.0.0.1:{dead_port}/{redis_database}"
+        )
         outage_before = db_fingerprint("redis-outage-db-before")
         _cp, outage = run(
             "required-redis-outage",
@@ -1594,6 +1703,14 @@ def installed_task_logs_smoke(
                 "deterministic_digest": rebuild["stable_digest"],
                 "changed_table_names": changed_materialization_tables,
                 "changed_semantic_table_names": changed_materialization_semantic_tables,
+                "allowance_checkpoint_changed_columns": sorted(changed_cache_columns),
+                "allowance_totals": semantic_snapshots[0]["allowance_totals"],
+                "allowance_available": semantic_snapshots[0][
+                    "allowance_available_from_records"
+                ],
+                "task_budget_remaining": semantic_snapshots[0]["projection"][
+                    "budget_remaining"
+                ],
             },
             "redis_query_rebuild_and_table_fingerprint": {
                 "status": "passed",

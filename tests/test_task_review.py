@@ -639,6 +639,124 @@ def test_relation_assets_are_descriptive_and_history_exposes_asset_ids(world):
     reopened.close()
 
 
+@pytest.mark.parametrize("verdict", ("accept", "changes"))
+def test_decision_history_preserves_ordinary_relations(world, verdict):
+    from aigineering.core.publication_history import validate_published_member
+    from aigineering.task_policy_review import task_review_records
+
+    store = world["store"]
+    source = world["source"]
+    request, _ = publish_task_review_request(
+        store,
+        source.id,
+        "final",
+        world["target"].id,
+        "Check frozen evidence",
+        idempotency_key="history-request",
+    )
+    reviewer = store.get_contract(request["relation"]["reviewer_contract_id"])
+    report = _publish_claimed_output(
+        store,
+        world["genesis"],
+        world["signer"],
+        world["report_actor"],
+        reviewer,
+        request["relation"]["report_output"],
+        "Independent report over frozen evidence",
+    )
+    decision, _ = publish_task_review_decision(
+        store,
+        request["asset_id"],
+        report.id,
+        verdict,
+        "Check completed",
+        idempotency_key="history-decision",
+    )
+    records = tuple(record for _revision, record in store.scan_runtime_records())
+    before = tuple(
+        (revision, record.id) for revision, record in store.scan_runtime_records()
+    )
+    relation_commit = next(
+        record
+        for record in records
+        if record.record_type == "asset.committed"
+        and record.payload["asset"]["id"] == decision["asset_id"]
+    )
+    request_commit = next(
+        record
+        for record in records
+        if record.record_type == "asset.committed"
+        and record.payload["asset"]["id"] == request["asset_id"]
+    )
+    receipt, head = validate_published_member(records, relation_commit)
+    request_receipt, request_head = validate_published_member(records, request_commit)
+    attestation = next(
+        record for record in records if record.record_type == "asset.attested"
+    )
+    assert "candidate_id" not in attestation.payload
+    assert len(attestation.causal_parents) > 1
+    assert validate_published_member(
+        records,
+        attestation,
+        expected_receipt=receipt.id,
+        expected_head=head.id,
+        allow_additional_causal_parents=True,
+    ) == (receipt, head)
+    with pytest.raises(ValueError, match="receipt witness changed"):
+        validate_published_member(
+            records,
+            attestation,
+            expected_receipt=request_receipt.id,
+            allow_additional_causal_parents=True,
+        )
+    with pytest.raises(ValueError, match="head witness changed"):
+        validate_published_member(
+            records,
+            attestation,
+            expected_head=request_head.id,
+            allow_additional_causal_parents=True,
+        )
+    replay, _ = publish_task_review_decision(
+        store,
+        request["asset_id"],
+        report.id,
+        verdict,
+        "Check completed",
+        idempotency_key="history-decision",
+    )
+    assert replay == decision
+    assert (
+        tuple((rev, record.id) for rev, record in store.scan_runtime_records())
+        == before
+    )
+    history, revision = task_review_records(store, source.id)
+    assert [row["asset_id"] for row in history] == [
+        request["asset_id"],
+        decision["asset_id"],
+    ]
+    assert [row["relation"] for row in history] == [
+        request["relation"],
+        decision["relation"],
+    ]
+    assert revision == store.get_runtime_revision()
+    assert (
+        tuple((rev, record.id) for rev, record in store.scan_runtime_records())
+        == before
+    )
+
+    reopened = SQLiteStore(world["store_path"])
+    try:
+        assert task_review_records(reopened, source.id) == (history, revision)
+        reopened.rebuild_runtime_materializations()
+        assert task_review_records(reopened, source.id) == (history, revision)
+        assert (
+            tuple((rev, record.id) for rev, record in reopened.scan_runtime_records())
+            == before
+        )
+    finally:
+        reopened.close()
+
+
 def test_legacy_review_facts_are_read_only_history(world):
     legacy = create_runtime_record(
         "task.review.requested",

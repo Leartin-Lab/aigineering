@@ -11,11 +11,13 @@ from aigineering.core.acceptance import (
 )
 from aigineering.core.output_satisfaction import output_asset_meets_conditions
 from aigineering.core.publication_history import (
+    committed_member_ids,
     index_published_records,
     validate_published_member,
 )
 from aigineering.core.projection_context import load_effect_projection_context
 from aigineering.protocol.identity import canonical_json
+from aigineering.protocol.immutability import deep_thaw
 from aigineering.protocol.types import Asset
 
 REQUEST_RELATION = "task-review-request"
@@ -140,12 +142,12 @@ def task_review_asset_records(store, source_contract_id: str) -> list[dict]:
         if relation is None or relation.get("source_contract_id") != source_contract_id:
             continue
         try:
-            receipt, _head = validate_published_member(
+            receipt, head = validate_published_member(
                 records, committed, record_index=publication_index
             )
+            member_ids = frozenset(committed_member_ids(head))
         except ValueError:
             continue
-        candidate_id = receipt.payload.get("candidate_id")
         expected_effects = (
             ("contract.declare", "asset.propose")
             if relation["relation"] == REQUEST_RELATION
@@ -165,11 +167,7 @@ def task_review_asset_records(store, source_contract_id: str) -> list[dict]:
             str(relation.get("asset_id", "")),
         } <= set(receipt.causal_parents):
             continue
-        members = tuple(
-            record
-            for record in records
-            if record.payload.get("candidate_id") == candidate_id
-        )
+        members = tuple(record for record in records if record.id in member_ids)
         if relation["relation"] == REQUEST_RELATION:
             reviewer_id = relation.get("reviewer_contract_id")
             source = store.get_contract(source_contract_id)
@@ -297,9 +295,9 @@ def task_review_asset_records(store, source_contract_id: str) -> list[dict]:
                 != relation.get("reviewer_contract_id")
                 or request.get("policy_id") != relation.get("policy_id")
                 or request.get("policy_version") != relation.get("policy_version")
-                or attestation.payload.get("rubric_asset_ids")
+                or deep_thaw(attestation.payload.get("rubric_asset_ids"))
                 != request.get("rubric_asset_ids")
-                or attestation.payload.get("evidence_asset_ids")
+                or deep_thaw(attestation.payload.get("evidence_asset_ids"))
                 != request.get("evidence_asset_ids")
                 or report is None
                 or target is None
@@ -318,6 +316,8 @@ def task_review_asset_records(store, source_contract_id: str) -> list[dict]:
                     records,
                     attestation,
                     expected_receipt=receipt.id,
+                    expected_head=head.id,
+                    allow_additional_causal_parents=True,
                     record_index=publication_index,
                 )
             except ValueError:
