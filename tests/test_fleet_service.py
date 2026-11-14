@@ -820,7 +820,12 @@ def test_stop_gate_drains_admitted_invocation_and_blocks_later_claims(
     live_state = None
     while time.monotonic() < ack_deadline:
         live_state = read_service_metadata(state_path)
-        if live_state is not None and live_state["state"] == "stopping":
+        # The stop watcher can acknowledge before the slot sampler refreshes.
+        if (
+            live_state is not None
+            and live_state["state"] == "stopping"
+            and live_state["active_slots"] == 1
+        ):
             break
         time.sleep(0.01)
     assert live_state is not None and live_state["state"] == "stopping"
