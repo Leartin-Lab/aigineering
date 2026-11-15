@@ -37,6 +37,10 @@ and [earlier import changes](../../changes/133-cli-guidance-and-runtime-contract
   real-provider reliability remains unestablished.
 - Planning, tool continuation, review and recovery publish ordinary Tasks and
   Assets. There is no post-completion controller or runtime execution DAG.
+  Continuations retain prior declared inputs. Native tool responses must use
+  names advertised in that request. Generic repair retains the failed Task's
+  scope and description, with actual funding and current publisher authority
+  checked separately.
 - The current fresh writer surface does not include handoff, revision/edit,
   mutable assignment, dependency edges, holds/promotion, priority writes,
   comments or attachment links. Historical records may be inspected where

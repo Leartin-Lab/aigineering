@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
+from contextlib import nullcontext
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
@@ -129,7 +130,27 @@ def schedule_projection_recovery(
         return result if include_disposition else result.contract
 
     source_record_ids = _normalize_source_record_ids(source_record_ids)
-    funder = _generic_recovery_funder(store, failed_contract)
+    from aigineering.plugins.recovery_history import RecoveryHistoryCaptureUnstable
+
+    try:
+        snapshot = recovery_snapshot or _capture_recovery_history(store, publisher)
+    except RecoveryHistoryCaptureUnstable:
+        result = RecoveryDisposition(None, "recovery_history_conflict")
+        return result if include_disposition else None
+    if snapshot is None:
+        result = RecoveryDisposition(None, "recovery_history_unavailable")
+        return result if include_disposition else None
+    existing = _find_recovery_for_failure(
+        snapshot,
+        publisher,
+        failed_contract,
+        source_record_ids,
+        expected_parent_id=failed_contract.id,
+    )
+    if existing is not None:
+        result = RecoveryDisposition(existing)
+        return result if include_disposition else existing
+    funder = _generic_recovery_funder(snapshot, failed_contract)
     if funder is None:
         result = RecoveryDisposition(None, "recovery_unfunded")
         return result if include_disposition else None
@@ -145,7 +166,7 @@ def schedule_projection_recovery(
         idempotency_key=f"projection-recovery:{failed_contract.id}",
         causal_parents=causal_parents,
         source_record_ids=source_record_ids,
-        recovery_snapshot=recovery_snapshot,
+        recovery_snapshot=snapshot,
     )
     disposition = RecoveryDisposition(
         published[0] if published is not None else None,
@@ -633,18 +654,13 @@ def _find_recovery_for_failure(
         if not isinstance(raw, Mapping):
             continue
         contract_id = raw.get("id")
-        receipt_row = next(
-            (
-                row
-                for row in rows
-                if row.record_type == "candidate.received"
-                and row.payload.get("candidate_id")
-                == declaration.payload.get("candidate_id")
-            ),
-            None,
-        )
-        if receipt_row is None:
+        candidate_id = declaration.payload.get("candidate_id")
+        if not isinstance(candidate_id, str):
             continue
+        receipts = index.by_type_candidate.get(("candidate.received", candidate_id), ())
+        if len(receipts) != 1:
+            continue
+        receipt_row = receipts[0]
         payload = receipt_row.payload
         causal = tuple(receipt_row.causal_parents)
         if (
@@ -702,6 +718,8 @@ def _find_recovery_for_failure(
                 body = json.loads(asset.content)
             except (TypeError, json.JSONDecodeError):
                 continue
+            if not isinstance(body, dict):
+                continue
             if (
                 body.get("failed_contract_id") == expected_parent_id
                 and body.get("source_contract_id", expected_parent_id)
@@ -751,7 +769,13 @@ def _projection_recovery_intent(
         "instructions": repair_instructions,
         "source_record_ids": list(source_record_ids),
     }
-    description = json.dumps(
+    try:
+        source_description = json.loads(failed_contract.description)
+    except (TypeError, json.JSONDecodeError):
+        source_description = None
+    if not isinstance(source_description, dict):
+        source_description = {"source_description": failed_contract.description}
+    source_description.update(
         {
             "recovery": "projection_repair",
             "failed_contract_id": failed_contract.id,
@@ -760,7 +784,10 @@ def _projection_recovery_intent(
                 f"Read {context_name}. {repair_instructions} Required outputs: "
                 f"{list(failed_contract.outputs)}."
             ),
-        },
+        }
+    )
+    description = json.dumps(
+        source_description,
         sort_keys=True,
         ensure_ascii=False,
     )
@@ -810,11 +837,11 @@ def _projection_recovery_intent(
     return recovery, asset
 
 
-def _generic_recovery_funder(store, failed_contract: Contract) -> Contract | None:
+def _generic_recovery_funder(snapshot, failed_contract: Contract) -> Contract | None:
     from aigineering.core.causal_allowance import allowance_available
 
-    contracts = {item.id: item for item in store.get_all_contracts()}
-    records = tuple(record for _, record in store.scan_runtime_records())
+    contracts = {item.id: item for item in snapshot.context.contracts}
+    records = snapshot.context.runtime_records
     terminal_ids = {
         str(record.payload.get("contract_id"))
         for record in records
@@ -824,9 +851,7 @@ def _generic_recovery_funder(store, failed_contract: Contract) -> Contract | Non
     visited: set[str] = set()
     while current is not None and current.id not in visited:
         visited.add(current.id)
-        if current.id not in terminal_ids and _recovery_scope_fits(
-            current, failed_contract
-        ):
+        if current.id not in terminal_ids:
             if allowance_available(current, records) >= 1:
                 return current
         current = contracts.get(current.parent_id)
@@ -949,7 +974,9 @@ def _prove_existing_recovery(
 def _capture_recovery_history(store, publisher):
     from aigineering.plugins.recovery_history import capture_recovery_history
 
-    return capture_recovery_history(store, publisher)
+    read_scope = getattr(store, "read_transaction", nullcontext)
+    with read_scope():
+        return capture_recovery_history(store, publisher)
 
 
 def _normalize_source_record_ids(record_ids: tuple[str, ...]) -> tuple[str, ...]:

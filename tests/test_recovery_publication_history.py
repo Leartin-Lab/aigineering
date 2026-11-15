@@ -211,3 +211,89 @@ def test_tool_recovery_without_authenticated_source_claim_publishes_nothing(tmp_
     assert disposition.reason == "source_proof_missing"
     assert store.get_runtime_revision() == before
     store.close()
+
+
+@pytest.mark.parametrize("existing", [False, True])
+def test_recovery_capture_keeps_one_wal_snapshot(tmp_path, monkeypatch, existing):
+    from aigineering.plugins import recovery as recovery_module
+    from aigineering.protocol.runtime_record import create_runtime_record
+
+    store, _setup, _root, failed, publisher, source_id = _environment(tmp_path)
+
+    def schedule():
+        return schedule_projection_recovery(
+            store,
+            publisher,
+            failed_contract=failed,
+            candidate_raw="malformed output",
+            rejections=[],
+            source_record_ids=(source_id,),
+            include_disposition=True,
+        )
+
+    prior = schedule().contract if existing else None
+    if existing:
+
+        def no_maker(*args, **kwargs):
+            pytest.fail("existing recovery must be read without invoking its maker")
+
+        monkeypatch.setattr(recovery_module, "_projection_recovery_intent", no_maker)
+
+    original_publish = CandidatePublisher.publish
+
+    def publish_after_read(self, *args, **kwargs):
+        assert not store._conn.in_transaction
+        return original_publish(self, *args, **kwargs)
+
+    monkeypatch.setattr(CandidatePublisher, "publish", publish_after_read)
+    original_read = store.get_claim_history_contract_ids
+    marker = create_runtime_record("query.test.concurrent_marker", {})
+    with SQLiteStore(tmp_path / "recovery-history.sqlite3") as writer:
+
+        def concurrent_write():
+            result = original_read()
+            writer.append_runtime_record(marker)
+            return result
+
+        monkeypatch.setattr(store, "get_claim_history_contract_ids", concurrent_write)
+        before = store.get_runtime_revision()
+        try:
+            result = schedule()
+            assert result.contract is not None
+            assert not store._conn.in_transaction
+            assert any(r.id == marker.id for _, r in store.scan_runtime_records())
+            if existing:
+                assert result.contract.id == prior.id
+                assert store.get_runtime_revision() == before + 1
+            else:
+                assert store.get_runtime_revision() > before + 1
+            assert sum(c.origin == "recovery" for c in store.get_all_contracts()) == 1
+        finally:
+            store.close()
+
+
+def test_recovery_capture_exception_releases_read_scope(tmp_path, monkeypatch):
+    from aigineering.plugins import recovery as recovery_module
+    from aigineering.protocol.types import Asset
+
+    store, _setup, _root, _failed, publisher, _source_id = _environment(tmp_path)
+
+    def broken_read():
+        raise ValueError("capture fixture failure")
+
+    monkeypatch.setattr(store, "get_claim_history_contract_ids", broken_read)
+    try:
+        with pytest.raises(ValueError, match="capture fixture failure"):
+            recovery_module._capture_recovery_history(store, publisher)
+        assert not store._conn.in_transaction
+        decision = publisher.publish(
+            (
+                asset_proposal_effect(
+                    Asset(id="after-capture", name="after", content="ok")
+                ),
+            ),
+            idempotency_key="after-capture-error",
+        )
+        assert decision.accepted
+    finally:
+        store.close()

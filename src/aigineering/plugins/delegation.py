@@ -107,7 +107,7 @@ def _parallel_tool_contracts(
         allowance,
         legacy_stage_labels=False,
         legacy_consumed_tool_scope=False,
-        legacy_acceptance_policy=False,
+        legacy_continuation=False,
     )
 
 
@@ -121,7 +121,7 @@ def _legacy_parallel_tool_contracts(
         allowance,
         legacy_stage_labels=True,
         legacy_consumed_tool_scope=True,
-        legacy_acceptance_policy=True,
+        legacy_continuation=True,
     )
 
 
@@ -135,7 +135,7 @@ def _baseline_parallel_tool_contracts(
         allowance,
         legacy_stage_labels=False,
         legacy_consumed_tool_scope=True,
-        legacy_acceptance_policy=True,
+        legacy_continuation=True,
     )
 
 
@@ -146,7 +146,7 @@ def _build_parallel_tool_contracts(
     *,
     legacy_stage_labels: bool,
     legacy_consumed_tool_scope: bool,
-    legacy_acceptance_policy: bool,
+    legacy_continuation: bool,
 ) -> tuple[Contract, ...]:
     payload = deep_thaw(action.payload)
     calls = payload.get("calls")
@@ -191,7 +191,11 @@ def _build_parallel_tool_contracts(
     continuation_fields = {
         "name": f"{parent.name or parent.id}.parallel_tool.continue.{batch_key}",
         "description": parent.description,
-        "inputs": observations,
+        "inputs": (
+            observations
+            if legacy_continuation
+            else tuple(dict.fromkeys((*parent.inputs, *observations)))
+        ),
         "outputs": parent.outputs,
         "activation": " AND ".join(observations),
         "budget": allowance - len(tool_tasks),
@@ -219,7 +223,7 @@ def _build_parallel_tool_contracts(
         ),
         "context_asset_ids": parent.context_asset_ids,
     }
-    if legacy_acceptance_policy:
+    if legacy_continuation:
         if (
             parent.acceptance_policy is not None
             and parent.acceptance_policy.get("mode") == "mechanical"

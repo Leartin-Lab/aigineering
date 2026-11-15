@@ -70,6 +70,7 @@ _FAILURE_CODES = frozenset(
         "json_object_with_tools_unsupported",
         "tool_call_missing_function",
         "tool_call_missing_name",
+        "tool_call_not_advertised",
         "tool_call_invalid_arguments",
         "planning_compile_rejected",
         "invocation_failure",

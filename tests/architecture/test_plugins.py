@@ -599,8 +599,9 @@ def test_parallel_tool_method_compiles_independent_tasks_and_boolean_join():
     assert {json.loads(item.description)["method"] for item in tools} == {
         "parallel_tool_item"
     }
-    assert set(continuation.inputs) == {item.outputs[0] for item in tools}
-    assert continuation.activation == " AND ".join(continuation.inputs)
+    observations = tuple(item.outputs[0] for item in tools)
+    assert continuation.inputs == tuple(dict.fromkeys((*parent.inputs, *observations)))
+    assert continuation.activation == " AND ".join(observations)
     assert continuation.outputs == parent.outputs
     assert all(item.budget == 1 for item in tools)
     assert continuation.budget == 1

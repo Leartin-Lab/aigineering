@@ -314,6 +314,15 @@ class LLMWorker:
                         "JSON object response mode cannot be combined with native tools",
                     )
                 payload["tools"] = scoped_tools
+                payload["messages"][0]["content"] += (
+                    "\nNative function calls use exactly the advertised tool name "
+                    "and its direct arguments. Protocol actions such as /exec, "
+                    "/tool and /parallel_tool are text actions, not native wrappers."
+                )
+
+        advertised_names = frozenset(
+            tool["function"]["name"] for tool in payload.get("tools", ())
+        )
 
         headers = {"Content-Type": "application/json"}
         if self.api_key:
@@ -346,7 +355,9 @@ class LLMWorker:
                         "json_object_tool_call_response",
                         "JSON object response mode requires one JSON action object",
                     )
-                raw_output, parsed_action = self._map_tool_calls_to_actions(tool_calls)
+                raw_output, parsed_action = self._map_tool_calls_to_actions(
+                    tool_calls, allowed_names=advertised_names
+                )
                 return Candidate(
                     worker_id=self.worker_id,
                     raw_output=raw_output,
@@ -489,6 +500,8 @@ class LLMWorker:
     @staticmethod
     def _map_tool_calls_to_actions(
         tool_calls: list[dict[str, object]],
+        *,
+        allowed_names: frozenset[str],
     ) -> tuple[str, dict[str, object]]:
         """Map OpenAI *tool_calls* to ``/tool`` method request format.
 
@@ -528,6 +541,12 @@ class LLMWorker:
             if not isinstance(name, str) or not name.strip():
                 raise WorkerExecutionError(
                     "tool_call_missing_name", "tool call missing valid 'name'"
+                )
+            if name not in allowed_names:
+                raise WorkerExecutionError(
+                    "tool_call_not_advertised",
+                    "Native function was not advertised for this request; use an "
+                    "advertised tool name with direct arguments, or a text protocol action",
                 )
             args_str = func.get("arguments", "{}")
             if isinstance(args_str, str):

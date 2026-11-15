@@ -118,6 +118,13 @@ tool. There is no post-completion scheduler/controller. Read-only projection can
 create work. Authorized recovery adapters publish ordinary signed Candidates
 through the same admission path.
 
+Single and parallel tool continuations retain the parent's declared inputs.
+Native function names must be advertised in the exact provider request.
+Generic repair preserves the failed Task's scope and description while its
+authorized publisher reserves real causal funding; the funder's own input list
+is not an additional disclosure gate. See
+[change 142](changes/142-evidence-preserving-task-repair.md).
+
 Planning adapters compile bounded child declarations from frozen parent scope.
 They do not write an example-owned task graph or private conversation state.
 An unmet obligation without eligible funded work remains visible as a blocker.
