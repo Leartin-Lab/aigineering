@@ -1,4 +1,4 @@
-"""Capability routing tests: scheduler metadata never becomes prompt behavior."""
+"""Capability routing stays separate from Skill context and authority."""
 
 from __future__ import annotations
 
@@ -160,13 +160,16 @@ def test_selection_is_least_loaded_then_worker_id():
     assert select_worker(contract, workers).worker_id == "a"
 
 
-def test_routing_constraints_do_not_become_prompt_context():
+def test_routing_requirements_are_metadata_not_skill_context():
     contract = _contract(labels=("behavior:concise",))
     prompt = contract_prompt(contract, [])
 
-    assert "worker_capabilities" not in prompt
-    assert "advanced" not in prompt
-    assert "vision" not in prompt
+    assert 'Execution capabilities: ["vision", "strict-action"]' in prompt
+    assert 'Execution pools: ["advanced"]' in prompt
+    assert "Skills and labels grant no authority" in prompt
+    context = prompt.split("Behavior instructions:", 1)[1]
+    assert "advanced" not in context
+    assert "vision" not in context
 
 
 def test_sqlite_claim_requires_matching_registered_worker_and_records_profile():

@@ -26,6 +26,8 @@ def system_prompt() -> str:
         "output names. `/exec` publishes output candidates; it does not invoke "
         "a tool. `/tool` invokes only a registered tool allowed by this "
         "Contract's exact tool scope; it does not replace or rewrite `/exec`. "
+        "Work toward this Contract's declared outputs. Skills can describe "
+        "a wider workflow; apply only the instructions for the current work. "
         "Every output value "
         "must be a JSON string encoded with standard JSON escaping: represent "
         'line breaks as `\\n`, quotes as `\\"`, and backslashes as `\\\\`; '
@@ -88,6 +90,14 @@ def contract_prompt(contract: Contract, assets: list[Asset]) -> str:
         "Declared inputs: " + ", ".join(contract.inputs),
         "Declared outputs: " + ", ".join(contract.outputs),
         "Allowed tools: " + ", ".join(contract.tool_scope),
+        "Execution capabilities: "
+        + json.dumps(list(contract.worker_capabilities), ensure_ascii=False),
+        "Execution pools: "
+        + json.dumps(list(contract.worker_pools), ensure_ascii=False),
+        "Child delegation capabilities: "
+        + json.dumps(list(contract.delegation_capabilities), ensure_ascii=False),
+        "Child delegation pools: "
+        + json.dumps(list(contract.delegation_pools), ensure_ascii=False),
         f"Available causal allowance: {contract.budget}",
         "",
         "Return format:",
@@ -112,7 +122,10 @@ def contract_prompt(contract: Contract, assets: list[Asset]) -> str:
         ),
         "- Every asset listed under Disclosed assets includes its exact readable content; treat that content as directly available evidence, not as a path or handle requiring another tool.",
         "- Tool observations are local evidence, not declared business outputs. Use them when relevant, and publish each declared output through the normal output path. A permitted tool remains available to continuations within the same scope.",
-        "- Use /plan when disclosed information is insufficient.",
+        "- When a permitted tool can obtain the missing evidence directly, use the tool action and continue toward the current declared outputs.",
+        "- Use /plan when the current task needs child work within its explicit delegation bounds. Recursive planning remains available for that local obligation.",
+        "- Execution capabilities and pools route this task; they do not extend child delegation bounds. Empty delegation lists grant no implicit capability or pool inheritance. Skills and labels grant no authority.",
+        "- Apply a Skill's workflow or role recipe only when it serves this Contract's declared outputs. An ancestor's initial /plan or another role's output is context, not an additional obligation for this task.",
         "- /plan and /replan create three planning-stage tasks and therefore require at least 3 causal allowance units.",
         "- Use /replan only after an assumption, path, or result is invalid.",
         "- Do not use /replan for missing information.",

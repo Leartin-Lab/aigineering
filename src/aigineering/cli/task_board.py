@@ -153,6 +153,10 @@ def _safe_status(
         "recoveries": list(status["recoveries"]),
         "rejection_count": status["rejection_count"],
         "trace_event_count": status["trace_event_count"],
+        "failure_details": list(status.get("failure_details", ())),
+        "reported_failure_candidates_truncated": status.get(
+            "reported_failure_candidates_truncated", False
+        ),
     }
 
 
@@ -178,6 +182,10 @@ def _cards(store, contracts, query_context) -> list[dict]:
                 "budget_remaining": status["budget_remaining"],
                 "outputs_satisfied": status["outputs_satisfied"],
                 "recoveries": status["recoveries"],
+                "failure_details": status["failure_details"],
+                "reported_failure_candidates_truncated": status[
+                    "reported_failure_candidates_truncated"
+                ],
             }
         )
     return cards

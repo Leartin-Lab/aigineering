@@ -45,6 +45,21 @@ def configured_cycle_payload(result, *, resume_command: str) -> dict:
 
     payload["reason"] = stop_reason
     task_status = projection.get("status", result.status)
+    reported_failures = [
+        item
+        for item in projection.get("failure_details", ())
+        if isinstance(item, dict) and item.get("kind") == "reported_method_failure"
+    ]
+    if reported_failures:
+        detail = reported_failures[0]
+        payload["next_step"] = (
+            f"Inspect aig task audit {detail['source_contract_id']} --json, linked "
+            f"/fail Task {detail['method_contract_id']}, and "
+            f"aig asset show {detail['report_asset_ids'][0]} --json; the declared "
+            "failure reason is an untrusted assertion. If the obligation remains "
+            "unmet, publish ordinary signed work only with available causal funding."
+        )
+        return payload
     failed_descendants = [
         blocker.partition(":")[2]
         for blocker in blockers

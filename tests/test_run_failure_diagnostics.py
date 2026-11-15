@@ -590,3 +590,45 @@ def test_stalled_resume_redacts_historical_failure_text_without_current_proof():
     assert marker not in json.dumps(payload, sort_keys=True)
     assert payload["projection"]["rejections"] == ["[recovery] details omitted"]
     assert "resume_command" not in payload
+
+
+def test_reported_failure_projection_guides_to_exact_read_only_evidence():
+    detail = {
+        "kind": "reported_method_failure",
+        "source_contract_id": "task:source",
+        "method_contract_id": "task:method",
+        "report_asset_ids": ["asset:report"],
+        "reason": "PRIVATE_DECLARED_REASON_MARKER",
+    }
+    invocation_failure = {
+        "kind": "invocation_failure",
+        "status": "invocation_failed",
+        "contract_id": "task:method",
+        "claim_id": "lease:old-claim",
+    }
+    result = SimpleNamespace(
+        contract_id="task:source",
+        status="stalled",
+        completed=False,
+        timed_out=False,
+        worker_errors=(),
+        worker_failure_details=(invocation_failure,),
+        capture_warnings=(),
+        stop_reason="deadline",
+        cycles=(),
+        submission_status=None,
+        projection={
+            "status": "stalled",
+            "blockers": ["claim:submitted"],
+            "failure_details": [detail],
+        },
+    )
+
+    payload = configured_cycle_payload(result, resume_command="aig run --resume exact")
+
+    assert payload["worker_failure_details"] == [invocation_failure]
+    assert "aig task audit task:source --json" in payload["next_step"]
+    assert "linked /fail Task task:method" in payload["next_step"]
+    assert "aig asset show asset:report --json" in payload["next_step"]
+    assert "PRIVATE_DECLARED_REASON_MARKER" not in payload["next_step"]
+    assert "available causal funding" in payload["next_step"]

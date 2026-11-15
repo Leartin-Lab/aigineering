@@ -36,6 +36,15 @@ policy still requires its exact qualification.
 The board and status are read-only views of committed facts. They show
 unfinished outputs, missing inputs, capability or claim blockers, and
 independent acceptance separately. They do not schedule work or repair state.
+When a linked `/fail` method has a published report while its source outputs
+remain unmet, the view identifies the source Task, method declaration, report
+Asset, and publication proof. Its reason is an untrusted declared assertion;
+inspect the exact source audit and report Asset before deciding what funded
+ordinary work to publish. Any admitted Asset that satisfies the source's frozen
+requirements can clear this current warning, regardless of producer.
+At most eight linked failure candidates are proof-checked in one view; the
+`reported_failure_candidates_truncated` flag indicates that the display limit
+was reached, not that any unseen candidate is a valid report.
 
 ## Inspect and export exact results
 

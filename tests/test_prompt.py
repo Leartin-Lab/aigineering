@@ -168,8 +168,48 @@ def test_ordinary_task_can_still_plan_recursively():
         [],
     )
 
-    assert "Use /plan when disclosed information is insufficient." in prompt
+    assert "Use /plan when the current task needs child work" in prompt
+    assert "Recursive planning remains available" in prompt
     assert "already-issued /plan or /replan action" not in prompt
+
+
+@pytest.mark.parametrize("delegation", [(), ("research",)])
+def test_prompt_distinguishes_local_routing_from_child_scope(delegation):
+    contract = Contract(
+        id="local-analysis",
+        description="Obtain evidence and publish the local analysis.",
+        outputs=("analysis",),
+        tool_scope=("measure",),
+        worker_capabilities=("execute-analysis",),
+        worker_pools=("analysis-workers",),
+        delegation_capabilities=delegation,
+        delegation_pools=("child-workers",) if delegation else (),
+    )
+    skill = Asset(
+        id="shared-skill",
+        name="_skill_content_study",
+        content="Begin the overall study with /plan, then arrange review.",
+    )
+    prompt = contract_prompt(contract, [skill])
+    import json
+
+    fields = dict(
+        line.split(": ", 1)
+        for line in prompt.splitlines()
+        if line.startswith(("Execution ", "Child delegation "))
+    )
+    assert json.loads(fields["Execution capabilities"]) == ["execute-analysis"]
+    assert json.loads(fields["Execution pools"]) == ["analysis-workers"]
+    assert json.loads(fields["Child delegation capabilities"]) == list(delegation)
+    assert json.loads(fields["Child delegation pools"]) == list(
+        contract.delegation_pools
+    )
+    assert "permitted tool can obtain the missing evidence directly" in prompt
+    assert "only when it serves this Contract's declared outputs" in prompt
+    assert "Skills and labels grant no authority" in prompt
+    assert skill.content in prompt
+    assert '- /plan {"reason":' in prompt
+    assert '- /tool {"name":' in prompt
 
 
 def test_prompt_omits_markdown_example_for_shaped_and_protected_outputs():

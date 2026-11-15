@@ -17,6 +17,11 @@ from aigineering.core.output_satisfaction import (
     all_outputs_satisfied,
     output_asset_meets_conditions,
     is_output_role_asset,
+    selected_output_assets,
+)
+from aigineering.core.publication_history import (
+    index_published_records,
+    validate_published_member,
 )
 from aigineering.core.worker_routing import eligible_workers
 from aigineering.core.claim_assignments import (
@@ -28,6 +33,8 @@ from aigineering.core.projection_context import load_effect_projection_context
 from aigineering.plugins.task_priority import PRIORITY_FACT, priority_histories
 from aigineering.protocol.immutability import deep_thaw
 from aigineering.protocol.types import Contract, TraceEntry
+from aigineering.protocol.wire import contract_to_dict
+from aigineering.plugins.task_semantics import method_payload
 
 
 def contract_tree_ids(contracts: list[Contract], root_contract_id: str) -> set[str]:
@@ -141,6 +148,12 @@ def project_task_status(
         store,
         include_contract=status in {"failed", "cancelled", "unreachable", "stalled"},
     )
+    reported_failures, reported_failures_truncated = _reported_method_failures(
+        contract,
+        projection_context,
+        query_context=query_context,
+    )
+    failure_details.extend(reported_failures)
     blockers = list(view.blockers)
     if qualification_pending and "qualification:independent_acceptance" not in blockers:
         blockers.append("qualification:independent_acceptance")
@@ -148,6 +161,7 @@ def project_task_status(
         blockers.extend(
             f"descendant_{item['status']}:{item['contract_id']}"
             for item in failure_details
+            if isinstance(item.get("status"), str)
         )
     risks = _silent_failure_risks(
         contract,
@@ -183,6 +197,7 @@ def project_task_status(
         "trace_event_count": len(entries),
         "token_usage": usage,
         "failure_details": failure_details,
+        "reported_failure_candidates_truncated": reported_failures_truncated,
         "historical_assignment": (
             {
                 "assignment_id": assignment_fact.id,
@@ -672,6 +687,147 @@ def _descendant_failure_details(
             details.append(detail)
         pending.extend(children.get(child.id, ()))
     return details
+
+
+def _reported_method_failures(contract, projection_context, *, query_context=None):
+    """Expose a published /fail assertion only while its source outputs remain unmet."""
+    from aigineering.core.output_satisfaction import all_outputs_satisfied
+
+    contracts = tuple(projection_context.contracts)
+    records = tuple(projection_context.runtime_records)
+    by_id = {item.id: item for item in contracts}
+    children: dict[str, list[Contract]] = {}
+    for item in contracts:
+        if item.parent_id is not None:
+            children.setdefault(item.parent_id, []).append(item)
+    tree_ids = {contract.id}
+    pending = [contract.id]
+    while pending:
+        current_id = pending.pop()
+        for child in children.get(current_id, ()):
+            if child.id not in tree_ids:
+                tree_ids.add(child.id)
+                pending.append(child.id)
+
+    linked = []
+    for task in contracts:
+        if task.id not in tree_ids:
+            continue
+        declared = method_payload(task)
+        if declared.get("method") != "fail" or not isinstance(
+            declared.get("payload"), Mapping
+        ):
+            continue
+        source = by_id.get(task.parent_id or "")
+        if (
+            source is None
+            or source.id not in tree_ids
+            or declared.get("parent_contract_id") != source.id
+        ):
+            continue
+        linked.append((task, source, declared))
+    if not linked or not records:
+        return [], False
+
+    index = index_published_records(records)
+    declarations_by_id: dict[str, list] = {}
+    declaration_order: dict[str, int] = {}
+    terminal_ids = {
+        row.payload.get("contract_id")
+        for row in index.records
+        if row.record_type == "lifecycle.terminal"
+        and isinstance(row.payload.get("contract_id"), str)
+    }
+    for ordinal, row in enumerate(index.records):
+        if row.record_type != "contract.declared":
+            continue
+        declaration = row.payload.get("contract")
+        declared_id = (
+            declaration.get("id") if isinstance(declaration, Mapping) else None
+        )
+        if isinstance(declared_id, str):
+            declarations_by_id.setdefault(declared_id, []).append(row)
+            declaration_order.setdefault(declared_id, ordinal)
+    from aigineering.core.projection_store_view import ProjectionStoreView
+
+    view = query_context or ProjectionStoreView(projection_context)
+    candidates = []
+    for task, source, declared in linked:
+        if source.id in terminal_ids:
+            continue
+        declarations = declarations_by_id.get(task.id, ())
+        if len(declarations) != 1 or deep_thaw(
+            declarations[0].payload["contract"]
+        ) != deep_thaw(contract_to_dict(task)):
+            continue
+        candidates.append(
+            (
+                declaration_order.get(task.id, len(index.records)),
+                task,
+                source,
+                declared,
+                declarations[0],
+            )
+        )
+
+    details = []
+    truncated = len(candidates) > 8
+    for _ordinal, task, source, declared, declaration in sorted(
+        candidates, key=lambda item: item[0]
+    )[:8]:
+        if len(task.outputs) != 1:
+            continue
+        if all_outputs_satisfied(source, view):
+            continue
+        try:
+            receipt, head = validate_published_member(
+                records,
+                declaration,
+                record_index=index,
+                domain_id=(
+                    query_context.domain_id if query_context is not None else None
+                ),
+            )
+        except (TypeError, ValueError):
+            continue
+        selected = selected_output_assets(task, view)
+        if len(selected) != len(set(task.outputs)) or not selected:
+            continue
+        asset = next(iter(selected.values()))
+        try:
+            report_receipt, report_head, _member = validate_asset_publication(
+                projection_context, asset
+            )
+        except (LookupError, TypeError, ValueError):
+            continue
+        if (
+            asset.tombstoned
+            or not asset.promptable
+            or asset.disclosure_view != "original"
+        ):
+            continue
+        reason = declared["payload"].get("reason")
+        if not isinstance(reason, str) or not reason.strip():
+            continue
+        reason = " ".join(reason.split())[:500]
+        details.append(
+            {
+                "kind": "reported_method_failure",
+                "assertion_label": "untrusted declared failure reason",
+                "source_contract_id": source.id,
+                "method_contract_id": task.id,
+                "method_declaration_record_id": declaration.id,
+                "method_receipt_id": receipt.id,
+                "method_head_id": head.id,
+                "method_actor_id": receipt.payload.get("actor_id"),
+                "report_asset_ids": [asset.id],
+                "report_receipt_id": report_receipt.id,
+                "report_head_id": report_head.id,
+                "report_actor_id": report_receipt.payload.get("actor_id"),
+                "reason": reason,
+            }
+        )
+    return details, truncated
 
 
 def _observation_asset_ids(entry: TraceEntry, store) -> list[str]:
