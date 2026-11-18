@@ -43,6 +43,10 @@ def _repl_loop() -> None:
             continue
 
         parts = raw[1:].split(None, 1)
+        if not parts:
+            click.echo("Type /help for available commands.")
+            continue
+
         command = parts[0].lower()
         args_str = parts[1] if len(parts) > 1 else ""
 

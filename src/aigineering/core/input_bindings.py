@@ -3,9 +3,28 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from enum import Enum
 from typing import Any
 
 from aigineering.protocol.types import Asset, Contract
+
+
+class InputAssetBindingIssue(Enum):
+    MISSING = "input_asset_bindings references a missing Asset"
+    WRONG_ROLE = "input_asset_bindings Asset name does not match its role"
+    TOMBSTONED = "input_asset_bindings cannot reference a tombstoned Asset"
+
+
+def input_asset_binding_issue(
+    role: str, asset: Asset | None
+) -> InputAssetBindingIssue | None:
+    if asset is None:
+        return InputAssetBindingIssue.MISSING
+    if asset.name != role:
+        return InputAssetBindingIssue.WRONG_ROLE
+    if asset.tombstoned:
+        return InputAssetBindingIssue.TOMBSTONED
+    return None
 
 
 def input_asset_bindings(policy: object) -> dict[str, tuple[str, ...]]:
@@ -50,17 +69,9 @@ def validate_input_asset_binding_targets(
         if role not in contract.inputs:
             continue
         for asset_id in asset_ids:
-            asset = by_id.get(asset_id)
-            if asset is None:
-                raise ValueError("input_asset_bindings references a missing Asset")
-            if asset.name != role:
-                raise ValueError(
-                    "input_asset_bindings Asset name does not match its role"
-                )
-            if asset.tombstoned:
-                raise ValueError(
-                    "input_asset_bindings cannot reference a tombstoned Asset"
-                )
+            issue = input_asset_binding_issue(role, by_id.get(asset_id))
+            if issue is not None:
+                raise ValueError(issue.value)
 
 
 def read_contract_input_assets(contract: Contract, store: Any) -> list[Asset]:
@@ -78,21 +89,16 @@ def read_contract_input_assets(contract: Contract, store: Any) -> list[Asset]:
             continue
         for asset_id in bindings[role]:
             asset = store.get_asset(asset_id)
-            if asset is None:
-                raise ValueError("input_asset_bindings references a missing Asset")
-            if asset.name != role:
-                raise ValueError(
-                    "input_asset_bindings Asset name does not match its role"
-                )
-            if asset.tombstoned:
-                raise ValueError(
-                    "input_asset_bindings cannot reference a tombstoned Asset"
-                )
+            issue = input_asset_binding_issue(role, asset)
+            if issue is not None:
+                raise ValueError(issue.value)
             result.append(asset)
     return result
 
 
 __all__ = [
+    "InputAssetBindingIssue",
+    "input_asset_binding_issue",
     "input_asset_bindings",
     "read_contract_input_assets",
     "validate_input_asset_binding_targets",

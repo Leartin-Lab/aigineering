@@ -593,6 +593,22 @@ class MemoryStore(_ProjectionIndexMixin):
     def get_assets_by_name(self, name: str) -> list[Asset]:
         return [a for a in self.assets.values() if a.name == name]
 
+    def get_latest_asset_by_name(self, name: str) -> Asset | None:
+        matches = {asset.id: asset for asset in self.get_assets_by_name(name)}
+        if not matches:
+            return None
+        first_revisions: dict[str, int] = {}
+        for revision, record in self._runtime_records.values():
+            if record.record_type == "asset.committed":
+                asset_id = record.payload["asset"]["id"]
+                if asset_id in matches:
+                    first_revisions.setdefault(asset_id, revision)
+        return max(
+            matches.values(),
+            key=lambda asset: (first_revisions.get(asset.id, 0), asset.id),
+            default=None,
+        )
+
     def has_asset_named(self, name: str) -> bool:
         return any(a.name == name for a in self.assets.values())
 

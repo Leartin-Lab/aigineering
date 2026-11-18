@@ -6,8 +6,12 @@ import json
 from dataclasses import replace
 
 import pytest
+from click.testing import CliRunner
 
+from aigineering.adapters.redis_query import QueryProjectionUnavailable
+from aigineering.application import collaboration_service
 from aigineering.cli._candidate import commit_local_effects, require_accepted
+from aigineering.cli.main import cli
 from aigineering.core.control_plane import build_control_plane_asset
 from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.core.worker_routing import WorkerRegistration
@@ -147,6 +151,55 @@ def attest(store, service, evaluation):
             idempotency_key=f"review:{evaluation.id}",
         )
     )
+
+
+def test_method_attest_cli_relays_durable_decision(domain, tmp_path, monkeypatch):
+    store, service = domain
+    method = service.import_package(json.dumps(package_data()))
+    suite = service.import_cases(json.dumps(suite_data()), "heldout")
+    run, _ = service.prepare_tests(method.id, suite.id, name="checks", budget=1)
+    run_cases(store, run, _MethodWorker())
+    evaluation, assessment = service.assess(run.id)
+    monkeypatch.setattr(
+        "aigineering.cli.method._persistent_store",
+        lambda: SQLiteStore(str(tmp_path / "methods.db")),
+    )
+
+    class InterruptedRelay:
+        def sync(self):
+            raise QueryProjectionUnavailable("method attestation relay interrupted")
+
+    relay = collaboration_service(store)
+    before = relay.status()["watermark"]
+    runner = CliRunner()
+    command = ("method", "attest", evaluation.id, "--json")
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            "aigineering.runtime_services.collaboration_service",
+            lambda _store: InterruptedRelay(),
+        )
+        result = runner.invoke(cli, command)
+    assert result.exit_code == 1
+    pending = json.loads(result.output)
+    assert pending["error"] == "redis_sync_pending"
+    assert pending["facts_retained"] and pending["candidate_accepted"]
+    assert pending["revision"] == store.get_runtime_revision()
+    assert relay.status()["watermark"] == before < pending["revision"]
+    assert pending["asset_ids"] == [evaluation.id]
+    assert pending["contract_ids"] == [assessment.id]
+    records = {
+        record.record_type: record
+        for record in store.read_candidate_publication(pending["candidate_id"])
+    }
+    assert pending["receipt_id"] == records["candidate.received"].id
+    assert pending["head_id"] == records["candidate.committed"].id
+    assert records["asset.attested"].payload["asset_id"] == evaluation.id
+
+    replayed = runner.invoke(cli, command)
+    assert replayed.exit_code == 0, replayed.output
+    assert store.get_runtime_revision() == pending["revision"]
+    assert relay.status()["watermark"] == pending["revision"]
+    assert len(store.scan_runtime_records(record_type="asset.attested")) == 1
 
 
 def test_generated_method_is_tested_qualified_and_reused_after_rebuild(

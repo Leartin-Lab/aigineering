@@ -1,8 +1,8 @@
 # Support and limits
 
-The current development branch is **dev**, scoped to bounded local
-single-machine workflows. This is an unreleased snapshot; delivery claims
-depend on evidence for the exact artifact and case. Python integrations should
+Ordinary development lands on **dev**. The runtime described here supports
+bounded local single-machine workflows. Delivery claims depend on evidence for
+the exact artifact and case. Python integrations should
 consult the [primitive runtime migration](../../changes/137-closed-primitive-task-runtime.md#public-compatibility)
 and [earlier import changes](../../changes/133-cli-guidance-and-runtime-contraction.md#python-import-migration).
 
@@ -20,17 +20,20 @@ and [earlier import changes](../../changes/133-cli-guidance-and-runtime-contract
 
 ## Operational boundaries
 
-- Schema 24 is the current reader floor. Stop older Workers and back up before
-  upgrading. The floor cannot constrain a connection already opened by an old
-  process.
+- Schema 24 is the current reader floor. Stop older Workers before running
+  `aig domain upgrade`. The command creates a backup before applying the schema
+  floor and rebuilding the Asset graph in one transaction. An old connection
+  opened before the upgrade can still be active. See
+  [change 145](../../changes/145-atomic-schema-upgrade.md).
 - Output requirements can select exact Definition, content, producer actor
   and shape. A matching admitted Asset from another Task can satisfy an
   output. Historical `output_source` metadata remains readable but does not
   impose a producer-tree rule. Independent acceptance still requires exact
   qualification.
 - Engine bridge output Definitions describe the frozen goal and exact mapped
-  inputs. Existing signed bridge history is not rewritten; an old publication
-  that does not match current output conditions may require new ordinary work.
+  inputs. A completed bridge verifies its original publication when replayed.
+  An older publication that does not match current output conditions may require
+  new ordinary work.
 - Failure is recorded at the attempt and audit level. Retry or recovery
   requires an actually available causal grant. No root grant is fabricated.
   Bounded deterministic and installed CLI cases verify these paths; broad

@@ -9,10 +9,13 @@ from click.testing import CliRunner
 
 import aigineering.cli.asset as asset_cli
 from aigineering.cli.main import cli
+from aigineering.core.asset_versions import resolve_latest
 from aigineering.core.control_plane import build_control_plane_asset
+from aigineering.core.provenance import sign_asset
 from aigineering.core.query_projection import StoreQueryProjection
 from aigineering.core.sqlite_store import SQLiteStore
 from conftest import candidate_runtime
+from test_shared_definition_output import _graph_output_effects
 
 
 @pytest.fixture(autouse=True)
@@ -275,6 +278,67 @@ class TestAssetList:
             assert isinstance(data, list)
             assert len(data) == 1
             assert data[0]["name"] == "x"
+
+
+def test_latest_asset_uses_first_commit_revision_across_reopen(monkeypatch, tmp_path):
+    db_path = tmp_path / "versions.sqlite"
+    with SQLiteStore(str(db_path)) as store:
+        runtime = candidate_runtime(store)
+        _, _, _, older_effects = _graph_output_effects(
+            runtime,
+            (runtime.signer, runtime.actor_key),
+            name="report",
+            content_text="version B",
+            source_uri="fixture:report",
+        )
+        _, _, _, newer_effects = _graph_output_effects(
+            runtime,
+            (runtime.signer, runtime.actor_key),
+            name="report",
+            content_text="version A",
+            source_uri="fixture:report",
+        )
+        first = runtime.publisher.publish(older_effects, idempotency_key="report-first")
+        second = runtime.publisher.publish(
+            newer_effects, idempotency_key="report-second"
+        )
+        assert first.accepted and second.accepted
+        oldest = first.assets[0]
+        latest = second.assets[0]
+        replay = runtime.publisher.publish(
+            older_effects, idempotency_key="report-first"
+        )
+        assert replay.accepted and replay.assets[0].id == oldest.id
+        repeated = runtime.publisher.publish(
+            older_effects, idempotency_key="report-repeat"
+        )
+        assert repeated.accepted and repeated.assets[0].id == oldest.id
+        assert len(store.read_asset_commit_facts(oldest.id)) == 2
+        assert latest.content_hash < oldest.content_hash
+
+    with SQLiteStore(str(db_path)) as store:
+        assert resolve_latest(store, "report").id == latest.id
+        monkeypatch.setattr(asset_cli, "_persistent_store", lambda: store)
+        listed = CliRunner().invoke(asset_cli.asset_group, ["versions", "report"])
+        assert listed.exit_code == 0, listed.output
+        assert f"→ {latest.id[:24]}" in listed.output
+
+
+def test_latest_asset_retains_deterministic_legacy_order(tmp_path):
+    with SQLiteStore(str(tmp_path / "legacy-versions.sqlite")) as store:
+        runtime = candidate_runtime(store)
+        legacy = [
+            sign_asset(build_control_plane_asset(name="report", content=content))
+            for content in ("legacy A", "legacy B")
+        ]
+        for asset in legacy:
+            store.add_asset(asset)
+        assert resolve_latest(store, "report").id == max(asset.id for asset in legacy)
+
+        committed = runtime.accept_asset(
+            build_control_plane_asset(name="report", content="committed version")
+        )
+        assert resolve_latest(store, "report").id == committed.id
 
 
 class TestAssetShow:

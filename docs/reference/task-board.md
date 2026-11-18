@@ -48,9 +48,10 @@ was reached, not that any unseen candidate is a valid report.
 
 ## Inspect and export exact results
 
-Use the exact Asset IDs shown by status, audit or `aig asset show`. `result`
-exports only an output whose requirements are satisfied and whose independent
-qualification is present when required:
+Use the exact Asset IDs shown by status, audit or `aig asset show`. For each
+completed output slot, status and `result` select the lowest Asset ID among
+admitted Assets that match the declared requirements and have independent
+qualification when required.
 
 ```bash
 aig task audit <contract_id> --json
@@ -59,8 +60,9 @@ aig task result <contract_id> --output report --to report.md --json
 
 Without `--to`, the command lists result metadata. It does not overwrite an
 existing file. Sealed, non-promptable, tombstoned or transformed content is not
-exported. Same-name output sharing is allowed only when the declared conditions
-match; use exact selectors when identity matters.
+exported. The selected Asset must pass disclosure before its bytes can be
+exported. Same-name Assets can satisfy a slot when the declared conditions
+match. Use exact selectors when identity matters.
 
 ## Retry, cancel and diagnose
 

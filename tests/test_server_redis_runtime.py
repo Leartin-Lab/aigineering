@@ -101,8 +101,9 @@ def test_redis_health_returns_sanitized_503_when_required_service_is_down(
     }
 
 
-def test_postcommit_relay_failure_returns_pending_and_keeps_asset_fact(
-    tmp_path, monkeypatch
+@pytest.mark.parametrize("authenticated", [True, False])
+def test_postcommit_relay_failure_reports_only_durable_identifiers(
+    tmp_path, monkeypatch, authenticated
 ):
     monkeypatch.chdir(tmp_path)
     signer = Ed25519Signer()
@@ -151,25 +152,47 @@ def test_postcommit_relay_failure_returns_pending_and_keeps_asset_fact(
         idempotency_key="server-postcommit-pending-test",
     )
 
-    response = TestClient(app).post(
-        "/assets", json=candidate_proposal_to_dict(candidate)
-    )
+    body = candidate_proposal_to_dict(candidate)
+    if not authenticated:
+        body["signature"] = "invalid-signature"
+    response = TestClient(app).post("/assets", json=body)
 
     assert response.status_code == 503
-    assert response.json() == {
+    assert content not in response.text
+    assert body["signature"] not in response.text
+    expected = {
         "ok": False,
         "error": "redis_sync_pending",
         "facts_retained": True,
-        "candidate_accepted": True,
+        "candidate_accepted": authenticated,
     }
     persisted = SQLiteStore.snapshot_from_path(tmp_path / ".aig/store.db")
     try:
+        expected["revision"] = persisted.get_runtime_revision()
         stored_assets = persisted.get_assets_by_name(asset.name)
-        assert len(stored_assets) == 1
-        assert stored_assets[0].content == content
-        assert any(
-            record.record_type == "candidate.committed"
-            for _, record in persisted.scan_runtime_records()
-        )
+        if authenticated:
+            (stored,) = stored_assets
+            assert stored.content == content
+            history = {
+                record.record_type: record
+                for record in persisted.read_candidate_publication(candidate.id)
+            }
+            expected.update(
+                {
+                    "candidate_id": candidate.id,
+                    "receipt_id": history["candidate.received"].id,
+                    "head_id": history["candidate.committed"].id,
+                    "asset_ids": [stored.id],
+                }
+            )
+        else:
+            assert not stored_assets
+            assert not persisted.read_candidate_publication(candidate.id)
+            ((_, audit),) = persisted.scan_runtime_records(
+                record_type="candidate.authentication_rejected"
+            )
+            expected["rejection_id"] = audit.id
+            assert candidate.id not in response.text
+        assert response.json() == expected
     finally:
         persisted.close()

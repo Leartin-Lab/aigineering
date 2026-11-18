@@ -9,6 +9,11 @@ import json
 from typing import Any
 
 from aigineering.core.ids import hash_asset_content, hash_asset_definition
+from aigineering.core.input_bindings import (
+    InputAssetBindingIssue,
+    input_asset_binding_issue,
+    input_asset_bindings,
+)
 from aigineering.core.provenance import verify_asset_seal
 from aigineering.core.trust_policy import TrustPolicy
 from aigineering.protocol.types import Asset, Contract, TrustTier
@@ -58,68 +63,55 @@ def check_sufficiency(
         "sufficiency_ok": True,
     }
 
-    # ── 1. Missing inputs ─────────────────────────────────────────────────
-    for input_name in contract.inputs:
-        if not store.has_asset_named(input_name):
-            report["missing_inputs"].append(input_name)
+    bindings = input_asset_bindings(contract.sensitive_input_policy)
+    assets_by_definition: dict[str, dict[str, str]] = {}
+    policy_gaps = []
+    for role in dict.fromkeys(contract.inputs):
+        if role in bindings:
+            assets = []
+            missing = not bindings[role]
+            for asset_id in bindings[role]:
+                asset = store.get_asset(asset_id)
+                issue = input_asset_binding_issue(role, asset)
+                if asset is None or issue is InputAssetBindingIssue.WRONG_ROLE:
+                    missing = True
+                else:
+                    assets.append(asset)
+        else:
+            assets = store.get_assets_by_name(role)
+            missing = not assets
+            for asset in assets:
+                if asset.definition_hash:
+                    assets_by_definition.setdefault(asset.definition_hash, {})[
+                        asset.id
+                    ] = asset.name
 
-    # ── 2. Stale / tombstoned assets ──────────────────────────────────────
-    for input_name in contract.inputs:
-        if store.has_asset_named(input_name):
-            for asset in store.get_assets_by_name(input_name):
-                if asset.tombstoned:
-                    if input_name not in report["stale_assets"]:
-                        report["stale_assets"].append(input_name)
+        if missing:
+            report["missing_inputs"].append(role)
+        if any(asset.tombstoned for asset in assets):
+            report["stale_assets"].append(role)
+        if any(not asset.tombstoned and _trust_gap(asset) for asset in assets):
+            report["trust_gaps"].append(role)
+        if any(not asset.tombstoned and _seal_gap(asset) for asset in assets):
+            report["seal_gaps"].append(role)
+        if trust_policy is not None and assets:
+            result = trust_policy.evaluate(assets, contract)
+            if not result.accepted:
+                policy_gaps.extend(
+                    {"asset": role, "gap": "trust", "reason": reason}
+                    for reason in result.reasons
+                )
 
-    # ── 3. Version conflicts (multiple versions under same def_hash) ──────
-    seen_def_hashes: dict[str, list[str]] = {}
-    for input_name in contract.inputs:
-        for asset in store.get_assets_by_name(input_name):
-            if asset.definition_hash:
-                seen_def_hashes.setdefault(asset.definition_hash, []).append(asset.id)
-    for def_hash, asset_ids in seen_def_hashes.items():
-        unique_ids = list(set(asset_ids))
-        if len(unique_ids) > 1:
-            # Find the names that contributed to this conflict
-            conflicting_names: list[str] = []
-            for aid in unique_ids:
-                a = store.get_asset(aid)
-                if a is not None and a.name not in conflicting_names:
-                    conflicting_names.append(a.name)
+    report["trust_gaps"].extend(policy_gaps)
+    for definition_hash, names_by_id in assets_by_definition.items():
+        if len(names_by_id) > 1:
             report["version_conflicts"].append(
                 {
-                    "definition_hash": def_hash,
-                    "asset_ids": sorted(unique_ids),
-                    "names": sorted(conflicting_names),
+                    "definition_hash": definition_hash,
+                    "asset_ids": sorted(names_by_id),
+                    "names": sorted(set(names_by_id.values())),
                 }
             )
-
-    # ── 4. Trust gaps ─────────────────────────────────────────────────────
-    for input_name in contract.inputs:
-        for asset in store.get_assets_by_name(input_name):
-            if _trust_gap(asset) and not asset.tombstoned:
-                if input_name not in report["trust_gaps"]:
-                    report["trust_gaps"].append(input_name)
-
-    # ── 4b. Trust policy enrichment (when policy provided) ────────────────
-    if trust_policy is not None:
-        for input_name in contract.inputs:
-            assets = store.get_assets_by_name(input_name)
-            if not assets:
-                continue
-            trust_result = trust_policy.evaluate(assets, contract)
-            if not trust_result.accepted:
-                for reason in trust_result.reasons:
-                    report["trust_gaps"].append(
-                        {"asset": input_name, "gap": "trust", "reason": reason}
-                    )
-
-    # ── 5. Signature gaps ─────────────────────────────────────────────────
-    for input_name in contract.inputs:
-        for asset in store.get_assets_by_name(input_name):
-            if _seal_gap(asset) and not asset.tombstoned:
-                if input_name not in report["seal_gaps"]:
-                    report["seal_gaps"].append(input_name)
 
     # ── 6. Recommendation ─────────────────────────────────────────────────
     has_missing = len(report["missing_inputs"]) > 0

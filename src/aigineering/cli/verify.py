@@ -14,6 +14,7 @@ from aigineering.core.verification import (
 )
 from aigineering.protocol.effect_builders import asset_attestation_effect
 from aigineering.local_identity import ensure_local_plugin_publisher
+from aigineering.runtime_services import sync_runtime
 
 
 @click.group("verify")
@@ -49,11 +50,6 @@ def verify_attest(
     """Publish a signed independent attestation for one exact output Asset."""
     store = _persistent_store()
     try:
-        publisher = ensure_local_plugin_publisher(
-            store,
-            "human.verify.v1",
-            ("asset.attest", "verify.human"),
-        )
         contract = store.get_contract(contract_id)
         if contract is None:
             raise LookupError(f"unknown Contract {contract_id!r}")
@@ -67,29 +63,36 @@ def verify_attest(
             raise ValueError(
                 "--evidence-asset values must exactly match the Contract policy"
             )
-        decision = require_accepted(
-            publisher.publish(
-                (
-                    asset_attestation_effect(
-                        contract_id,
-                        output_name,
-                        asset_id,
-                        policy_id=acceptance_policy_id(policy),
-                        policy_version=policy_version,
-                        verdict=verdict,
-                        rubric_asset_ids=rubric_asset_ids,
-                        evidence_asset_ids=evidence_asset_ids,
-                    ),
-                ),
-                idempotency_key=(
-                    f"attest:{contract_id}:{output_name}:{asset_id}:{verdict}:"
-                    f"{','.join(evidence_asset_ids)}"
-                ),
-                causal_parents=(asset_id, *evidence_asset_ids),
-            )
+        publisher = ensure_local_plugin_publisher(
+            store,
+            "human.verify.v1",
+            ("asset.attest", "verify.human"),
         )
+        decision = publisher.publish(
+            (
+                asset_attestation_effect(
+                    contract_id,
+                    output_name,
+                    asset_id,
+                    policy_id=acceptance_policy_id(policy),
+                    policy_version=policy_version,
+                    verdict=verdict,
+                    rubric_asset_ids=rubric_asset_ids,
+                    evidence_asset_ids=evidence_asset_ids,
+                ),
+            ),
+            idempotency_key=(
+                f"attest:{contract_id}:{output_name}:{asset_id}:{verdict}:"
+                f"{','.join(evidence_asset_ids)}"
+            ),
+            causal_parents=(asset_id, *evidence_asset_ids),
+        )
+        sync_runtime(store, decision=decision)
+        require_accepted(decision)
     except (LookupError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
+    finally:
+        store.close()
     payload = {
         "accepted": decision.accepted,
         "asset_id": asset_id,

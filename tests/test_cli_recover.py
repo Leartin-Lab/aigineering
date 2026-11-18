@@ -350,6 +350,136 @@ def test_recover_cancel_and_recreate_json():
         assert len(data["recovery_required"]) == 2
 
 
+def test_combined_recovery_resumes_after_interruption_without_repeating_effects(
+    monkeypatch,
+):
+    import importlib
+
+    recovery = importlib.import_module("aigineering.cli.recover")
+    runner = CliRunner()
+    args = ["recover", "--cancel", "--recreate", "--json"]
+    with runner.isolated_filesystem():
+        store, first, second = _make_recovery_scenario(".aig/store.db")
+        commit = recovery.commit_local_effects
+        calls = []
+
+        def interrupt_second(*args, **kwargs):
+            calls.append(tuple(effect.effect_type for effect in args[1]))
+            if len(calls) == 2:
+                raise ValueError("interrupted before commit")
+            return commit(*args, **kwargs)
+
+        with monkeypatch.context() as patch:
+            patch.setattr(recovery, "commit_local_effects", interrupt_second)
+            failed = runner.invoke(cli, args)
+        assert failed.exit_code == 1
+        assert calls == [("contract.declare", "contract.cancel")] * 2
+        assert _cancelled_contract_ids(store) == {first.id}
+        assert len(store.get_child_contracts(first.id)) == 1
+        assert not store.get_child_contracts(second.id)
+
+        retried = runner.invoke(cli, args)
+        assert retried.exit_code == 0, retried.output
+        assert set(json.loads(retried.output)["cancelled"]) == {first.id, second.id}
+        revision = store.get_runtime_revision()
+        repeated = runner.invoke(cli, args)
+        assert repeated.exit_code == 0, repeated.output
+        assert json.loads(repeated.output) == json.loads(retried.output)
+        assert store.get_runtime_revision() == revision
+        store.close()
+
+
+def test_combined_recovery_finishes_legacy_half_action_without_another_reservation():
+    runner = CliRunner()
+    args = ["recover", "--cancel", "--recreate", "--json"]
+    with runner.isolated_filesystem():
+        store, _, _ = _make_recovery_scenario(".aig/store.db")
+        legacy = runner.invoke(cli, ["recover", "--recreate", "--json"])
+        assert legacy.exit_code == 0, legacy.output
+        reservations = store.scan_runtime_records(record_type="allowance.reserved")
+        result = runner.invoke(cli, args)
+        assert result.exit_code == 0, result.output
+        assert (
+            json.loads(result.output)["recreated"]
+            == json.loads(legacy.output)["recreated"]
+        )
+        assert (
+            store.scan_runtime_records(record_type="allowance.reserved") == reservations
+        )
+        revision = store.get_runtime_revision()
+        replayed = runner.invoke(cli, args)
+        assert replayed.exit_code == 0, replayed.output
+        assert json.loads(replayed.output) == json.loads(result.output)
+        assert store.get_runtime_revision() == revision
+        store.close()
+
+
+def test_combined_recovery_rejects_unfunded_replacement_without_cancel():
+    from dataclasses import replace
+
+    from aigineering.core.control_plane import build_control_plane_contract
+    from aigineering.local_publication import commit_local_effect
+    from aigineering.protocol.effect_builders import contract_declaration_effect
+    from aigineering.protocol.identity import contract_identity_v3
+
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        assert runner.invoke(cli, ["domain", "init"]).exit_code == 0
+        with SQLiteStore(".aig/store.db") as store:
+            root = build_control_plane_contract(name="funded root", budget=1)
+            child = replace(
+                build_control_plane_contract(name="allocated elsewhere", budget=1),
+                parent_id=root.id,
+            )
+            child = replace(child, id=contract_identity_v3(child))
+            for item in (root, child):
+                assert commit_local_effect(
+                    store, contract_declaration_effect(item), idempotency_key=item.id
+                ).accepted
+            store.append(
+                create_entry(
+                    contract_id=root.id, event_type="recovery_required", sequence=1
+                )
+            )
+            result = runner.invoke(cli, ["recover", "--cancel", "--recreate", "--json"])
+            assert result.exit_code == 1
+            assert "allowance" in result.output
+            assert store.get_child_contracts(root.id) == [child]
+            assert not _cancelled_contract_ids(store)
+
+
+def test_combined_recovery_reports_existing_child_without_exact_publication():
+    from aigineering.cli.recover import _replacement
+    from aigineering.local_publication import commit_local_effect
+    from aigineering.protocol.effect_builders import contract_declaration_effect
+
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        store, first, second = _make_recovery_scenario(".aig/store.db")
+        with store:
+            assert runner.invoke(cli, ["domain", "init"]).exit_code == 0
+            replacement = _replacement(first)
+            assert commit_local_effect(
+                store,
+                contract_declaration_effect(replacement),
+                idempotency_key="different-recovery-operation",
+            ).accepted
+            result = runner.invoke(cli, ["recover", "--cancel", "--recreate", "--json"])
+            assert result.exit_code == 0, result.output
+            report = json.loads(result.output)
+            assert set(report["recovery_required"]) == {first.id, second.id}
+            assert report["cancelled"] == [second.id]
+            assert report["blocked"] == [
+                {
+                    "original_id": first.id,
+                    "existing_recovery_ids": [replacement.id],
+                    "reason": "missing_exact_recovery_publication",
+                }
+            ]
+            assert _cancelled_contract_ids(store) == {second.id}
+            assert store.get_child_contracts(first.id) == [replacement]
+
+
 # ---------------------------------------------------------------------------
 # Guard: no flags = list-only (no mutation)
 # ---------------------------------------------------------------------------

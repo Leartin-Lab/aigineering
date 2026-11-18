@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 import sys
 from types import ModuleType
@@ -10,18 +11,32 @@ from conftest import candidate_runtime, hosted_worker
 import pytest
 
 from aigineering.agent.engine_worker import EngineWorker
+from aigineering.agent import engine_worker
 from aigineering.agent.mock import MockWorker
 from aigineering.agent.worker import WorkerHost
 from aigineering.fleet_config import load_fleet_config
 from aigineering.local_identity import ensure_local_domain, ensure_local_worker_host
 from aigineering.runtime import claim_next_package, execute_claimed_package
 from aigineering.runtime import submit_worker_proposal
+from aigineering.core.acceptance import validate_asset_publication
+from aigineering.core.candidate_publisher import CandidatePublisher
+from aigineering.core.ids import compute_content_hash
+from aigineering.core.projection_context import load_effect_projection_context
 from aigineering.core.signing import Ed25519Signer
 from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.local_publication import commit_local_effect
-from aigineering.protocol.effect_builders import asset_proposal_effect
+from aigineering.protocol.asset_graph import (
+    create_content_object,
+    create_definition_content_assertion,
+)
+from aigineering.protocol.effect_builders import (
+    actor_authorization_effect,
+    asset_proposal_effect,
+    content_publication_effect,
+    definition_content_assertion_effect,
+)
 from aigineering.run_config import prepare_fleet_resources
-from aigineering.protocol.candidate import CandidateClaimBinding
+from aigineering.protocol.candidate import ActorKey, CandidateClaimBinding
 from aigineering.protocol.envelope import CandidateEnvelope
 from aigineering.protocol.types import Asset, Contract
 
@@ -346,6 +361,317 @@ def test_engine_worker_restarts_from_inner_facts_and_fences_late_outer_result(
     assert len(inner.get_assets_by_name("report")) == 1
     inner.close()
     outer.close()
+
+
+@pytest.fixture
+def completed_bridge(tmp_path, monkeypatch):
+    inner_path = str(tmp_path / "bridge.db")
+    signer = Ed25519Signer()
+    output_signer = Ed25519Signer()
+    output_key = ActorKey(
+        "actor:outputs",
+        "outputs",
+        output_signer.kind,
+        output_signer.signer_id,
+        ("asset.publish", "asset.relate"),
+    )
+    with SQLiteStore(":memory:") as outer:
+        contract = candidate_runtime(outer).accept_contract(
+            Contract(id="task:bridge", name="bridge", outputs=("report",), budget=2)
+        )
+    binding = CandidateClaimBinding(contract.id, "claim:one", 1, "pkg:one")
+
+    class UnusedDelegate:
+        worker_id = "worker:unused"
+
+        def invoke(self, contract, disclosed_assets):
+            pytest.fail("output was already available in the inner domain")
+
+    def worker():
+        return EngineWorker(
+            UnusedDelegate(),
+            inner_store_factory=lambda: SQLiteStore(inner_path),
+            inner_signer=signer,
+        )
+
+    def write_output_versions(
+        store,
+        _delegate,
+        _selector,
+        publisher,
+        genesis,
+        _signer,
+        _plugins,
+        *,
+        root_contract_id,
+        **_kwargs,
+    ):
+        root = store.get_contract(root_contract_id)
+        definition_id = root.acceptance_policy["output_requirements"]["report"][
+            "definition_id"
+        ]
+        authorize = publisher.publish(
+            (actor_authorization_effect(output_key),),
+            idempotency_key="authorize-outputs",
+        )
+        assert authorize.accepted, authorize.runtime_records
+        output_publisher = CandidatePublisher(
+            store, store, genesis, output_key, output_signer
+        )
+        possibilities = []
+        for text in ("first admissible version", "second admissible version"):
+            content = create_content_object(text)
+            assertion = create_definition_content_assertion(
+                domain_id=genesis.id,
+                definition_id=definition_id,
+                content_id=content.id,
+                relation_type="satisfies",
+                actor_id=output_key.actor_id,
+                key_id=output_key.key_id,
+                signer=output_signer,
+            )
+            possibilities.append(
+                (
+                    "asset:v1:" + compute_content_hash(assertion.id),
+                    text,
+                    (
+                        content_publication_effect(content),
+                        definition_content_assertion_effect(assertion),
+                    ),
+                )
+            )
+        smaller, larger = sorted(possibilities)
+        published = output_publisher.publish(larger[2], idempotency_key="larger")
+        assert published.accepted, published.runtime_records
+        assert published.assets[0].id == larger[0]
+        observed.update(publisher=publisher, larger=larger, smaller=smaller)
+        return True
+
+    observed = {}
+    with monkeypatch.context() as patch:
+        patch.setattr(engine_worker, "_run_inner_steps", write_output_versions)
+        original = worker().invoke_claimed(contract, [], binding)
+    assert original.parsed_action["outputs"]["report"] == observed["larger"][1]
+
+    with SQLiteStore(inner_path) as store:
+        original_publisher = observed["publisher"]
+        publisher = CandidatePublisher(
+            store,
+            store,
+            original_publisher.genesis,
+            output_key,
+            output_signer,
+        )
+        assert publisher.publish(
+            observed["smaller"][2], idempotency_key="smaller"
+        ).accepted
+        assert [
+            asset.id
+            for asset in sorted(
+                store.get_assets_by_name("report"), key=lambda asset: asset.id
+            )
+        ] == [observed["smaller"][0], observed["larger"][0]]
+        revision = store.get_runtime_revision()
+
+    return worker, contract, binding, inner_path, original, observed, revision
+
+
+def test_engine_bridge_replay_pins_original_output_and_new_operation_selects_minimum(
+    completed_bridge, monkeypatch
+):
+    worker, contract, binding, path, original, observed, revision = completed_bridge
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            engine_worker,
+            "_run_inner_steps",
+            lambda *_args, **_kwargs: pytest.fail("completed bridge reran runtime"),
+        )
+        replayed = worker().invoke_claimed(contract, [], binding)
+    assert replayed == original
+    with SQLiteStore(path) as store:
+        assert store.get_runtime_revision() == revision
+
+    fresh = worker().invoke_claimed(contract, [], replace(binding, claim_epoch=2))
+    assert fresh.parsed_action["outputs"]["report"] == observed["smaller"][1]
+    with SQLiteStore(path) as store:
+        exported = [
+            json.loads(asset.content)["output_asset_ids"]["report"]
+            for asset in store.get_all_assets()
+            if asset.name.startswith("bridge_completion:")
+        ]
+        assert sorted(exported) == sorted(
+            [observed["smaller"][0], observed["larger"][0]]
+        )
+
+
+def test_engine_bridge_replay_never_imports_new_disclosure(completed_bridge):
+    worker, contract, binding, path, _, _, revision = completed_bridge
+    with SQLiteStore(":memory:") as outer:
+        extra = candidate_runtime(outer).accept_asset(
+            Asset(id="asset:extra", name="unexpected", content="late outer material")
+        )
+
+    replay = worker().invoke_claimed(contract, [extra], binding)
+
+    assert (
+        replay.raw_output
+        == "engine_worker_failure: completed bridge lacks exact prior setup publication"
+    )
+    with SQLiteStore(path) as store:
+        assert store.get_runtime_revision() == revision
+        assert store.get_assets_by_name(extra.name) == []
+
+
+def test_engine_bridge_replay_rejects_changed_materialized_output(
+    completed_bridge, monkeypatch
+):
+    worker, contract, binding, path, _, observed, revision = completed_bridge
+    get_asset = SQLiteStore.get_asset
+
+    def read_changed_output(store, asset_id):
+        asset = get_asset(store, asset_id)
+        if asset_id == observed["larger"][0]:
+            return replace(asset, content="damaged materialization")
+        return asset
+
+    monkeypatch.setattr(SQLiteStore, "get_asset", read_changed_output)
+    replay = worker().invoke_claimed(contract, [], binding)
+
+    assert (
+        replay.raw_output
+        == "engine_worker_failure: inner output 'report' has an invalid Asset seal"
+    )
+    with SQLiteStore(path) as store:
+        assert store.get_runtime_revision() == revision
+
+
+@pytest.mark.parametrize(
+    "restriction",
+    [{"promptable": False}, {"disclosure_view": "sealed"}, {"tombstoned": True}],
+)
+def test_engine_bridge_checks_current_disclosure_for_selected_slot(
+    completed_bridge, monkeypatch, restriction
+):
+    worker, contract, binding, path, _, observed, revision = completed_bridge
+    get_asset = SQLiteStore.get_asset
+    get_by_definition = SQLiteStore.get_assets_by_definition
+
+    def read_replay_output(store, asset_id):
+        asset = get_asset(store, asset_id)
+        return (
+            replace(asset, **restriction)
+            if asset_id == observed["larger"][0]
+            else asset
+        )
+
+    def read_new_outputs(store, definition_id):
+        return [
+            replace(asset, **restriction)
+            if asset.id == observed["smaller"][0]
+            else asset
+            for asset in get_by_definition(store, definition_id)
+        ]
+
+    monkeypatch.setattr(SQLiteStore, "get_asset", read_replay_output)
+    monkeypatch.setattr(SQLiteStore, "get_assets_by_definition", read_new_outputs)
+    replay = worker().invoke_claimed(contract, [], binding)
+    assert (
+        replay.raw_output
+        == "engine_worker_failure: inner output 'report' has no exportable original Asset"
+    )
+    with SQLiteStore(path) as store:
+        assert store.get_runtime_revision() == revision
+
+    fresh = worker().invoke_claimed(contract, [], replace(binding, claim_epoch=2))
+    assert fresh.raw_output == replay.raw_output
+    with SQLiteStore(path) as store:
+        assert (
+            sum(
+                asset.name.startswith("bridge_completion:")
+                for asset in store.get_all_assets()
+            )
+            == 1
+        )
+
+
+def test_engine_bridge_completion_race_returns_winning_selection(
+    completed_bridge, monkeypatch
+):
+    worker, contract, binding, path, _, observed, _ = completed_bridge
+    publish_completion = engine_worker._publish_bridge_completion
+
+    def publish_after_competitor(publisher, current_binding, selected):
+        assert selected["report"].id == observed["smaller"][0]
+        competing_output = publisher.store.get_asset(observed["larger"][0])
+        assert publish_completion(
+            publisher, current_binding, {"report": competing_output}
+        ).accepted
+        return publish_completion(publisher, current_binding, selected)
+
+    monkeypatch.setattr(
+        engine_worker, "_publish_bridge_completion", publish_after_competitor
+    )
+    replayed = worker().invoke_claimed(contract, [], replace(binding, claim_epoch=2))
+    assert replayed.parsed_action["outputs"]["report"] == observed["larger"][1]
+    with SQLiteStore(path) as store:
+        completions = [
+            asset
+            for asset in store.get_all_assets()
+            if asset.name.startswith("bridge_completion:")
+        ]
+        assert len(completions) == 2
+        assert {
+            json.loads(asset.content)["output_asset_ids"]["report"]
+            for asset in completions
+        } == {observed["larger"][0]}
+
+
+@pytest.mark.parametrize("bad_marker", ["binding", "wrong intent", "duplicate"])
+def test_engine_bridge_rejects_invalid_markers_with_valid_publications(
+    completed_bridge, monkeypatch, bad_marker
+):
+    worker, contract, binding, path, _, _, _ = completed_bridge
+    next_binding = replace(binding, claim_epoch=2)
+    publish_completion = engine_worker._publish_bridge_completion
+
+    def publish_bad_marker(publisher, current_binding, selected):
+        if bad_marker == "duplicate":
+            assert publish_completion(publisher, current_binding, selected).accepted
+        payload = {
+            **current_binding,
+            "output_asset_ids": {name: asset.id for name, asset in selected.items()},
+        }
+        if bad_marker == "binding":
+            payload["outer_contract_id"] = "task:different"
+        marker = engine_worker._bridge_asset(
+            "bridge_completion", current_binding["operation_id"], payload
+        )
+        decision = publisher.publish(
+            (asset_proposal_effect(marker),),
+            idempotency_key="different-completion-intent",
+        )
+        assert decision.accepted, decision.runtime_records
+        validate_asset_publication(
+            load_effect_projection_context(publisher.store), decision.assets[0]
+        )
+        return decision
+
+    with monkeypatch.context() as patch:
+        patch.setattr(engine_worker, "_publish_bridge_completion", publish_bad_marker)
+        assert worker().invoke_claimed(contract, [], next_binding).parsed_action
+    with SQLiteStore(path) as store:
+        revision = store.get_runtime_revision()
+
+    monkeypatch.setattr(
+        engine_worker,
+        "_run_inner_steps",
+        lambda *_args, **_kwargs: pytest.fail("invalid bridge marker reran runtime"),
+    )
+    replayed = worker().invoke_claimed(contract, [], next_binding)
+    assert replayed.parsed_action is None
+    assert replayed.raw_output.startswith("engine_worker_failure: ")
+    with SQLiteStore(path) as store:
+        assert store.get_runtime_revision() == revision
 
 
 def test_existing_workspace_engine_worker_uses_pinned_receiver_fleet(

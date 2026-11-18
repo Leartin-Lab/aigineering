@@ -974,6 +974,19 @@ class SQLiteStore:
         return [json.loads(row["payload_json"]) for row in rows]
 
     @_connection_scope
+    def read_asset_graph_values(
+        self, definition_id: str, content_id: str
+    ) -> tuple[dict, dict] | None:
+        """Read the exact Definition and Content values for derivation checks."""
+        row = self._conn.execute(
+            "SELECT definition.payload_json, content.payload_json "
+            "FROM asset_definitions AS definition CROSS JOIN asset_contents AS content "
+            "WHERE definition.definition_id = ? AND content.content_id = ?",
+            (definition_id, content_id),
+        ).fetchone()
+        return (json.loads(row[0]), json.loads(row[1])) if row is not None else None
+
+    @_connection_scope
     def get_definition_content_assertions(
         self, *, definition_id: str = "", content_id: str = ""
     ) -> list[dict]:
@@ -995,11 +1008,15 @@ class SQLiteStore:
     @_connection_scope
     def rebuild_asset_graph_projection(self) -> None:
         with self._conn:
-            self._conn.execute("DELETE FROM asset_definition_content_assertions")
-            self._conn.execute("DELETE FROM asset_definitions")
-            self._conn.execute("DELETE FROM asset_contents")
-            for _, record in self.scan_runtime_records():
-                self._materialize_asset_graph_record(record)
+            self._rebuild_asset_graph_projection()
+
+    def _rebuild_asset_graph_projection(self) -> None:
+        """Reconstruct the graph inside the caller's writer transaction."""
+        self._conn.execute("DELETE FROM asset_definition_content_assertions")
+        self._conn.execute("DELETE FROM asset_definitions")
+        self._conn.execute("DELETE FROM asset_contents")
+        for _, record in self.scan_runtime_records():
+            self._materialize_asset_graph_record(record)
 
     @_connection_scope
     def get_runtime_record(self, record_id: str) -> RuntimeRecord | None:
@@ -1778,6 +1795,20 @@ class SQLiteStore:
     def get_assets_by_name(self, name: str) -> list[Asset]:
         cur = self._conn.execute("SELECT * FROM assets WHERE name = ?", (name,))
         return [self._row_to_asset(row) for row in cur.fetchall()]
+
+    @_connection_scope
+    def get_latest_asset_by_name(self, name: str) -> Asset | None:
+        # Unary + removes column affinity without changing the ID. SQLite can
+        # then use the existing JSON expression index for the correlated lookup.
+        row = self._conn.execute(
+            "SELECT asset.* FROM assets AS asset WHERE asset.name = ? "
+            "ORDER BY (SELECT MIN(revision) FROM runtime_records "
+            "WHERE record_type = 'asset.committed' "
+            "AND json_extract(payload_json, '$.asset.id') = +asset.id) DESC, "
+            "asset.id DESC LIMIT 1",
+            (name,),
+        ).fetchone()
+        return self._row_to_asset(row) if row is not None else None
 
     @_connection_scope
     def has_asset_named(self, name: str) -> bool:

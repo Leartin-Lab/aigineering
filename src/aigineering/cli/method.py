@@ -9,6 +9,7 @@ import click
 from aigineering.cli._candidate import commit_local_effects, require_accepted
 from aigineering.cli._common import _output_json, _persistent_store
 from aigineering.local_identity import ensure_local_plugin_publisher
+from aigineering.runtime_services import sync_runtime
 from aigineering.methods.packages import visible_asset
 from aigineering.methods.schema import MAX_PACKAGE_BYTES
 from aigineering.methods.service import MethodService
@@ -252,13 +253,13 @@ def method_attest(evaluation_id: str, verdict: str, as_json: bool) -> None:
         publisher = ensure_local_plugin_publisher(
             store, "method.review.v1", ("asset.attest", "method.verify")
         )
-        decision = require_accepted(
-            publisher.publish(
-                (effect,),
-                idempotency_key=f"method:attest:{evaluation_id}:{verdict}",
-                causal_parents=(evaluation_id,),
-            )
+        decision = publisher.publish(
+            (effect,),
+            idempotency_key=f"method:attest:{evaluation_id}:{verdict}",
+            causal_parents=(evaluation_id,),
         )
+        sync_runtime(store, decision=decision)
+        require_accepted(decision)
         _emit(
             {
                 "evaluation_id": evaluation_id,

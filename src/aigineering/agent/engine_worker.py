@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+from contextlib import nullcontext
 from pathlib import Path
 from collections.abc import Callable
 from typing import TYPE_CHECKING
@@ -24,6 +25,9 @@ from aigineering.core.candidate_publisher import (
     CandidatePublisherRegistry,
     publish_effect,
 )
+from aigineering.core.acceptance import validate_asset_publication
+from aigineering.core.actor_facts import load_effective_actor_keys
+from aigineering.core.commitment import CandidateCommitter
 from aigineering.core.domain import initialize_genesis
 from aigineering.core.domain import load_genesis
 from aigineering.core.input_bindings import input_asset_bindings
@@ -33,7 +37,12 @@ from aigineering.core.ids import (
     hash_asset_content,
     contract_from_fields,
 )
-from aigineering.core.output_satisfaction import output_asset_is_eligible
+from aigineering.core.output_satisfaction import (
+    output_asset_is_eligible,
+    selected_output_assets,
+)
+from aigineering.core.projection_context import EffectProjectionContext
+from aigineering.core.publication_history import committed_candidate_decision
 from aigineering.core.authority import matched_reserved_prefix
 from aigineering.core.provenance import verify_asset_seal
 from aigineering.core.signing import Ed25519Signer
@@ -49,6 +58,9 @@ from aigineering.worker_hosting import authorize_worker_host
 from aigineering.protocol.candidate import (
     ActorKey,
     CandidateClaimBinding,
+    CandidateProposal,
+    candidate_received_record,
+    create_candidate_proposal,
     create_genesis_manifest,
 )
 from aigineering.protocol.effect_builders import (
@@ -167,6 +179,17 @@ class EngineWorker:
                         "receiver root key is not currently authorized by Genesis"
                     )
                 publisher = CandidatePublisher(inner, inner, genesis, actor_key, signer)
+            operation_id = _bridge_operation_id(
+                contract.id,
+                claim_binding,
+                self._bridge_policy,
+                source_domain_id=self._source_domain_id,
+                target_domain_id=genesis.id,
+                receiver_config_fingerprint=self._receiver_config_fingerprint,
+            )
+            completion_name = f"bridge_completion:{operation_id}"
+            has_completion = inner.has_asset_named(completion_name)
+            if not has_completion and self._target_domain_id is not None:
                 candidate_publishers = ensure_local_runtime_publishers(
                     inner, key_path=self._receiver_key_path
                 )
@@ -177,20 +200,10 @@ class EngineWorker:
                         publish_tool_descriptors(
                             inner, registry, key_path=self._receiver_key_path
                         )
-            operation_id = _bridge_operation_id(
-                contract.id,
-                claim_binding,
-                self._bridge_policy,
-                source_domain_id=self._source_domain_id,
-                target_domain_id=genesis.id,
-                receiver_config_fingerprint=self._receiver_config_fingerprint,
-            )
-            input_error, input_id_map = _publish_disclosed_inputs(
-                inner, disclosed_assets, genesis, actor_key, signer
-            )
-            if input_error is not None:
-                return self._failure(input_error)
             try:
+                input_id_map = _publish_disclosed_inputs(
+                    publisher, disclosed_assets, replay_only=has_completion
+                )
                 inner_contract = _inner_contract(
                     contract,
                     input_assets=disclosed_assets,
@@ -198,12 +211,10 @@ class EngineWorker:
                     operation_id=operation_id,
                 )
                 output_requirements = _publish_output_definitions(
-                    inner,
+                    publisher,
                     outer=contract,
                     inner_contract=inner_contract,
-                    genesis=genesis,
-                    actor_key=actor_key,
-                    signer=signer,
+                    replay_only=has_completion,
                 )
                 inner_contract = _inner_contract(
                     contract,
@@ -235,8 +246,22 @@ class EngineWorker:
                 source_domain_id=self._source_domain_id,
                 target_domain_id=genesis.id,
                 receiver_config_fingerprint=self._receiver_config_fingerprint,
+                replay_only=has_completion,
             ):
                 return self._failure("inner domain rejected bridge operation mapping")
+            completion_binding = {
+                "inner_contract_id": inner_contract.id,
+                "operation_id": operation_id,
+                "outer_contract_id": contract.id,
+                "source_domain_id": self._source_domain_id,
+                "target_domain_id": genesis.id,
+                "receiver_config_fingerprint": self._receiver_config_fingerprint,
+            }
+            if has_completion:
+                return self._replay_completion(
+                    publisher, inner_contract, completion_binding
+                )
+
             decision = publish_effect(
                 inner,
                 inner,
@@ -263,51 +288,21 @@ class EngineWorker:
             ):
                 return self._failure("inner worker produced an invalid submission")
 
-            outputs, output_ids = _collect_inner_outputs(
-                inner,
-                contract.outputs,
-                root_contract_id=inner_contract.id,
-            )
-            if set(outputs) != set(contract.outputs):
-                missing = sorted(set(contract.outputs) - set(outputs))
-                return self._failure(
-                    "inner runtime stopped without declared outputs: "
-                    + ", ".join(missing)
+            try:
+                selected = _collect_inner_outputs(inner, inner_contract)
+                outputs = _bridge_output_content(inner_contract, selected)
+                completion = _publish_bridge_completion(
+                    publisher, completion_binding, selected
                 )
-            completion = publish_effect(
-                inner,
-                inner,
-                genesis,
-                actor_key,
-                signer,
-                asset_proposal_effect(
-                    _bridge_asset(
-                        "bridge_completion",
-                        operation_id,
-                        {
-                            "inner_contract_id": inner_contract.id,
-                            "operation_id": operation_id,
-                            "outer_contract_id": contract.id,
-                            "output_asset_ids": output_ids,
-                            "source_domain_id": self._source_domain_id,
-                            "target_domain_id": genesis.id,
-                            "receiver_config_fingerprint": self._receiver_config_fingerprint,
-                        },
-                    )
-                ),
-                idempotency_key=f"bridge-completion:{operation_id}",
-            )
+            except _BridgeCompletionExists:
+                return self._replay_completion(
+                    publisher, inner_contract, completion_binding
+                )
+            except ValueError as exc:
+                return self._failure(str(exc))
             if not completion.accepted:
                 return self._failure("inner domain rejected bridge completion mapping")
-            return Candidate(
-                worker_id=self.worker_id,
-                raw_output=json.dumps(
-                    {"type": "exec", "outputs": outputs},
-                    sort_keys=True,
-                    ensure_ascii=False,
-                ),
-                parsed_action={"type": "exec", "outputs": outputs},
-            )
+            return self._success(outputs)
         finally:
             close = getattr(inner, "close", None)
             if callable(close):
@@ -315,6 +310,22 @@ class EngineWorker:
 
     def _effective_selector(self):
         return self._worker_selector
+
+    def _replay_completion(self, publisher, inner_contract, binding) -> Candidate:
+        try:
+            return self._success(
+                _replay_bridge_completion(publisher, inner_contract, binding)
+            )
+        except (LookupError, ValueError) as exc:
+            return self._failure(str(exc))
+
+    def _success(self, outputs: dict[str, str]) -> Candidate:
+        action = {"type": "exec", "outputs": outputs}
+        return Candidate(
+            worker_id=self.worker_id,
+            raw_output=json.dumps(action, sort_keys=True, ensure_ascii=False),
+            parsed_action=action,
+        )
 
     def _failure(self, reason: str) -> Candidate:
         # Deliberately undeclared: outer projection records a visible rejection
@@ -371,8 +382,6 @@ def _initialize_inner_domain(
 
 
 def _receiver_root_key(store, genesis, signer):
-    from aigineering.core.actor_facts import load_effective_actor_keys
-
     return next(
         (
             key
@@ -386,36 +395,59 @@ def _receiver_root_key(store, genesis, signer):
     )
 
 
-def _publish_disclosed_inputs(store, assets, genesis, actor_key, signer):
+def _publish_disclosed_inputs(publisher, assets, *, replay_only):
     id_map: dict[str, str] = {}
     for asset in assets:
         if not verify_asset_seal(asset):
-            return "outer disclosure contains an invalid asset seal", {}
-        decision = publish_effect(
-            store,
-            store,
-            genesis,
-            actor_key,
-            signer,
+            raise ValueError("outer disclosure contains an invalid asset seal")
+        decision = _bridge_setup_effect(
+            publisher,
             asset_proposal_effect(asset),
             idempotency_key=f"inner-asset:{asset.id}",
+            replay_only=replay_only,
         )
         if not decision.accepted:
-            return "inner domain rejected disclosed input", {}
+            raise ValueError("inner domain rejected disclosed input")
         if len(decision.assets) != 1:
-            return "inner input publication returned no unique Asset", {}
+            raise ValueError("inner input publication returned no unique Asset")
         committed = decision.assets[0]
         if (
             committed.name != asset.name
             or committed.content != asset.content
             or committed.content_type != asset.content_type
-            or committed.created_by != actor_key.actor_id
-            or committed.signed_by != actor_key.actor_id
+            or committed.created_by != publisher.actor_key.actor_id
+            or committed.signed_by != publisher.actor_key.actor_id
             or not verify_asset_seal(committed)
         ):
-            return "inner input publication returned an invalid exact Asset", {}
+            raise ValueError("inner input publication returned an invalid exact Asset")
         id_map[asset.id] = committed.id
-    return None, id_map
+    return id_map
+
+
+def _bridge_setup_effect(publisher, effect, *, idempotency_key, replay_only):
+    if not replay_only:
+        return publisher.publish((effect,), idempotency_key=idempotency_key)
+
+    store = publisher.store
+    candidate = create_candidate_proposal(
+        domain_id=publisher.genesis.id,
+        actor_id=publisher.actor_key.actor_id,
+        key_id=publisher.actor_key.key_id,
+        effects=(effect,),
+        signer=publisher.signer,
+        idempotency_key=idempotency_key,
+    )
+    read_transaction = getattr(store, "read_transaction", nullcontext)
+    with read_transaction():
+        records = store.read_candidate_publication(candidate.id)
+        if not records:
+            raise ValueError("completed bridge lacks exact prior setup publication")
+        receipt = candidate_received_record(
+            candidate,
+            publisher.genesis,
+            actor_keys=load_effective_actor_keys(store, publisher.genesis),
+        )
+        return committed_candidate_decision(receipt, records)
 
 
 def _publish_bridge_operation(
@@ -433,6 +465,7 @@ def _publish_bridge_operation(
     source_domain_id: str | None = None,
     target_domain_id: str | None = None,
     receiver_config_fingerprint: str = "",
+    replay_only: bool = False,
 ) -> bool:
     operation_asset = _bridge_asset(
         "bridge_operation",
@@ -465,6 +498,8 @@ def _publish_bridge_operation(
             and asset.signed_by == actor_key.actor_id
             for asset in prior
         )
+    if replay_only:
+        return False
     return publish_effect(
         store,
         store,
@@ -522,30 +557,171 @@ def _run_inner_steps(
     return True
 
 
-def _collect_inner_outputs(store, names, *, root_contract_id: str):
-    root = store.get_contract(root_contract_id)
-    if root is None:
-        return {}, {}
-    from aigineering.task_views import project_task_status
+def _collect_inner_outputs(store, root: Contract) -> dict[str, Asset]:
+    # The inner root has no parent. Its immutable terminal facts can block a
+    # new export, while historical failed attempts still permit fulfillment.
+    if any(
+        record.payload.get("terminal") not in {"complete", "failed"}
+        for record in store.read_task_facts(root.id, ("lifecycle.terminal",))
+    ):
+        return {}
+    return selected_output_assets(root, store)
 
-    root_status = project_task_status(root, store)
-    if root_status.get("status") != "completed":
-        return {}, {}
-    outputs: dict[str, str] = {}
-    output_ids: dict[str, str] = {}
-    for name in names:
-        matches = [
-            asset
-            for asset in store.get_assets_by_name(name)
-            if output_asset_is_eligible(root, name, asset, store)
-        ]
-        if len(matches) > 1:
-            return {}, {}
-        if matches:
-            selected = matches[0]
-            outputs[name] = selected.content
-            output_ids[name] = selected.id
-    return outputs, output_ids
+
+def _bridge_output_content(
+    root: Contract, selected: dict[str, Asset]
+) -> dict[str, str]:
+    missing = sorted(set(root.outputs) - set(selected))
+    if missing:
+        raise ValueError(
+            "inner runtime stopped without declared outputs: " + ", ".join(missing)
+        )
+    for name, asset in selected.items():
+        if (
+            not asset.promptable
+            or asset.disclosure_view != "original"
+            or asset.tombstoned
+        ):
+            raise ValueError(f"inner output {name!r} has no exportable original Asset")
+        if not verify_asset_seal(asset):
+            raise ValueError(f"inner output {name!r} has an invalid Asset seal")
+    return {name: asset.content for name, asset in selected.items()}
+
+
+class _BridgeCompletionExists(ValueError):
+    """Another invocation committed the operation's export selection."""
+
+
+def _publish_bridge_completion(publisher, binding, selected):
+    operation_id = binding["operation_id"]
+    payload = {
+        **binding,
+        "output_asset_ids": {name: asset.id for name, asset in selected.items()},
+    }
+    draft = _bridge_asset("bridge_completion", operation_id, payload)
+    proposal = create_candidate_proposal(
+        domain_id=publisher.genesis.id,
+        actor_id=publisher.actor_key.actor_id,
+        key_id=publisher.actor_key.key_id,
+        effects=(asset_proposal_effect(draft),),
+        signer=publisher.signer,
+        idempotency_key=f"bridge-completion:{operation_id}",
+    )
+
+    def validate_fresh():
+        if publisher.store.has_asset_named(draft.name):
+            raise _BridgeCompletionExists
+
+    return CandidateCommitter(publisher.store, publisher.trace).commit(
+        proposal, publisher.genesis, validate_fresh=validate_fresh
+    )
+
+
+def _replay_bridge_completion(publisher, root: Contract, binding) -> dict[str, str]:
+    store = publisher.store
+    operation_id = binding["operation_id"]
+    read_transaction = getattr(store, "read_transaction", nullcontext)
+    with read_transaction():
+        matches = store.get_assets_by_name(f"bridge_completion:{operation_id}")
+        if len(matches) != 1 or store.get_contract(root.id) != root:
+            raise ValueError(
+                "inner bridge completion has no unique marker and exact root"
+            )
+        marker = matches[0]
+        try:
+            payload = json.loads(marker.content)
+        except json.JSONDecodeError as exc:
+            raise ValueError("inner bridge completion payload is invalid") from exc
+        output_ids = (
+            payload.get("output_asset_ids") if isinstance(payload, dict) else None
+        )
+        if (
+            not isinstance(output_ids, dict)
+            or set(output_ids) != set(root.outputs)
+            or any(
+                not isinstance(asset_id, str) or not asset_id
+                for asset_id in output_ids.values()
+            )
+            or marker.content
+            != canonical_json({**binding, "output_asset_ids": output_ids})
+        ):
+            raise ValueError("inner bridge completion bindings or output slots differ")
+
+        _validate_bridge_completion_publication(
+            publisher, operation_id, marker, payload
+        )
+        qualified: dict[str, set[str]] = {}
+        if (root.acceptance_policy or {}).get("mode") == "independent":
+            for record in store.read_task_facts(root.id, ("output.qualified",)):
+                name = str(record.payload.get("output_name", ""))
+                asset_id = str(record.payload.get("asset_id", ""))
+                qualified.setdefault(name, set()).add(asset_id)
+
+        selected: dict[str, Asset] = {}
+        for name, asset_id in output_ids.items():
+            asset = store.get_asset(asset_id)
+            if (
+                asset is None
+                or asset.id != asset_id
+                or not output_asset_is_eligible(
+                    root,
+                    name,
+                    asset,
+                    store,
+                    qualified_asset_ids=qualified.get(name, frozenset()),
+                )
+            ):
+                raise ValueError(
+                    f"inner bridge completion output {name!r} no longer qualifies"
+                )
+            selected[name] = asset
+        return _bridge_output_content(root, selected)
+
+
+def _validate_bridge_completion_publication(publisher, operation_id, marker, payload):
+    store = publisher.store
+    actor_key = publisher.actor_key
+    expected = _bridge_asset("bridge_completion", operation_id, payload)
+    if (
+        marker.created_by != actor_key.actor_id
+        or marker.signed_by != actor_key.actor_id
+        or marker.content_type != expected.content_type
+        or marker.origin != expected.origin
+        or marker.promptable
+        or marker.tombstoned
+        or not verify_asset_seal(marker)
+    ):
+        raise ValueError("inner bridge completion marker has invalid provenance")
+    commits = store.read_asset_commit_facts(marker.id)
+    if len(commits) != 1 or len(commits[0].causal_parents) != 1:
+        raise ValueError("inner bridge completion marker has no exact publication")
+    receipt = store.get_runtime_record(commits[0].causal_parents[0])
+    if receipt is None or receipt.record_type != "candidate.received":
+        raise ValueError("inner bridge completion marker has no exact receipt")
+    candidate_id = str(receipt.payload.get("candidate_id", ""))
+    context = EffectProjectionContext(
+        runtime_records=store.read_candidate_publication(candidate_id)
+    )
+    proven_receipt, _head, _member = validate_asset_publication(context, marker)
+    candidate = CandidateProposal(
+        id=candidate_id,
+        domain_id=publisher.genesis.id,
+        actor_id=actor_key.actor_id,
+        key_id=actor_key.key_id,
+        signature_kind=actor_key.kind,
+        signature=str(receipt.payload.get("signature", "")),
+        effects=(asset_proposal_effect(expected),),
+        idempotency_key=f"bridge-completion:{operation_id}",
+    )
+    authenticated = candidate_received_record(
+        candidate,
+        publisher.genesis,
+        actor_keys=load_effective_actor_keys(store, publisher.genesis),
+    )
+    if authenticated.id != proven_receipt.id or proven_receipt.id != receipt.id:
+        raise ValueError(
+            "inner bridge completion receipt differs from its signed marker"
+        )
 
 
 def _inner_contract(
@@ -632,7 +808,7 @@ def _inner_contract(
 
 
 def _publish_output_definitions(
-    store, *, outer, inner_contract, genesis, actor_key, signer
+    publisher, *, outer, inner_contract, replay_only
 ) -> dict:
     """Describe required outputs by frozen goal and inputs, not task ownership."""
     policy = outer.acceptance_policy or {}
@@ -648,24 +824,21 @@ def _publish_output_definitions(
         }
         description = canonical_json(deep_thaw(statement))
         definition = create_signed_definition(
-            domain_id=genesis.id,
+            domain_id=publisher.genesis.id,
             name=output,
             description=description,
             content_type="text",
             source_kind="engine-output-requirement",
             source_uri=f"goal:v1:{compute_content_hash(description)}",
-            actor_id=actor_key.actor_id,
-            key_id=actor_key.key_id,
-            signer=signer,
+            actor_id=publisher.actor_key.actor_id,
+            key_id=publisher.actor_key.key_id,
+            signer=publisher.signer,
         )
-        result = publish_effect(
-            store,
-            store,
-            genesis,
-            actor_key,
-            signer,
+        result = _bridge_setup_effect(
+            publisher,
             definition_publication_effect(definition),
             idempotency_key=f"inner-output-definition:{definition.id}",
+            replay_only=replay_only,
         )
         if not result.accepted:
             raise ValueError("inner domain rejected its output requirement definition")

@@ -22,10 +22,7 @@ from aigineering.cli._task_batch import (
     preflight_task_batch,
     validate_task_ids,
 )
-from aigineering.core.output_satisfaction import (
-    all_outputs_satisfied,
-    output_asset_is_eligible,
-)
+from aigineering.core.output_satisfaction import selected_output_assets
 from aigineering.runtime_services import RedisSyncPending
 from aigineering.task_publication import (
     RetryPublicationRejected,
@@ -149,7 +146,11 @@ def _safe_status(
         "blockers": list(status["blockers"]),
         "budget_remaining": status["budget_remaining"],
         "asserted_outputs": dict(status["outputs"]),
-        "output_semantics": "task-view asset-name assertions; not acceptance qualification",
+        "output_semantics": (
+            "canonical policy-qualified output selection"
+            if status["status"] == "completed"
+            else "task-view asset-name assertions; not acceptance qualification"
+        ),
         "recoveries": list(status["recoveries"]),
         "rejection_count": status["rejection_count"],
         "trace_event_count": status["trace_event_count"],
@@ -457,41 +458,20 @@ def task_show(contract_id: str, as_json: bool) -> None:
 def _qualified_outputs(
     contract, store, *, output_names: tuple[str, ...] = ()
 ) -> list[dict]:
-    if not all_outputs_satisfied(contract, store):
+    satisfied = selected_output_assets(contract, store)
+    if not set(contract.outputs).issubset(satisfied):
         raise ValueError("task outputs are not all committed and policy-qualified")
     selected: list[dict] = []
-    policy = contract.acceptance_policy
     for output_name in contract.outputs:
         if output_names and output_name not in output_names:
             continue
-        qualified_ids: set[str] | None = None
-        if policy is not None and policy.get("mode") == "independent":
-            qualified_ids = {
-                str(record.payload.get("asset_id", ""))
-                for _, record in store.scan_runtime_records(
-                    record_type="output.qualified"
-                )
-                if record.payload.get("contract_id") == contract.id
-                and record.payload.get("output_name") == output_name
-            }
-        candidates = []
-        for asset in store.get_assets_by_name(output_name):
-            if asset.disclosure_view != "original" or asset.tombstoned:
-                continue
-            if not asset.promptable:
-                continue
-            if not output_asset_is_eligible(
-                contract,
-                output_name,
-                asset,
-                store,
-                qualified_asset_ids=qualified_ids or frozenset(),
-            ):
-                continue
-            candidates.append(asset)
-        if not candidates:
+        asset = satisfied[output_name]
+        if (
+            asset.disclosure_view != "original"
+            or asset.tombstoned
+            or not asset.promptable
+        ):
             raise ValueError(f"output {output_name!r} has no exportable original Asset")
-        asset = sorted(candidates, key=lambda item: item.id)[-1]
         selected.append(
             {
                 "name": output_name,

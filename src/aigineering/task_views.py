@@ -125,14 +125,10 @@ def project_task_status(
         else RuntimeProjection(store, store).contract_view(contract)
     )
     attempt_outcome = _latest_attempt_outcome(store, contract.id)
-    output_assets = _output_assets(contract, store)
     projection_context = projection_context or (
         query_context.effect_projection
         if query_context is not None
         else load_effect_projection_context(store)
-    )
-    candidate_qualification_outputs = _submitted_independent_output_assets(
-        contract, store, projection_context
     )
     assignment_context = assignment_context_from_projection(projection_context)
     assignment_fact = assignment_head(assignment_context, contract_id=contract.id)
@@ -154,14 +150,22 @@ def project_task_status(
         if entry.usage_metadata is not None
     ]
 
+    selected_outputs = selected_output_assets(contract, store)
+    outputs_satisfied = all(name in selected_outputs for name in contract.outputs)
     status = _status_from_facts(
         contract,
         store,
         view,
         attempt_outcome,
+        outputs_satisfied=outputs_satisfied,
+    )
+    output_assets = (
+        {name: asset.id for name, asset in selected_outputs.items()}
+        if status == "completed"
+        else _output_assets(contract, store)
     )
     qualification_pending_outputs = (
-        candidate_qualification_outputs
+        _submitted_independent_output_assets(contract, store, projection_context)
         if status not in {"completed", "failed", "cancelled", "unreachable", "stalled"}
         else {}
     )
@@ -206,7 +210,7 @@ def project_task_status(
         "status": status,
         "terminal": status in TERMINAL_EVENTS or status == "completed",
         "ok": status == "completed",
-        "outputs_satisfied": all_outputs_satisfied(contract, store),
+        "outputs_satisfied": outputs_satisfied,
         "blockers": blockers,
         "budget_remaining": view.budget_remaining,
         "projection_hash": view.projection_hash,
@@ -345,12 +349,16 @@ def _status_from_facts(
     store,
     view: ContractView,
     attempt_outcome: str,
+    *,
+    outputs_satisfied: bool | None = None,
 ) -> str:
     if view.terminal == "conflict":
         return "stalled"
     if view.terminal is not None:
         return "completed" if view.terminal == "complete" else view.terminal
-    if all_outputs_satisfied(contract, store):
+    if outputs_satisfied is None:
+        outputs_satisfied = all_outputs_satisfied(contract, store)
+    if outputs_satisfied:
         return "completed"
     if attempt_outcome == "expanded":
         return "expanded"

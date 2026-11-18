@@ -7,6 +7,7 @@ from copy import copy
 from inspect import unwrap
 from types import SimpleNamespace
 
+import pytest
 from click.testing import CliRunner
 
 from aigineering.cli import task_board as board
@@ -426,6 +427,62 @@ def test_result_refuses_nonpromptable_assets(tmp_path, monkeypatch):
     assert result.exit_code == 1
     assert json.loads(result.output)["error"]["code"] == "result_unavailable"
     assert not path.exists()
+
+
+@pytest.mark.parametrize("promptable", [True, False])
+def test_completed_status_and_result_share_canonical_asset(
+    tmp_path, monkeypatch, promptable
+):
+    db_path = tmp_path / "canonical-result.sqlite"
+    with SQLiteStore(str(db_path)) as store:
+        # Fix the domain so the alternative has a larger signed Asset ID in both cases.
+        signer = Ed25519Signer.from_private_key_hex("9a" * 32)
+        key = ActorKey(
+            "test:setup",
+            "test-setup-1",
+            signer.kind,
+            signer.signer_id,
+            ("asset.publish", "asset.relate", "contract.publish"),
+        )
+        genesis = create_genesis_manifest(
+            "test-canonical-result", (key,), "policy:test-setup"
+        )
+        initialize_genesis(store, genesis)
+        publisher = candidate_runtime(
+            store, genesis=genesis, actor_key=key, signer=signer
+        )
+        task = publisher.accept_contract(
+            build_control_plane_contract(name="Report task", outputs=("report",))
+        )
+        canonical = publisher.accept_asset(
+            build_control_plane_asset(
+                name="report", content="Earlier assertion", promptable=promptable
+            )
+        )
+        alternate = publisher.accept_asset(
+            build_control_plane_asset(name="report", content="Third assertion")
+        )
+        assert canonical.id < alternate.id
+    _attach_cli(monkeypatch, db_path)
+
+    status = _invoke(["show", task.id, "--json"])
+    assert status.exit_code == 0, status.output
+    shown = json.loads(status.output)["data"]["task"]
+    assert shown["status"] == "completed"
+    assert shown["asserted_outputs"] == {"report": canonical.id}
+
+    path = tmp_path / "report.txt"
+    result = _invoke(["result", task.id, "--to", str(path), "--json"])
+    if promptable:
+        assert result.exit_code == 0, result.output
+        assert (
+            json.loads(result.output)["data"]["outputs"][0]["asset_id"] == canonical.id
+        )
+        assert path.read_bytes() == canonical.content.encode("utf-8")
+    else:
+        assert result.exit_code == 1
+        assert json.loads(result.output)["error"]["code"] == "result_unavailable"
+        assert not path.exists()
 
 
 def test_result_exports_selected_slot_without_disclosing_unselected_slot(

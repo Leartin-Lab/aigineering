@@ -6,6 +6,7 @@ Effect projection is delegated; invalid effects have no direct-write fallback.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
@@ -165,10 +166,14 @@ class CandidateCommitter:
         genesis: GenesisManifest | None = None,
         *,
         verifier_factory: VerifierFactory = create_verifier,
+        validate_fresh: Callable[[], None] | None = None,
     ) -> CommitmentDecision:
+        """Commit or replay, with an optional read-only fresh-action predicate."""
         try:
             with self._store.candidate_transaction():
-                decision = self._commit_locked(candidate, genesis, verifier_factory)
+                decision = self._commit_locked(
+                    candidate, genesis, verifier_factory, validate_fresh
+                )
         except CandidateCommitRejected as exc:
             rejection = record_authenticated_candidate_rejection(
                 candidate, exc.decision, str(exc), self._store, self._trace
@@ -180,7 +185,7 @@ class CandidateCommitter:
             self._trace_exporter.export(decision.trace_entries)
         return decision
 
-    def _commit_locked(self, candidate, genesis, verifier_factory):
+    def _commit_locked(self, candidate, genesis, verifier_factory, validate_fresh):
         if genesis is None:
             from aigineering.core.domain import load_genesis
 
@@ -212,6 +217,8 @@ class CandidateCommitter:
             raise CandidateHistoryError(
                 "Candidate committed history is incomplete or invalid"
             ) from exc
+        if validate_fresh is not None:
+            validate_fresh()
         projection_context = context_inputs.load_candidate_projection_context(
             self._store, candidate, actor_keys=actor_keys
         )

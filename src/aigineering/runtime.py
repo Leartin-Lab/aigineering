@@ -31,7 +31,7 @@ from aigineering.core.commitment import (
     CandidateCommitter,
     record_candidate_rejection,
 )
-from aigineering.core.candidate_decision import trace_record
+from aigineering.core.candidate_decision import CommitmentDecision, trace_record
 from aigineering.core.publication_history import CandidateHistoryError
 from aigineering.core.worker_routing import is_eligible
 from aigineering.core.worker_coordination import (
@@ -652,6 +652,23 @@ def submit_worker_proposal(
     candidate_publishers=None,
 ) -> dict:
     """Submit one claim-bound ordinary-effect Candidate."""
+    result, _ = submit_worker_proposal_with_decision(
+        proposal,
+        store,
+        trace_store=trace_store,
+        candidate_publishers=candidate_publishers,
+    )
+    return result
+
+
+def submit_worker_proposal_with_decision(
+    proposal,
+    store,
+    *,
+    trace_store=None,
+    candidate_publishers=None,
+) -> tuple[dict, CommitmentDecision]:
+    """Return the existing Worker view and the exact durable decision."""
     trace = trace_store if trace_store is not None else store
     if proposal.claim_binding is None:
         raise ValueError("worker Candidate requires an explicit claim binding")
@@ -684,7 +701,7 @@ def submit_worker_proposal(
     if decision.contracts:
         first = decision.contracts[0]
         declared_method = str(method_payload(first).get("method", ""))
-        return {
+        result = {
             "contract_id": proposal.claim_binding.contract_id,
             "status": "task_delegated" if decision.accepted else "rejected",
             "method": declared_method or "task_expansion",
@@ -693,13 +710,14 @@ def submit_worker_proposal(
             "complete": False,
             "duplicate": duplicate,
         }
+        return result, decision
     rejection_reasons = [
         str(record.payload.get("reason", "candidate rejected"))
         for record in decision.runtime_records
         if record.record_type
         in {"candidate.rejected", "candidate.authentication_rejected"}
     ]
-    return {
+    result = {
         "contract_id": proposal.claim_binding.contract_id,
         "status": "accepted" if decision.accepted else "rejected",
         "accepted": [asset.name for asset in decision.assets],
@@ -707,6 +725,7 @@ def submit_worker_proposal(
         "complete": terminal,
         "duplicate": duplicate,
     }
+    return result, decision
 
 
 def _schedule_rejected_recovery(

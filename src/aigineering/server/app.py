@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from aigineering import __version__
+from aigineering.asset_publication import slice_publication_effects
 from aigineering.application import (
     find_trace_for_session as _find_trace_for_session,
     latest_session_file as _latest_session_file,
@@ -27,19 +28,16 @@ from aigineering.runtime_services import (
 )
 from aigineering.runtime import (
     WorkerSubmissionCommitError,
-    submit_worker_proposal,
+    submit_worker_proposal_with_decision,
 )
 
-from aigineering.core.commitment import CandidateCommitter
+from aigineering.core.commitment import CandidateCommitRejected, CandidateCommitter
 from aigineering.core.disclosure import redact_for_disclosure
 from aigineering.core.worker_coordination import authenticate_worker_command
 from aigineering.protocol.candidate import (
     candidate_proposal_from_dict,
 )
-from aigineering.protocol.effect_builders import (
-    asset_proposal_effect,
-    replacement_claim_effect,
-)
+from aigineering.protocol.effect_builders import replacement_claim_effect
 from aigineering.protocol.immutability import deep_thaw
 
 app = FastAPI(title="Aigineering API", version=__version__)
@@ -48,6 +46,7 @@ app = FastAPI(title="Aigineering API", version=__version__)
 @app.exception_handler(QueryProjectionUnavailable)
 async def redis_failure(_request, error: QueryProjectionUnavailable):
     pending = isinstance(error, RedisSyncPending)
+    details = error.committed_identifiers() if pending else {}
     return JSONResponse(
         status_code=503,
         content={
@@ -55,6 +54,7 @@ async def redis_failure(_request, error: QueryProjectionUnavailable):
             "error": "redis_sync_pending" if pending else "redis_unavailable",
             "facts_retained": pending,
             "candidate_accepted": error.accepted if pending else None,
+            **details,
         },
     )
 
@@ -270,11 +270,15 @@ def _request_store() -> Iterator:
         store.close()
 
 
-def _commit_candidate_request(body: CandidateProposalRequest, store):
+def _commit_candidate_request(
+    body: CandidateProposalRequest, store, *, validate_fresh=None
+):
     try:
         candidate = candidate_proposal_from_dict(body.model_dump())
-        decision = CandidateCommitter(store, store).commit(candidate)
-        sync_runtime(store, accepted=decision.accepted)
+        decision = CandidateCommitter(store, store).commit(
+            candidate, validate_fresh=validate_fresh
+        )
+        sync_runtime(store, decision=decision)
         return decision
     except LookupError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -386,31 +390,69 @@ def slice_asset(
     body: AssetSliceCandidateRequest,
     store=Depends(_request_store),
 ):
-    """Create a new asset from a line or character slice of an existing asset."""
-    from aigineering.core.asset_versions import create_slice_asset, resolve_latest
-
-    source = resolve_latest(store, name)
-    if source is None:
-        raise HTTPException(status_code=404, detail=f"No asset named '{name}'")
-    _require_single_effect(body, "asset.propose")
-    proposed = body.effects[0].payload.get("asset")
-    if not isinstance(proposed, dict) or not proposed.get("name"):
-        raise HTTPException(status_code=422, detail="slice requires asset.name")
-    try:
-        expected = create_slice_asset(
-            source,
-            slice_name=str(proposed["name"]),
-            range_spec=body.range,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    expected_payload = deep_thaw(asset_proposal_effect(expected).payload)
-    if body.effects[0].payload != expected_payload:
+    """Commit a signed slice and its exact source relation together."""
+    effect_types = tuple(effect.effect_type for effect in body.effects)
+    legacy = effect_types == ("asset.propose",)
+    if not legacy and effect_types != ("asset.propose", "asset.relate"):
         raise HTTPException(
             status_code=422,
-            detail="signed asset.propose payload does not match the requested slice",
+            detail="slice requires an asset.propose followed by an asset.relate",
         )
-    decision = _commit_candidate_request(body, store)
+    proposed = body.effects[0].payload.get("asset")
+    if (
+        not isinstance(proposed, dict)
+        or not isinstance(proposed.get("name"), str)
+        or not proposed["name"]
+    ):
+        raise HTTPException(status_code=422, detail="slice requires asset.name")
+    source_id = ""
+    range_spec = body.range
+    if not legacy:
+        relation = body.effects[1].payload
+        claim = relation.get("claim")
+        index = relation.get("replacement_effect_index")
+        if (
+            not isinstance(claim, dict)
+            or claim.get("claim_type") != "slice"
+            or "replacement_asset_id" in claim
+            or type(index) is not int
+            or index != 0
+            or not isinstance(claim.get("source_asset_id"), str)
+            or not claim["source_asset_id"]
+            or not isinstance(claim.get("range_spec"), str)
+        ):
+            raise HTTPException(status_code=422, detail="invalid signed slice relation")
+        source_id = claim["source_asset_id"]
+        range_spec = claim["range_spec"]
+        if "range" in body.model_fields_set and body.range != range_spec:
+            raise HTTPException(
+                status_code=422, detail="range disagrees with signed slice"
+            )
+    expected_origin = f"slice_of:{name}"
+    if range_spec:
+        expected_origin = f"{expected_origin}:{range_spec}"
+    if proposed.get("origin") != expected_origin:
+        raise HTTPException(
+            status_code=422,
+            detail="signed slice origin disagrees with the request path or range",
+        )
+
+    def validate_fresh():
+        if legacy:
+            raise ValueError("new slices require a signed asset.relate")
+        source = store.get_asset(source_id)
+        if source is None or source.name != name:
+            raise HTTPException(status_code=404, detail="Signed slice source not found")
+        expected, _ = slice_publication_effects(
+            store, source, slice_name=proposed["name"], range_spec=range_spec
+        )
+        if any(
+            supplied.payload != deep_thaw(effect.payload)
+            for supplied, effect in zip(body.effects, expected, strict=True)
+        ):
+            raise ValueError("signed effects do not match the requested slice")
+
+    decision = _commit_candidate_request(body, store, validate_fresh=validate_fresh)
     if not decision.accepted:
         raise HTTPException(status_code=403, detail=_rejection_reason(decision))
     return _asset_response(decision.assets[0])
@@ -572,7 +614,12 @@ def claim_worker_package(body: CandidateProposalRequest, store=Depends(_request_
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     if claimed is None:
         raise HTTPException(status_code=409, detail="No eligible contract available")
-    sync_runtime(store, accepted=True)
+    _sync_worker_command(
+        store,
+        command,
+        claim_id=claimed.package.claim_id,
+        contract_id=claimed.package.contract_id,
+    )
     return json.loads(claimed.package.to_json())
 
 
@@ -606,8 +653,25 @@ def renew_worker_claim(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     if renewed is None:
         raise HTTPException(status_code=409, detail="Claim renewal was rejected")
-    sync_runtime(store, accepted=True)
+    _sync_worker_command(
+        store, command, claim_id=claim_id, contract_id=renewed["contract_id"]
+    )
     return renewed
+
+
+def _sync_worker_command(store, command, *, claim_id: str, contract_id: str):
+    receipt, request = command.runtime_records
+    sync_runtime(
+        store,
+        accepted=True,
+        identifiers={
+            "candidate_id": receipt.payload["candidate_id"],
+            "receipt_id": receipt.id,
+            "operation_record_id": request.id,
+            "claim_id": claim_id,
+            "contract_ids": [contract_id],
+        },
+    )
 
 
 @app.post("/worker/submissions")
@@ -617,12 +681,15 @@ def submit_worker_candidate(
     """Commit a signed and claim-fenced worker Candidate on any replica."""
     try:
         proposal = candidate_proposal_from_dict(body.model_dump())
-        result = submit_worker_proposal(
+        result, decision = submit_worker_proposal_with_decision(
             proposal,
             store,
         )
-        sync_runtime(store)
+        sync_runtime(store, decision=decision)
         return result
+    except CandidateCommitRejected as exc:
+        sync_runtime(store, decision=exc.decision)
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 

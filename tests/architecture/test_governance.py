@@ -260,7 +260,7 @@ def test_asset_slice_uses_candidate_commitment_and_preserves_lineage():
     )[0]
 
     assert "commit_local_effect" in body
-    assert "asset_proposal_effect" in body
+    assert "slice_publication_effects" in body
     assert "accept_asset" not in body
     projection = (ROOT / "src/aigineering/core/effect_projectors.py").read_text(
         encoding="utf-8"
@@ -322,17 +322,32 @@ def test_http_asset_and_contract_creation_require_signed_candidates():
     assert "inject_asset" not in creation_surface
 
 
-def test_http_slice_recomputes_signed_candidate_payload_before_commit():
+def test_http_slice_validates_fresh_pair_in_candidate_commitment():
     source = (ROOT / "src/aigineering/server/app.py").read_text(encoding="utf-8")
     body = source.split("def slice_asset", 1)[1].split(
         '@app.post(\n    "/replacement-claims"', 1
     )[0]
 
     assert "AssetSliceCandidateRequest" in source
-    assert "_require_single_effect" in body
-    assert "asset_proposal_effect(expected)" in body
-    assert "_commit_candidate_request" in body
+    assert '("asset.propose", "asset.relate")' in body
+    assert "slice_publication_effects" in body
+    assert "validate_fresh=validate_fresh" in body
     assert "RuntimeIngress" not in body
+    builder = (ROOT / "src/aigineering/asset_publication.py").read_text()
+    assert "asset_proposal_effect(sliced)" in builder
+    assert "replacement_claim_effect(claim, replacement_effect_index=0)" in builder
+    committer = (ROOT / "src/aigineering/core/commitment.py").read_text()
+    assert (
+        committer.index(
+            "receipt = candidate_received_record(",
+            committer.index("def _commit_locked"),
+        )
+        < committer.index("return committed_candidate_decision(receipt, historical)")
+        < committer.index("validate_fresh()")
+        < committer.index(
+            "projection_context = context_inputs.load_candidate_projection_context"
+        )
+    )
 
 
 def test_recovery_recreate_publishes_contract_candidate():
@@ -357,7 +372,7 @@ def test_recovery_cancel_uses_candidate_and_trace_is_not_task_state():
     assert "commit_local_effect" in cancel
     assert "RecoveryMethodHandler" not in source
     assert "MethodRuntime" not in source
-    assert 'record_type="lifecycle.terminal"' in source
+    assert 'read_task_facts(contract_id, ("lifecycle.terminal",))' in source
 
 
 def test_retry_cli_publishes_an_ordinary_contract_candidate():

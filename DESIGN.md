@@ -31,6 +31,10 @@ index to the already projected Asset. Durable relations contain only exact
 IDs; there is no name lookup, cross-Candidate alias or replay-time resolution.
 This lets slice publication include its lineage assertion atomically without
 changing Asset identity or disclosure. See [change 138](changes/138-atomic-local-asset-publication.md).
+The HTTP slice endpoint verifies the fresh pair against its signed exact
+source and range within the writer transaction. It also supports exact replay
+of complete legacy single-effect publications. See
+[change 143](changes/143-atomic-http-slice-and-relay-reporting.md).
 
 Configured setup publishes its input/Skill Assets and Contract atomically.
 A `contract.declare` effect may explicitly opt into `bind_local_assets`:
@@ -163,8 +167,9 @@ registration.
 
 The existing provider, model, Fleet and workspace defaults are configured by
 their current application settings; this design change does not define new
-defaults. Redis outages remain visible. SQLite-accepted facts are not discarded
-when Redis synchronization is pending.
+defaults. A post-commit Redis relay failure preserves the SQLite facts and
+reports the observed SQLite revision and available exact publication or claim
+IDs. See [change 143](changes/143-atomic-http-slice-and-relay-reporting.md).
 
 ## Known transition boundaries
 

@@ -1,5 +1,6 @@
 import json
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
@@ -8,9 +9,12 @@ from aigineering.business.claim_review_contracts import (
     expected_draft_checks,
     expected_gate_receipt,
 )
+from aigineering.configured_run import _publish_root
 from aigineering.core.control_plane import build_control_plane_asset
 from aigineering.core.provenance import sign_asset
+from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.protocol.types import Contract
+from aigineering.run_config import prepare_configured_run
 
 
 ACTORS = {
@@ -129,6 +133,43 @@ def test_acceptance_accepts_prose_and_embedded_json_repeating_same_target():
     )
 
     assert candidate.raw_output.startswith("/attest ")
+
+
+def test_acceptance_targets_exact_compiled_example_root(tmp_path, monkeypatch):
+    repo = Path(__file__).resolve().parents[1]
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.syspath_prepend(str(repo))
+    monkeypatch.setenv("AIG_ACTOR_KEY_FILE", str(tmp_path / "root.ed25519"))
+    monkeypatch.setattr(
+        "aigineering.fleet_config.build_fleet_worker",
+        lambda *_args, **_kwargs: object(),
+    )
+    monkeypatch.setattr("aigineering.local_publication.require_redis", lambda: None)
+    monkeypatch.setattr(
+        "aigineering.local_publication.sync_runtime", lambda *_args, **_kwargs: None
+    )
+    preset = prepare_configured_run(repo / "examples/guarded-claim-review/run.toml")
+    store = SQLiteStore(preset.db_path)
+    try:
+        root = _publish_root(store, preset)
+        review_instructions = next(
+            asset.content for asset in store.get_assets_by_name("review_instructions")
+        )
+    finally:
+        store.close()
+
+    contract, assets = _bundle()
+    candidate = create_acceptance_worker(worker_id=ACTORS["acceptor"]).invoke(
+        replace(contract, description=f"Attest the review of {root.id}."), assets
+    )
+
+    assert candidate.raw_output.startswith("/attest ")
+    assert json.loads(candidate.raw_output.removeprefix("/attest "))["contract_id"] == (
+        root.id
+    )
+    for instructions in (root.description, review_instructions):
+        assert "exact root Contract ID" in instructions
+        assert "task:v" not in instructions
 
 
 @pytest.mark.parametrize(

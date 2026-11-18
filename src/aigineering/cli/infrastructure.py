@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from functools import wraps
 
 import click
@@ -68,10 +69,16 @@ def protect_commands(group: click.Group, path: tuple[str, ...] = ()) -> None:
                     if isinstance(exc, RedisSyncPending):
                         payload["facts_retained"] = True
                         payload["candidate_accepted"] = exc.accepted
+                        payload.update(exc.committed_identifiers())
                     if as_json:
                         _output_json(payload)
                         raise click.exceptions.Exit(1) from exc
-                    raise click.ClickException(str(exc)) from exc
+                    message = str(exc)
+                    if isinstance(exc, RedisSyncPending):
+                        identifiers = exc.committed_identifiers()
+                        if identifiers:
+                            message = f"{message}\n{json.dumps(identifiers)}"
+                    raise click.ClickException(message) from exc
                 except FileNotFoundError as exc:
                     message = (
                         "Workspace Store missing; initialize with 'aig domain init'."

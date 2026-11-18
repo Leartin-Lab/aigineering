@@ -7,6 +7,7 @@ from pathlib import Path
 
 import click
 
+from aigineering.asset_publication import slice_publication_effects
 from aigineering.cli._common import _output_json, _persistent_store, _query_projection
 from aigineering.cli._candidate import (
     commit_local_effect,
@@ -15,7 +16,6 @@ from aigineering.cli._candidate import (
 )
 from aigineering.core.asset_versions import (
     create_replacement_claim,
-    create_slice_asset,
     list_versions,
     replacement_claim_from_record,
     resolve_latest,
@@ -217,51 +217,24 @@ def asset_slice(name: str, slice_name: str, range_spec: str, as_json: bool) -> N
     The slice is a separate asset with lineage linking back to the source.
     """
     store = _persistent_store()
-    source = resolve_latest(store, name)
-    if source is None:
-        raise click.ClickException(f"No asset named '{name}' found in store.")
-
     try:
-        sliced = create_slice_asset(
-            source,
-            slice_name=slice_name,
-            range_spec=range_spec,
+        source = resolve_latest(store, name)
+        if source is None:
+            raise click.ClickException(f"No asset named '{name}' found in store.")
+        effects, claim_id = slice_publication_effects(
+            store, source, slice_name=slice_name, range_spec=range_spec
         )
-    except ValueError as e:
-        raise click.ClickException(str(e))
-    claim = create_replacement_claim(
-        source_asset_id=source.id,
-        replacement_asset_id=sliced.id,
-        definition_hash=sliced.definition_hash,
-        claim_type="slice",
-        lineage_id=source.lineage_id or source.id,
-        range_spec=range_spec,
-    )
-
-    class SliceInputs:
-        def get_asset(self, asset_id):
-            return sliced if asset_id == sliced.id else store.get_asset(asset_id)
-
-        def __getattr__(self, name):
-            return getattr(store, name)
-
-    verification = verify_replacement_claims(SliceInputs(), [claim])
-    if verification["fail_count"]:
-        issues = verification["results"][0]["issues"]
-        raise click.ClickException("; ".join(issues))
-    try:
         decision = require_accepted(
             commit_local_effects(
                 store,
-                (
-                    asset_proposal_effect(sliced),
-                    replacement_claim_effect(claim, replacement_effect_index=0),
-                ),
-                idempotency_key=f"asset-slice:{claim.id}",
+                effects,
+                idempotency_key=f"asset-slice:{claim_id}",
             )
         )
     except ValueError as exc:
         raise click.ClickException(str(exc)) from exc
+    finally:
+        store.close()
     sliced = decision.assets[0]
     claim = next(
         claim
@@ -375,8 +348,9 @@ def asset_replace(
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON.")
 def asset_versions(name: str, as_json: bool) -> None:
     """List all versions of an asset by name."""
-    store = _persistent_store()
-    versions = list_versions(store, name)
+    with _persistent_store() as store, store.read_transaction():
+        versions = list_versions(store, name)
+        latest = resolve_latest(store, name) if versions and not as_json else None
     if not versions:
         click.echo(f"No versions found for '{name}'.")
         return
@@ -396,7 +370,7 @@ def asset_versions(name: str, as_json: bool) -> None:
     else:
         click.echo(f"Versions of '{name}':")
         for v in versions:
-            marker = "→" if v.id == versions[-1].id else " "
+            marker = "→" if latest is not None and v.id == latest.id else " "
             click.echo(
                 f"  {marker} {v.id[:24]:<26} content_hash={v.content_hash[:16]}..."
             )

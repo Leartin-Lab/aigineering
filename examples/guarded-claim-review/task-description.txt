@@ -77,4 +77,4 @@ complete report field requirements into the reviser child description, including
 evidence_excerpt_ids and rationale for every claim. Copy the full semantic
 receipt schema into the semantic child description.
 
-The acceptor child description must name the actual original independently accepted root Contract ID as its attestation target. Copy the exact task:v5:... ID exposed by plan compile. Do not leave placeholders; do not include any other Contract IDs. The acceptor checks the unique target ID in its signed description, regardless of prose or JSON presentation.
+The acceptor child description must name the actual original independently accepted root Contract ID as its attestation target. Copy the exact root Contract ID exposed by plan compile. Do not leave placeholders; do not include any other Contract IDs. The acceptor checks the unique target ID in its signed description, regardless of prose or JSON presentation.

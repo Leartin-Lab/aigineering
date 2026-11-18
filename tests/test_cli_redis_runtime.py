@@ -328,12 +328,12 @@ def test_committed_decision_with_relay_failure_is_not_reported_as_rejection(
         result = runner.invoke(
             cli,
             [
-                "task",
-                "create",
+                "asset",
+                "add",
                 "--name",
                 "retained-decision",
-                "--output",
-                "retained-output",
+                "--content",
+                "private-test-payload",
                 "--json",
             ],
         )
@@ -341,16 +341,56 @@ def test_committed_decision_with_relay_failure_is_not_reported_as_rejection(
     payload = json.loads(result.output)
     assert payload["error"] == "redis_sync_pending"
     assert payload["facts_retained"] and payload["candidate_accepted"]
+    assert "private-test-payload" not in result.output
     store = SQLiteStore.snapshot_from_path(workspace / ".aig/store.db")
-    committed = [
-        contract
-        for contract in store.get_all_contracts()
-        if contract.name == "retained-decision"
-    ]
-    assert len(committed) == 1
-    store.close()
+    try:
+        (committed,) = store.get_assets_by_name("retained-decision")
+        history = {
+            record.record_type: record
+            for record in store.read_candidate_publication(payload["candidate_id"])
+        }
+        assert payload["receipt_id"] == history["candidate.received"].id
+        assert payload["head_id"] == history["candidate.committed"].id
+        assert payload["asset_ids"] == [committed.id]
+        assert payload["revision"] == store.get_runtime_revision()
+        assert collaboration_service(store).status()["watermark"] < payload["revision"]
+    finally:
+        store.close()
     recovered = runner.invoke(cli, ["redis", "sync", "--json"])
     assert recovered.exit_code == 0, recovered.output
-    visible = runner.invoke(cli, ["task", "show", committed[0].id, "--json"])
+    visible = runner.invoke(cli, ["asset", "show", "--id", committed.id, "--json"])
     assert visible.exit_code == 0, visible.output
-    assert json.loads(visible.output)["data"]["task"]["status"] == "ready"
+    assert json.loads(visible.output)["id"] == committed.id
+    with SQLiteStore.snapshot_from_path(workspace / ".aig/store.db") as store:
+        assert collaboration_service(store).status()["watermark"] == payload["revision"]
+
+
+def test_domain_init_pending_reports_exact_domain_without_key_path(
+    live_cli, monkeypatch
+):
+    from aigineering.adapters.redis_query import QueryProjectionUnavailable
+    from aigineering.core.domain import load_genesis
+
+    runner, _, workspace = live_cli
+    next_workspace = workspace / "next"
+    next_workspace.mkdir()
+    monkeypatch.chdir(next_workspace)
+
+    class InterruptedRelay:
+        def sync(self):
+            raise QueryProjectionUnavailable("domain relay interrupted")
+
+    monkeypatch.setattr(
+        "aigineering.runtime_services.collaboration_service",
+        lambda _store: InterruptedRelay(),
+    )
+    result = runner.invoke(cli, ["domain", "init", "--json"])
+    assert result.exit_code == 1
+    pending = json.loads(result.output)
+    assert pending["error"] == "redis_sync_pending"
+    assert pending["facts_retained"] and pending["candidate_accepted"]
+    assert "key_file" not in pending
+    assert "public_key" not in pending
+    with SQLiteStore.snapshot_from_path(".aig/store.db") as store:
+        assert load_genesis(store).id == pending["domain_id"]
+        assert store.get_runtime_revision() == pending["revision"]
