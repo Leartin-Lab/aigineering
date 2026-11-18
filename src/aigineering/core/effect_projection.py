@@ -2,17 +2,18 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from types import MappingProxyType
+from dataclasses import dataclass, replace
 from collections.abc import Mapping
 
 from aigineering.core.effect_projectors import (
     BUILTIN_EFFECTS,
     EffectProjection,
-    EffectProjector,
 )
 from aigineering.core.asset_graph_facts import project_new_graph_assets
-from aigineering.core.acceptance import validate_output_shape
+from aigineering.core.acceptance import (
+    validate_output_shape,
+    validate_output_qualification_batch,
+)
 from aigineering.core.authority import (
     matched_reserved_prefix,
     validate_reserved_name_authority,
@@ -23,22 +24,12 @@ from aigineering.core.causal_allowance import (
 )
 from aigineering.core.fact_materialization import asset_committed_record
 from aigineering.core.projection_context import EffectProjectionContext
-from aigineering.core.claim_assignments import (
-    AssignmentAdmission,
-    AssignmentConflict,
-    AssignmentIntent,
-    EffectFactOwner,
-    SuccessorAssignmentWitness,
-    assignment_context_from_projection,
-    validate_assignment_batch,
-)
-from aigineering.core.injected_fact_replay import (
-    CORE_GENERATED_FACT_TYPES,
-    exact_single_effect_head_replay,
-)
+from aigineering.core.declaration_bindings import bind_declaration_assets
+from aigineering.core.input_bindings import input_asset_bindings
 from aigineering.protocol.candidate import CandidateEffect, CandidateProposal
 from aigineering.protocol.runtime_record import RuntimeRecord, validate_runtime_record
 from aigineering.protocol.types import Asset, Contract
+from aigineering.protocol.wire import contract_to_dict
 
 
 @dataclass(frozen=True)
@@ -49,9 +40,6 @@ class EffectBatchProjection:
     contracts: tuple[Contract, ...] = ()
     assets: tuple[Asset, ...] = ()
     accepted_asset_names: tuple[str, ...] = ()
-    effect_fact_owners: tuple[EffectFactOwner, ...] = ()
-    assignment_intents: tuple[AssignmentIntent, ...] = ()
-    successor_assignment_witnesses: tuple[SuccessorAssignmentWitness, ...] = ()
 
     @property
     def contract(self) -> Contract | None:
@@ -59,157 +47,28 @@ class EffectBatchProjection:
         return self.contracts[0] if len(self.contracts) == 1 else None
 
 
-@dataclass(frozen=True)
-class EffectHandler:
-    capability: str
-    projector: EffectProjector
-    emitted_fact_types: frozenset[str] = frozenset()
-    assignment_admission: AssignmentAdmission = AssignmentAdmission.NONE
-    direct_output_fact_types: frozenset[str] | None = field(default=None, kw_only=True)
-    reserved_fact_types: frozenset[str] = field(default_factory=frozenset, kw_only=True)
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.capability, str) or not self.capability:
-            raise ValueError("effect handler capability must be non-empty")
-        if not callable(self.projector):
-            raise ValueError("effect handler projector must be callable")
-        fact_types = frozenset(self.emitted_fact_types)
-        if any(not isinstance(item, str) or not item for item in fact_types):
-            raise ValueError("effect handler fact types must be non-empty strings")
-        object.__setattr__(self, "emitted_fact_types", fact_types)
-        if not isinstance(self.assignment_admission, AssignmentAdmission):
-            raise ValueError("effect handler assignment admission is invalid")
-        if (
-            "claim.assignment.changed" in fact_types
-            and self.assignment_admission is AssignmentAdmission.NONE
-        ):
-            raise ValueError("assignment fact requires an assignment admission")
-        direct_types = _freeze_fact_type_set(
-            self.direct_output_fact_types,
-            "direct_output_fact_types",
-            allow_none=True,
-        )
-        reserved_types = _freeze_fact_type_set(
-            self.reserved_fact_types,
-            "reserved_fact_types",
-            allow_none=False,
-        )
-        if direct_types is None and reserved_types:
-            raise ValueError(
-                "reserved_fact_types requires strict direct_output_fact_types"
-            )
-        if direct_types is not None and not reserved_types <= direct_types:
-            raise ValueError(
-                "reserved_fact_types must be a subset of direct_output_fact_types"
-            )
-        object.__setattr__(self, "direct_output_fact_types", direct_types)
-        object.__setattr__(self, "reserved_fact_types", reserved_types)
-
-
-def _freeze_fact_type_set(
-    value, name: str, *, allow_none: bool
-) -> frozenset[str] | None:
-    if value is None and allow_none:
-        return None
-    if not isinstance(value, (set, frozenset)):
-        expected = "a set or frozenset" + (" or None" if allow_none else "")
-        raise ValueError(f"{name} must be {expected}")
-    result = frozenset(value)
-    for fact_type in result:
-        if not isinstance(fact_type, str) or not fact_type.strip():
-            raise ValueError(f"{name} entries must be non-empty strings")
-        try:
-            fact_type.encode("utf-8", errors="strict")
-        except UnicodeEncodeError as exc:
-            raise ValueError(f"{name} entries must be valid UTF-8") from exc
-    return result
-
-
-def freeze_additional_effects(
-    effects: Mapping[str, tuple[str, EffectProjector] | EffectHandler] | None,
-) -> Mapping[str, EffectHandler] | None:
-    """Copy and validate trusted host projectors without changing core defaults."""
-    if effects is None:
-        return None
-    if not isinstance(effects, Mapping):
-        raise TypeError("additional_effects must be a mapping")
-    copied: dict[str, EffectHandler] = {}
-    for effect_type, handler in effects.items():
-        if not isinstance(effect_type, str) or not effect_type:
-            raise ValueError("additional effect type must be a non-empty string")
-        if effect_type in BUILTIN_EFFECTS:
-            raise ValueError(
-                f"additional effect cannot replace built-in {effect_type!r}"
-            )
-        if isinstance(handler, EffectHandler):
-            copied[effect_type] = EffectHandler(
-                handler.capability,
-                handler.projector,
-                handler.emitted_fact_types,
-                handler.assignment_admission,
-                direct_output_fact_types=handler.direct_output_fact_types,
-                reserved_fact_types=handler.reserved_fact_types,
-            )
-        elif isinstance(handler, tuple) and len(handler) == 2:
-            capability, projector = handler
-            copied[effect_type] = EffectHandler(capability, projector)
-        else:
-            raise ValueError(
-                "additional effect handler must be EffectHandler or legacy pair"
-            )
-    reserved_owners: dict[str, str] = {}
-    for effect_type, handler in copied.items():
-        for fact_type in handler.reserved_fact_types:
-            previous_owner = reserved_owners.get(fact_type)
-            if previous_owner is not None:
-                raise ValueError(
-                    f"reserved fact type {fact_type!r} has multiple effect owners"
-                )
-            reserved_owners[fact_type] = effect_type
-    return MappingProxyType(copied)
-
-
 def project_effect_batch(
     candidate: CandidateProposal,
     receipt_id: str,
     actor_capabilities: tuple[str, ...],
     context: EffectProjectionContext | None = None,
-    *,
-    additional_effects: Mapping[str, tuple[str, EffectProjector] | EffectHandler]
-    | None = None,
 ) -> EffectBatchProjection:
     """Project one Candidate-wide atomic effect group without Store access."""
     groups = {effect.atomic_group for effect in candidate.effects}
     if len(groups) > 1:
         raise ValueError("one Candidate cannot mix different atomic_group values")
     effective_context = context or EffectProjectionContext()
-    handlers = dict(BUILTIN_EFFECTS)
-    handlers.update(freeze_additional_effects(additional_effects) or {})
-    normalized_handlers = {
-        effect_type: handler
-        if isinstance(handler, EffectHandler)
-        else EffectHandler(*handler)
-        for effect_type, handler in handlers.items()
-    }
-    reserved_owners: dict[str, str] = {}
-    for effect_type, handler in normalized_handlers.items():
-        for fact_type in handler.reserved_fact_types:
-            previous_owner = reserved_owners.get(fact_type)
-            if previous_owner is not None:
-                raise ValueError(
-                    f"reserved fact type {fact_type!r} has multiple effect owners"
-                )
-            reserved_owners[fact_type] = effect_type
     claimed_parent = _validate_claim_bound_effects(
         candidate, actor_capabilities, effective_context
     )
     projections: list[tuple[CandidateEffect, EffectProjection]] = []
-    handlers_for_effect: dict[str, EffectHandler] = {}
-    for effect in candidate.effects:
-        handler = normalized_handlers.get(effect.effect_type)
+    proposed_assets: dict[int, Asset] = {}
+    assets_by_id = {asset.id: asset for asset in effective_context.assets}
+    for effect_index, effect in enumerate(candidate.effects):
+        handler = BUILTIN_EFFECTS.get(effect.effect_type)
         if handler is None:
             raise ValueError(f"unsupported effect type {effect.effect_type!r}")
-        required_capability, projector = handler.capability, handler.projector
+        required_capability, projector = handler
         claim_delegated = claimed_parent is not None and effect.effect_type in {
             "asset.assert",
             "asset.content.publish",
@@ -219,7 +78,28 @@ def project_effect_batch(
         }
         if not claim_delegated and required_capability not in actor_capabilities:
             raise ValueError(f"actor lacks required capability {required_capability!r}")
-        projection = projector(effect, candidate, receipt_id, effective_context)
+        effect = _resolve_replacement_reference(effect, projections)
+        bound = bind_declaration_assets(
+            effect, candidate, effect_index, projected_assets=proposed_assets
+        )
+        projection_context = effective_context
+        if bound is not None:
+            effect = CandidateEffect(
+                effect.effect_type,
+                {"contract": contract_to_dict(bound)},
+                effect.atomic_group,
+            )
+            wanted = set(bound.context_asset_ids)
+            bindings = input_asset_bindings(bound.sensitive_input_policy)
+            for role in bound.inputs:
+                wanted.update(bindings.get(role, ()))
+            projection_context = replace(
+                effective_context,
+                assets=tuple(
+                    assets_by_id[key] for key in sorted(wanted) if key in assets_by_id
+                ),
+            )
+        projection = projector(effect, candidate, receipt_id, projection_context)
         if not isinstance(projection, EffectProjection):
             raise ValueError(
                 f"projector for {effect.effect_type!r} returned an invalid projection"
@@ -253,61 +133,10 @@ def project_effect_batch(
         )
         if missing:
             raise ValueError(f"actor lacks required capabilities {missing!r}")
-        if any(
-            record.record_type == "claim.assignment.changed"
-            and record.record_type not in handler.emitted_fact_types
-            for record in projection.records
-        ):
-            raise ValueError("effect handler emitted an undeclared assignment fact")
-        if (
-            projection.assignment_intents
-            and handler.assignment_admission is AssignmentAdmission.NONE
-        ):
-            raise ValueError("effect handler cannot emit assignment intents")
-        if (
-            projection.successor_assignment_witnesses
-            and handler.assignment_admission
-            is not AssignmentAdmission.SAME_OBLIGATION_SUCCESSOR
-        ):
-            raise ValueError(
-                "effect handler cannot emit successor assignment witnesses"
-            )
-        handlers_for_effect[effect.effect_type] = handler
         projections.append((effect, projection))
-
-    exact_replay = False
-    if len(projections) == 1:
-        only_effect, only_projection = projections[0]
-        exact_replay = exact_single_effect_head_replay(
-            candidate,
-            receipt_id,
-            only_projection.records,
-            effective_context.runtime_records,
-        )
-    for effect, projection in projections:
-        handler = handlers_for_effect[effect.effect_type]
-        for record in projection.records:
-            owner = reserved_owners.get(record.record_type)
-            if owner is not None and owner != effect.effect_type:
-                raise ValueError(
-                    f"effect handler {effect.effect_type!r} emitted reserved fact "
-                    f"type {record.record_type!r} owned by {owner!r}"
-                )
-            is_generated_coeffect = (
-                exact_replay
-                and handler.direct_output_fact_types is not None
-                and record.record_type in CORE_GENERATED_FACT_TYPES
-                and record.record_type not in handler.direct_output_fact_types
-            )
-            if (
-                handler.direct_output_fact_types is not None
-                and record.record_type not in handler.direct_output_fact_types
-                and not is_generated_coeffect
-            ):
-                raise ValueError(
-                    f"effect handler {effect.effect_type!r} emitted undeclared "
-                    f"direct fact type(s): {record.record_type}"
-                )
+        if effect.effect_type == "asset.propose" and len(projection.assets) == 1:
+            proposed_assets[effect_index] = projection.assets[0]
+            assets_by_id[projection.assets[0].id] = projection.assets[0]
 
     _validate_graph_batch(projections, effective_context)
 
@@ -320,6 +149,9 @@ def project_effect_batch(
         asset for _, projection in projections for asset in projection.assets
     )
     projection_records = _ordered_projection_records(projections)
+    validate_output_qualification_batch(
+        effective_context.runtime_records, projection_records
+    )
     graph_assets = project_new_graph_assets(
         effective_context.runtime_records + projection_records,
         projection_records,
@@ -340,7 +172,13 @@ def project_effect_batch(
         )
     assets = assets + tuple(asset for asset, _ in graph_assets)
     if claimed_parent is not None:
-        _validate_claim_bound_projection(claimed_parent, contracts, assets)
+        _validate_claim_bound_projection(
+            claimed_parent,
+            contracts,
+            assets,
+            candidate=candidate,
+            graph_assets=graph_assets,
+        )
     pending_records = projection_records + tuple(
         asset_committed_record(asset, causal_parents=(assertion.id,))
         for asset, assertion in graph_assets
@@ -377,51 +215,6 @@ def project_effect_batch(
         (effect.effect_type, projection.relation_target)
         for effect, projection in projections
     )
-    owners = tuple(
-        EffectFactOwner(
-            record.id,
-            effect.effect_type,
-            handlers_for_effect[effect.effect_type].assignment_admission,
-        )
-        for effect, projection in projections
-        for record in projection.records
-        if (
-            handlers_for_effect[effect.effect_type].direct_output_fact_types is None
-            or record.record_type
-            in handlers_for_effect[effect.effect_type].direct_output_fact_types
-        )
-    )
-    intents = tuple(
-        intent
-        for _, projection in projections
-        for intent in projection.assignment_intents
-    )
-    witnesses = tuple(
-        witness
-        for _, projection in projections
-        for witness in projection.successor_assignment_witnesses
-    )
-    if (
-        any(
-            record.record_type == "claim.assignment.changed"
-            for record in pending_records
-        )
-        or intents
-        or witnesses
-    ):
-        try:
-            validate_assignment_batch(
-                assignment_context_from_projection(effective_context),
-                pending_records,
-                contracts,
-                candidate=candidate,
-                receipt_id=receipt_id,
-                effect_fact_owners=owners,
-                assignment_intents=intents,
-                successor_assignment_witnesses=witnesses,
-            )
-        except AssignmentConflict as exc:
-            raise ValueError(str(exc)) from exc
     return EffectBatchProjection(
         records=pending_records + allowance_records,
         relation_target=(targets[0][1] if len(targets) == 1 else candidate.id),
@@ -434,9 +227,38 @@ def project_effect_batch(
             for name in projection.accepted_asset_names
         )
         + tuple(asset.name for asset, _ in graph_assets),
-        effect_fact_owners=owners,
-        assignment_intents=intents,
-        successor_assignment_witnesses=witnesses,
+    )
+
+
+def _resolve_replacement_reference(
+    effect: CandidateEffect,
+    prior: list[tuple[CandidateEffect, EffectProjection]],
+) -> CandidateEffect:
+    """Resolve a signed, batch-local proposal index to its exact Asset ID."""
+    if (
+        effect.effect_type != "asset.relate"
+        or "replacement_effect_index" not in effect.payload
+    ):
+        return effect
+    index = effect.payload["replacement_effect_index"]
+    claim = effect.payload.get("claim")
+    if not isinstance(claim, Mapping) or "replacement_asset_id" in claim:
+        raise ValueError(
+            "replacement_effect_index requires a claim without replacement_asset_id"
+        )
+    if type(index) is not int or not 0 <= index < len(prior):
+        raise ValueError(
+            "replacement_effect_index must identify a prior asset.propose effect"
+        )
+    referenced, projection = prior[index]
+    if referenced.effect_type != "asset.propose" or len(projection.assets) != 1:
+        raise ValueError(
+            "replacement_effect_index must identify a prior asset.propose effect"
+        )
+    return CandidateEffect(
+        effect.effect_type,
+        {"claim": {**claim, "replacement_asset_id": projection.assets[0].id}},
+        effect.atomic_group,
     )
 
 
@@ -517,11 +339,6 @@ def _validate_claim_bound_effects(
     valid_output = output_effect_types == {"asset.propose"} or (
         output_effect_types <= graph_effects and "asset.assert" in output_effect_types
     )
-    if parent.origin == "recovery" and parent.tool_scope and valid_output:
-        raise ValueError(
-            "tool recovery cannot publish outputs before its remaining tool scope "
-            "is compiled into tool observations"
-        )
     if "asset.attest" in effect_types and "asset.attest" not in actor_capabilities:
         raise ValueError("claim-bound attestation actor lacks 'asset.attest'")
     if not valid_output and effect_types != {"contract.declare"}:
@@ -557,19 +374,52 @@ def _validate_claim_bound_projection(
     parent: Contract,
     contracts: tuple[Contract, ...],
     assets: tuple[Asset, ...],
+    *,
+    candidate: CandidateProposal,
+    graph_assets,
 ) -> None:
     if assets:
-        if any(asset.created_by != parent.id for asset in assets):
-            raise ValueError("claim-bound output Asset has invalid Contract provenance")
+        requirements = (parent.acceptance_policy or {}).get("output_requirements", {})
+        assertions = {
+            asset.id: record.payload["assertion"] for asset, record in graph_assets
+        }
+        for asset in assets:
+            required_definition = requirements.get(asset.name, {}).get("definition_id")
+            if required_definition:
+                assertion = assertions.get(asset.id, {})
+                evidence = assertion.get("evidence", {})
+                if (
+                    asset.definition_hash != required_definition
+                    or assertion.get("actor_id") != candidate.actor_id
+                    or assertion.get("key_id") != candidate.key_id
+                    or not isinstance(evidence, Mapping)
+                    or evidence.get("contract_id") != parent.id
+                    or evidence.get("output_name") != asset.name
+                ):
+                    raise ValueError(
+                        "shared-definition output lacks exact claim provenance"
+                    )
+            elif asset.created_by != parent.id:
+                raise ValueError(
+                    "claim-bound output Asset has invalid Contract provenance"
+                )
         if {asset.name for asset in assets} != set(parent.outputs):
             raise ValueError(
                 "claim-bound output must satisfy exactly all declared outputs"
             )
         if parent.acceptance_policy is not None:
+            from aigineering.core.output_satisfaction import (
+                output_asset_meets_conditions,
+            )
+
             for asset in assets:
                 validate_output_shape(
                     parent.acceptance_policy, asset.name, asset.content
                 )
+                if not output_asset_meets_conditions(parent, asset.name, asset):
+                    raise ValueError(
+                        "claim-bound output does not meet declared Asset conditions"
+                    )
         return
     if not contracts:
         raise ValueError("claim-bound expansion produced no Contracts")

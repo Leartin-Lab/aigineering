@@ -87,5 +87,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: reconstruction-evidence-python-3.11-${{ github.run_id }}
-          path: ${{ runner.temp }}/reconstruction-evidence
+          path: ${{ runner.temp }}/reconstruction-evidence/**/*.json
           if-no-files-found: warn

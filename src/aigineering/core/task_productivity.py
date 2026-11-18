@@ -13,7 +13,7 @@ from collections import Counter, defaultdict
 from collections.abc import Iterable, Mapping
 from typing import Any, Protocol
 
-from aigineering.core.runtime_projection import TERMINAL_EVENTS
+from aigineering.core.lifecycle_facts import TERMINAL_EVENTS
 from aigineering.core.store_capabilities import (
     AssetReader,
     ContractReader,
@@ -53,7 +53,7 @@ def project_task_productivity(
         )
     )
     traces = _trace_entries(records, contract_ids)
-    terminal_by_contract = _terminal_states(records, traces, contract_ids)
+    terminal_by_contract = _terminal_states(records, contract_ids)
 
     contract_states: list[dict[str, Any]] = []
     status_counts: Counter[str] = Counter()
@@ -82,7 +82,9 @@ def project_task_productivity(
         if _is_tool_contract(item, method):
             tool_rows.append(_tool_call_row(item, status, store))
 
-    usage_records, token_totals = _usage_projection(traces, contracts)
+    usage_records, token_totals, token_usage_coverage = _usage_projection(
+        traces, contracts
+    )
     rejection_records, rejection_trace_count = _rejections(
         records, traces, contract_ids
     )
@@ -122,6 +124,7 @@ def project_task_productivity(
         "rejections": rejection_records,
         "usage_records": usage_records,
         "token_totals": token_totals,
+        "token_usage_coverage": token_usage_coverage,
     }
 
 
@@ -176,13 +179,8 @@ def _trace_entries(records: Iterable[Any], contract_ids: set[str]) -> list[Trace
     return traces
 
 
-def _terminal_states(
-    records: Iterable[Any], traces: Iterable[TraceEntry], contract_ids: set[str]
-) -> dict[str, str]:
+def _terminal_states(records: Iterable[Any], contract_ids: set[str]) -> dict[str, str]:
     states: dict[str, str] = {}
-    for trace in traces:
-        if trace.event_type in TERMINAL_EVENTS:
-            states[trace.contract_id] = trace.event_type
     for record in records:
         if record.record_type != "lifecycle.terminal":
             continue
@@ -258,10 +256,12 @@ def _tool_call_row(contract: Contract, status: str, store) -> dict[str, Any]:
 
 def _usage_projection(
     traces: Iterable[TraceEntry], contracts: list[Contract]
-) -> tuple[list[dict[str, Any]], dict[str, int]]:
+) -> tuple[list[dict[str, Any]], dict[str, int | None], dict[str, dict[str, int]]]:
     methods = {item.id: _method(item) for item in contracts}
     usage_records: list[dict[str, Any]] = []
-    totals = {field: 0 for field in _TOKEN_FIELDS}
+    subtotals: Counter[str] = Counter()
+    known: Counter[str] = Counter()
+    observations = 0
     for trace in traces:
         metadata = trace.usage_metadata
         if metadata is None:
@@ -270,10 +270,6 @@ def _usage_projection(
         if usage_dict is None:
             continue
         kind = _usage_kind(trace, methods.get(trace.contract_id, ""), usage_dict)
-        if kind == "llm" and not any(
-            field in usage_dict for field in TOKEN_USAGE_FIELDS
-        ):
-            continue
         usage_records.append(
             {
                 "contract_id": trace.contract_id,
@@ -283,15 +279,36 @@ def _usage_projection(
                 "usage": usage_dict,
             }
         )
-        for field in _TOKEN_FIELDS:
-            if field in usage_dict:
-                totals[field] += usage_dict[field]
-        if "total_tokens" not in usage_dict:
-            prompt = usage_dict.get("prompt_tokens")
-            completion = usage_dict.get("completion_tokens")
-            if prompt is not None and completion is not None:
-                totals["total_tokens"] += prompt + completion
-    return usage_records, totals
+        if kind != "llm":
+            continue
+        observations += 1
+        values = {
+            field: usage_dict[field] for field in _TOKEN_FIELDS if field in usage_dict
+        }
+        if (
+            "total_tokens" not in values
+            and {"prompt_tokens", "completion_tokens"} <= values.keys()
+        ):
+            values["total_tokens"] = (
+                values["prompt_tokens"] + values["completion_tokens"]
+            )
+        subtotals.update(values)
+        known.update(values.keys())
+    totals = {
+        field: subtotals[field]
+        if observations and known[field] == observations
+        else None
+        for field in _TOKEN_FIELDS
+    }
+    coverage = {
+        field: {
+            "known_subtotal": subtotals[field],
+            "known_observations": known[field],
+            "observations": observations,
+        }
+        for field in _TOKEN_FIELDS
+    }
+    return usage_records, totals, coverage
 
 
 def _usage_kind(trace: TraceEntry, method: str, usage: Mapping[str, Any]) -> str:

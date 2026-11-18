@@ -8,7 +8,7 @@ from aigineering.core.ids import compute_content_hash, contract_from_fields
 from aigineering.protocol.immutability import deep_thaw
 from aigineering.plugins.continuation import allocate_continuation_budget
 from aigineering.plugins.planning_roles import without_planning_stage_labels
-from aigineering.plugins.task_semantics import method_contract
+from aigineering.plugins.task_semantics import continuation_contract, method_contract
 from aigineering.protocol.actions import WorkerAction
 from aigineering.protocol.effect_builders import contract_declaration_effect
 from aigineering.protocol.types import Contract
@@ -37,6 +37,10 @@ class TaskDelegationPlugin:
             raise ValueError(f"unsupported claimed task action {action.type!r}")
         if allowance < 1:
             raise ValueError("claimed task action has no causal allowance")
+        if action.type == "tool" and allowance < 2:
+            raise ValueError(
+                "tool action lacks allowance for its tool task and continuation"
+            )
         from aigineering.plugins.base import PluginProposal
 
         if action.type == "parallel_tool":
@@ -66,6 +70,26 @@ class TaskDelegationPlugin:
             return PluginProposal(
                 effects=tuple(contract_declaration_effect(child) for child in children)
             )
+        if action.type == "tool":
+            first_recovery_demand = min(1, max(0, allowance - 2))
+            continuation_budget, _reserve = allocate_continuation_budget(
+                parent,
+                max(0, allowance - 1),
+                recovery_demand=first_recovery_demand,
+            )
+            method_task = _claimed_method_contract(parent, action)
+            continuation = continuation_contract(
+                parent,
+                method_task,
+                method="tool",
+                budget=continuation_budget,
+            )
+            return PluginProposal(
+                effects=tuple(
+                    contract_declaration_effect(child)
+                    for child in (method_task, continuation)
+                )
+            )
         child = (
             _claimed_retry_contract(parent, allowance)
             if action.type == "retry"
@@ -78,7 +102,12 @@ def _parallel_tool_contracts(
     parent: Contract, action: WorkerAction, allowance: int
 ) -> tuple[Contract, ...]:
     return _build_parallel_tool_contracts(
-        parent, action, allowance, legacy_stage_labels=False
+        parent,
+        action,
+        allowance,
+        legacy_stage_labels=False,
+        legacy_consumed_tool_scope=False,
+        legacy_continuation=False,
     )
 
 
@@ -87,7 +116,26 @@ def _legacy_parallel_tool_contracts(
 ) -> tuple[Contract, ...]:
     """Recreate former signed parallel-tool declarations for history proofs."""
     return _build_parallel_tool_contracts(
-        parent, action, allowance, legacy_stage_labels=True
+        parent,
+        action,
+        allowance,
+        legacy_stage_labels=True,
+        legacy_consumed_tool_scope=True,
+        legacy_continuation=True,
+    )
+
+
+def _baseline_parallel_tool_contracts(
+    parent: Contract, action: WorkerAction, allowance: int
+) -> tuple[Contract, ...]:
+    """Recreate ecee5f7: current labels with consumed tool scope."""
+    return _build_parallel_tool_contracts(
+        parent,
+        action,
+        allowance,
+        legacy_stage_labels=False,
+        legacy_consumed_tool_scope=True,
+        legacy_continuation=True,
     )
 
 
@@ -97,6 +145,8 @@ def _build_parallel_tool_contracts(
     allowance: int,
     *,
     legacy_stage_labels: bool,
+    legacy_consumed_tool_scope: bool,
+    legacy_continuation: bool,
 ) -> tuple[Contract, ...]:
     payload = deep_thaw(action.payload)
     calls = payload.get("calls")
@@ -141,12 +191,18 @@ def _build_parallel_tool_contracts(
     continuation_fields = {
         "name": f"{parent.name or parent.id}.parallel_tool.continue.{batch_key}",
         "description": parent.description,
-        "inputs": observations,
+        "inputs": (
+            observations
+            if legacy_continuation
+            else tuple(dict.fromkeys((*parent.inputs, *observations)))
+        ),
         "outputs": parent.outputs,
         "activation": " AND ".join(observations),
         "budget": allowance - len(tool_tasks),
-        "tool_scope": tuple(
-            tool for tool in parent.tool_scope if tool not in used_tools
+        "tool_scope": (
+            tuple(tool for tool in parent.tool_scope if tool not in used_tools)
+            if legacy_consumed_tool_scope
+            else parent.tool_scope
         ),
         "labels": tuple(
             dict.fromkeys((*parent.labels, "plugin:parallel_tool.continuation"))
@@ -167,6 +223,21 @@ def _build_parallel_tool_contracts(
         ),
         "context_asset_ids": parent.context_asset_ids,
     }
+    if legacy_continuation:
+        if (
+            parent.acceptance_policy is not None
+            and parent.acceptance_policy.get("mode") == "mechanical"
+            and parent.acceptance_policy.get("output_source") == "contract_tree"
+        ):
+            continuation_fields["acceptance_policy"] = deep_thaw(
+                parent.acceptance_policy
+            )
+    elif parent.acceptance_policy is not None:
+        acceptance_policy = deep_thaw(parent.acceptance_policy)
+        if not isinstance(acceptance_policy, dict):
+            raise ValueError("parent acceptance policy must be an object")
+        acceptance_policy.pop("output_source", None)
+        continuation_fields["acceptance_policy"] = acceptance_policy
     continuation = contract_from_fields(**continuation_fields)
     return (*tool_tasks, continuation)
 

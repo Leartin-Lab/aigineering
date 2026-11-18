@@ -805,9 +805,9 @@ def worker_coordination_smoke(
     before_rebuild = _python_json(
         python, _STATE_SCRIPT, [str(database)], cwd=cwd, env=local_env
     )
-    if before_rebuild.get("schema_version") != 21:
+    if before_rebuild.get("schema_version", 0) < 21:
         raise RuntimeError(
-            f"Installed Worker coordination requires schema 21: {before_rebuild.get('schema_version')}"
+            f"Installed Worker coordination requires schema >=21: {before_rebuild.get('schema_version')}"
         )
     if before_rebuild["record_ids_before"] != before_rebuild["record_ids_after"]:
         raise RuntimeError("reopen/rebuild changed Worker coordination fact IDs")
@@ -940,6 +940,6 @@ def worker_coordination_smoke(
         "normal_run_and_fleet_fixtures_completed": True,
         "rebuild_fact_ids_unchanged": True,
         "redis_event_index_current_after_rebuild": True,
-        "schema_version": 21,
+        "schema_version": before_rebuild["schema_version"],
         "provider_calls": 0,
     }

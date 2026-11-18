@@ -3,31 +3,29 @@
 from __future__ import annotations
 
 import json
+from collections import defaultdict
 from collections.abc import Mapping
 
 from aigineering.core.runtime_projection import (
-    TERMINAL_EVENTS,
     ContractView,
     RuntimeProjection,
 )
-from aigineering.core.claim_constraints import (
-    claim_constraint_blockers,
-    open_claim_constraints,
-)
+from aigineering.core.lifecycle_facts import TERMINAL_EVENTS
 from aigineering.core.store import require_operational_store
-from aigineering.core.acceptance import (
-    validate_claim_bound_output,
-    validate_output_shape,
-)
+from aigineering.core.acceptance import validate_asset_publication
 from aigineering.core.contract_admission import validate_acceptance_policy
 from aigineering.core.output_satisfaction import (
-    _is_contract_or_descendant,
     all_outputs_satisfied,
-    is_business_output,
+    output_asset_meets_conditions,
+    is_output_role_asset,
+    selected_output_assets,
+)
+from aigineering.core.publication_history import (
+    index_published_records,
+    validate_published_member,
 )
 from aigineering.core.worker_routing import eligible_workers
 from aigineering.core.claim_assignments import (
-    assignment_blocker,
     assignment_context_from_projection,
     assignment_head,
     effective_assignment,
@@ -36,20 +34,44 @@ from aigineering.core.projection_context import load_effect_projection_context
 from aigineering.plugins.task_priority import PRIORITY_FACT, priority_histories
 from aigineering.protocol.immutability import deep_thaw
 from aigineering.protocol.types import Contract, TraceEntry
+from aigineering.protocol.wire import contract_to_dict
+from aigineering.plugins.task_semantics import method_payload
 
 
 def contract_tree_ids(contracts: list[Contract], root_contract_id: str) -> set[str]:
-    """Select an immutable root and descendants for every application entry."""
-    by_id = {contract.id: contract for contract in contracts}
-    selected = {root_contract_id} if root_contract_id in by_id else set()
-    changed = True
-    while changed:
-        changed = False
-        for contract in contracts:
-            if contract.parent_id in selected and contract.id not in selected:
-                selected.add(contract.id)
-                changed = True
-    return selected
+    """Select an immutable root and descendants from a captured collection."""
+    children = defaultdict(list)
+    root = None
+    for contract in contracts:
+        if contract.id == root_contract_id:
+            root = contract
+        children[contract.parent_id].append(contract)
+    return {
+        contract.id
+        for contract in _walk_contract_tree(root, lambda parent: children[parent])
+    }
+
+
+def read_contract_tree(store, root_contract_id: str) -> list[Contract]:
+    """Read one root and its descendants from the Store's parent index."""
+    with store.read_transaction():
+        return list(
+            _walk_contract_tree(
+                store.get_contract(root_contract_id), store.get_child_contracts
+            )
+        )
+
+
+def _walk_contract_tree(root, get_children):
+    pending = [root] if root is not None else []
+    seen = set()
+    while pending:
+        contract = pending.pop()
+        if contract.id in seen:
+            continue
+        seen.add(contract.id)
+        yield contract
+        pending.extend(get_children(contract.id))
 
 
 def task_priority_histories(projection_context, contract_ids) -> dict[str, tuple]:
@@ -93,39 +115,24 @@ def project_task_status(
     original_store = store
     if query_context is not None:
         query_context.require_match(store, projection_context=projection_context)
-        if query_context.read_store.get_contract(contract.id) != contract:
+        if query_context.get_contract(contract.id) != contract:
             raise ValueError("task-view Contract does not belong to its query snapshot")
-        store = query_context.read_store
+        store = query_context
     entries = _trace_entries(store, contract.id)
     view = (
         query_context.runtime_projection.contract_view(contract)
         if query_context is not None
         else RuntimeProjection(store, store).contract_view(contract)
     )
-    runtime_records = tuple(
-        record for _revision, record in store.scan_runtime_records()
-    )
-    open_dependencies = open_claim_constraints(runtime_records, contract_id=contract.id)
-    dependency_blockers = claim_constraint_blockers(
-        runtime_records, contract_id=contract.id
-    )
-    terminal = _latest_terminal(entries) or _runtime_terminal(store, contract.id)
     attempt_outcome = _latest_attempt_outcome(store, contract.id)
-    output_assets = _output_assets(contract, store)
     projection_context = projection_context or (
         query_context.effect_projection
         if query_context is not None
         else load_effect_projection_context(store)
     )
-    candidate_qualification_outputs = (
-        _submitted_independent_output_assets(contract, store, projection_context)
-        if view.claim_status == "submitted"
-        else {}
-    )
     assignment_context = assignment_context_from_projection(projection_context)
     assignment_fact = assignment_head(assignment_context, contract_id=contract.id)
     effective_worker = effective_assignment(assignment_context, contract_id=contract.id)
-    assignment_issue = assignment_blocker(assignment_context, contract_id=contract.id)
     if priority_facts is None:
         priority_facts = task_priority_histories(projection_context, (contract.id,))[
             contract.id
@@ -143,17 +150,24 @@ def project_task_status(
         if entry.usage_metadata is not None
     ]
 
-    status = _status_from_entries(
+    selected_outputs = selected_output_assets(contract, store)
+    outputs_satisfied = all(name in selected_outputs for name in contract.outputs)
+    status = _status_from_facts(
         contract,
         store,
-        entries,
-        terminal,
         view,
         attempt_outcome,
-        assignment_blocker=assignment_issue,
+        outputs_satisfied=outputs_satisfied,
+    )
+    output_assets = (
+        {name: asset.id for name, asset in selected_outputs.items()}
+        if status == "completed"
+        else _output_assets(contract, store)
     )
     qualification_pending_outputs = (
-        candidate_qualification_outputs if status == "submitted" else {}
+        _submitted_independent_output_assets(contract, store, projection_context)
+        if status not in {"completed", "failed", "cancelled", "unreachable", "stalled"}
+        else {}
     )
     qualification_pending = bool(qualification_pending_outputs)
     failure_details = _descendant_failure_details(
@@ -161,17 +175,20 @@ def project_task_status(
         store,
         include_contract=status in {"failed", "cancelled", "unreachable", "stalled"},
     )
+    reported_failures, reported_failures_truncated = _reported_method_failures(
+        contract,
+        projection_context,
+        query_context=query_context,
+    )
+    failure_details.extend(reported_failures)
     blockers = list(view.blockers)
     if qualification_pending and "qualification:independent_acceptance" not in blockers:
         blockers.append("qualification:independent_acceptance")
-    if assignment_issue is not None:
-        marker = f"assignment:{assignment_issue['assignment_id']}:{assignment_issue['reason']}"
-        if marker not in blockers:
-            blockers.append(marker)
     if status not in {"completed", "failed", "cancelled", "unreachable"}:
         blockers.extend(
             f"descendant_{item['status']}:{item['contract_id']}"
             for item in failure_details
+            if isinstance(item.get("status"), str)
         )
     risks = _silent_failure_risks(
         contract,
@@ -193,22 +210,8 @@ def project_task_status(
         "status": status,
         "terminal": status in TERMINAL_EVENTS or status == "completed",
         "ok": status == "completed",
-        "outputs_satisfied": all_outputs_satisfied(contract, store),
+        "outputs_satisfied": outputs_satisfied,
         "blockers": blockers,
-        "dependency_blockers": list(dependency_blockers),
-        "dependencies": [
-            {
-                "constraint_id": record.id,
-                "prerequisite_contract_id": str(
-                    record.payload["prerequisite_contract_id"]
-                ),
-                "predicate": str(record.payload["predicate"]),
-                "required_terminal": str(record.payload["required_terminal"]),
-                "reason": str(record.payload["reason"]),
-                "active": True,
-            }
-            for record in open_dependencies
-        ],
         "budget_remaining": view.budget_remaining,
         "projection_hash": view.projection_hash,
         "outputs": output_assets,
@@ -221,7 +224,8 @@ def project_task_status(
         "trace_event_count": len(entries),
         "token_usage": usage,
         "failure_details": failure_details,
-        "assignment": (
+        "reported_failure_candidates_truncated": reported_failures_truncated,
+        "historical_assignment": (
             {
                 "assignment_id": assignment_fact.id,
                 "worker_id": (
@@ -229,15 +233,16 @@ def project_task_status(
                     if effective_worker is not None
                     else None
                 ),
-                "blocker": dict(assignment_issue) if assignment_issue else None,
             }
             if assignment_fact is not None
             else None
         ),
-        "priority": (
+        "historical_priority": (
             int(priority_fact.payload["priority"]) if priority_fact is not None else 0
         ),
-        "priority_fact_id": priority_fact.id if priority_fact is not None else None,
+        "historical_priority_fact_id": priority_fact.id
+        if priority_fact is not None
+        else None,
     }
     if check_integrity:
         from aigineering.core.integrity import check_store_integrity
@@ -312,94 +317,59 @@ def recovery_successor_map(
     }
 
 
-def _latest_terminal(entries: list[TraceEntry]) -> str:
-    terminal = ""
-    for entry in entries:
-        if entry.event_type in TERMINAL_EVENTS:
-            terminal = entry.event_type
-    return terminal
-
-
-def _runtime_terminal(store, contract_id: str) -> str:
-    terminals = {
-        str(record.payload["terminal"])
-        for _, record in store.scan_runtime_records(record_type="lifecycle.terminal")
-        if record.payload.get("contract_id") == contract_id
-    }
-    if len(terminals) > 1:
-        return "stalled"
-    return next(iter(terminals), "")
-
-
 def _latest_attempt_outcome(store, contract_id: str) -> str:
-    outcomes = [
-        str(record.payload.get("outcome", ""))
-        for _, record in store.scan_runtime_records(record_type="attempt.closed")
-        if record.payload.get("contract_id") == contract_id
-    ]
-    return outcomes[-1] if outcomes else ""
+    attempts = store.read_task_facts(contract_id, ("attempt.closed",))
+    return str(attempts[-1].payload.get("outcome", "")) if attempts else ""
 
 
 def _output_assets(contract: Contract, store) -> dict[str, str]:
+    qualified: dict[str, set[str]] = {}
+    if (contract.acceptance_policy or {}).get("mode") == "independent":
+        for _, record in store.scan_runtime_records(record_type="output.qualified"):
+            if record.payload.get("contract_id") == contract.id:
+                qualified.setdefault(
+                    str(record.payload.get("output_name", "")), set()
+                ).add(str(record.payload.get("asset_id", "")))
     outputs: dict[str, str] = {}
     for name in contract.outputs:
-        matches = store.get_assets_by_name(name)
+        matches = [
+            asset
+            for asset in store.get_assets_by_name(name)
+            if is_output_role_asset(asset, name)
+            and output_asset_meets_conditions(contract, name, asset)
+            and (not qualified.get(name) or asset.id in qualified[name])
+        ]
         if matches:
             outputs[name] = matches[-1].id
     return outputs
 
 
-def _status_from_entries(
+def _status_from_facts(
     contract: Contract,
     store,
-    entries: list[TraceEntry],
-    terminal: str,
     view: ContractView,
     attempt_outcome: str,
     *,
-    assignment_blocker: dict | None = None,
+    outputs_satisfied: bool | None = None,
 ) -> str:
     if view.terminal == "conflict":
         return "stalled"
     if view.terminal is not None:
         return "completed" if view.terminal == "complete" else view.terminal
-    if terminal == "complete":
-        return "completed"
-    if terminal:
-        return terminal
-    if all_outputs_satisfied(contract, store):
+    if outputs_satisfied is None:
+        outputs_satisfied = all_outputs_satisfied(contract, store)
+    if outputs_satisfied:
         return "completed"
     if attempt_outcome == "expanded":
         return "expanded"
     if view.claim_status == "active":
         return "claimed"
-    if view.claim_status == "submitted":
+    if view.claim_status == "submitted" and attempt_outcome != "failed":
         return "submitted"
-    if any(entry.event_type == "projection" for entry in entries):
-        return "submitted"
-    suspended = False
-    for entry in entries:
-        if entry.event_type in {
-            "task_delegated",
-            "method_scheduled",
-            "method_continuation_scheduled",
-        }:
-            suspended = True
-        elif entry.event_type == "method_resumed":
-            suspended = False
-    if suspended:
-        return "blocked_delegation"
-    if any(
-        blocker.startswith(("claim_hold:", "prerequisite:"))
-        for blocker in view.blockers
-    ):
-        return "blocked"
     if not view.inputs_satisfied or not view.activation_satisfied:
         return "blocked"
     if view.budget_remaining <= 0:
         return "stalled"
-    if assignment_blocker is not None:
-        return "blocked_assignment"
     if contract.worker_capabilities or contract.worker_pools:
         if not eligible_workers(contract, store.get_worker_registrations()):
             return "blocked_capability"
@@ -505,8 +475,8 @@ def _submitted_independent_output_assets(
         matching_assets = store.get_assets_by_name(output_name)
         if any(
             asset.id in qualified_asset_ids
-            and is_business_output(asset, output_name)
-            and _is_contract_or_descendant(asset.created_by, contract.id, store)
+            and is_output_role_asset(asset, output_name)
+            and output_asset_meets_conditions(contract, output_name, asset)
             for asset in matching_assets
         ):
             continue
@@ -514,29 +484,17 @@ def _submitted_independent_output_assets(
         eligible_asset_id = None
         for asset in matching_assets:
             try:
-                validate_claim_bound_output(
-                    projection_context,
-                    asset,
-                    next(
-                        item
-                        for item in projection_context.contracts
-                        if item.id == asset.created_by
-                    ),
-                )
-            except (LookupError, StopIteration, ValueError):
+                validate_asset_publication(projection_context, asset)
+            except (LookupError, ValueError):
                 continue
             if (
                 asset.tombstoned
                 or not asset.promptable
                 or asset.disclosure_view != "original"
-                or not is_business_output(asset, output_name)
-                or not _is_contract_or_descendant(asset.created_by, contract.id, store)
+                or not is_output_role_asset(asset, output_name)
+                or not output_asset_meets_conditions(contract, output_name, asset)
                 or asset.id not in committed_asset_ids
             ):
-                continue
-            try:
-                validate_output_shape(policy, output_name, asset.content)
-            except (TypeError, ValueError):
                 continue
             eligible_asset_id = asset.id
             break
@@ -553,25 +511,12 @@ def _submitted_independent_output_assets(
 
 
 def _has_unfinished_descendant(contract: Contract, store) -> bool:
-    children: dict[str, list[str]] = {}
-    for candidate in store.get_all_contracts():
-        if candidate.parent_id is not None:
-            children.setdefault(candidate.parent_id, []).append(candidate.id)
-    terminal_ids = {
-        str(record.payload.get("contract_id", ""))
-        for _, record in store.scan_runtime_records(record_type="lifecycle.terminal")
-    }
-    pending = list(children.get(contract.id, ()))
-    visited: set[str] = set()
-    while pending:
-        contract_id = pending.pop()
-        if contract_id in visited:
-            continue
-        visited.add(contract_id)
-        if contract_id not in terminal_ids:
-            return True
-        pending.extend(children.get(contract_id, ()))
-    return False
+    descendants = _walk_contract_tree(contract, store.get_child_contracts)
+    next(descendants)  # The root's own terminal fact says nothing about its children.
+    return any(
+        not store.read_task_facts(child.id, ("lifecycle.terminal",))
+        for child in descendants
+    )
 
 
 def _has_active_recovery(contract: Contract, store) -> bool:
@@ -601,12 +546,9 @@ def _descendant_failure_risks(
             visited.add(child.id)
             entries = _trace_entries(store, child.id)
             view = projection.contract_view(child)
-            terminal = _latest_terminal(entries)
-            status = _status_from_entries(
+            status = _status_from_facts(
                 child,
                 store,
-                entries,
-                terminal,
                 view,
                 _latest_attempt_outcome(store, child.id),
             )
@@ -627,8 +569,7 @@ def _descendant_failure_risks(
                 has_active_recovery=child.id in active_recovery_for,
                 view=view,
                 qualification_pending=(
-                    view.claim_status == "submitted"
-                    and bool(
+                    bool(
                         _submitted_independent_output_assets(
                             child, store, projection_context
                         )
@@ -670,13 +611,10 @@ def _descendant_failure_details(
         if child.id in visited:
             continue
         visited.add(child.id)
-        entries = _trace_entries(store, child.id)
         view = projection.contract_view(child)
-        status = _status_from_entries(
+        status = _status_from_facts(
             child,
             store,
-            entries,
-            _latest_terminal(entries),
             view,
             _latest_attempt_outcome(store, child.id),
         )
@@ -763,6 +701,147 @@ def _descendant_failure_details(
             details.append(detail)
         pending.extend(children.get(child.id, ()))
     return details
+
+
+def _reported_method_failures(contract, projection_context, *, query_context=None):
+    """Expose a published /fail assertion only while its source outputs remain unmet."""
+    from aigineering.core.output_satisfaction import all_outputs_satisfied
+
+    contracts = tuple(projection_context.contracts)
+    records = tuple(projection_context.runtime_records)
+    by_id = {item.id: item for item in contracts}
+    children: dict[str, list[Contract]] = {}
+    for item in contracts:
+        if item.parent_id is not None:
+            children.setdefault(item.parent_id, []).append(item)
+    tree_ids = {contract.id}
+    pending = [contract.id]
+    while pending:
+        current_id = pending.pop()
+        for child in children.get(current_id, ()):
+            if child.id not in tree_ids:
+                tree_ids.add(child.id)
+                pending.append(child.id)
+
+    linked = []
+    for task in contracts:
+        if task.id not in tree_ids:
+            continue
+        declared = method_payload(task)
+        if declared.get("method") != "fail" or not isinstance(
+            declared.get("payload"), Mapping
+        ):
+            continue
+        source = by_id.get(task.parent_id or "")
+        if (
+            source is None
+            or source.id not in tree_ids
+            or declared.get("parent_contract_id") != source.id
+        ):
+            continue
+        linked.append((task, source, declared))
+    if not linked or not records:
+        return [], False
+
+    index = index_published_records(records)
+    declarations_by_id: dict[str, list] = {}
+    declaration_order: dict[str, int] = {}
+    terminal_ids = {
+        row.payload.get("contract_id")
+        for row in index.records
+        if row.record_type == "lifecycle.terminal"
+        and isinstance(row.payload.get("contract_id"), str)
+    }
+    for ordinal, row in enumerate(index.records):
+        if row.record_type != "contract.declared":
+            continue
+        declaration = row.payload.get("contract")
+        declared_id = (
+            declaration.get("id") if isinstance(declaration, Mapping) else None
+        )
+        if isinstance(declared_id, str):
+            declarations_by_id.setdefault(declared_id, []).append(row)
+            declaration_order.setdefault(declared_id, ordinal)
+    from aigineering.core.projection_store_view import ProjectionStoreView
+
+    view = query_context or ProjectionStoreView(projection_context)
+    candidates = []
+    for task, source, declared in linked:
+        if source.id in terminal_ids:
+            continue
+        declarations = declarations_by_id.get(task.id, ())
+        if len(declarations) != 1 or deep_thaw(
+            declarations[0].payload["contract"]
+        ) != deep_thaw(contract_to_dict(task)):
+            continue
+        candidates.append(
+            (
+                declaration_order.get(task.id, len(index.records)),
+                task,
+                source,
+                declared,
+                declarations[0],
+            )
+        )
+
+    details = []
+    truncated = len(candidates) > 8
+    for _ordinal, task, source, declared, declaration in sorted(
+        candidates, key=lambda item: item[0]
+    )[:8]:
+        if len(task.outputs) != 1:
+            continue
+        if all_outputs_satisfied(source, view):
+            continue
+        try:
+            receipt, head = validate_published_member(
+                records,
+                declaration,
+                record_index=index,
+                domain_id=(
+                    query_context.domain_id if query_context is not None else None
+                ),
+            )
+        except (TypeError, ValueError):
+            continue
+        selected = selected_output_assets(task, view)
+        if len(selected) != len(set(task.outputs)) or not selected:
+            continue
+        asset = next(iter(selected.values()))
+        try:
+            report_receipt, report_head, _member = validate_asset_publication(
+                projection_context, asset
+            )
+        except (LookupError, TypeError, ValueError):
+            continue
+        if (
+            asset.tombstoned
+            or not asset.promptable
+            or asset.disclosure_view != "original"
+        ):
+            continue
+        reason = declared["payload"].get("reason")
+        if not isinstance(reason, str) or not reason.strip():
+            continue
+        reason = " ".join(reason.split())[:500]
+        details.append(
+            {
+                "kind": "reported_method_failure",
+                "assertion_label": "untrusted declared failure reason",
+                "source_contract_id": source.id,
+                "method_contract_id": task.id,
+                "method_declaration_record_id": declaration.id,
+                "method_receipt_id": receipt.id,
+                "method_head_id": head.id,
+                "method_actor_id": receipt.payload.get("actor_id"),
+                "report_asset_ids": [asset.id],
+                "report_receipt_id": report_receipt.id,
+                "report_head_id": report_head.id,
+                "report_actor_id": report_receipt.payload.get("actor_id"),
+                "reason": reason,
+            }
+        )
+    return details, truncated
 
 
 def _observation_asset_ids(entry: TraceEntry, store) -> list[str]:

@@ -28,12 +28,7 @@ from aigineering.core.worker_routing import (
     WorkerRegistration,
     worker_registration_payload,
 )
-from aigineering.core.projection_context import load_effect_projection_context
-from aigineering.plugins.worker_profile_promotion import (
-    WORKER_PROFILE_PROMOTION_EFFECTS,
-    completed_profile_promotion_matches,
-    validate_worker_profile_promotion,
-)
+
 from aigineering.worker_hosting import authorize_worker_host
 
 
@@ -56,6 +51,10 @@ class _ActorKeyAlreadyExists(ValueError):
 
 def actor_key_path() -> Path:
     return Path(os.environ.get("AIG_ACTOR_KEY_FILE", ".aig/identity/root.ed25519"))
+
+
+def _identity_directory(key_path: Path | None = None) -> Path:
+    return (key_path or actor_key_path()).parent
 
 
 def write_actor_key(path: Path, signer: Ed25519Signer) -> None:
@@ -112,12 +111,12 @@ def _load_or_create_signer(path: Path) -> Ed25519Signer:
     return signer
 
 
-def ensure_local_domain(store) -> GenesisManifest:
+def ensure_local_domain(store, *, key_path: Path | None = None) -> GenesisManifest:
     """Create the sole local bootstrap on first use, otherwise load it."""
     try:
         return load_genesis(store)
     except LookupError:
-        path = actor_key_path()
+        path = key_path or actor_key_path()
         signer = _load_or_create_signer(path)
         manifest = create_genesis_manifest(
             "local",
@@ -136,10 +135,10 @@ def ensure_local_domain(store) -> GenesisManifest:
 
 
 def _local_root_publisher(
-    store, *, additional_effects=None
+    store, *, key_path: Path | None = None
 ) -> tuple[GenesisManifest, CandidatePublisher]:
-    genesis = ensure_local_domain(store)
-    signer = load_actor_signer()
+    genesis = ensure_local_domain(store, key_path=key_path)
+    signer = load_actor_signer(key_path)
     try:
         actor_key = next(
             key
@@ -154,7 +153,6 @@ def _local_root_publisher(
         genesis,
         actor_key,
         signer,
-        additional_effects=additional_effects,
     )
 
 
@@ -164,13 +162,15 @@ def ensure_local_worker_host(
     *,
     effect_capabilities: tuple[str, ...] = (),
     pull_only: bool = False,
+    key_path: Path | None = None,
 ):
     """Bind one local Worker adapter to its immutable registration history."""
     from aigineering.application import require_redis
 
     require_redis()
     genesis, authority = _local_root_publisher(
-        store, additional_effects=WORKER_PROFILE_PROMOTION_EFFECTS
+        store,
+        key_path=key_path,
     )
     worker_id = str(worker.worker_id)
     effect_capabilities = tuple(sorted(set(effect_capabilities)))
@@ -181,7 +181,7 @@ def ensure_local_worker_host(
     )
     key_suffix = compute_content_hash(key_identity)[:16]
     key_id = f"worker-{key_suffix}"
-    path = actor_key_path().parent / f"{key_id}.ed25519"
+    path = _identity_directory(key_path) / f"{key_id}.ed25519"
     current = store.get_worker_registration(worker_id)
     registration_factory = getattr(worker, "registration", None)
     requested = (
@@ -219,7 +219,10 @@ def ensure_local_worker_host(
     # Existing registrations must prove their local signer before any new key
     # can be written. This also refuses disabled and externally owned workers.
     existing_host = load_existing_local_worker_host(
-        store, worker, effect_capabilities=effect_capabilities
+        store,
+        worker,
+        effect_capabilities=effect_capabilities,
+        key_path=key_path,
     )
     requested = replace(
         requested,
@@ -230,7 +233,6 @@ def ensure_local_worker_host(
     if worker_registration_payload(current) == worker_registration_payload(requested):
         return replace(existing_host, registration_version=current.version)
 
-    records = tuple(record for _, record in store.scan_runtime_records())
     if pull_only:
         pull_view = replace(
             requested, profile_id=current.profile_id, version=current.version
@@ -243,45 +245,20 @@ def ensure_local_worker_host(
             f"Worker {worker_id!r} registration version {current.version!r} has "
             "routing metadata incompatible with pull-only package retrieval"
         )
-    if (
-        requested.version == "1"
-        and current.version != "1"
-        and completed_profile_promotion_matches(
-            records, requested=requested, current=current
-        )
+    current_adapter = replace(requested, version=current.version)
+    if worker_registration_payload(current_adapter) == worker_registration_payload(
+        current
     ):
         return replace(existing_host, registration_version=current.version)
-
-    actor_keys = tuple(load_effective_actor_keys(store, genesis))
-    context = load_effect_projection_context(store, actor_keys=actor_keys)
-    history = [
-        record
-        for record in records
-        if record.record_type == "worker.registered"
-        and record.payload.get("worker_id") == worker_id
-    ]
-    if (
-        requested.version == "1"
-        and current.version.isdecimal()
-        and str(int(current.version)) == current.version
-        and len(history) == 1
-        and requested.profile_id
-        and not effect_capabilities
-    ):
-        promoted = replace(requested, version=str(int(current.version) + 1))
-        previous = validate_worker_profile_promotion(
-            context,
-            previous_registration_id=history[0].id,
-            registration=promoted,
-        )
+    if requested.version == "1" and current.version.isdecimal():
+        registration = replace(requested, version=str(int(current.version) + 1))
         return authorize_worker_host(
             worker,
             genesis,
             existing_host.actor_key,
             existing_host.signer,
             authority,
-            registration=promoted,
-            promotion_previous_registration_id=previous.id,
+            registration=registration,
         )
 
     changed = [
@@ -297,7 +274,11 @@ def ensure_local_worker_host(
 
 
 def load_existing_local_worker_host(
-    store, worker, *, effect_capabilities: tuple[str, ...] = ()
+    store,
+    worker,
+    *,
+    effect_capabilities: tuple[str, ...] = (),
+    key_path: Path | None = None,
 ):
     """Load an already registered local Worker signer without provisioning."""
     genesis = load_genesis(store)
@@ -317,7 +298,7 @@ def load_existing_local_worker_host(
             "registered Worker identity is not the canonical local signer; "
             "provide a signed Worker Candidate"
         )
-    path = actor_key_path().parent / f"{key_id}.ed25519"
+    path = _identity_directory(key_path) / f"{key_id}.ed25519"
     if not path.is_file():
         raise ValueError(
             "registered Worker signer is not available locally; "
@@ -351,13 +332,15 @@ def ensure_local_plugin_publisher(
     store,
     plugin_id: str,
     capabilities: tuple[str, ...],
+    *,
+    key_path: Path | None = None,
 ) -> CandidatePublisher:
     """Provision one durable plugin actor and return its explicit publisher."""
-    genesis, authority = _local_root_publisher(store)
+    genesis, authority = _local_root_publisher(store, key_path=key_path)
     actor_id = f"plugin:{plugin_id}"
     key_suffix = compute_content_hash(actor_id)[:16]
     key_id = f"plugin-{key_suffix}"
-    path = actor_key_path().parent / f"{key_id}.ed25519"
+    path = _identity_directory(key_path) / f"{key_id}.ed25519"
     signer = _load_or_create_signer(path)
     actor_key = ActorKey(
         actor_id,
@@ -386,7 +369,9 @@ def ensure_local_plugin_publisher(
     return CandidatePublisher(store, store, genesis, actor_key, signer)
 
 
-def ensure_local_runtime_publishers(store) -> CandidatePublisherRegistry:
+def ensure_local_runtime_publishers(
+    store, *, key_path: Path | None = None
+) -> CandidatePublisherRegistry:
     """Provision the fixed plugin actors used by local completion/recovery."""
     specifications = (
         ("planning.expand.v1", ("contract.publish",)),
@@ -409,7 +394,9 @@ def ensure_local_runtime_publishers(store) -> CandidatePublisherRegistry:
         tuple(
             (
                 plugin_id,
-                ensure_local_plugin_publisher(store, plugin_id, capabilities),
+                ensure_local_plugin_publisher(
+                    store, plugin_id, capabilities, key_path=key_path
+                ),
             )
             for plugin_id, capabilities in specifications
         )

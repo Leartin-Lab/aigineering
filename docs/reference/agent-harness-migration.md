@@ -34,15 +34,12 @@ The Worker registration drives eligibility. Capabilities describe what the
 harness can execute—such as `vision`, `repository.write`, or
 `compliance.review`—rather than price, persona, or prompt style.
 
-`aig worker registrations WORKER_ID --json` displays the current registration,
-full immutable history and promotion records. For canonical local identities,
-an initial pull-only registration may advance once to a concrete adapter profile
-under the same Worker ID and key; active claims or other metadata changes block
-this automatic path. Explicit external registrations keep their existing
-semantics. Local hosts bind the selected version through the claim writer fence.
-Profile describes compatibility and does not prove which code executed. Stop
-older local Worker processes before promotion. See
-[ADR-039](../adr/ADR-039-local-worker-profile-promotion.md).
+`aig worker registrations WORKER_ID --json` displays the current registration
+and immutable history. Update an external registration explicitly through the
+signed registration owner. Local hosts bind their resolved registration version
+through the claim writer fence; a profile is descriptive metadata, not proof of
+which code executed. Automatic profile promotion is no longer a publication
+path. Stop older local Worker processes before changing the registration they use.
 
 ## Pull and submit loop
 
@@ -118,9 +115,8 @@ and [change 099](../../changes/099-tool-mcp-failure-convergence.md). Recovery
 work is an ordinary successor: a configured Fleet or the root's ordinary
 claim flow can continue it when the task is eligible. Lineage does not pair one failure with one publication, and sibling
 containment does not prove that a particular tool observation caused a
-continuation. Unavailable schedule records are observations. Explicit `/fail`
-remains an operator-decided terminal result and does not schedule automatic
-recovery. For other failed work, inspect `task status` and `task audit`; publish
+continuation. Unavailable schedule records are observations. Explicit `/fail` publishes an ordinary failure-report Asset; it does not
+terminate an unmet parent obligation. For other failed work, inspect `task status` and `task audit`; publish
 `task retry ID` when a retry is authorized. A configured local Worker can run
 the returned successor with `aig run --task RETRY_ID`. An external Worker signs
 a new claim Candidate targeting `RETRY_ID`, then resumes the same claim/submit
@@ -129,8 +125,9 @@ observation Assets exist. A negative business result may therefore make the
 join eligible when the observation was recorded successfully (`ok: true`) and
 its returned payload has `result.ok: false`. A ToolWorker execution exception
 raises `WorkerExecutionError` and does not create a successful observation.
-Inspect each exact observation before continuing; if the join is
-still unclaimed, hold it with `task block JOIN_ID --reason TEXT`.
+Inspect each exact observation before continuing. Encode required evidence in
+ordinary task inputs and frozen acceptance conditions. There is no separate
+hold/dependency control mechanism.
 
 All operational entry points use the same signed coordination boundary. SQLite
 rechecks the current enabled Worker registration, actor/key authorization,

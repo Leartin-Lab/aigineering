@@ -32,17 +32,25 @@ def test_query_context_preserves_real_revision_order_and_is_read_only(
         assert tuple(
             entry
             for contract in context.contracts
-            for entry in context.read_store.get_by_contract(contract.id)
+            for entry in context.get_by_contract(contract.id)
         ) == tuple(
             entry
             for contract in context.contracts
             for entry in store.get_by_contract(contract.id)
         )
         assert context.domain_id is not None
-        assert not hasattr(context.read_store, "append_runtime_record")
-        assert not hasattr(context.read_store, "commit_ingress_batch")
-        with pytest.raises(AttributeError, match="immutable"):
-            context.read_store._records = ()
+        assert not hasattr(context, "append_runtime_record")
+        assert not hasattr(context, "commit_ingress_batch")
+        assert not hasattr(context, "source_store")
+        assert not hasattr(context, "read_store")
+        assert context == context
+        assert "TaskViewQueryContext" in repr(context)
+        with pytest.raises(AttributeError):
+            context.runtime_records = ()
+        original = context.get_all_contracts()
+        original.clear()
+        assert context.get_all_contracts() == list(context.contracts)
+        assert context.get_contract(contract.id) == contract
     finally:
         store.close()
 

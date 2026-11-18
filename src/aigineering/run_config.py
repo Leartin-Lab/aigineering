@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 import json
 from pathlib import Path
 import re
@@ -84,7 +85,10 @@ class PreparedFleetResources:
 
 
 def prepare_fleet_resources(
-    fleet: LocalFleetConfig, *, base_dir: str | Path | None = None
+    fleet: LocalFleetConfig,
+    *,
+    base_dir: str | Path | None = None,
+    workspace_dir: str | Path | None = None,
 ) -> PreparedFleetResources:
     """Build every configured adapter through one application-owned path.
 
@@ -95,6 +99,9 @@ def prepare_fleet_resources(
     from aigineering.fleet_config import build_fleet_worker
 
     base = Path(base_dir).resolve() if base_dir is not None else None
+    workspace = (
+        Path(workspace_dir).resolve() if workspace_dir is not None else Path.cwd()
+    )
     registry_refs = sorted(
         {
             _resolve_tool_registry_reference(spec.tool_registry, base)
@@ -106,21 +113,187 @@ def prepare_fleet_resources(
         (reference, load_tool_registry(reference)) for reference in registry_refs
     )
     registry_map = dict(registries)
-    workers = tuple(
-        (
-            spec,
-            build_fleet_worker(
-                spec,
-                registry=registry_map[
-                    _resolve_tool_registry_reference(spec.tool_registry, base)
-                ],
-            )
-            if spec.tool_registry
-            else build_fleet_worker(spec),
-        )
-        for spec in fleet.workers
+    source_domain_id = (
+        _configured_domain_id(fleet.db_path, workspace)
+        if any(spec.kind == "engine" for spec in fleet.workers)
+        else None
     )
+    workers = []
+    for spec in fleet.workers:
+        if spec.kind == "engine":
+            workers.append(
+                (
+                    spec,
+                    _build_engine_worker(
+                        spec,
+                        base=base,
+                        workspace_dir=workspace,
+                        source_domain_id=source_domain_id,
+                    ),
+                )
+            )
+            continue
+        workers.append(
+            (
+                spec,
+                build_fleet_worker(
+                    spec,
+                    registry=registry_map[
+                        _resolve_tool_registry_reference(spec.tool_registry, base)
+                    ],
+                )
+                if spec.tool_registry
+                else build_fleet_worker(spec),
+            )
+        )
     return PreparedFleetResources(workers=workers, tool_registries=registries)
+
+
+def _configured_domain_id(db_path: str, workspace_dir: Path) -> str:
+    from aigineering.core.domain import load_genesis
+    from aigineering.core.sqlite_store import SQLiteStore
+
+    selected = Path(db_path)
+    if not selected.is_absolute():
+        selected = workspace_dir / selected
+    selected = selected.resolve(strict=True)
+    snapshot = SQLiteStore.snapshot_from_path(selected)
+    try:
+        return load_genesis(snapshot).id
+    finally:
+        snapshot.close()
+
+
+def _build_engine_worker(
+    spec: FleetWorkerSpec,
+    *,
+    base,
+    workspace_dir: Path,
+    source_domain_id: str,
+):
+    from aigineering.agent.engine_worker import EngineWorker
+    from aigineering.core.domain import load_genesis
+    from aigineering.core.sqlite_store import SQLiteStore
+    from aigineering.core.ids import compute_content_hash
+    from aigineering.local_identity import load_actor_signer
+
+    config_dir = base or workspace_dir
+    workspace = Path(spec.target_workspace)
+    if not workspace.is_absolute():
+        workspace = workspace_dir / workspace
+    workspace = workspace.resolve(strict=True)
+    if not workspace.is_dir():
+        raise ValueError("engine target_workspace must be a directory")
+    aig_directory = workspace / ".aig"
+    target_db = aig_directory / "store.db"
+    if aig_directory.is_symlink() or target_db.is_symlink() or not target_db.is_file():
+        raise ValueError("engine target must contain an existing .aig/store.db")
+
+    receiver_path = Path(spec.receiver_fleet)
+    if not receiver_path.is_absolute():
+        receiver_path = config_dir / receiver_path
+    receiver_path = receiver_path.resolve(strict=True)
+    from aigineering.fleet_config import load_fleet_config
+
+    receiver_fleet = load_fleet_config(receiver_path)
+    if any(item.kind == "engine" for item in receiver_fleet.workers):
+        raise ValueError("receiver Fleet cannot contain engine Workers")
+    receiver_db = Path(receiver_fleet.db_path)
+    if not receiver_db.is_absolute():
+        receiver_db = workspace / receiver_db
+    receiver_db = receiver_db.resolve(strict=True)
+    if receiver_db != target_db.resolve(strict=True):
+        raise ValueError(
+            "receiver Fleet db_path must resolve to target_workspace/.aig/store.db"
+        )
+
+    key_path = Path(spec.receiver_key_file)
+    if not key_path.is_absolute():
+        key_path = workspace / key_path
+    key_path = key_path.resolve(strict=True)
+    if not key_path.is_file():
+        raise ValueError("engine receiver_key_file must name an existing key file")
+
+    snapshot = SQLiteStore.snapshot_from_path(target_db)
+    try:
+        receiver_genesis = load_genesis(snapshot)
+    finally:
+        snapshot.close()
+    if receiver_genesis.id != spec.target_domain_id:
+        raise ValueError("engine target_domain_id does not match target Genesis")
+    if receiver_genesis.id == source_domain_id:
+        raise ValueError("engine source and receiver must be distinct domains")
+    resources = prepare_fleet_resources(receiver_fleet, base_dir=receiver_path.parent)
+    from aigineering.configured_run import tool_descriptor_assets
+
+    descriptor_ids = sorted(
+        descriptor.id
+        for _reference, registry in resources.tool_registries
+        for descriptor in tool_descriptor_assets(registry)
+    )
+    signer = load_actor_signer(key_path)
+    config_digest = compute_content_hash(
+        json.dumps(
+            {
+                "fleet_sha256": hashlib.sha256(receiver_path.read_bytes()).hexdigest(),
+                "key_id": signer.signer_id,
+                "key_path": str(key_path),
+                "tool_descriptor_ids": descriptor_ids,
+                "target_domain_id": receiver_genesis.id,
+                "target_store_path": str(target_db.resolve(strict=True)),
+                "target_workspace": str(workspace),
+                "worker_specs": [
+                    {field: getattr(item, field) for field in item.__dataclass_fields__}
+                    for item in receiver_fleet.workers
+                ],
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+    )
+    from aigineering.core.worker_routing import WorkerRegistration
+
+    delegates = tuple(resources.workers)
+    if not delegates:
+        raise ValueError("receiver Fleet requires at least one delegate Worker")
+    pinned_workspace = workspace
+    pinned_db = target_db.resolve(strict=True)
+
+    def open_receiver_store():
+        current_aig = pinned_workspace / ".aig"
+        current_db = current_aig / "store.db"
+        if (
+            pinned_workspace.is_symlink()
+            or current_aig.is_symlink()
+            or current_db.is_symlink()
+            or not current_db.is_file()
+            or current_db.resolve(strict=True) != pinned_db
+        ):
+            raise ValueError("receiver workspace Store path changed after preparation")
+        return SQLiteStore(str(pinned_db))
+
+    return EngineWorker(
+        delegates[0][1],
+        worker_id=spec.worker_id,
+        inner_workers=delegates,
+        inner_store_factory=open_receiver_store,
+        target_domain_id=receiver_genesis.id,
+        source_domain_id=source_domain_id,
+        receiver_config_fingerprint=config_digest,
+        receiver_key_path=key_path,
+        receiver_signer_id=signer.signer_id,
+        receiver_tool_registries=tuple(
+            registry for _reference, registry in resources.tool_registries
+        ),
+        registration=WorkerRegistration(
+            spec.worker_id,
+            capabilities=spec.capabilities,
+            pools=spec.pools,
+            profile_id=spec.profile_id or "engine-worker-v1",
+            capacity=spec.capacity,
+            version=spec.version,
+        ),
+    )
 
 
 def _resolve_tool_registry_reference(reference: str, base: Path | None) -> str:
@@ -214,7 +387,7 @@ def prepare_configured_run(
         raise ValueError("prepared input and Skill Asset names must be unique")
 
     # Build every configured adapter before any domain/store/identity mutation.
-    resources = prepare_fleet_resources(fleet)
+    resources = prepare_fleet_resources(fleet, base_dir=fleet_path.parent)
     return PreparedConfiguredRun(
         source_path=source,
         fleet=fleet,

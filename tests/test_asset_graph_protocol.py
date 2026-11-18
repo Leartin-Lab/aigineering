@@ -718,7 +718,7 @@ def test_graph_endpoints_and_edge_commit_atomically_in_any_effect_order(
     )
 
 
-def test_graph_projection_rebuilds_on_reopen(tmp_path) -> None:
+def test_graph_projection_rebuild_is_explicit_after_reopen(tmp_path) -> None:
     db_path = tmp_path / "graph.db"
     store = SQLiteStore(str(db_path))
     runtime = candidate_runtime(store)
@@ -733,6 +733,8 @@ def test_graph_projection_rebuilds_on_reopen(tmp_path) -> None:
 
     reopened = SQLiteStore(str(db_path))
     try:
+        assert reopened.get_content_objects() == []
+        reopened.rebuild_asset_graph_projection()
         assert [item["id"] for item in reopened.get_content_objects()] == [content.id]
     finally:
         reopened.close()

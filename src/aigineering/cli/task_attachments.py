@@ -8,11 +8,9 @@ from pathlib import Path
 import click
 
 from aigineering.cli._common import _output_json
-from aigineering.runtime_services import RedisSyncPending
 from aigineering.redis_collaboration import RedisCollaborationUnavailable
 from aigineering.task_attachments import (
     TaskAttachmentError,
-    add_task_attachment,
     export_task_attachment,
     open_task_attachment_store,
     task_attachment_list,
@@ -22,54 +20,7 @@ from aigineering.task_attachments import (
 def register_task_attachment_command(group: click.Group) -> None:
     @group.group("attachment")
     def attachment_group() -> None:
-        """Associate exact committed attachment Assets with a task."""
-
-    @attachment_group.command("add")
-    @click.argument("contract_id")
-    @click.argument("asset_id")
-    @click.option("--idempotency-key", default=None)
-    @click.option(
-        "--store",
-        "store_path",
-        type=click.Path(path_type=Path),
-        default=Path(".aig/store.db"),
-        show_default=True,
-    )
-    @click.option("--json", "as_json", is_flag=True)
-    def add(
-        contract_id: str,
-        asset_id: str,
-        idempotency_key: str | None,
-        store_path: Path,
-        as_json: bool,
-    ) -> None:
-        store = None
-        try:
-            store = open_task_attachment_store(store_path, writable=True)
-            data, revision = add_task_attachment(
-                store, contract_id, asset_id, idempotency_key=idempotency_key
-            )
-        except RedisSyncPending as error:
-            payload = {
-                "ok": False,
-                "error": "redis_sync_pending",
-                "candidate_accepted": bool(error.decision and error.decision.accepted),
-                "facts_retained": bool(error.decision and error.decision.accepted),
-                "data": getattr(error, "data", None),
-                "revision": getattr(error, "revision", None),
-            }
-            _emit(payload, as_json)
-            raise click.exceptions.Exit(1)
-        except RedisCollaborationUnavailable:
-            _emit_error("redis_unavailable", as_json)
-        except TaskAttachmentError as error:
-            _emit_error(error.code, as_json)
-        except Exception:
-            _emit_error("attachment_operation_failed", as_json)
-        finally:
-            if store is not None:
-                store.close()
-        _emit({"ok": True, "data": data, "revision": revision}, as_json)
+        """Read and export verified historical task attachments."""
 
     @attachment_group.command("list")
     @click.argument("contract_id")

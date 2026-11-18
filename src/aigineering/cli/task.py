@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import math
 import time
 from pathlib import Path
@@ -12,12 +11,14 @@ import click
 
 from aigineering.application import collaboration_service
 from aigineering.cli._common import (
+    _cli_json_object_option as _parse_json_object,
     _output_json,
     _persistent_snapshot,
     _persistent_store,
 )
 from aigineering.cli.task_state import project_task_status
 from aigineering.core.session import runtime_record_contract_references
+from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.core.task_productivity import project_task_productivity
 from aigineering.protocol.wire import trace_entry_to_dict
 from aigineering.task_publication import prepare_task_contract, publish_task_contract
@@ -227,8 +228,10 @@ def task_wait(
     last_status: dict | None = None
     while True:
         try:
-            store = _persistent_snapshot()
-            try:
+            with (
+                SQLiteStore(".aig/store.db", read_only=True) as store,
+                store.read_transaction(),
+            ):
                 contract = store.get_contract(contract_id)
                 if contract is None:
                     _emit_error(f"Task '{contract_id}' not found.", as_json)
@@ -266,8 +269,6 @@ def task_wait(
                     else:
                         click.echo(f"{contract_id} {last_status['status']} (timed out)")
                     raise click.exceptions.Exit(1)
-            finally:
-                store.close()
         except (click.exceptions.Exit, click.ClickException):
             raise
         except Exception as error:
@@ -353,18 +354,6 @@ def _emit_error(message: str, as_json: bool) -> None:
         raise click.exceptions.Exit(1)
     else:
         raise click.ClickException(message)
-
-
-def _parse_json_object(value: str | None, option: str) -> dict | None:
-    if value is None:
-        return None
-    try:
-        parsed = json.loads(value)
-    except json.JSONDecodeError as error:
-        raise click.UsageError(f"{option} is not valid JSON: {error}") from error
-    if not isinstance(parsed, dict):
-        raise click.UsageError(f"{option} must be a JSON object")
-    return parsed
 
 
 def _validate_wait_durations(timeout_seconds: float, interval: float) -> None:

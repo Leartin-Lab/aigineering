@@ -21,12 +21,14 @@ def commit_local_effect(
     *,
     idempotency_key: str,
     causal_parents: tuple[str, ...] = (),
+    key_path=None,
 ) -> CommitmentDecision:
     return commit_local_effects(
         store,
         (effect,),
         idempotency_key=idempotency_key,
         causal_parents=causal_parents,
+        key_path=key_path,
     )
 
 
@@ -134,10 +136,11 @@ def commit_local_effects(
     *,
     idempotency_key: str,
     causal_parents: tuple[str, ...] = (),
+    key_path=None,
 ) -> CommitmentDecision:
     require_redis()
     genesis = load_genesis(store)
-    signer = load_actor_signer()
+    signer = load_actor_signer(key_path)
     try:
         actor_key = next(
             key

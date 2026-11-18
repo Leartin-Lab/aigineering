@@ -32,6 +32,12 @@ provider. Credentials are environment variables and never task input Assets.
 The root's 32 units bound causal work; they are not a token quota or billing
 estimate. Provider usage can remain unknown.
 
+Planning uses Asset names for activation, not lifecycle events. For example,
+`sample` means the sample Asset must be available; `on_start` has no special
+meaning. Empty activation adds no predicate, while declared inputs remain
+required. A rejected blueprint is a failed attempt, not a partially installed
+plan; inspect its exact failure before starting another funded attempt.
+
 Use the returned exact `contract_id` for inspection, continuation and export:
 
 ```bash
@@ -47,10 +53,13 @@ aig -C /path/to/empty-workspace task result TASK_ID \
 Incomplete runs and unqualified exports return nonzero. Inspect the projected
 blockers and failure details; never reset a claim or treat a scheduled recovery
 as executed work. Configured Fleet slots continue pulling ordinary eligible
-tasks after a recorded invocation failure. A failed root remains terminal: if
-its recovery is a separate root successor, explicitly select that recovery ID.
+tasks after a recorded invocation failure. That failure remains inspectable and
+leaves an unmet output obligation unresolved. Ordinary recovery may proceed only
+when exact failure evidence and the consumer's actual allowance permit it;
+without that funded path, the task stays stalled. Resume uses the committed
+Contract and inputs; it does not reload sample files or reset claims.
+
 `--once` runs at most one claimed package and can stop before any tools run.
-Resume uses the committed Contract and inputs; it does not reread sample files.
 Export refuses existing destination files.
 
 For a controlled failure experiment only, set

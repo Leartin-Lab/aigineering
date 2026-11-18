@@ -6,7 +6,6 @@ from dataclasses import replace
 
 from aigineering.core.trace import create_entry
 from aigineering.core.candidate_decision import trace_record
-from aigineering.core.lifecycle_facts import create_terminal_record
 from aigineering.protocol.candidate import CandidateProposal
 from aigineering.protocol.runtime_record import create_runtime_record
 
@@ -21,11 +20,12 @@ def close_claim_attempt(candidate: CandidateProposal, decision):
         outcome = "expanded"
     else:
         outcome = "output_asserted"
+    causal_type = "candidate.received" if decision.accepted else "candidate.rejected"
     committed = next(
         (
             record
             for record in decision.runtime_records
-            if record.record_type in {"candidate.committed", "candidate.rejected"}
+            if record.record_type == causal_type
         ),
         None,
     )
@@ -73,15 +73,7 @@ def close_claim_attempt(candidate: CandidateProposal, decision):
             ),
             timestamp="",
         )
-        records += (
-            create_terminal_record(
-                binding.contract_id,
-                "failed",
-                reason="claim-bound Candidate was rejected",
-                causal_parents=parents,
-            ),
-            trace_record(entry, causal_parents=parents),
-        )
+        records += (trace_record(entry, causal_parents=parents),)
         return replace(
             decision,
             runtime_records=records,

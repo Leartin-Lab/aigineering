@@ -14,13 +14,18 @@ from aigineering.core.ids import (
     hash_contract_v3,
 )
 from aigineering.core.provenance import sign_asset
+from aigineering.core.disclosure import compute_disclosure
 from aigineering.core.signing import Ed25519Signer
 from aigineering.core.sqlite_store import CURRENT_SCHEMA_VERSION, SQLiteStore
 from aigineering.core.domain import load_genesis
 from aigineering.core.trace import create_entry
 from aigineering.core.candidate_publisher import CandidatePublisher
 from aigineering.core.worker_routing import WorkerRegistration
-from aigineering.local_identity import ensure_local_domain, load_actor_signer
+from aigineering.local_identity import (
+    ensure_local_domain,
+    ensure_local_worker_host,
+    load_actor_signer,
+)
 from aigineering.protocol.candidate import (
     ActorKey,
     CandidateClaimBinding,
@@ -46,7 +51,6 @@ from aigineering.protocol.package import WorkerPackage
 from aigineering.protocol.types import Asset, Contract, TraceEntry
 from aigineering.protocol.types import Candidate
 from aigineering.runtime import (
-    _method_context_assets_for,
     claim_next_package,
     execute_claimed_package,
 )
@@ -193,6 +197,13 @@ def _seed_continuation_with_method_context(
     disclosure_view: str = "original",
 ) -> tuple[Contract, Contract, Asset]:
     """Add parent, continuation, and durable method context observation."""
+    from aigineering.cli._candidate import commit_local_effects, require_accepted
+    from aigineering.protocol.effect_builders import asset_proposal_effect
+    from aigineering.core.ids import contract_identity_v3
+    from dataclasses import replace
+
+    ensure_local_domain(store)
+    obs_name = "_tool_obs_contract_parent"
     parent = Contract(
         id="contract_parent",
         name="root",
@@ -200,16 +211,17 @@ def _seed_continuation_with_method_context(
         activation="",
         budget=5,
     )
+    parent = replace(parent, id=contract_identity_v3(parent))
     continuation = Contract(
         id="contract_continue",
         parent_id=parent.id,
         name="root.tool.continue",
+        inputs=(obs_name,),
         outputs=["report"],
         activation="",
         budget=4,
         origin="continuation",
     )
-    obs_name = "_tool_obs_contract_parent"
     obs = sign_asset(
         Asset(
             id=hash_asset_content(obs_name, "value:x"),
@@ -223,20 +235,20 @@ def _seed_continuation_with_method_context(
             disclosure_view=disclosure_view,
         )
     )
-    store.add_contract(parent)
-    store.add_contract(continuation)
-    store._add_system_asset(obs)
-    store.append_trace_entry(
-        TraceEntry(
-            id="evt_continue",
-            contract_id=parent.id,
-            event_type="method_continuation_scheduled",
-            relation_type="tool",
-            relation_target=continuation.id,
-            disclosed_assets=[obs.id],
+    continuation = replace(continuation, id=contract_identity_v3(continuation))
+    decision = require_accepted(
+        commit_local_effects(
+            store,
+            (
+                contract_declaration_effect(parent),
+                contract_declaration_effect(continuation),
+                asset_proposal_effect(obs),
+            ),
+            idempotency_key="fixture-tool-continuation",
         )
     )
-    return parent, continuation, obs
+    committed_obs = next(asset for asset in decision.assets if asset.name == obs_name)
+    return parent, continuation, committed_obs
 
 
 _CLI_WORKER_SIGNER = Ed25519Signer()
@@ -474,8 +486,8 @@ def test_worker_package_includes_continuation_method_context():
         assert result.exit_code == 0, f"stderr: {result.output}"
         data = json.loads(result.output)
         assert data["contract_id"] == continuation.id
-        assert [a["name"] for a in data["method_context_assets"]] == [obs.name]
-        assert "content" not in data["method_context_assets"][0]
+        assert [a["name"] for a in data["disclosed_assets"]] == [obs.name]
+        assert "content" not in data["disclosed_assets"][0]
         assert obs.content not in result.output
 
 
@@ -495,10 +507,10 @@ def test_method_context_asset_lookup_uses_relation_target_query():
         )
 
         def fail_get_all():
-            raise AssertionError("continuation context must use targeted trace query")
+            raise AssertionError("disclosure must not read Trace")
 
         store.get_all = fail_get_all
-        assets = _method_context_assets_for(continuation, store)
+        assets = compute_disclosure(continuation, store)
         assert [asset.id for asset in assets] == [obs.id]
     finally:
         store.close()
@@ -509,7 +521,12 @@ def test_method_context_survives_file_reopen_and_materialization_rebuild(tmp_pat
     store = SQLiteStore(str(path))
     setup = candidate_runtime(store)
     contract = setup.accept_contract(
-        Contract(id="context-root", name="root", outputs=["report"])
+        Contract(
+            id="context-root",
+            name="root",
+            inputs=("original", "redacted"),
+            outputs=["report"],
+        )
     )
     original = setup.accept_asset(
         Asset(
@@ -556,7 +573,7 @@ def test_method_context_survives_file_reopen_and_materialization_rebuild(tmp_pat
     def snapshot(current_store):
         current_contract = current_store.get_contract(contract.id)
         assert current_contract is not None
-        assets = _method_context_assets_for(current_contract, current_store)
+        assets = compute_disclosure(current_contract, current_store)
         return (
             [(asset.id, asset.name, asset.content) for asset in assets],
             current_store.runtime_materialization_digest(),
@@ -595,7 +612,7 @@ def test_worker_package_never_emits_method_context_content():
             cli, ["worker", "package", "--contract", continuation.id, "--json"]
         )
         assert result.exit_code == 0, result.output
-        context = json.loads(result.output)["method_context_assets"]
+        context = json.loads(result.output)["disclosed_assets"]
         assert context[0]["id"] == obs.id
         assert "content" not in context[0]
         assert "value:x" not in result.output
@@ -658,7 +675,7 @@ def test_submit_creates_projection_assets():
             if record.record_type == "candidate.committed"
             and record.payload.get("candidate_id") == receipt.payload["candidate_id"]
         )
-        assert candidate_committed.id in claim_submitted.causal_parents
+        assert claim_submitted.id in candidate_committed.payload["committed_record_ids"]
 
 
 def test_submit_rejects_tampered_signed_worker_candidate(monkeypatch):
@@ -1243,7 +1260,7 @@ def test_worker_next_returns_continuation_with_method_context():
         assert result.exit_code == 0, f"stderr: {result.output}"
         data = json.loads(result.output)
         assert data["contract_id"] == continuation.id
-        assert [a["name"] for a in data["method_context_assets"]] == [obs.name]
+        assert [a["name"] for a in data["disclosed_assets"]] == [obs.name]
         assert data["claim_id"]
 
         persisted = SQLiteStore(".aig/store.db")
@@ -1252,7 +1269,9 @@ def test_worker_next_returns_continuation_with_method_context():
         assert claim["package_id"] == data["package_id"]
 
 
-def test_local_worker_invocation_receives_continuation_method_context():
+def test_local_worker_invocation_receives_continuation_method_context(
+    tmp_path, monkeypatch
+):
     """Built-in workers and external WorkerPackages receive equivalent context."""
 
     class CapturingWorker:
@@ -1268,13 +1287,14 @@ def test_local_worker_invocation_receives_continuation_method_context():
                 raw_output='/exec {"outputs":{"report":"grounded result"}}',
             )
 
+    monkeypatch.chdir(tmp_path)
     store = SQLiteStore(":memory:")
     _parent, continuation, obs = _seed_continuation_with_method_context(store)
     store.get_all = lambda: (_ for _ in ()).throw(
         AssertionError("continuation context must not scan the full trace")
     )
     worker = CapturingWorker()
-    host = hosted_worker(store, worker)
+    host = ensure_local_worker_host(store, worker)
     claimed = claim_next_package(
         store, worker_id=host.worker_id, contract_id=continuation.id
     )

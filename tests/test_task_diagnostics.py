@@ -929,7 +929,7 @@ def test_signed_attempt_uses_exact_receipt_and_ignores_claimed_id_collision(
         assert row["attempt_outcome"] == "output_asserted"
         assert fake_auth.id not in row["fact_ids"]
         diagnostics = task_diagnostics(store, contract.id, claimed.package.claim_id)
-        assert diagnostics["ok"] is True
+        assert diagnostics["ok"] is True, diagnostics["data"]["integrity"]
         assert fake_auth.id not in {
             event["record_id"] for event in diagnostics["data"]["events"]
         }
@@ -1037,7 +1037,7 @@ def test_durable_expiry_and_conflicting_history_are_distinct(tmp_path, monkeypat
         assert result["ok"] is True, result["data"]["integrity"]
         assert result["data"]["runs"][0]["status"] == "expired"
         diagnostics = task_diagnostics(store, contract_id, claim_id)
-        assert diagnostics["ok"] is True
+        assert diagnostics["ok"] is True, diagnostics["data"]["integrity"]
         assert "lifecycle.terminal" in {
             event["record_type"] for event in diagnostics["data"]["events"]
         }
@@ -1159,7 +1159,7 @@ def test_signed_rejection_uses_exact_failed_attempt_chain(domain_wide):
         assert row["candidate_id"] == proposal.id
         assert row["attempt_outcome"] == "rejected"
         diagnostics = task_diagnostics(store, contract.id, claimed.package.claim_id)
-        assert diagnostics["ok"] is True
+        assert diagnostics["ok"] is True, diagnostics["data"]["integrity"]
         event_types = {event["record_type"] for event in diagnostics["data"]["events"]}
         assert {
             "candidate.received",
@@ -1397,7 +1397,7 @@ def test_release_terminal_witness_must_match_claim_contract(tmp_path, monkeypatc
         diagnostics = task_diagnostics(
             normal_store, normal_contract_id, normal_claim_id
         )
-        assert diagnostics["ok"] is True
+        assert diagnostics["ok"] is True, diagnostics["data"]["integrity"]
         assert terminal.id in {
             event["record_id"] for event in diagnostics["data"]["events"]
         }

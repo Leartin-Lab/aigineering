@@ -1,16 +1,22 @@
 """Target-scoped behavior for ``aig run --task``."""
 
 import json
-import sqlite3
+from contextlib import nullcontext
+from pathlib import Path
 from types import SimpleNamespace
 
+import click
 from click.testing import CliRunner
 
 from aigineering.cli.main import cli
+from aigineering.cli.run import _finish_target_run, _target_next_step
+from aigineering.core.session import SessionStore
 from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.task_views import project_task_status
 from aigineering.core.control_plane import build_control_plane_contract
 from aigineering.protocol.identity import contract_from_fields
+from aigineering.protocol.types import Session, TraceEntry
+from aigineering.protocol.wire import trace_entry_to_dict
 
 
 def _create_task(runner, name, output, *extra):
@@ -51,6 +57,66 @@ def test_target_run_leaves_unrelated_ready_contract_unclaimed(tmp_path):
             assert store.get_claim(unrelated_id) is None
         finally:
             store.close()
+
+
+def test_target_trace_reads_durable_store_and_never_uses_old_session(tmp_path):
+    runner = CliRunner()
+    with runner.isolated_filesystem(temp_dir=str(tmp_path)):
+        initialized = runner.invoke(cli, ["domain", "init"])
+        assert initialized.exit_code == 0, initialized.output
+        target_id = _create_task(runner, "target-trace", "target-trace-output")
+        result = runner.invoke(
+            cli, ["run", "--task", target_id, "--worker", "mock", "--json"]
+        )
+        assert result.exit_code == 0, result.output
+        resumed = runner.invoke(
+            cli, ["run", "--resume", target_id, "--worker", "mock", "--json"]
+        )
+        assert resumed.exit_code == 0, resumed.output
+        assert json.loads(resumed.output)["stop_reason"] == "terminal"
+
+        discovery = runner.invoke(cli, ["trace", "--json"])
+        assert discovery.exit_code == 0, discovery.output
+        discovery_payload = json.loads(discovery.output)
+        assert "aig trace --contract <contract_id>" in discovery_payload["hint"]
+
+        old_session = TraceEntry(
+            id="old-session-entry",
+            contract_id="old-unrelated-task",
+            event_type="activation",
+            timestamp="2025-01-01T00:00:00",
+        )
+        old_path = Path(".aig/traces/session_old.jsonl")
+        old_path.parent.mkdir(parents=True, exist_ok=True)
+        old_path.write_text(json.dumps(trace_entry_to_dict(old_session)) + "\n")
+        SessionStore().create_session(
+            Session(id="session_old", trace_ids=(old_session.id,))
+        )
+
+        before = SQLiteStore(".aig/store.db")
+        revision_before = before.get_runtime_revision()
+        before.close()
+        selected = runner.invoke(cli, ["trace", "--contract", target_id, "--json"])
+        assert selected.exit_code == 0, selected.output
+        selected_entries = json.loads(selected.output)
+        assert selected_entries
+        assert {entry["contract_id"] for entry in selected_entries} == {target_id}
+        assert all(
+            entry["contract_id"] != old_session.contract_id
+            for entry in selected_entries
+        )
+        after = SQLiteStore(".aig/store.db")
+        assert after.get_runtime_revision() == revision_before
+        after.close()
+
+        # Existing session selectors retain their JSONL source semantics.
+        session_selected = runner.invoke(
+            cli, ["trace", "--session", "session_old", "--json"]
+        )
+        assert session_selected.exit_code == 0, session_selected.output
+        assert json.loads(session_selected.output)[0]["contract_id"] == (
+            "old-unrelated-task"
+        )
 
 
 def test_terminal_target_is_checked_before_claiming_other_work(tmp_path):
@@ -107,6 +173,92 @@ def test_blocked_idle_reports_status_blockers_and_next_step(tmp_path):
         assert payload["timed_out"] is False
         assert payload["blockers"]
         assert "activation" in payload["next_step"]
+
+
+def test_stalled_capability_risk_points_to_worker_routing_configuration():
+    status = {
+        "status": "stalled",
+        "silent_failure_risks": [
+            {
+                "code": "blocked_capability",
+                "message": "no registered worker currently satisfies routing constraints",
+            }
+        ],
+        "recoveries": [],
+    }
+
+    next_step = _target_next_step(status, "idle")
+
+    assert "Fleet configuration's Worker `capabilities`" in next_step
+    assert "aig fleet run --config <PATH> --task <CONTRACT_ID>" in next_step
+    assert "--capability" in next_step
+    assert "does not change Worker routing" in next_step
+    assert "recovery successor" not in next_step
+
+
+def test_stalled_capability_diagnostic_survives_json_and_human_rendering():
+    runner = CliRunner()
+    risk = {
+        "code": "blocked_capability",
+        "message": "no registered worker currently satisfies routing constraints",
+    }
+
+    json_status = {
+        "status": "stalled",
+        "contract_id": "target-contract",
+        "silent_failure_risks": [risk],
+        "recoveries": [],
+        "blockers": [],
+        "rejections": [],
+    }
+    json_result = runner.invoke(
+        click.Command(
+            "finish",
+            callback=lambda: _finish_target_run(
+                json_status, [], stop_reason="idle", json_output=True
+            ),
+        )
+    )
+
+    assert json_result.exit_code == 1
+    payload = json.loads(json_result.output)
+    assert payload["status"] == "stalled"
+    assert payload["stop_reason"] == "idle"
+    assert payload["silent_failure_risks"] == [risk]
+    assert payload["recoveries"] == []
+    assert "Fleet configuration's Worker `capabilities`" in payload["next_step"]
+
+    human_status = {
+        "status": "stalled",
+        "contract_id": "target-contract",
+        "silent_failure_risks": [risk],
+        "recoveries": [],
+        "blockers": [],
+        "rejections": [],
+    }
+    human_result = runner.invoke(
+        click.Command(
+            "finish",
+            callback=lambda: _finish_target_run(
+                human_status, [], stop_reason="idle", json_output=False
+            ),
+        )
+    )
+
+    assert human_result.exit_code == 1
+    assert "run stalled" in human_result.output
+    assert "stop_reason: idle" in human_result.output
+    assert "Worker `capabilities`" in human_result.output
+
+
+def test_other_stalled_statuses_keep_existing_recovery_guidance():
+    assert (
+        _target_next_step(
+            {"status": "stalled", "silent_failure_risks": [], "recoveries": []},
+            "idle",
+        )
+        == "Inspect aig task audit; run a recovery successor explicitly if one was published."
+    )
 
 
 def test_target_timeout_human_output_keeps_blockers_and_guidance(tmp_path):
@@ -280,68 +432,13 @@ def test_recovery_status_does_not_cross_same_name_roots(monkeypatch, tmp_path):
         )
         assert failed.exit_code == 1, failed.output
         first_recoveries = json.loads(failed.output)["recoveries"]
-        assert first_recoveries
-        deeply_nested = "[" * 1500 + "0" + "]" * 1500
-        with sqlite3.connect(".aig/store.db") as connection:
-            connection.execute(
-                "UPDATE contracts SET description=? WHERE id=?",
-                (deeply_nested, first_recoveries[0]),
-            )
-
+        assert first_recoveries == []
         first_status = runner.invoke(cli, ["task", "status", failed_id, "--json"])
-        assert first_status.exit_code == 1, first_status.output
-        first_status_payload = json.loads(first_status.output)
-        assert first_status_payload["recoveries"] == first_recoveries
-
-        status = runner.invoke(cli, ["task", "status", other_id, "--json"])
-        assert status.exit_code == 1, status.output
-        assert json.loads(status.output)["recoveries"] == []
-        from aigineering.task_views import _has_active_recovery
-
-        store = SQLiteStore(".aig/store.db")
-        try:
-            failed_contract = store.get_contract(failed_id)
-            other_contract = store.get_contract(other_id)
-            assert failed_contract is not None
-            assert other_contract is not None
-            assert _has_active_recovery(failed_contract, store) is True
-            assert _has_active_recovery(other_contract, store) is False
-        finally:
-            store.close()
-
-        from aigineering.agent.worker import WorkerExecutionError
-
-        class FailingWorker:
-            worker_id = "failing-worker-for-recovery-attribution"
-
-            def invoke(self, contract, disclosed_assets):
-                del contract, disclosed_assets
-                raise WorkerExecutionError("fixture_failure", "fixture failure")
-
-        monkeypatch.setattr(
-            "aigineering.cli.run.build_worker",
-            lambda *_args, **_kwargs: FailingWorker(),
-        )
-        second_failure = runner.invoke(
-            cli,
-            [
-                "run",
-                "--task",
-                other_id,
-                "--worker",
-                "llm",
-                "--model",
-                "fixture",
-                "--json",
-            ],
-        )
-
-        assert second_failure.exit_code == 1, second_failure.output
-        second_recoveries = json.loads(second_failure.output)["recoveries"]
-        assert second_recoveries
-        assert set(second_recoveries).isdisjoint(
-            json.loads(failed.output)["recoveries"]
-        )
+        other_status = runner.invoke(cli, ["task", "status", other_id, "--json"])
+        assert json.loads(first_status.output)["status"] == "stalled"
+        assert json.loads(other_status.output)["status"] == "ready"
+        assert json.loads(first_status.output)["recoveries"] == []
+        assert json.loads(other_status.output)["recoveries"] == []
 
 
 def test_target_pool_claims_child_recovery_and_tool_descendants(monkeypatch):
@@ -393,8 +490,13 @@ def test_target_pool_claims_child_recovery_and_tool_descendants(monkeypatch):
     }
 
     class Store:
-        def get_all_contracts(self):
-            return list(contracts.values())
+        def read_transaction(self):
+            return nullcontext()
+
+        def get_child_contracts(self, contract_id):
+            return [
+                item for item in contracts.values() if item.parent_id == contract_id
+            ]
 
         def get_contract(self, contract_id):
             return contracts.get(contract_id)

@@ -576,18 +576,19 @@ def test_cli_calibration_first_tool_schema_failure_runs_runtime_recovery(
         ]
         assert len(failures) == 1
         failure = failures[0]
-        scheduled = [
-            record
-            for _, record in store.scan_runtime_records(
-                record_type="worker_failure.recovery_scheduled"
-            )
-            if record.payload.get("failure_id") == failure.id
+        from aigineering.task_lineage import task_lineage
+
+        edges = task_lineage(store, failure.payload["contract_id"])["data"]["edges"]
+        recoveries_by_proof = [
+            edge
+            for edge in edges
+            if edge["kind"] == "recovery_publication"
+            and edge["source_contract_id"] == failure.payload["contract_id"]
         ]
-        assert len(scheduled) == 1
-        recovery_id = scheduled[0].payload["recovery_contract_id"]
+        assert len(recoveries_by_proof) == 1
+        recovery_id = recoveries_by_proof[0]["target_contract_id"]
         recovery = store.get_contract(recovery_id)
         assert recovery is not None
-        assert recovery.origin == "system"
         assert "normalize_calibration" in recovery.tool_scope
         assert any(
             entry.event_type == "candidate_committed"

@@ -36,6 +36,11 @@ Ordinary tasks preserve the existing global same-name business-output rule;
 retained IDs do not prove predecessor production. Independent acceptance uses
 the existing exact Contract/Asset qualification owner.
 
+Change 136 keeps name-only matching as the compatibility condition when a
+successor declares no selectors. Explicit Definition, Content, producer and
+shape conditions are filtered to the successor's retained roles; generic
+completion no longer requires producer-tree ancestry.
+
 Trusted injected effect handlers remain pure. For accepted Candidates handled
 by an injected registry, commitment reruns the same pure decision inside the
 SQLite writer transaction with current facts and effective actor keys. It

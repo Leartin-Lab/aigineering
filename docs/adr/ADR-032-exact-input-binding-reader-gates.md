@@ -1,5 +1,10 @@
 # ADR-032: Bind exact input selection and reject incompatible readers
 
+> Current implementation: conflicting fresh-write, injected-projector and
+> task-completion mechanisms in this historical decision are superseded by
+> [change 137](../../changes/137-closed-primitive-task-runtime.md).
+> Consult [DESIGN](../../DESIGN.md) for the supported primitive surface.
+
 Status: Accepted
 Date: 2026-10-04
 
@@ -19,6 +24,13 @@ explicitly selects nothing. Active missing, tombstoned or wrong-role references
 fail closed, with no name fallback. Unmapped roles retain existing authorized
 name selection. Unused inherited bindings remain inert. The map narrows selection;
 it grants neither capabilities nor permission to introduce new input roles.
+
+For atomic configured setup, [change 139](../../changes/139-atomic-configured-publication.md)
+adds explicit batch-local compilation in `contract.declare`. The signed template
+retains a canonical identity and an active local input reference that an older
+writer rejects as a missing Asset. Compilation binds the actual proposed Asset
+IDs and derives an ordinary canonical Contract. Accepted facts and replay
+contain exact active bindings; they do not retain a mutable name lookup.
 
 A shared pure input-selection owner supplies disclosure and verification.
 Original trust, signer, derivation and redaction rules continue to apply to the
@@ -51,3 +63,8 @@ An exact binding freezes Asset selection, not external knowledge or universal
 semantic truth. Original unbound Contracts remain dynamic. Planner and tool
 continuation containment still authorize new roles and preserve inherited policy;
 unmapped selection is not permission to widen parent scope.
+
+The schema18 statement above is the introduction point for exact input bindings,
+not the current Store floor. Change 136 raises the current floor to schema23 for
+declared Asset output conditions and completion-on-declaration; it does not
+change this ADR's input-selection decision.

@@ -53,11 +53,19 @@ its signed child description. Native planning inserts a compile stage, so
 the immediate parent is not necessarily the original root. The runtime still
 checks target policy, evidence, producer independence and actor authority.
 
+For the general operator flow for requesting an exact independent review, see
+[the task-board review procedure](../../docs/reference/task-board.md#request-an-exact-independent-review).
+Its default decision command supports `verify.human` policies; this preset's
+custom acceptance policy and configured acceptor are not interchangeable with
+that operator identity.
+
 
 
 The preset paths are relative to `run.toml`; its database is relative to the
-selected workspace. Use a fresh workspace for an independent run; a new start
-refuses historical outputs. Resume does not reload inputs or reset a failed root.
+selected workspace. Setup atomically freezes the selected resources; identical
+setup replays its original Contract. Existing Assets are checked against ordinary
+requirements. Use a fresh workspace for a separate fact domain. Resume selects
+an existing Contract without reloading inputs or resetting attempts.
 See [configured runs](../../docs/reference/configured-runs.md). The entrypoint
 migration has deterministic verification; the earlier linked live reports do not
 constitute new provider execution of this preset.

@@ -3,19 +3,90 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
+from pathlib import Path
+import sys
+from types import ModuleType
 from conftest import candidate_runtime, hosted_worker
 import pytest
 
 from aigineering.agent.engine_worker import EngineWorker
+from aigineering.agent import engine_worker
 from aigineering.agent.mock import MockWorker
 from aigineering.agent.worker import WorkerHost
+from aigineering.fleet_config import load_fleet_config
+from aigineering.local_identity import ensure_local_domain, ensure_local_worker_host
 from aigineering.runtime import claim_next_package, execute_claimed_package
 from aigineering.runtime import submit_worker_proposal
+from aigineering.core.acceptance import validate_asset_publication
+from aigineering.core.candidate_publisher import CandidatePublisher
+from aigineering.core.ids import compute_content_hash
+from aigineering.core.projection_context import load_effect_projection_context
 from aigineering.core.signing import Ed25519Signer
 from aigineering.core.sqlite_store import SQLiteStore
-from aigineering.protocol.candidate import CandidateClaimBinding
+from aigineering.local_publication import commit_local_effect
+from aigineering.protocol.asset_graph import (
+    create_content_object,
+    create_definition_content_assertion,
+)
+from aigineering.protocol.effect_builders import (
+    actor_authorization_effect,
+    asset_proposal_effect,
+    content_publication_effect,
+    definition_content_assertion_effect,
+)
+from aigineering.run_config import prepare_fleet_resources
+from aigineering.protocol.candidate import ActorKey, CandidateClaimBinding
 from aigineering.protocol.envelope import CandidateEnvelope
 from aigineering.protocol.types import Asset, Contract
+
+
+class _OutputWorker:
+    """Deterministic fixture that follows the Contract's declared output slots."""
+
+    worker_id = "output_worker"
+
+    def __init__(self, prefix="output"):
+        self.prefix = prefix
+
+    def invoke(self, contract, disclosed_assets):
+        from aigineering.protocol.types import Candidate
+
+        del disclosed_assets
+        return Candidate(
+            worker_id=self.worker_id,
+            raw_output="/exec "
+            + json.dumps(
+                {
+                    "outputs": {
+                        name: f"{self.prefix}:{contract.id}"
+                        for name in contract.outputs
+                    }
+                }
+            ),
+        )
+
+
+class _ShapedOutputWorker:
+    def __init__(self, worker_id):
+        self.worker_id = worker_id
+
+    def invoke(self, contract, disclosed_assets):
+        from aigineering.protocol.types import Candidate
+
+        del disclosed_assets
+        return Candidate(
+            worker_id=self.worker_id,
+            raw_output="/exec "
+            + json.dumps(
+                {
+                    "outputs": {
+                        name: json.dumps({"value": f"service:{contract.id}:{name}"})
+                        for name in contract.outputs
+                    }
+                }
+            ),
+        )
 
 
 def test_engine_worker_exports_only_declared_candidate_outputs():
@@ -34,9 +105,7 @@ def test_engine_worker_exports_only_declared_candidate_outputs():
         budget=2,
     )
     contract = ingress.accept_contract(contract)
-    delegate = MockWorker(
-        {"nested_task": '/exec {"outputs": {"report": "isolated result"}}'}
-    )
+    delegate = _OutputWorker("isolated result")
     worker = EngineWorker(delegate)
     host = hosted_worker(
         store,
@@ -49,7 +118,7 @@ def test_engine_worker_exports_only_declared_candidate_outputs():
 
     assert preview.parsed_action == {
         "type": "exec",
-        "outputs": {"report": "isolated result"},
+        "outputs": {"report": preview.parsed_action["outputs"]["report"]},
     }
     assert "trace" not in preview.raw_output
     assert "asset:evidence" not in preview.raw_output
@@ -66,9 +135,11 @@ def test_engine_worker_exports_only_declared_candidate_outputs():
     assert result["status"] == "accepted", result
     committed = store.get_assets_by_name("report")
     assert len(committed) == 1
-    assert committed[0].content == "isolated result"
+    assert committed[0].content.startswith("isolated result:")
     assert committed[0].created_by == contract.id
-    assert json.loads(preview.raw_output)["outputs"] == {"report": "isolated result"}
+    assert json.loads(preview.raw_output)["outputs"] == dict(
+        preview.parsed_action["outputs"]
+    )
     store.close()
 
 
@@ -102,8 +173,7 @@ def test_default_engine_worker_uses_unique_domain_per_actual_invocation(monkeypa
         engine_worker_module, "_initialize_inner_domain", capture_domain
     )
     worker = EngineWorker(
-        MockWorker({contract.name: '/exec {"outputs":{"report":"isolated result"}}'}),
-        worker_id="worker:engine-fresh-domain",
+        _OutputWorker("isolated result"), worker_id="worker:engine-fresh-domain"
     )
     host = hosted_worker(
         store,
@@ -125,8 +195,10 @@ def test_default_engine_worker_uses_unique_domain_per_actual_invocation(monkeypa
     )
     first = worker.invoke_claimed(contract, [evidence], binding)
     second = worker.invoke_claimed(contract, [evidence], binding)
-    assert first.parsed_action == second.parsed_action == preview.parsed_action
-    assert first.raw_output == second.raw_output == preview.raw_output
+    assert first.parsed_action["outputs"]["report"].startswith("isolated result:")
+    assert second.parsed_action != first.parsed_action
+    assert preview.parsed_action["outputs"]["report"].startswith("isolated result:")
+    assert preview.parsed_action != first.parsed_action
     assert len(domains) == 3
     assert len(set(domains)) == 3
 
@@ -134,7 +206,7 @@ def test_default_engine_worker_uses_unique_domain_per_actual_invocation(monkeypa
     assert result["status"] == "accepted", result
     assert len(domains) == 4
     assert len(set(domains)) == 4
-    assert store.get_assets_by_name("report")[0].content == "isolated result"
+    assert store.get_assets_by_name("report")[0].content.startswith("isolated result:")
     store.close()
 
 
@@ -165,7 +237,12 @@ def test_engine_worker_unfinished_inner_run_fails_visibly_at_outer_boundary():
     assert result["status"] == "rejected"
     assert store.get_assets_by_name("report") == []
     terminal = store.scan_runtime_records(record_type="lifecycle.terminal")
-    assert terminal[-1][1].payload["terminal"] == "failed"
+    assert not any(
+        record.payload.get("contract_id") == contract.id for _, record in terminal
+    )
+    # The outer claim remains submitted for diagnosis; the inner run produced
+    # no signed terminal outcome for the business Task.
+    assert store.get_claim(contract.id)["status"] == "submitted"
     store.close()
 
 
@@ -190,7 +267,7 @@ def test_engine_worker_restarts_from_inner_facts_and_fences_late_outer_result(
     inner_path = str(tmp_path / "engine-worker-inner.db")
     inner_private_key = Ed25519Signer().private_key_hex
     first = EngineWorker(
-        MockWorker({"durable_bridge": '/exec {"outputs":{"report":"inner result"}}'}),
+        _OutputWorker("inner result"),
         inner_store_factory=lambda: SQLiteStore(inner_path),
         inner_signer=Ed25519Signer.from_private_key_hex(inner_private_key),
     )
@@ -227,19 +304,6 @@ def test_engine_worker_restarts_from_inner_facts_and_fences_late_outer_result(
         submit_worker_proposal(stale, outer)
     assert outer.get_assets_by_name("report") == []
 
-    replacement = runtime.accept_contract(
-        Contract(
-            id="bridge:replacement",
-            parent_id=root.id,
-            name=root.name,
-            description=root.description,
-            inputs=root.inputs,
-            outputs=root.outputs,
-            activation=root.activation,
-            budget=root.budget,
-        )
-    )
-
     class _MustNotRun:
         worker_id = "mock_worker"
 
@@ -251,29 +315,602 @@ def test_engine_worker_restarts_from_inner_facts_and_fences_late_outer_result(
         inner_store_factory=lambda: SQLiteStore(inner_path),
         inner_signer=Ed25519Signer.from_private_key_hex(inner_private_key),
     )
-    restarted_host = WorkerHost(restarted, host.genesis, host.actor_key, host.signer)
-    replacement_claim = claim_next_package(
-        outer,
-        worker_id=restarted_host.worker_id,
-        contract_id=replacement.id,
-    )
-    assert replacement_claim is not None
+    replayed = restarted.invoke_claimed(root, [evidence], binding)
+    assert replayed.parsed_action == inner_result.parsed_action
+    assert replayed.raw_output == inner_result.raw_output
 
-    result = execute_claimed_package(replacement_claim, restarted_host, outer)
-
-    assert result["status"] == "accepted"
-    assert outer.get_assets_by_name("report")[0].content == "inner result"
-    inner = SQLiteStore(inner_path)
-    assert (
-        len(
-            [
-                asset
-                for asset in inner.get_all_assets()
-                if asset.name.startswith("bridge_operation:")
-            ]
+    replacement = runtime.accept_contract(
+        Contract(
+            id="bridge:replacement",
+            parent_id=root.id,
+            name=root.name,
+            description=root.description,
+            inputs=root.inputs,
+            outputs=root.outputs,
+            activation=root.activation,
+            budget=2,
         )
-        == 2
     )
+    next_worker = EngineWorker(
+        _MustNotRun(),
+        inner_store_factory=lambda: SQLiteStore(inner_path),
+        inner_signer=Ed25519Signer.from_private_key_hex(inner_private_key),
+    )
+    next_host = WorkerHost(next_worker, host.genesis, host.actor_key, host.signer)
+    next_claim = claim_next_package(
+        outer, worker_id=next_host.worker_id, contract_id=replacement.id
+    )
+    assert next_claim is not None
+    result = execute_claimed_package(next_claim, next_host, outer)
+    assert result["status"] == "accepted", result
+    assert outer.get_assets_by_name("report")[-1].content.startswith("inner result:")
+    inner = SQLiteStore(inner_path)
+    operations = [
+        asset
+        for asset in inner.get_all_assets()
+        if asset.name.startswith("bridge_operation:")
+    ]
+    assert len(operations) == 2
+    completions = [
+        json.loads(asset.content)
+        for asset in inner.get_all_assets()
+        if asset.name.startswith("bridge_completion:")
+    ]
+    assert len(completions) == 2
+    assert len({item["inner_contract_id"] for item in completions}) == 2
     assert len(inner.get_assets_by_name("report")) == 1
     inner.close()
     outer.close()
+
+
+@pytest.fixture
+def completed_bridge(tmp_path, monkeypatch):
+    inner_path = str(tmp_path / "bridge.db")
+    signer = Ed25519Signer()
+    output_signer = Ed25519Signer()
+    output_key = ActorKey(
+        "actor:outputs",
+        "outputs",
+        output_signer.kind,
+        output_signer.signer_id,
+        ("asset.publish", "asset.relate"),
+    )
+    with SQLiteStore(":memory:") as outer:
+        contract = candidate_runtime(outer).accept_contract(
+            Contract(id="task:bridge", name="bridge", outputs=("report",), budget=2)
+        )
+    binding = CandidateClaimBinding(contract.id, "claim:one", 1, "pkg:one")
+
+    class UnusedDelegate:
+        worker_id = "worker:unused"
+
+        def invoke(self, contract, disclosed_assets):
+            pytest.fail("output was already available in the inner domain")
+
+    def worker():
+        return EngineWorker(
+            UnusedDelegate(),
+            inner_store_factory=lambda: SQLiteStore(inner_path),
+            inner_signer=signer,
+        )
+
+    def write_output_versions(
+        store,
+        _delegate,
+        _selector,
+        publisher,
+        genesis,
+        _signer,
+        _plugins,
+        *,
+        root_contract_id,
+        **_kwargs,
+    ):
+        root = store.get_contract(root_contract_id)
+        definition_id = root.acceptance_policy["output_requirements"]["report"][
+            "definition_id"
+        ]
+        authorize = publisher.publish(
+            (actor_authorization_effect(output_key),),
+            idempotency_key="authorize-outputs",
+        )
+        assert authorize.accepted, authorize.runtime_records
+        output_publisher = CandidatePublisher(
+            store, store, genesis, output_key, output_signer
+        )
+        possibilities = []
+        for text in ("first admissible version", "second admissible version"):
+            content = create_content_object(text)
+            assertion = create_definition_content_assertion(
+                domain_id=genesis.id,
+                definition_id=definition_id,
+                content_id=content.id,
+                relation_type="satisfies",
+                actor_id=output_key.actor_id,
+                key_id=output_key.key_id,
+                signer=output_signer,
+            )
+            possibilities.append(
+                (
+                    "asset:v1:" + compute_content_hash(assertion.id),
+                    text,
+                    (
+                        content_publication_effect(content),
+                        definition_content_assertion_effect(assertion),
+                    ),
+                )
+            )
+        smaller, larger = sorted(possibilities)
+        published = output_publisher.publish(larger[2], idempotency_key="larger")
+        assert published.accepted, published.runtime_records
+        assert published.assets[0].id == larger[0]
+        observed.update(publisher=publisher, larger=larger, smaller=smaller)
+        return True
+
+    observed = {}
+    with monkeypatch.context() as patch:
+        patch.setattr(engine_worker, "_run_inner_steps", write_output_versions)
+        original = worker().invoke_claimed(contract, [], binding)
+    assert original.parsed_action["outputs"]["report"] == observed["larger"][1]
+
+    with SQLiteStore(inner_path) as store:
+        original_publisher = observed["publisher"]
+        publisher = CandidatePublisher(
+            store,
+            store,
+            original_publisher.genesis,
+            output_key,
+            output_signer,
+        )
+        assert publisher.publish(
+            observed["smaller"][2], idempotency_key="smaller"
+        ).accepted
+        assert [
+            asset.id
+            for asset in sorted(
+                store.get_assets_by_name("report"), key=lambda asset: asset.id
+            )
+        ] == [observed["smaller"][0], observed["larger"][0]]
+        revision = store.get_runtime_revision()
+
+    return worker, contract, binding, inner_path, original, observed, revision
+
+
+def test_engine_bridge_replay_pins_original_output_and_new_operation_selects_minimum(
+    completed_bridge, monkeypatch
+):
+    worker, contract, binding, path, original, observed, revision = completed_bridge
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            engine_worker,
+            "_run_inner_steps",
+            lambda *_args, **_kwargs: pytest.fail("completed bridge reran runtime"),
+        )
+        replayed = worker().invoke_claimed(contract, [], binding)
+    assert replayed == original
+    with SQLiteStore(path) as store:
+        assert store.get_runtime_revision() == revision
+
+    fresh = worker().invoke_claimed(contract, [], replace(binding, claim_epoch=2))
+    assert fresh.parsed_action["outputs"]["report"] == observed["smaller"][1]
+    with SQLiteStore(path) as store:
+        exported = [
+            json.loads(asset.content)["output_asset_ids"]["report"]
+            for asset in store.get_all_assets()
+            if asset.name.startswith("bridge_completion:")
+        ]
+        assert sorted(exported) == sorted(
+            [observed["smaller"][0], observed["larger"][0]]
+        )
+
+
+def test_engine_bridge_replay_never_imports_new_disclosure(completed_bridge):
+    worker, contract, binding, path, _, _, revision = completed_bridge
+    with SQLiteStore(":memory:") as outer:
+        extra = candidate_runtime(outer).accept_asset(
+            Asset(id="asset:extra", name="unexpected", content="late outer material")
+        )
+
+    replay = worker().invoke_claimed(contract, [extra], binding)
+
+    assert (
+        replay.raw_output
+        == "engine_worker_failure: completed bridge lacks exact prior setup publication"
+    )
+    with SQLiteStore(path) as store:
+        assert store.get_runtime_revision() == revision
+        assert store.get_assets_by_name(extra.name) == []
+
+
+def test_engine_bridge_replay_rejects_changed_materialized_output(
+    completed_bridge, monkeypatch
+):
+    worker, contract, binding, path, _, observed, revision = completed_bridge
+    get_asset = SQLiteStore.get_asset
+
+    def read_changed_output(store, asset_id):
+        asset = get_asset(store, asset_id)
+        if asset_id == observed["larger"][0]:
+            return replace(asset, content="damaged materialization")
+        return asset
+
+    monkeypatch.setattr(SQLiteStore, "get_asset", read_changed_output)
+    replay = worker().invoke_claimed(contract, [], binding)
+
+    assert (
+        replay.raw_output
+        == "engine_worker_failure: inner output 'report' has an invalid Asset seal"
+    )
+    with SQLiteStore(path) as store:
+        assert store.get_runtime_revision() == revision
+
+
+@pytest.mark.parametrize(
+    "restriction",
+    [{"promptable": False}, {"disclosure_view": "sealed"}, {"tombstoned": True}],
+)
+def test_engine_bridge_checks_current_disclosure_for_selected_slot(
+    completed_bridge, monkeypatch, restriction
+):
+    worker, contract, binding, path, _, observed, revision = completed_bridge
+    get_asset = SQLiteStore.get_asset
+    get_by_definition = SQLiteStore.get_assets_by_definition
+
+    def read_replay_output(store, asset_id):
+        asset = get_asset(store, asset_id)
+        return (
+            replace(asset, **restriction)
+            if asset_id == observed["larger"][0]
+            else asset
+        )
+
+    def read_new_outputs(store, definition_id):
+        return [
+            replace(asset, **restriction)
+            if asset.id == observed["smaller"][0]
+            else asset
+            for asset in get_by_definition(store, definition_id)
+        ]
+
+    monkeypatch.setattr(SQLiteStore, "get_asset", read_replay_output)
+    monkeypatch.setattr(SQLiteStore, "get_assets_by_definition", read_new_outputs)
+    replay = worker().invoke_claimed(contract, [], binding)
+    assert (
+        replay.raw_output
+        == "engine_worker_failure: inner output 'report' has no exportable original Asset"
+    )
+    with SQLiteStore(path) as store:
+        assert store.get_runtime_revision() == revision
+
+    fresh = worker().invoke_claimed(contract, [], replace(binding, claim_epoch=2))
+    assert fresh.raw_output == replay.raw_output
+    with SQLiteStore(path) as store:
+        assert (
+            sum(
+                asset.name.startswith("bridge_completion:")
+                for asset in store.get_all_assets()
+            )
+            == 1
+        )
+
+
+def test_engine_bridge_completion_race_returns_winning_selection(
+    completed_bridge, monkeypatch
+):
+    worker, contract, binding, path, _, observed, _ = completed_bridge
+    publish_completion = engine_worker._publish_bridge_completion
+
+    def publish_after_competitor(publisher, current_binding, selected):
+        assert selected["report"].id == observed["smaller"][0]
+        competing_output = publisher.store.get_asset(observed["larger"][0])
+        assert publish_completion(
+            publisher, current_binding, {"report": competing_output}
+        ).accepted
+        return publish_completion(publisher, current_binding, selected)
+
+    monkeypatch.setattr(
+        engine_worker, "_publish_bridge_completion", publish_after_competitor
+    )
+    replayed = worker().invoke_claimed(contract, [], replace(binding, claim_epoch=2))
+    assert replayed.parsed_action["outputs"]["report"] == observed["larger"][1]
+    with SQLiteStore(path) as store:
+        completions = [
+            asset
+            for asset in store.get_all_assets()
+            if asset.name.startswith("bridge_completion:")
+        ]
+        assert len(completions) == 2
+        assert {
+            json.loads(asset.content)["output_asset_ids"]["report"]
+            for asset in completions
+        } == {observed["larger"][0]}
+
+
+@pytest.mark.parametrize("bad_marker", ["binding", "wrong intent", "duplicate"])
+def test_engine_bridge_rejects_invalid_markers_with_valid_publications(
+    completed_bridge, monkeypatch, bad_marker
+):
+    worker, contract, binding, path, _, _, _ = completed_bridge
+    next_binding = replace(binding, claim_epoch=2)
+    publish_completion = engine_worker._publish_bridge_completion
+
+    def publish_bad_marker(publisher, current_binding, selected):
+        if bad_marker == "duplicate":
+            assert publish_completion(publisher, current_binding, selected).accepted
+        payload = {
+            **current_binding,
+            "output_asset_ids": {name: asset.id for name, asset in selected.items()},
+        }
+        if bad_marker == "binding":
+            payload["outer_contract_id"] = "task:different"
+        marker = engine_worker._bridge_asset(
+            "bridge_completion", current_binding["operation_id"], payload
+        )
+        decision = publisher.publish(
+            (asset_proposal_effect(marker),),
+            idempotency_key="different-completion-intent",
+        )
+        assert decision.accepted, decision.runtime_records
+        validate_asset_publication(
+            load_effect_projection_context(publisher.store), decision.assets[0]
+        )
+        return decision
+
+    with monkeypatch.context() as patch:
+        patch.setattr(engine_worker, "_publish_bridge_completion", publish_bad_marker)
+        assert worker().invoke_claimed(contract, [], next_binding).parsed_action
+    with SQLiteStore(path) as store:
+        revision = store.get_runtime_revision()
+
+    monkeypatch.setattr(
+        engine_worker,
+        "_run_inner_steps",
+        lambda *_args, **_kwargs: pytest.fail("invalid bridge marker reran runtime"),
+    )
+    replayed = worker().invoke_claimed(contract, [], next_binding)
+    assert replayed.parsed_action is None
+    assert replayed.raw_output.startswith("engine_worker_failure: ")
+    with SQLiteStore(path) as store:
+        assert store.get_runtime_revision() == revision
+
+
+def test_existing_workspace_engine_worker_uses_pinned_receiver_fleet(
+    tmp_path, monkeypatch
+):
+    module = ModuleType("engine_receiver_test")
+    module.build_worker = lambda *, worker_id: _ShapedOutputWorker(worker_id)
+    module.tool_version = "1.0"
+
+    def build_registry():
+        from aigineering.core.tools import ToolRegistry
+        from aigineering.protocol.types import ToolSpec
+
+        registry = ToolRegistry()
+        registry.register(
+            ToolSpec(
+                name="receiver_lookup",
+                description="receiver lookup",
+                input_schema={"type": "object", "properties": {}},
+                output_schema={"type": "string"},
+                version=module.tool_version,
+            ),
+            lambda _arguments: '"ok"',
+        )
+        return registry
+
+    module.build_registry = build_registry
+    monkeypatch.setitem(sys.modules, "engine_receiver_test", module)
+    source_workspace = tmp_path / "workspaces" / "A"
+    receiver_workspace = tmp_path / "workspaces" / "B"
+    config_dir = tmp_path / "config-outside-workspaces"
+    source_identity = source_workspace / ".aig" / "identity" / "root.ed25519"
+    receiver_identity = receiver_workspace / ".aig" / "identity" / "root.ed25519"
+    source_db = source_workspace / ".aig" / "store.db"
+    receiver_db = receiver_workspace / ".aig" / "store.db"
+    source_workspace.mkdir(parents=True)
+    receiver_workspace.mkdir(parents=True)
+    config_dir.mkdir()
+
+    monkeypatch.setattr("aigineering.application.require_redis", lambda *_: None)
+    monkeypatch.setattr(
+        "aigineering.runtime_services.sync_runtime",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr("aigineering.local_publication.require_redis", lambda: None)
+    monkeypatch.setattr(
+        "aigineering.local_publication.sync_runtime", lambda *_args, **_kwargs: None
+    )
+
+    with SQLiteStore(str(source_db)) as source_store:
+        source_genesis = ensure_local_domain(source_store, key_path=source_identity)
+        from aigineering.protocol.types import Asset
+
+        input_decision = commit_local_effect(
+            source_store,
+            asset_proposal_effect(
+                Asset(id="input", name="evidence", content="source evidence")
+            ),
+            idempotency_key="test-input-publication",
+            key_path=source_identity,
+        )
+        evidence = input_decision.assets[0]
+    with SQLiteStore(str(receiver_db)) as receiver_store:
+        receiver_genesis = ensure_local_domain(
+            receiver_store, key_path=receiver_identity
+        )
+        preexisting_same_content = commit_local_effect(
+            receiver_store,
+            asset_proposal_effect(
+                Asset(
+                    id="receiver-existing-evidence",
+                    name=evidence.name,
+                    content=evidence.content,
+                    origin="receiver-local",
+                    trust_tier="trusted",
+                    promptable=False,
+                )
+            ),
+            idempotency_key="receiver-existing-same-content",
+            key_path=receiver_identity,
+        ).assets[0]
+
+    receiver_config = config_dir / "receiver.toml"
+    receiver_fleet_text = (
+        "[fleet]\n"
+        'db_path = ".aig/store.db"\n\n'
+        "[[workers]]\n"
+        'id = "receiver-worker"\n'
+        'kind = "local"\n'
+        'worker_factory = "engine_receiver_test:build_worker"\n'
+        "\n"
+        "[[workers]]\n"
+        'id = "receiver-tools"\n'
+        'kind = "tool"\n'
+        'tool_registry = "engine_receiver_test:build_registry"\n'
+    )
+    receiver_config.write_text(receiver_fleet_text, encoding="utf-8")
+    source_config = config_dir / "source.toml"
+    source_config.write_text(
+        "[fleet]\n"
+        'db_path = ".aig/store.db"\n\n'
+        "[[workers]]\n"
+        'id = "engine-bridge"\n'
+        'kind = "engine"\n'
+        'target_workspace = "../B"\n'
+        f'target_domain_id = "{receiver_genesis.id}"\n'
+        'receiver_fleet = "receiver.toml"\n'
+        'receiver_key_file = ".aig/identity/root.ed25519"\n',
+        encoding="utf-8",
+    )
+
+    fleet = load_fleet_config(source_config)
+    resources = prepare_fleet_resources(
+        fleet, base_dir=config_dir, workspace_dir=source_workspace
+    )
+    engine = resources.workers[0][1]
+    assert isinstance(engine, EngineWorker)
+    assert engine.expected_domain_id == source_genesis.id
+
+    with SQLiteStore(str(source_db)) as source_store:
+        source_host = ensure_local_worker_host(
+            source_store, engine, key_path=source_identity
+        )
+        outer = Contract(
+            id="source:outer",
+            name="existing_workspace_report",
+            inputs=("evidence",),
+            outputs=("report",),
+            budget=3,
+            labels=("evidence",),
+            context_asset_ids=(evidence.id,),
+            acceptance_policy={
+                "mode": "independent",
+                "policy_version": "test-policy-v1",
+                "verifier_capabilities": ["review"],
+                "rubric_asset_ids": ["source-rubric-id"],
+                "evidence_asset_ids": ["source-evidence-id"],
+                "output_shapes": {"report": {"value": "string"}},
+            },
+        )
+        binding = CandidateClaimBinding(
+            contract_id=outer.id,
+            claim_id="claim:existing-workspace-test",
+            claim_epoch=1,
+            package_id="pkg:existing-workspace-test",
+        )
+        candidate = source_host.invoke(outer, [evidence], claim_binding=binding)
+        if candidate.parsed_action is None:
+            with SQLiteStore(str(receiver_db)) as debug_store:
+                rejections = debug_store.scan_runtime_records(
+                    record_type="candidate.rejected"
+                )
+                pytest.fail(
+                    "Engine bridge rejected before output: "
+                    + str(
+                        rejections[-1][1].payload
+                        if rejections
+                        else candidate.raw_output
+                    )
+                )
+        assert candidate.parsed_action is not None
+        assert json.loads(candidate.parsed_action["outputs"]["report"])[
+            "value"
+        ].startswith("service:")
+        replay = source_host.invoke(outer, [evidence], claim_binding=binding)
+        assert replay.parsed_action == candidate.parsed_action
+
+        module.tool_version = "2.0"
+        changed_resources = prepare_fleet_resources(
+            fleet, base_dir=config_dir, workspace_dir=source_workspace
+        )
+        changed_engine = changed_resources.workers[0][1]
+        changed_candidate = changed_engine.invoke_claimed(outer, [evidence], binding)
+        assert changed_candidate.parsed_action is None
+        assert "bridge operation mapping" in changed_candidate.raw_output
+        module.tool_version = "1.0"
+        assert (
+            source_host.invoke(outer, [evidence], claim_binding=binding).parsed_action
+            == candidate.parsed_action
+        )
+        with pytest.raises(ValueError, match="expected domain"):
+            WorkerHost(
+                engine, receiver_genesis, source_host.actor_key, source_host.signer
+            )
+        assert source_store.get_assets_by_name("report") == []
+
+    with SQLiteStore(str(receiver_db)) as receiver_store:
+        assert (
+            ensure_local_domain(receiver_store, key_path=receiver_identity).id
+            == receiver_genesis.id
+        )
+        report_assets = receiver_store.get_assets_by_name("report")
+        assert len(report_assets) == 1
+        assertion = next(
+            item
+            for item in receiver_store.get_definition_content_assertions(
+                definition_id=report_assets[0].definition_hash,
+                content_id=report_assets[0].content_hash,
+            )
+            if item["actor_id"] == report_assets[0].signed_by
+        )
+        inner_root = receiver_store.get_contract(assertion["evidence"]["contract_id"])
+        assert inner_root is not None
+        from aigineering.core.input_bindings import input_asset_bindings
+
+        mapped_ids = input_asset_bindings(inner_root.sensitive_input_policy)["evidence"]
+        assert len(mapped_ids) == 1
+        assert mapped_ids[0] != evidence.id
+        assert mapped_ids[0] != preexisting_same_content.id
+        assert receiver_store.get_asset(mapped_ids[0]).content == evidence.content
+        assert (
+            len(
+                [
+                    asset
+                    for asset in receiver_store.get_assets_by_name(evidence.name)
+                    if asset.content == evidence.content
+                ]
+            )
+            == 2
+        )
+        assert inner_root.context_asset_ids == mapped_ids
+        assert inner_root.acceptance_policy["mode"] == "mechanical"
+        assert "output_source" not in inner_root.acceptance_policy
+        assert inner_root.acceptance_policy["output_requirements"] == {
+            "report": {"definition_id": report_assets[0].definition_hash}
+        }
+        assert inner_root.acceptance_policy["output_shapes"] == {
+            "report": {"value": "string"}
+        }
+        assert "rubric_asset_ids" not in inner_root.acceptance_policy
+        bridge_ops = [
+            asset
+            for asset in receiver_store.get_all_assets()
+            if asset.name.startswith("bridge_operation:")
+        ]
+        assert len(bridge_ops) == 1
+        operation = json.loads(bridge_ops[0].content)
+        assert operation["source_domain_id"] == source_genesis.id
+        assert operation["target_domain_id"] == receiver_genesis.id
+        assert operation["outer_claim"]["claim_id"] == binding.claim_id
+        assert operation["outer_claim"]["package_id"] == binding.package_id
+    assert Path(source_workspace / ".aig" / "store.db").is_file()

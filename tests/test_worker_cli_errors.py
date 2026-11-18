@@ -5,9 +5,11 @@ from types import SimpleNamespace
 
 from click.testing import CliRunner
 
+from aigineering.adapters.redis_query import QueryProjectionUnavailable
 from aigineering.cli.main import cli
+from aigineering.core.candidate_decision import CommitmentDecision
 from aigineering.core.commitment import CandidateCommitRejected
-from aigineering.runtime_services import RedisSyncPending
+from aigineering.protocol.runtime_record import create_runtime_record
 
 
 class _Store:
@@ -101,27 +103,54 @@ def test_worker_submit_sync_pending_after_durable_rejection_is_not_reworded(
     monkeypatch,
 ):
     store = _Store()
+    monkeypatch.setattr(store, "get_runtime_revision", lambda: 7, raising=False)
+    receipt = create_runtime_record(
+        "candidate.received", {"candidate_id": "signed-candidate"}
+    )
+    rejection = create_runtime_record(
+        "candidate.rejected",
+        {"candidate_id": "signed-candidate", "reason": "durable rejection"},
+        causal_parents=(receipt.id,),
+    )
+    decision = CommitmentDecision(
+        candidate_id="signed-candidate",
+        accepted=False,
+        runtime_records=(receipt, rejection),
+        trace_entries=(),
+    )
+
+    def reject_submission(*_args, **_kwargs):
+        raise CandidateCommitRejected("durable rejection", decision)
+
+    def unavailable_relay(_store):
+        raise QueryProjectionUnavailable("relay interrupted")
+
     monkeypatch.setattr("aigineering.cli.worker._persistent_store", lambda: store)
     monkeypatch.setattr(
         "aigineering.cli.worker.candidate_proposal_from_dict",
         lambda _data: SimpleNamespace(idempotency_key="signed-key"),
     )
     monkeypatch.setattr(
-        "aigineering.cli.worker.submit_worker_proposal",
-        lambda *args, **kwargs: (_ for _ in ()).throw(
-            CandidateCommitRejected("durable rejection", None)
-        ),
+        "aigineering.cli.worker.submit_worker_proposal_with_decision",
+        reject_submission,
     )
     monkeypatch.setattr(
-        "aigineering.cli.worker.sync_runtime",
-        lambda _store: (_ for _ in ()).throw(RedisSyncPending(accepted=False)),
+        "aigineering.runtime_services.collaboration_service", unavailable_relay
     )
 
     result = CliRunner().invoke(cli, ["worker", "submit", "--json", "{}"])
 
     assert result.exit_code != 0
-    assert "Redis synchronization pending" in result.output
-    assert '"status": "error"' not in result.output
+    pending = json.loads(result.output)
+    assert pending["error"] == "redis_sync_pending"
+    assert "Redis synchronization pending" in pending["message"]
+    assert pending["facts_retained"] is True
+    assert pending["candidate_accepted"] is False
+    assert pending["candidate_id"] == decision.candidate_id
+    assert pending["receipt_id"] == receipt.id
+    assert pending["rejection_id"] == rejection.id
+    assert pending["revision"] == 7
+    assert "status" not in pending
     assert store.closed
 
 

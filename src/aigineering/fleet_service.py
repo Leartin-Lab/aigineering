@@ -24,7 +24,6 @@ from aigineering.adapters.redis_query import QueryProjectionUnavailable
 from aigineering.application import require_redis
 from aigineering.core.domain import load_genesis
 from aigineering.core.sqlite_store import SQLiteStore
-from aigineering.plugins import default_completion_registry
 from aigineering.local_fleet import (
     FleetHost,
     PullAdmissionGate,
@@ -203,7 +202,7 @@ def start_service(
             "workspace_uninitialized",
             "Workspace Store is missing; initialize its domain first",
         )
-    _prevalidate_fleet_adapters(fleet, config.parent)
+    _prevalidate_fleet_adapters(fleet, config.parent, workspace_dir=root)
 
     # Read the exact existing domain and test operational Redis before creating
     # a generation or publishing local Worker setup.
@@ -230,17 +229,24 @@ def start_service(
     service_dir = _service_dir(root)
     _validated_prior_state(service_dir, root)
     lock_path = service_dir / _LOCK_NAME
+    deadline = time.monotonic() + readiness_timeout
     lock_fd = _open_lock(lock_path)
     try:
-        try:
-            fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            current = _validated_prior_state(service_dir, root)
-            if current is None:
-                raise FleetServiceError(
-                    "unsafe_state", "Fleet service lock is live but metadata is missing"
-                )
-            return _result_from_state(current, fallback="running")
+        while True:
+            try:
+                fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                current = _validated_prior_state(service_dir, root)
+                if current is not None:
+                    return _result_from_state(current, fallback="running")
+                remaining = deadline - time.monotonic()
+                if not 0 < remaining < float("inf"):
+                    raise FleetServiceError(
+                        "unsafe_state",
+                        "Fleet service lock is live but metadata is missing",
+                    )
+                time.sleep(min(0.05, remaining))
 
         # A valid stale generation may be replaced only after exclusive lock
         # acquisition and a fresh validation of the metadata it left behind.
@@ -291,7 +297,6 @@ def start_service(
         # The child owns state after launch. It may already have written ready
         # or a specific startup failure before Popen returns; never replay the
         # parent's stale starting snapshot over that result.
-        deadline = time.monotonic() + readiness_timeout
         while time.monotonic() < deadline:
             latest = read_service_metadata(service_dir / _STATE_NAME)
             if latest is None or latest.get("generation") != generation:
@@ -460,7 +465,9 @@ def _serve_from_environment() -> int:
                 state_path, initial, state="failed", error_code="invalid_store_path"
             )
             return 1
-        resources = prepare_fleet_resources(fleet, base_dir=config.parent)
+        resources = prepare_fleet_resources(
+            fleet, base_dir=config.parent, workspace_dir=root
+        )
         with SQLiteStore(db_path) as store:
             genesis = load_genesis(store)
             if genesis.id != initial.get("domain_id"):
@@ -481,13 +488,11 @@ def _serve_from_environment() -> int:
             sync_runtime(store)
         maintenance_store = SQLiteStore(db_path)
         maintenance_publishers = ensure_local_runtime_publishers(maintenance_store)
-        completion_registry = default_completion_registry()
 
         def maintenance_tick() -> None:
             require_redis()
             run_runtime_maintenance_step(
                 maintenance_store,
-                completion_registry,
                 candidate_publishers=maintenance_publishers,
             )
             sync_runtime(maintenance_store)
@@ -606,14 +611,14 @@ def _require_llm_credentials(fleet) -> None:
         )
 
 
-def _prevalidate_fleet_adapters(fleet, base_dir: Path) -> None:
+def _prevalidate_fleet_adapters(fleet, base_dir: Path, *, workspace_dir: Path) -> None:
     """Use the shared resource owner to validate constructibility before Popen.
 
     The child constructs its own process-local adapters again after launch.
     Worker factories retain their strict existing module:callable semantics.
     """
     try:
-        prepare_fleet_resources(fleet, base_dir=base_dir)
+        prepare_fleet_resources(fleet, base_dir=base_dir, workspace_dir=workspace_dir)
     except Exception as exc:
         raise FleetServiceError(
             "worker_adapter_invalid", "Configured Fleet adapters are invalid"

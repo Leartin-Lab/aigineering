@@ -22,6 +22,24 @@ and `worker_errors`. Completion satisfies the Contract policy; it does not prove
 general semantic correctness. `--json` emits one result object, not a streaming
 format shared with another harness.
 
+New tasks use mechanical output conditions. With no explicit output selector,
+the compatibility condition is a matching business Asset name, regardless of
+producer Contract tree. To bind an output role to an existing semantic
+Definition or exact version, configure `acceptance_policy.output_requirements`
+with `definition_id`, optional `content_id`, and optional sorted
+`producer_actor_ids`. A syntactically valid Definition may be required before it
+is published; until its signed graph fact exists, the output remains unmet and
+does not fall back to its name. The legacy mechanical `output_source` field is
+readable but no longer adds a tree restriction. Independent acceptance still
+requires exact qualification for its declared output slot.
+
+The SQLite reader floor is schema23. Stop old Workers and run
+`aig domain upgrade --json` before relying on the new output conditions; the
+command backs up before migration. An older process with an already-open
+connection is not fenced. Existing signed Engine bridge history is immutable;
+if it does not satisfy a newly compiled goal Definition and mapped-input
+conditions, continue with new ordinary work rather than rewriting that history.
+
 Add `--once` to traverse the configured Worker slots until one eligible
 package is claimed, invoke at most that one package, and return the current
 projection at the cycle boundary. This supports ordinary task planning and
@@ -82,6 +100,61 @@ tool/Worker adapter. A configured tool registry selects an importable factory;
 it does not discover arbitrary MCP transports. Staged `/plan` expansion uses
 ordinary runtime tasks and must remain within the root's frozen scope.
 
+## Delegate to an existing local workspace
+
+Initialize two distinct workspaces with `aig -C PATH domain init`. Obtain the
+receiving domain's Genesis ID with `aig -C PATH domain show --json`. Both
+workspaces retain their own history; switching directories does not reset it.
+The operator must control both domains and explicitly provide the receiver's
+root key. This is a local trust arrangement, not a remote security boundary.
+
+Add an Engine adapter to the source Fleet:
+
+```toml
+[fleet]
+db_path = ".aig/store.db"
+
+[[workers]]
+id = "engine:analysis"
+kind = "engine"
+capabilities = ["analysis"]
+target_workspace = "/absolute/path/to/receiver"
+target_domain_id = "GENESIS_ID"
+receiver_fleet = "/absolute/path/to/receiver-workers.toml"
+receiver_key_file = ".aig/identity/root.ed25519"
+```
+
+Use the receiver's actual existing key filename. `target_workspace` is relative
+to the source workspace; `receiver_key_file` and the receiver Fleet's `db_path`
+are relative to the target workspace. The receiving database must be
+`.aig/store.db`. `receiver_fleet` is relative to the source Fleet TOML directory.
+Tool registry resources inside the receiver Fleet are relative to the receiver
+Fleet TOML directory. The receiver Fleet declares ordinary
+`llm`, `local` or `tool` Workers with the capabilities needed by the delegated
+Contract. It cannot contain `engine` Workers. The source domain must already
+exist before preparing this configuration.
+
+Run the source through the existing `aig fleet run --config PATH --task ID`
+or configured-run entrypoint. The bridge imports only disclosed inputs, binds
+their receiving-domain IDs, and uses normal signed registration and task
+execution. New operations have distinct inner roots; exact-claim replay reuses
+the original operation. Changing receiver configuration cannot refresh that
+claim's recorded intent. Use one frozen receiver configuration at a time: the
+history check is not a transactional uniqueness fence against concurrent first
+invocations with different configurations. Stop bridge processes before changing
+that configuration. The configuration fingerprint covers Fleet contents and
+declared tool descriptor metadata. Keep referenced Python factories, handlers
+and their dependencies immutable for the operation; profile/version metadata
+does not attest implementation bytes. Inner mechanical completion does not satisfy an outer
+independent-acceptance policy. Unsupported protected outputs or policy
+translations fail explicitly.
+
+Invocation stays within the inner root tree; ordinary receiver-domain runtime
+maintenance still runs. Stopping the source does not cancel all receiver work,
+and registry archive does not stop either Fleet. The reverse direction requires
+a separate explicit profile. There is no shared budget, recursive federation,
+or external-effect exactly-once guarantee.
+
 ## Preset format
 
 ```toml
@@ -124,12 +197,17 @@ JSON action wire mode for an LLM profile and cannot be combined with a
 `tool_registry`; ordinary parsing and commitment still apply. Configuration mode rejects goal, mock, tool and provider flag overrides;
 edit the explicit profile instead.
 
-A new preset launch refuses roots and output slots present at its startup check.
-That check is an application guard, not an atomic output namespace reservation.
-Use distinct workspaces for independent concurrent runs. Use `--resume` to continue
-that fact domain or a fresh workspace for an independent run. Setup publication
-and execution are separate signed transactions; a failed start can leave
-accepted setup evidence. Task audit and the runtime records remain authoritative.
+Setup commits inputs, Skills and the exact-bound Contract in one signed Candidate.
+Rejected or interrupted setup leaves none of those effects. An identical setup
+replays its original publication; changed resources or requirements produce a
+distinct intent and Contract, even when the display name is unchanged.
+Existing matching Assets can satisfy the declared requirements; a historical
+output name alone neither rejects creation nor grants qualification. Express
+required content, producer or independent policy through ordinary selectors.
+Use `--resume` to select an existing Contract without reloading its source files,
+or a fresh workspace for a separate fact domain. Worker execution and identity
+registration are separate actions; failure after accepted setup preserves its
+facts. Task audit and runtime records remain authoritative.
 
 ## Example coverage
 

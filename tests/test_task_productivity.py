@@ -73,6 +73,7 @@ def test_productivity_projects_root_descendants_and_usage_without_mutation():
         WorkerAction(type="tool", payload={"name": "bad_lookup", "args": {}}),
     )
     continuation = continuation_contract(root, lookup, method="tool", budget=2)
+    assert continuation.tool_scope == root.tool_scope
     recovery = _recovery_contract(bad_lookup)
     for contract in (root, lookup, bad_lookup, continuation, recovery):
         store.add_contract(contract)

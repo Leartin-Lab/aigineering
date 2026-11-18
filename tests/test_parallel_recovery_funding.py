@@ -7,28 +7,107 @@ import shutil
 
 import pytest
 
-from conftest import hosted_worker
-from test_recovery_publication_history import _environment
+from types import SimpleNamespace
+
+from conftest import candidate_runtime, hosted_worker
 
 from aigineering.agent.mock import MockWorker
 from aigineering.agent.tool_worker import ToolWorker
-from aigineering.application import default_completion_registry
-from aigineering.core.candidate_publisher import CandidatePublisherRegistry
+from aigineering.core.candidate_publisher import (
+    CandidatePublisher,
+    CandidatePublisherRegistry,
+)
 from aigineering.core.capability_descriptors import create_tool_descriptor
 from aigineering.core.causal_allowance import allowance_available
 from aigineering.core.sqlite_store import SQLiteStore
+from aigineering.core.domain import initialize_genesis
+from aigineering.core.signing import Ed25519Signer
 from aigineering.core.tools import ToolRegistry, ToolSpec
 from aigineering.plugins.delegation import _parallel_tool_contracts
 from aigineering.plugins.task_semantics import method_payload
 from aigineering.protocol.actions import WorkerAction
+from aigineering.protocol.candidate import ActorKey, create_genesis_manifest
 from aigineering.protocol.types import Contract
 from aigineering.runtime import (
     WorkerInvocationError,
     claim_next_package,
     execute_claimed_package,
-    process_task_completions,
     process_worker_failures,
 )
+
+
+def _environment(name: str, *, store_path=":memory:"):
+    store = SQLiteStore(store_path)
+    setup_signer = Ed25519Signer()
+    setup_key = ActorKey(
+        f"test:parallel-recovery-{name}",
+        "setup",
+        setup_signer.kind,
+        setup_signer.signer_id,
+        (
+            "actor.authorize",
+            "actor.revoke",
+            "actor.rotate",
+            "asset.publish",
+            "asset.publish.protected",
+            "contract.publish",
+            "contract.publish.protected",
+            "worker.register",
+        ),
+    )
+    recovery_signer = Ed25519Signer()
+    recovery_key = ActorKey(
+        "plugin:recovery.publish.v1",
+        "recovery-v1",
+        recovery_signer.kind,
+        recovery_signer.signer_id,
+        (
+            "actor.revoke",
+            "actor.rotate",
+            "asset.publish",
+            "asset.publish.protected",
+            "contract.publish",
+            "contract.publish.protected",
+        ),
+    )
+    genesis = create_genesis_manifest(
+        f"parallel-recovery-{name}",
+        (setup_key, recovery_key),
+        f"policy:parallel-recovery-{name}",
+    )
+    initialize_genesis(store, genesis)
+    setup = candidate_runtime(
+        store, genesis=genesis, actor_key=setup_key, signer=setup_signer
+    )
+    recovery_publisher = CandidatePublisher(
+        store, store, genesis, recovery_key, recovery_signer
+    )
+    publishers = CandidatePublisherRegistry(
+        (("recovery.publish.v1", recovery_publisher),)
+    )
+    return SimpleNamespace(
+        store=store,
+        genesis=genesis,
+        setup=setup,
+        publisher=recovery_publisher,
+        publishers=publishers,
+    )
+
+
+def _proven_recoveries(env, source_ids):
+    from aigineering.task_lineage import task_lineage
+
+    targets = set()
+    for source_id in source_ids:
+        result = task_lineage(env.store, source_id)
+        assert result["ok"], result
+        targets.update(
+            edge["target_contract_id"]
+            for edge in result["data"]["edges"]
+            if edge["kind"] == "recovery_publication"
+            and edge["source_contract_id"] in source_ids
+        )
+    return [env.store.get_contract(task_id) for task_id in sorted(targets)]
 
 
 def _claim(env, host, contract_id: str, request_id: str):
@@ -181,7 +260,9 @@ def test_signed_tool_control_keeps_parent_recovery_balance(monkeypatch, tmp_path
     )
     assert child.budget == 1
     records = [record for _, record in env.store.scan_runtime_records()]
-    assert allowance_available(parent, records) == 3
+    # The signed root Candidate reserves the tool task and its continuation
+    # before either is run, leaving one unit for the parent recovery source.
+    assert allowance_available(parent, records) == 1
     env.store.close()
 
 
@@ -248,11 +329,7 @@ def test_signed_parallel_one_failure_recovery_healthy_sibling_and_join(
             failed_claim, tool_host, env.store, candidate_publishers=env.publishers
         )
     assert env.store.get_assets_by_name(failed.outputs[0]) == []
-    recovery = next(
-        item
-        for item in env.store.get_all_contracts()
-        if method_payload(item).get("recovery_source_contract_id") == failed.id
-    )
+    (recovery,) = _proven_recoveries(env, {failed.id})
     assert method_payload(recovery)["payload"] == method_payload(failed)["payload"]
     assert _claim(env, root_host, join.id, "claim:parallel-early-join") is None
     recovery_claim = _claim(env, tool_host, recovery.id, "claim:parallel-recovery")
@@ -269,13 +346,6 @@ def test_signed_parallel_one_failure_recovery_healthy_sibling_and_join(
     assert observed[0].origin == "worker"
     assert calls == {"fragile": 2, "healthy": 1}
 
-    assert process_task_completions(
-        env.store,
-        default_completion_registry(),
-        candidate_publishers=CandidatePublisherRegistry(
-            (("continuation.publish.v1", env.publisher),)
-        ),
-    )
     join_host_worker = MockWorker(worker_id="worker:parallel-success-join")
     join_host_worker.set_output(
         join.name,
@@ -334,23 +404,12 @@ def test_signed_parallel_minimum_allowance_failure_is_unavailable(
             execute_claimed_package(
                 claim, tool_host, env.store, candidate_publishers=env.publishers
             )
-    recoveries = [
-        item
-        for item in env.store.get_all_contracts()
-        if method_payload(item).get("recovery_source_contract_id")
-        in {c.id for c in items}
-    ]
+    recoveries = _proven_recoveries(env, {c.id for c in items})
     assert recoveries == []
-    unavailable = [
-        record
-        for _, record in env.store.scan_runtime_records()
-        if record.record_type == "worker_failure.recovery_unavailable"
-        and record.payload.get("contract_id") in {c.id for c in items}
-    ]
-    assert len(unavailable) == 2
-    assert {record.payload["reason"] for record in unavailable} == {
-        "recovery_publication_rejected"
-    }
+    for item in items:
+        assert env.store.read_task_facts(item.id, ("worker.invocation_failed",))
+        assert env.store.read_task_facts(item.id, ("allowance.extinguished",))
+    assert _claim(env, tool_host, join.id, "unfunded-join") is None
     env.store.close()
 
 
@@ -385,20 +444,8 @@ def test_signed_parallel_capacity_exhaustion_is_observable_and_recursive_is_boun
             execute_claimed_package(
                 claim, tool_host, env.store, candidate_publishers=env.publishers
             )
-    recoveries = [
-        item
-        for item in env.store.get_all_contracts()
-        if method_payload(item).get("recovery_source_contract_id")
-        in {c.id for c in items}
-    ]
+    recoveries = _proven_recoveries(env, {c.id for c in items})
     assert len(recoveries) == 1
-    unavailable = [
-        record
-        for _, record in env.store.scan_runtime_records()
-        if record.record_type == "worker_failure.recovery_unavailable"
-        and record.payload.get("reason") == "recovery_publication_rejected"
-    ]
-    assert len(unavailable) == 1
     recovery = recoveries[0]
     recovery_claim = _claim(
         env, tool_host, recovery.id, "claim:parallel-recursive-recovery"
@@ -408,21 +455,16 @@ def test_signed_parallel_capacity_exhaustion_is_observable_and_recursive_is_boun
         execute_claimed_package(
             recovery_claim, tool_host, env.store, candidate_publishers=env.publishers
         )
-    recursive_unavailable = [
-        record
-        for _, record in env.store.scan_runtime_records()
-        if record.record_type == "worker_failure.recovery_unavailable"
-        and record.payload.get("contract_id") == recovery.id
-    ]
-    assert len(recursive_unavailable) == 1
-    assert recursive_unavailable[0].payload["reason"] == "recovery_publication_rejected"
+    assert _proven_recoveries(env, {recovery.id}) == []
+    assert env.store.read_task_facts(recovery.id, ("worker.invocation_failed",))
+    assert env.store.read_task_facts(recovery.id, ("allowance.extinguished",))
     assert _claim(env, tool_host, join.id, "claim:parallel-exhaustion-join") is None
     env.store.close()
 
 
-@pytest.mark.parametrize(("parent_budget", "expect_recovery"), [(8, False), (9, True)])
+@pytest.mark.parametrize("parent_budget", [8, 9])
 def test_old_full_effective_allowance_parallel_history_replays_without_identity_change(
-    monkeypatch, tmp_path, parent_budget, expect_recovery
+    monkeypatch, tmp_path, parent_budget
 ):
     import aigineering.runtime_services as runtime_services
 
@@ -446,9 +488,8 @@ def test_old_full_effective_allowance_parallel_history_replays_without_identity_
         },
     )
     # Reproduce the old accepted source shape with the unchanged canonical
-    # builder receiving its full effective allowance of 8. The A=8 row has no
-    # parent spare; A=9 leaves one unrelated parent unit for a successful G1
-    # recovery publication.
+    # builder receiving its full effective allowance of 8. Its real waiting
+    # join has enough remaining allowance to fund one repair in both cases.
     old_children = _parallel_tool_contracts(parent, action, 8)
     old_ids = tuple(item.id for item in old_children)
     published = env.setup.publisher.publish(
@@ -487,24 +528,12 @@ def test_old_full_effective_allowance_parallel_history_replays_without_identity_
         execute_claimed_package(
             failed_claim, tool_host, env.store, candidate_publishers=env.publishers
         )
-    recoveries = [
-        item
-        for item in env.store.get_all_contracts()
-        if method_payload(item).get("recovery_source_contract_id") == failed.id
-    ]
+    recoveries = _proven_recoveries(env, {failed.id})
     assert tuple(item.id for item in old_children) == old_ids
-    if expect_recovery:
-        assert len(recoveries) == 1
-        assert recoveries[0] is not failed
-    else:
-        assert recoveries == []
-        outcome = next(
-            record
-            for _, record in env.store.scan_runtime_records()
-            if record.record_type == "worker_failure.recovery_unavailable"
-            and record.payload.get("contract_id") == failed.id
-        )
-        assert outcome.payload["reason"] == "recovery_publication_rejected"
+    assert len(recoveries) == 1
+    assert recoveries[0].id not in old_ids
+    assert recoveries[0].parent_id in old_ids  # Actual waiting join funds the repair.
+    assert recoveries[0].budget == 1
     assert process_worker_failures(env.store, candidate_publishers=env.publishers) == []
     digest = env.store.runtime_materialization_digest()
     records = tuple(env.store.scan_runtime_records())
@@ -678,5 +707,6 @@ def test_signed_parallel_tool_below_call_and_join_minimum_is_rejected_without_gr
     terminal = [
         record for record in records if record.record_type == "lifecycle.terminal"
     ]
-    assert terminal[-1].payload == {"contract_id": parent.id, "terminal": "failed"}
+    assert terminal == []
+    assert env.store.read_task_facts(parent.id, ("allowance.extinguished",))
     env.store.close()

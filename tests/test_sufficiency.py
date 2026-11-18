@@ -1,6 +1,7 @@
 """Tests for readiness/sufficiency diagnostic infrastructure (v0.3.12)."""
 
 import json
+from dataclasses import replace
 
 import pytest
 
@@ -160,6 +161,76 @@ def test_no_version_conflict_when_single_version():
     assert report["version_conflicts"] == []
 
 
+def test_bound_roles_inspect_exact_assets_only():
+    store = MemoryStore()
+    bound = [
+        _make_asset("data_file", "primary"),
+        _make_asset("data_file", "supporting"),
+    ]
+    for asset in bound:
+        store.add_asset(asset)
+    store.add_asset(_make_asset("data_file", "obsolete", tombstoned=True))
+    store.add_asset(_make_asset("data_file", "untrusted", trust_tier="untrusted"))
+    contract = replace(
+        _make_contract(inputs=["data_file"]),
+        sensitive_input_policy={
+            "input_asset_bindings": {"data_file": sorted(asset.id for asset in bound)}
+        },
+    )
+
+    report = check_sufficiency(contract, store)
+
+    assert report["recommendation"] == "exec"
+    for key in (
+        "missing_inputs",
+        "stale_assets",
+        "version_conflicts",
+        "trust_gaps",
+        "seal_gaps",
+    ):
+        assert report[key] == []
+
+
+@pytest.mark.parametrize(
+    ("kind", "gap", "recommendation"),
+    [
+        ("empty", "missing_inputs", "plan"),
+        ("missing", "missing_inputs", "plan"),
+        ("wrong_role", "missing_inputs", "plan"),
+        ("tombstoned", "stale_assets", "replan"),
+        ("untrusted", "trust_gaps", "escalate"),
+        ("invalid_seal", "seal_gaps", "escalate"),
+    ],
+)
+def test_bound_role_reports_exact_target_defects(kind, gap, recommendation):
+    role = "data_file"
+    store = MemoryStore()
+    healthy = _make_asset(role, "healthy same-name Asset")
+    store.add_asset(healthy)
+    target = _make_asset(
+        "other_role" if kind == "wrong_role" else role,
+        kind,
+        trust_tier="untrusted" if kind == "untrusted" else "human",
+        tombstoned=kind == "tombstoned",
+    )
+    if kind == "invalid_seal":
+        # Simulate a damaged historical materialization without changing admission.
+        store.assets[target.id] = replace(target, content="tampered")
+    elif kind not in {"empty", "missing"}:
+        store.add_asset(target)
+    bound_ids = [] if kind == "empty" else sorted([healthy.id, target.id])
+    contract = replace(
+        _make_contract(inputs=[role]),
+        sensitive_input_policy={"input_asset_bindings": {role: bound_ids}},
+    )
+
+    report = check_sufficiency(contract, store)
+
+    assert report[gap] == [role]
+    assert report["version_conflicts"] == []
+    assert report["recommendation"] == recommendation
+
+
 # ── Trust gaps ───────────────────────────────────────────────────────────
 
 
@@ -222,8 +293,6 @@ def test_seal_gap_detection_unsigned():
 
 def test_seal_gap_detection_invalid():
     """Store rejects tampered assets — sufficiency reports missing input."""
-    from dataclasses import replace
-
     contract = _make_contract(inputs=["tampered"])
     store = MemoryStore()
     signed = _make_asset("tampered", "original", signed=True)

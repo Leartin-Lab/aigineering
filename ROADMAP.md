@@ -1,7 +1,7 @@
 # Roadmap
 
-The current source is **v0.5.14**, scoped to bounded local single-machine CLI
-workflows. Version metadata does not establish delivery qualification; claims
+The **dev** branch supports bounded local single-machine CLI workflows.
+Development snapshots are identified by commit. Delivery claims
 depend on evidence for the applicable case and release scope. See
 [current support](docs/reference/development-status.md).
 The implemented boundary is actor-signed Candidate commitment in a single-machine
@@ -16,8 +16,16 @@ runtime, with transactional SQLite facts and required Redis collaboration.
 4. Reduce duplication and unnecessary maintenance; address confirmed performance
    defects after the supported user path works.
 
-Planning, tool continuation, retry and recovery remain ordinary runtime tasks.
-These priorities do not introduce a second scheduler or expand kernel authority.
+Planning, tool continuation, retry and funded recovery use ordinary runtime
+tasks. The runtime does not maintain an execution DAG or post-completion
+controller. Unfunded recovery remains a visible blocker; no root grant is
+fabricated.
+
+Current control-plane scope is intentionally limited to ordinary task creation,
+execution, claims, Assets, attestation, cancellation, retry and diagnostics.
+Legacy handoff, revision/edit, assignment, dependency, hold/promotion, priority,
+comment and attachment-link records are historical read surfaces, not fresh
+writer workflows.
 
 ## Outside current scope
 

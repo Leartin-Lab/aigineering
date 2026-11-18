@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import json
 
+import pytest
 from click.testing import CliRunner
 
+from aigineering.adapters.redis_query import QueryProjectionUnavailable
+from aigineering.application import collaboration_service
 from aigineering.cli.main import cli
 from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.local_identity import ensure_local_worker_host
@@ -13,7 +16,10 @@ from aigineering.protocol.types import Candidate
 from aigineering.runtime import claim_next_package, execute_claimed_package
 
 
-def test_cli_independent_output_requires_separate_attestation():
+@pytest.mark.parametrize("relay_interrupted", [False, True])
+def test_cli_independent_output_requires_separate_attestation(
+    monkeypatch, relay_interrupted
+):
     runner = CliRunner()
     with runner.isolated_filesystem():
         initialized = runner.invoke(cli, ("domain", "init"))
@@ -66,20 +72,80 @@ def test_cli_independent_output_requires_separate_attestation():
         assert before.exit_code == 0, before.output
         assert json.loads(before.output)["ok"] is False
 
-        attested = runner.invoke(
-            cli,
-            (
-                "verify",
-                "attest",
-                "--contract",
-                contract_id,
-                "--output",
-                "report",
-                "--asset",
-                asset_id,
-                "--json",
-            ),
+        command = (
+            "verify",
+            "attest",
+            "--contract",
+            contract_id,
+            "--output",
+            "report",
+            "--asset",
+            asset_id,
+            "--json",
         )
+
+        with monkeypatch.context() as relay:
+            if relay_interrupted:
+                synchronized = runner.invoke(cli, ("redis", "sync", "--json"))
+                assert synchronized.exit_code == 0, synchronized.output
+                with SQLiteStore.snapshot_from_path(".aig/store.db") as persisted:
+                    before_watermark = collaboration_service(persisted).status()[
+                        "watermark"
+                    ]
+
+                class InterruptedRelay:
+                    def sync(self):
+                        raise QueryProjectionUnavailable(
+                            "attestation relay interrupted"
+                        )
+
+                relay.setattr(
+                    "aigineering.runtime_services.collaboration_service",
+                    lambda _store: InterruptedRelay(),
+                )
+            attested = runner.invoke(cli, command)
+
+        with SQLiteStore.snapshot_from_path(".aig/store.db") as persisted:
+            committed_revision = persisted.get_runtime_revision()
+            relay_status = collaboration_service(persisted).status()
+            if relay_interrupted:
+                assert attested.exit_code == 1
+                pending = json.loads(attested.output)
+                assert pending["error"] == "redis_sync_pending"
+                assert pending["facts_retained"] and pending["candidate_accepted"]
+                assert pending["contract_ids"] == [contract_id]
+                assert pending["asset_ids"] == [asset_id]
+                assert pending["revision"] == committed_revision
+                assert (
+                    relay_status["watermark"] == before_watermark < committed_revision
+                )
+                history = {
+                    record.record_type: record
+                    for record in persisted.read_candidate_publication(
+                        pending["candidate_id"]
+                    )
+                }
+                assert pending["receipt_id"] == history["candidate.received"].id
+                assert pending["head_id"] == history["candidate.committed"].id
+                assert history["asset.attested"].payload["asset_id"] == asset_id
+                assert "candidate report" not in attested.output
+            else:
+                assert relay_status["watermark"] == committed_revision
+
+        if relay_interrupted:
+            synchronized = runner.invoke(cli, ("redis", "sync", "--json"))
+            assert synchronized.exit_code == 0, synchronized.output
+            attested = runner.invoke(cli, command)
+            with SQLiteStore.snapshot_from_path(".aig/store.db") as persisted:
+                assert persisted.get_runtime_revision() == committed_revision
+                assert (
+                    collaboration_service(persisted).status()["watermark"]
+                    == committed_revision
+                )
+                assert (
+                    len(persisted.scan_runtime_records(record_type="asset.attested"))
+                    == 1
+                )
         assert attested.exit_code == 0, attested.output
         assert json.loads(attested.output)["qualified"] is True
 

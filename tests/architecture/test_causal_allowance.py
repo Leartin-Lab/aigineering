@@ -10,14 +10,11 @@ import pytest
 
 from aigineering.core.candidate_publisher import publish_effect, publish_effects
 from aigineering.core.ids import hash_contract_v3
-from aigineering.core.runtime_projection import (
-    TERMINAL_EVENTS as RUNTIME_TERMINAL_EVENTS,
-    RuntimeProjection,
-)
+from aigineering.core.runtime_projection import RuntimeProjection
 from aigineering.core.signing import Ed25519Signer
 from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.core.store import MemoryStore
-from aigineering.core.terminal_types import TERMINAL_EVENTS
+from aigineering.core.lifecycle_facts import TERMINAL_EVENTS
 from aigineering.core.trace import MemoryTraceStore
 from aigineering.plugins import PluginRequest, StagedPlanningPlugin
 from aigineering.protocol.candidate import (
@@ -74,19 +71,18 @@ def test_terminal_event_values_have_one_dependency_neutral_owner():
         ):
             definitions.append(path.name)
 
-    assert definitions == ["terminal_types.py"]
+    assert definitions == ["lifecycle_facts.py"]
     assert TERMINAL_EVENTS == frozenset(
         {"complete", "failed", "cancelled", "unreachable"}
     )
-    assert RUNTIME_TERMINAL_EVENTS is TERMINAL_EVENTS
     allowance_tree = ast.parse((core / "causal_allowance.py").read_text())
     assert any(
         isinstance(node, ast.ImportFrom)
-        and node.module == "aigineering.core.terminal_types"
+        and node.module == "aigineering.core.lifecycle_facts"
         and any(alias.name == "TERMINAL_EVENTS" for alias in node.names)
         for node in allowance_tree.body
     )
-    terminal_tree = ast.parse((core / "terminal_types.py").read_text())
+    terminal_tree = ast.parse((core / "lifecycle_facts.py").read_text())
     assert not any(
         isinstance(node, ast.ImportFrom)
         and node.module

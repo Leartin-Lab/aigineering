@@ -2,15 +2,13 @@
 
 from __future__ import annotations
 
-from aigineering.core.asset_reads import read_assets_by_ids
 from aigineering.core.disclosure import (
     REDACTED_CONTENT,
     DisclosurePolicyError,
     compute_disclosure,
-    redact_for_disclosure,
 )
 from aigineering.core.store import require_operational_store
-from aigineering.protocol.types import Asset, Contract
+from aigineering.protocol.types import Asset
 
 
 class TaskContextError(ValueError):
@@ -19,27 +17,6 @@ class TaskContextError(ValueError):
     def __init__(self, code: str) -> None:
         self.code = code
         super().__init__(code)
-
-
-def method_context_assets_for(contract: Contract, store) -> tuple[Asset, ...]:
-    """Return the method continuation context used by the Worker package."""
-    store = require_operational_store(store)
-    assets: list[Asset] = []
-    seen: set[str] = set()
-    asset_ids: list[str] = []
-    for entry in store.get_by_relation_target(contract.id):
-        if entry.event_type not in {
-            "method_continuation_context_prepared",
-            "method_continuation_scheduled",
-        }:
-            continue
-        asset_ids.extend(entry.disclosed_assets)
-    for asset in read_assets_by_ids(store, asset_ids):
-        if asset is None or asset.id in seen:
-            continue
-        assets.append(redact_for_disclosure(asset))
-        seen.add(asset.id)
-    return tuple(assets)
 
 
 def task_context(
@@ -69,7 +46,6 @@ def task_context(
         raise TaskContextError("disclosure_rejected") from error
     except (LookupError, TypeError, ValueError) as error:
         raise TaskContextError("context_invalid") from error
-    method_context = method_context_assets_for(contract, operational)
 
     def metadata(asset: Asset) -> dict:
         return {
@@ -88,14 +64,13 @@ def task_context(
         "data": {
             "contract_id": contract.id,
             "disclosed_assets": [metadata(asset) for asset in disclosed],
-            "method_context_assets": [metadata(asset) for asset in method_context],
         },
         "revision": operational.get_runtime_revision(),
     }
     if asset_id is None:
         return result
     selected = next(
-        (asset for asset in (*disclosed, *method_context) if asset.id == asset_id),
+        (asset for asset in disclosed if asset.id == asset_id),
         None,
     )
     if selected is None:

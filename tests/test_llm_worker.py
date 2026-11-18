@@ -692,6 +692,18 @@ _SAMPLE_TOOL_CALLS = [
 ]
 
 
+def _native_tool_fixture(transport, *names):
+    worker = LLMWorker(
+        model="test-model",
+        transport=transport,
+        capabilities=frozenset({"tool_calling"}),
+        tool_definitions=[
+            {"type": "function", "function": {"name": name}} for name in names
+        ],
+    )
+    return worker, Contract(id="native-contract", tool_scope=names)
+
+
 def test_tool_calls_mapped_to_method_requests():
     """Simulate tool_calls from provider → /tool method request format."""
 
@@ -706,8 +718,8 @@ def test_tool_calls_mapped_to_method_requests():
             ],
         }
 
-    worker = LLMWorker(model="test-model", transport=transport)
-    candidate = worker.invoke(_min_contract(), [])
+    worker, contract = _native_tool_fixture(transport, "search")
+    candidate = worker.invoke(contract, [])
 
     assert candidate.raw_output.startswith("/tool ")
     assert "search" in candidate.raw_output
@@ -731,8 +743,8 @@ def test_tool_calls_never_execute_directly():
             ],
         }
 
-    worker = LLMWorker(model="test-model", transport=transport)
-    candidate = worker.invoke(_min_contract(), [])
+    worker, contract = _native_tool_fixture(transport, "search")
+    candidate = worker.invoke(contract, [])
 
     assert candidate.raw_output.startswith("/tool ")
     assert "search" in candidate.raw_output
@@ -756,8 +768,8 @@ def test_tool_call_format_valid():
             ],
         }
 
-    worker = LLMWorker(model="test-model", transport=transport)
-    candidate = worker.invoke(_min_contract(), [])
+    worker, contract = _native_tool_fixture(transport, "search")
+    candidate = worker.invoke(contract, [])
 
     parsed = candidate.parsed_action
     assert parsed["type"] == "tool"
@@ -855,8 +867,8 @@ def test_tool_calls_take_priority_over_content():
             ],
         }
 
-    worker = LLMWorker(model="test-model", transport=transport)
-    candidate = worker.invoke(_min_contract(), [])
+    worker, contract = _native_tool_fixture(transport, "search")
+    candidate = worker.invoke(contract, [])
 
     assert candidate.raw_output.startswith("/tool ")
     assert candidate.parsed_action is not None
@@ -866,20 +878,22 @@ def test_tool_calls_take_priority_over_content():
 def test_map_tool_calls_empty_raises():
     """Empty tool_calls list raises ValueError."""
     with pytest.raises(ValueError, match="must not be empty"):
-        LLMWorker._map_tool_calls_to_actions([])
+        LLMWorker._map_tool_calls_to_actions([], allowed_names=frozenset())
 
 
 def test_map_tool_calls_missing_function_raises():
     """Tool call without 'function' key raises ValueError."""
     with pytest.raises(ValueError, match="missing 'function'"):
-        LLMWorker._map_tool_calls_to_actions([{"id": "x", "type": "function"}])
+        LLMWorker._map_tool_calls_to_actions(
+            [{"id": "x", "type": "function"}], allowed_names=frozenset()
+        )
 
 
 def test_map_tool_calls_missing_name_raises():
     """Tool call without valid name raises ValueError."""
     bad = [{"id": "x", "type": "function", "function": {"arguments": "{}"}}]
     with pytest.raises(ValueError, match="missing valid 'name'"):
-        LLMWorker._map_tool_calls_to_actions(bad)
+        LLMWorker._map_tool_calls_to_actions(bad, allowed_names=frozenset())
 
 
 def test_map_tool_calls_non_string_arguments():
@@ -894,7 +908,9 @@ def test_map_tool_calls_non_string_arguments():
             },
         }
     ]
-    raw_output, parsed_action = LLMWorker._map_tool_calls_to_actions(tc)
+    raw_output, parsed_action = LLMWorker._map_tool_calls_to_actions(
+        tc, allowed_names=frozenset({"lookup"})
+    )
     assert parsed_action["payload"]["args"] == {"key": "val"}
     assert json.loads(raw_output.removeprefix("/tool ").strip()) == {
         "name": "lookup",
@@ -915,34 +931,35 @@ def test_map_tool_calls_invalid_json_arguments():
         }
     ]
     with pytest.raises(ValueError, match="not valid JSON"):
-        LLMWorker._map_tool_calls_to_actions(tc)
+        LLMWorker._map_tool_calls_to_actions(tc, allowed_names=frozenset({"f"}))
 
 
-def test_tool_mapping_error_carries_reported_usage():
+@pytest.mark.parametrize(
+    ("calls", "error_code"),
+    [
+        ([None], "tool_call_invalid_entry"),
+        (
+            [{"type": "function", "function": {"name": "lookup", "arguments": "{"}}],
+            "tool_call_invalid_arguments",
+        ),
+    ],
+)
+def test_tool_mapping_error_carries_reported_usage(calls, error_code):
     response = {
-        "choices": [
-            {
-                "message": {
-                    "tool_calls": [
-                        {
-                            "type": "function",
-                            "function": {"name": "lookup", "arguments": "{"},
-                        }
-                    ]
-                }
-            }
-        ],
+        "choices": [{"message": {"tool_calls": calls}}],
         "usage": {"total_tokens": 13},
     }
     worker = LLMWorker(
         model="test-model",
         transport=lambda *_args: response,
         capabilities=frozenset({"tool_calling"}),
+        tool_definitions=[{"type": "function", "function": {"name": "lookup"}}],
     )
 
     with pytest.raises(WorkerExecutionError) as raised:
-        worker.invoke(_min_contract(), [])
+        worker.invoke(Contract(id="native-usage", tool_scope=("lookup",)), [])
 
+    assert raised.value.code == error_code
     assert dict(raised.value.usage_metadata or {}) == {
         "total_tokens": 13,
         "model": "test-model",
@@ -961,7 +978,7 @@ def test_map_tool_calls_non_object_arguments_rejected(arguments):
         }
     ]
     with pytest.raises(ValueError, match="JSON object"):
-        LLMWorker._map_tool_calls_to_actions(tc)
+        LLMWorker._map_tool_calls_to_actions(tc, allowed_names=frozenset({"f"}))
 
 
 def test_provider_without_tool_calling_capability():
@@ -1273,8 +1290,8 @@ def test_provider_tool_call_mapping_preserves_authority():
             ],
         }
 
-    worker = LLMWorker(model="test-model", transport=transport)
-    candidate = worker.invoke(_min_contract(), [])
+    worker, contract = _native_tool_fixture(transport, "read_file")
+    candidate = worker.invoke(contract, [])
 
     # Must start with /tool to go through method dispatch, not direct
     assert candidate.raw_output.startswith("/tool ")
@@ -1328,8 +1345,8 @@ def test_multiple_tool_calls_in_one_response():
             ],
         }
 
-    worker = LLMWorker(model="test-model", transport=transport)
-    candidate = worker.invoke(_min_contract(), [])
+    worker, contract = _native_tool_fixture(transport, "search", "lookup", "fetch")
+    candidate = worker.invoke(contract, [])
 
     assert candidate.raw_output.startswith("/parallel_tool ")
     body = json.loads(candidate.raw_output.removeprefix("/parallel_tool ").strip())

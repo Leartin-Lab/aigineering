@@ -4,18 +4,21 @@ import pytest
 
 from aigineering.core.provenance import sign_asset
 from aigineering.core.ids import hash_asset_content, hash_asset_definition
-from aigineering.core.store import JsonLStore, MemoryStore
+from aigineering.core.sqlite_store import SQLiteStore
+from aigineering.core.store import MemoryStore
 from aigineering.protocol.types import Asset
 
 
-@pytest.fixture(params=["memory", "jsonl"])
+@pytest.fixture(params=["memory", "sqlite"])
 def store(request, tmp_path):
     if request.param == "memory":
-        return MemoryStore()
-    else:
-        return JsonLStore(
-            str(tmp_path / "assets.jsonl"), str(tmp_path / "contracts.jsonl")
-        )
+        yield MemoryStore()
+        return
+    sqlite_store = SQLiteStore(str(tmp_path / "store.sqlite"))
+    try:
+        yield sqlite_store
+    finally:
+        sqlite_store.close()
 
 
 def test_definition_hash_is_set_on_creation():

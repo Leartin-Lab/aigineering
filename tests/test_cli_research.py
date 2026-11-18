@@ -316,23 +316,26 @@ def test_cli_research_tool_schema_failure_recovers_through_runtime(
         failed_contract = store.get_contract(failed_id)
         assert failed_contract is not None
         assert failed_contract.origin != "recovery"
-        scheduled = [
-            record
-            for _, record in store.scan_runtime_records(
-                record_type="worker_failure.recovery_scheduled"
-            )
-            if record.payload.get("failure_id") == failures[0].id
+        from aigineering.task_lineage import task_lineage
+
+        edges = task_lineage(store, failed_id)["data"]["edges"]
+        recoveries_by_proof = [
+            edge
+            for edge in edges
+            if edge["kind"] == "recovery_publication"
+            and edge["source_contract_id"] == failed_id
         ]
-        assert len(scheduled) == 1
-        recovery_id = scheduled[0].payload["recovery_contract_id"]
+        assert len(recoveries_by_proof) == 1
+        recovery_id = recoveries_by_proof[0]["target_contract_id"]
         recoveries = [
             item for item in store.get_all_contracts() if item.id == recovery_id
         ]
         assert len(recoveries) == 1
         recovered = recoveries[0]
-        assert recovered.origin == "system"
         assert "summarize_sample" in recovered.tool_scope
-        assert recovered.parent_id == failed_contract.parent_id
+        assert recovered.parent_id is not None
+        assert recovered.budget == 1
+        assert store.get_contract(recovered.parent_id) is not None
         recovery_traces = store.get_by_contract(recovered.id)
         assert any(
             entry.event_type == "candidate_committed" for entry in recovery_traces

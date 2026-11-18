@@ -53,6 +53,7 @@ try:
     tables = {}
     for name in names:
         quoted = name.replace('"', '""')
+        columns = [row[1] for row in conn.execute(f'PRAGMA table_info("{quoted}")')]
         rows = conn.execute(f'SELECT * FROM "{quoted}"').fetchall()
         normalized = [
             [value.hex() if isinstance(value, bytes) else value for value in row]
@@ -60,7 +61,17 @@ try:
         ]
         normalized.sort(key=lambda row: json.dumps(row, sort_keys=True, separators=(",", ":"), default=str))
         encoded = json.dumps(normalized, sort_keys=True, separators=(",", ":"), default=str).encode()
-        tables[name] = {"row_count": len(rows), "sha256": hashlib.sha256(encoded).hexdigest()}
+        table = {"row_count": len(rows), "sha256": hashlib.sha256(encoded).hexdigest()}
+        if name == "allowance_checkpoints":
+            ignored = {"through_revision", "basis_record_id"}
+            semantic_columns = [column for column in columns if column not in ignored]
+            semantic_indexes = [index for index, column in enumerate(columns) if column not in ignored]
+            semantic_rows = [[row[index] for index in semantic_indexes] for row in normalized]
+            semantic_rows.sort(key=lambda row: json.dumps(row, sort_keys=True, separators=(",", ":"), default=str))
+            semantic_encoded = json.dumps(semantic_rows, sort_keys=True, separators=(",", ":"), default=str).encode()
+            table["semantic_columns"] = semantic_columns
+            table["semantic_sha256"] = hashlib.sha256(semantic_encoded).hexdigest()
+        tables[name] = table
     revision = conn.execute("SELECT COALESCE(MAX(revision), 0) FROM runtime_records").fetchone()[0]
     encoded = json.dumps(tables, sort_keys=True, separators=(",", ":")).encode()
     print(json.dumps({
@@ -74,27 +85,68 @@ finally:
 
 _REOPEN_REBUILD = r"""
 import json, sys
+from dataclasses import asdict
+from aigineering.core.causal_allowance import allowance_available, allowance_available_from_totals, fold_raw_allowance_records
+from aigineering.core.runtime_projection import RuntimeProjection
 from aigineering.core.sqlite_store import SQLiteStore
 
-path = sys.argv[1]
+path, contract_id = sys.argv[1:]
 def records(store):
     return sorted((record.id, record.recorded_at) for _, record in store.scan_runtime_records())
+def semantic_snapshot(store):
+    contract = store.get_contract(contract_id)
+    if contract is None:
+        raise RuntimeError("fixture Contract disappeared during rebuild")
+    scanned = store.scan_runtime_records()
+    all_records = [record for _, record in scanned]
+    allowance = store.read_raw_allowance_checkpoint(contract_id)
+    totals = None if allowance.totals is None else asdict(allowance.totals)
+    canonical_totals = fold_raw_allowance_records(contract_id, all_records)
+    totals_from_records = (
+        None if canonical_totals is None else asdict(canonical_totals)
+    )
+    available_from_checkpoint = (
+        None if allowance.totals is None
+        else allowance_available_from_totals(contract, allowance.totals)
+    )
+    available_from_records = allowance_available(contract, all_records)
+    view = asdict(RuntimeProjection(store, store).contract_view(contract))
+    row = store._conn.execute(
+        "SELECT * FROM allowance_checkpoints WHERE contract_id = ?", (contract_id,)
+    ).fetchone()
+    cache_row = None if row is None else {key: row[key] for key in row.keys()}
+    return {
+        "cache_row": cache_row,
+        "allowance_status": allowance.status,
+        "allowance_totals": totals,
+        "allowance_totals_from_records": totals_from_records,
+        "allowance_available_from_checkpoint": available_from_checkpoint,
+        "allowance_available_from_records": available_from_records,
+        "allowance_audit_issues": list(store.audit_allowance_checkpoints()),
+        "projection": view,
+    }
 
 store = SQLiteStore(path)
 before = records(store)
+semantic_before = semantic_snapshot(store)
 first_digest = store.rebuild_runtime_materializations()
 after = records(store)
+semantic_after = semantic_snapshot(store)
 store.close()
 store = SQLiteStore(path)
 reopened = records(store)
 second_digest = store.rebuild_runtime_materializations()
 final = records(store)
+semantic_final = semantic_snapshot(store)
 store.close()
 print(json.dumps({
     "same_records_after_rebuild": before == after,
     "same_records_after_reopen": after == reopened,
     "same_records_after_second_rebuild": reopened == final,
     "stable_rebuild_digest": first_digest == second_digest,
+    "semantic_before": semantic_before,
+    "semantic_after": semantic_after,
+    "semantic_final": semantic_final,
     "record_count": len(before),
 }, sort_keys=True))
 """
@@ -215,18 +267,23 @@ def installed_task_context_smoke(
     """Verify installed task context success, denial, privacy and SQLite immutability."""
     redis_url = env.get("AIGINEERING_REDIS_URL", "").strip()
     parsed_redis = urlsplit(redis_url)
+    database_index = parsed_redis.path[1:] if parsed_redis.path.startswith("/") else ""
     if (
         parsed_redis.scheme != "redis"
         or parsed_redis.hostname != "127.0.0.1"
-        or parsed_redis.port != 17386
-        or parsed_redis.path != "/12"
+        or parsed_redis.port is None
+        or not 1 <= parsed_redis.port <= 65535
+        or not database_index.isascii()
+        or not database_index.isdigit()
+        or int(database_index) == 0
+        or parsed_redis.path != f"/{database_index}"
         or parsed_redis.username is not None
         or parsed_redis.password is not None
         or parsed_redis.query
         or parsed_redis.fragment
     ):
         raise RuntimeError(
-            "task context smoke requires the explicit isolated Redis DB 12 URL"
+            "task context smoke requires loopback Redis on an explicit valid port and nonzero numeric DB"
         )
 
     aig = aig.expanduser().absolute()
@@ -484,13 +541,11 @@ def installed_task_context_smoke(
             not isinstance(data, dict)
             or data.get("contract_id") != contract_id
             or not isinstance(data.get("disclosed_assets"), list)
-            or not isinstance(data.get("method_context_assets"), list)
         ):
             raise RuntimeError(f"{phase} returned an unexpected task-context shape")
         expected_data_keys = {
             "contract_id",
             "disclosed_assets",
-            "method_context_assets",
         }
         if "--asset" in args:
             expected_data_keys.add("selected_asset")
@@ -498,7 +553,7 @@ def installed_task_context_smoke(
             raise RuntimeError(f"{phase} returned unexpected context data fields")
         if set(payload) != {"ok", "data", "revision"}:
             raise RuntimeError(f"{phase} returned unexpected top-level metadata")
-        for row in (*data["disclosed_assets"], *data["method_context_assets"]):
+        for row in data["disclosed_assets"]:
             if (
                 not isinstance(row, dict)
                 or set(row) != _METADATA_KEYS
@@ -521,8 +576,6 @@ def installed_task_context_smoke(
         raise RuntimeError(
             "disclosed metadata did not preserve exact input/context selection order"
         )
-    if data["method_context_assets"] != []:
-        raise RuntimeError("fixture unexpectedly acquired method continuation context")
     if any(row.get("id") in {unrelated_id, hidden_id} for row in disclosed):
         raise RuntimeError(
             "unrelated or nonpromptable Asset appeared in disclosed context"
@@ -564,17 +617,15 @@ def installed_task_context_smoke(
             != {
                 "contract_id",
                 "disclosed_assets",
-                "method_context_assets",
                 "selected_asset",
             }
             or data.get("contract_id") != contract_id
             or not isinstance(data.get("disclosed_assets"), list)
-            or not isinstance(data.get("method_context_assets"), list)
         ):
             raise RuntimeError(
                 "explicit body response has unexpected task context fields"
             )
-        for row in (*data["disclosed_assets"], *data["method_context_assets"]):
+        for row in data["disclosed_assets"]:
             if (
                 not isinstance(row, dict)
                 or set(row) != _METADATA_KEYS
@@ -719,7 +770,7 @@ def installed_task_context_smoke(
         json_output=False,
     )
     outage_env = dict(local_env)
-    outage_env["AIGINEERING_REDIS_URL"] = "redis://127.0.0.1:1/12"
+    outage_env["AIGINEERING_REDIS_URL"] = f"redis://127.0.0.1:1/{database_index}"
     expect_error(
         "context-required-redis-outage",
         ("task", "context", contract_id),
@@ -771,9 +822,12 @@ def installed_task_context_smoke(
         raise RuntimeError("human body selection exposed unrelated content")
 
     before_rebuild = fingerprint("sqlite-all-table-fingerprint-before-reopen-rebuild")
+    _task_status_before_completed, task_status_before = read_only_cli(
+        "task-status-before-reopen-rebuild", ("task", "status", contract_id)
+    )
     _rebuild_completed, rebuild = execute(
         "sqlite-reopen-rebuild",
-        [str(python), "-c", _REOPEN_REBUILD, str(database)],
+        [str(python), "-c", _REOPEN_REBUILD, str(database), contract_id],
     )
     if not isinstance(rebuild, dict) or not all(
         rebuild.get(key) is True
@@ -787,10 +841,88 @@ def installed_task_context_smoke(
         raise RuntimeError(
             "Store reopen/rebuild changed immutable runtime record identities"
         )
-    after_rebuild = fingerprint("sqlite-all-table-fingerprint-after-reopen-rebuild")
-    if before_rebuild != after_rebuild:
+    semantic_before = rebuild.get("semantic_before")
+    semantic_after = rebuild.get("semantic_after")
+    semantic_final = rebuild.get("semantic_final")
+    snapshots = (semantic_before, semantic_after, semantic_final)
+    if any(not isinstance(item, dict) for item in snapshots):
+        raise RuntimeError("rebuild omitted exact allowance and projection evidence")
+    cache_rows = [item.get("cache_row") for item in snapshots]
+    if any(not isinstance(row, dict) for row in cache_rows):
+        raise RuntimeError("rebuild omitted the fixture allowance checkpoint row")
+    changed_cache_columns = {
+        key
+        for key in set(cache_rows[0]) | set(cache_rows[1])
+        if cache_rows[0].get(key) != cache_rows[1].get(key)
+    }
+    final_changed_cache_columns = {
+        key
+        for key in set(cache_rows[1]) | set(cache_rows[2])
+        if cache_rows[1].get(key) != cache_rows[2].get(key)
+    }
+    if (changed_cache_columns | final_changed_cache_columns) - {
+        "through_revision",
+        "basis_record_id",
+    }:
         raise RuntimeError(
-            "reopen/rebuild changed one or more of the full SQLite table fingerprints"
+            "allowance rebuild changed fields outside checkpoint prefix metadata"
+        )
+    for snapshot in snapshots:
+        if (
+            snapshot.get("allowance_status") != "valid"
+            or snapshot.get("allowance_audit_issues") != []
+            or snapshot.get("allowance_totals") is None
+            or snapshot.get("allowance_totals")
+            != snapshot.get("allowance_totals_from_records")
+            or snapshot.get("allowance_available_from_checkpoint")
+            != snapshot.get("allowance_available_from_records")
+        ):
+            raise RuntimeError(
+                "allowance checkpoint differs from the canonical immutable-record fold"
+            )
+    semantic_baseline = {
+        key: value for key, value in semantic_before.items() if key != "cache_row"
+    }
+    if any(
+        {key: value for key, value in snapshot.items() if key != "cache_row"}
+        != semantic_baseline
+        for snapshot in snapshots[1:]
+    ):
+        raise RuntimeError(
+            "allowance totals or RuntimeProjection changed after rebuild"
+        )
+    _task_status_after_completed, task_status_after = read_only_cli(
+        "task-status-after-reopen-rebuild", ("task", "status", contract_id)
+    )
+    if (
+        task_status_before != task_status_after
+        or type(task_status_before.get("budget_remaining")) is not int
+    ):
+        raise RuntimeError("task status or available budget changed after rebuild")
+    after_rebuild = fingerprint("sqlite-all-table-fingerprint-after-reopen-rebuild")
+    rebuild_changed_tables = {
+        name
+        for name in set(before_rebuild.get("tables", {}))
+        | set(after_rebuild.get("tables", {}))
+        if before_rebuild.get("tables", {}).get(name)
+        != after_rebuild.get("tables", {}).get(name)
+    }
+    if rebuild_changed_tables - {"allowance_checkpoints"}:
+        raise RuntimeError(
+            "reopen/rebuild changed tables outside the derived allowance checkpoint cache"
+        )
+    if "allowance_checkpoints" in rebuild_changed_tables and (
+        "allowance_checkpoints" not in before_rebuild["tables"]
+        or "allowance_checkpoints" not in after_rebuild["tables"]
+        or before_rebuild["tables"]["allowance_checkpoints"].get("row_count")
+        != after_rebuild["tables"]["allowance_checkpoints"].get("row_count")
+        or before_rebuild["tables"]["allowance_checkpoints"].get("semantic_columns")
+        != after_rebuild["tables"]["allowance_checkpoints"].get("semantic_columns")
+        or before_rebuild["tables"]["allowance_checkpoints"].get("semantic_sha256")
+        != after_rebuild["tables"]["allowance_checkpoints"].get("semantic_sha256")
+    ):
+        raise RuntimeError(
+            "allowance checkpoint rebuild changed its row inventory or non-prefix columns"
         )
     _after_rebuild_completed, after_rebuild_context = read_only_cli(
         "context-metadata-after-reopen-rebuild",
@@ -826,6 +958,11 @@ def installed_task_context_smoke(
         "hidden_asset_id": hidden_id,
         "sqlite_revision": after_rebuild["revision"],
         "sqlite_table_count": len(after_rebuild["tables"]),
+        "rebuild_changed_derived_tables": sorted(rebuild_changed_tables),
+        "rebuild_changed_allowance_checkpoint_columns": sorted(
+            changed_cache_columns | final_changed_cache_columns
+        ),
+        "task_budget_remaining_after_rebuild": task_status_after["budget_remaining"],
         "sqlite_tables": after_rebuild["tables"],
         "rebuild_record_count": rebuild["record_count"],
         "command_count": len(invocations),

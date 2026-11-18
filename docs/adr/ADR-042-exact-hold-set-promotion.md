@@ -1,5 +1,10 @@
 # ADR-042: Recover manually held work through an exact release batch
 
+> Current implementation: conflicting fresh-write, injected-projector and
+> task-completion mechanisms in this historical decision are superseded by
+> [change 137](../../changes/137-closed-primitive-task-runtime.md).
+> Consult [DESIGN](../../DESIGN.md) for the supported primitive surface.
+
 Status: Accepted
 Date: 2026-10-05
 

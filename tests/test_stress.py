@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from conftest import hosted_worker
+from conftest import candidate_runtime, hosted_worker
 
 from aigineering.agent.mock import MockWorker
 from aigineering.core.ids import hash_asset_content, hash_asset_definition
@@ -30,6 +30,7 @@ def _trigger(name: str) -> Asset:
 @pytest.mark.stress
 def test_hundred_chained_contracts_commit_through_worker_host(tmp_path):
     store = SQLiteStore(str(tmp_path / "chain.db"))
+    setup = candidate_runtime(store)
     host = hosted_worker(
         store,
         MockWorker(
@@ -39,11 +40,14 @@ def test_hundred_chained_contracts_commit_through_worker_host(tmp_path):
             },
             worker_id="worker:stress-chain",
         ),
+        genesis=setup.genesis,
+        authority_key=setup.actor_key,
+        authority_signer=setup.signer,
     )
-    store.add_asset(_trigger("trigger"))
+    setup.accept_asset(_trigger("trigger"))
     for index in range(100):
         dependency = "trigger" if index == 0 else f"out_{index - 1}"
-        store.add_contract(
+        setup.accept_contract(
             Contract(
                 id=f"task:stress_{index}",
                 name=f"stress_{index}",
@@ -70,6 +74,7 @@ def test_hundred_chained_contracts_commit_through_worker_host(tmp_path):
 @pytest.mark.stress
 def test_hundred_independent_contracts_commit_without_collision(tmp_path):
     store = SQLiteStore(str(tmp_path / "independent.db"))
+    setup = candidate_runtime(store)
     host = hosted_worker(
         store,
         MockWorker(
@@ -81,10 +86,13 @@ def test_hundred_independent_contracts_commit_without_collision(tmp_path):
             },
             worker_id="worker:stress-independent",
         ),
+        genesis=setup.genesis,
+        authority_key=setup.actor_key,
+        authority_signer=setup.signer,
     )
-    store.add_asset(_trigger("shared_trigger"))
+    setup.accept_asset(_trigger("shared_trigger"))
     for index in range(100):
-        store.add_contract(
+        setup.accept_contract(
             Contract(
                 id=f"task:parallel_{index:03d}",
                 name=f"parallel_{index}",

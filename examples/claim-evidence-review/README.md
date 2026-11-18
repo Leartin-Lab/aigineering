@@ -38,8 +38,10 @@ four failed at least one manual semantic criterion. This is a diagnostic and
 boundary case, not evidence of reliable autonomous semantic verification.
 
 The preset paths are relative to `run.toml`; its database is relative to the
-selected workspace. Use a fresh workspace for an independent run; a new start
-refuses historical outputs. Resume does not reload inputs or reset a failed root.
+selected workspace. Setup atomically freezes the selected resources; identical
+setup replays its original Contract. Existing Assets are checked against ordinary
+requirements. Use a fresh workspace for a separate fact domain. Resume selects
+an existing Contract without reloading inputs or resetting attempts.
 See [configured runs](../../docs/reference/configured-runs.md). The entrypoint
 migration has deterministic verification; the earlier linked live reports do not
 constitute new provider execution of this preset.

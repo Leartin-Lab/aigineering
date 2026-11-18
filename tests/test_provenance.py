@@ -8,15 +8,13 @@ from aigineering.core.provenance import (
     sign_asset,
     verify_asset_seal,
 )
-from aigineering.core.store import JsonLStore
+from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.protocol.types import Asset, Candidate, Contract
 
 
-def test_jsonl_store_roundtrips_asset_provenance(tmp_path):
-    store = JsonLStore(
-        str(tmp_path / "assets.jsonl"),
-        str(tmp_path / "contracts.jsonl"),
-    )
+def test_sqlite_store_roundtrips_asset_provenance(tmp_path):
+    path = tmp_path / "store.sqlite"
+    store = SQLiteStore(str(path))
     asset = Asset(
         id="asset_1",
         name="evidence",
@@ -28,10 +26,8 @@ def test_jsonl_store_roundtrips_asset_provenance(tmp_path):
     )
 
     store.add_asset(sign_asset(asset))
-    reopened = JsonLStore(
-        str(tmp_path / "assets.jsonl"),
-        str(tmp_path / "contracts.jsonl"),
-    )
+    store.close()
+    reopened = SQLiteStore(str(path))
 
     signed_asset = sign_asset(asset)
     loaded = reopened.get_asset("asset_1")
@@ -40,6 +36,7 @@ def test_jsonl_store_roundtrips_asset_provenance(tmp_path):
     assert loaded.trust_tier == "observed"
     assert loaded.minted_by == "tool_worker"
     assert loaded.source_uri == "tool://read"
+    reopened.close()
 
 
 def test_projection_assets_record_worker_provenance():
@@ -76,11 +73,9 @@ def test_sign_asset_adds_deterministic_compute_provenance_seal():
     )
 
 
-def test_jsonl_store_roundtrips_asset_signature(tmp_path):
-    store = JsonLStore(
-        str(tmp_path / "assets.jsonl"),
-        str(tmp_path / "contracts.jsonl"),
-    )
+def test_sqlite_store_roundtrips_asset_signature(tmp_path):
+    path = tmp_path / "store.sqlite"
+    store = SQLiteStore(str(path))
     signed = sign_asset(
         Asset(
             id="asset_1",
@@ -93,14 +88,13 @@ def test_jsonl_store_roundtrips_asset_signature(tmp_path):
     )
 
     store.add_asset(signed)
-    reopened = JsonLStore(
-        str(tmp_path / "assets.jsonl"),
-        str(tmp_path / "contracts.jsonl"),
-    )
+    store.close()
+    reopened = SQLiteStore(str(path))
 
     loaded = reopened.get_asset("asset_1")
     assert loaded == signed
     assert loaded.provenance_seal == signed.provenance_seal
+    reopened.close()
 
 
 def test_verify_asset_seal_accepts_signed_asset():

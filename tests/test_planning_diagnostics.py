@@ -52,7 +52,7 @@ def _blueprint():
                     "name": "lookup",
                     "description": "Use a permitted tool.",
                     "inputs": [],
-                    "outputs": ["report"],
+                    "outputs": [],
                     "budget": 1,
                     "tool_scope": ["search"],
                     "capability_needs": ["tool_calling"],
@@ -84,11 +84,10 @@ def test_compiler_and_worker_errors_keep_frozen_details_and_existing_summary():
             _compile_contract(), {"planning_blueprint": _blueprint()}, allowance=4
         )
     error = raised.value
-    assert error.fields == ("budget", "output_recommitment")
+    assert error.fields == ("output_recommitment", "outputs")
     rejection = error.rejections[0]
     assert rejection["child_name"] == "lookup"
-    assert rejection["expected"] == "integer >= 2 when tool_scope is non-empty"
-    assert rejection["actual"] == "1"
+    assert rejection["field"] == "outputs"
     assert rejection["recoverable"] is True
     with pytest.raises(TypeError):
         rejection["actual"] = "changed"
@@ -256,27 +255,29 @@ def test_compile_failure_reopens_and_discloses_exact_details_without_republishin
             ),
         )
     )
-    import aigineering.runtime as runtime_module
-
-    original_commit = runtime_module._commit_recovery_outcome
+    original_publish = CandidatePublisher.publish
     if crash_after_publication:
 
-        def crash(*args, **kwargs):
-            raise RuntimeError("fixture interruption after publication")
+        def crash_after_commit(publisher, effects, **kwargs):
+            decision = original_publish(publisher, effects, **kwargs)
+            if publisher.actor_key.actor_id == recovery_key.actor_id:
+                assert decision.accepted
+                raise RuntimeError("fixture interruption after publication")
+            return decision
 
-        monkeypatch.setattr(runtime_module, "_commit_recovery_outcome", crash)
+        monkeypatch.setattr(CandidatePublisher, "publish", crash_after_commit)
     with pytest.raises(
         RuntimeError if crash_after_publication else WorkerInvocationError
     ):
         execute_claimed_package(claimed, host, store, candidate_publishers=publishers)
-    monkeypatch.setattr(runtime_module, "_commit_recovery_outcome", original_commit)
+    monkeypatch.setattr(CandidatePublisher, "publish", original_publish)
     failure = store.scan_runtime_records(record_type="worker.invocation_failed")[0][1]
     assert (
         failure.payload["category"]
-        == "worker_error:planning_compile_rejected:budget,output_recommitment"
+        == "worker_error:planning_compile_rejected:output_recommitment,outputs"
     )
     details = deep_thaw(failure.payload["compile_diagnostics"])
-    assert details["entries"][0]["values"]["actual"] == "1"
+    assert details["entries"][0]["values"]["actual"] == "[]"
     assert details["entries"][0]["values"]["recoverable"] is True
     if oversized:
         assert details["original_count"] == 21
@@ -302,9 +303,7 @@ def test_compile_failure_reopens_and_discloses_exact_details_without_republishin
             ),
         )
     )
-    assert process_worker_failures(reopened, candidate_publishers=publishers) == (
-        [failed.id] if crash_after_publication else []
-    )
+    assert process_worker_failures(reopened, candidate_publishers=publishers) == []
     assert process_worker_failures(reopened, candidate_publishers=publishers) == []
     assert tuple(reopened.get_all_contracts()) == contracts_before
     assert (
@@ -355,16 +354,15 @@ def test_compile_failure_reopens_and_discloses_exact_details_without_republishin
     assert recovery.outputs == failed.outputs
     assert recovery.tool_scope == failed.tool_scope
     assert recovery.labels == failed.labels
-    assert recovery.budget == failed.budget
+    assert recovery.budget == 1
     assert recovery.acceptance_policy == failed.acceptance_policy
     terminals = [
         record
         for _, record in reopened.scan_runtime_records(record_type="lifecycle.terminal")
         if record.payload.get("contract_id") == failed.id
     ]
-    assert len(terminals) == 1
-    assert terminals[0].payload["terminal"] == "failed"
-    assert terminals[0].causal_parents == (failure.id,)
+    assert terminals == []
+    assert reopened.read_task_facts(failed.id, ("allowance.extinguished",))
     reopened.close()
 
 

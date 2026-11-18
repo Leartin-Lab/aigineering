@@ -9,7 +9,6 @@ from aigineering.core.disclosure import compute_disclosure
 from aigineering.core.provenance import sign_asset
 from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.core.trace import create_entry
-from aigineering.runtime import _method_context_assets_for
 from aigineering.protocol.types import Asset, Contract
 from conftest import candidate_runtime
 
@@ -181,46 +180,29 @@ def test_disclosure_batch_query_is_exact_and_stable_after_reopen_and_rebuild(
         reopened.close()
 
 
-def test_method_context_batch_read_keeps_event_order_dedup_and_redaction():
+def test_trace_context_cannot_widen_ordinary_disclosure():
     store = SQLiteStore(":memory:")
-    setup = candidate_runtime(store)
-    contract = setup.accept_contract(
-        Contract(id="method-context-owner", name="owner", outputs=("result",))
-    )
-    first = setup.accept_asset(_asset("context_first", "first"))
-    redacted = setup.accept_asset(
-        _asset("context_redacted", "private", disclosure_view="redacted")
-    )
-    store.append_trace_entry(
-        create_entry(
-            contract.id,
-            "method_continuation_context_prepared",
-            relation_target=contract.id,
-            disclosed_assets=(first.id, "missing:asset", first.id),
-        )
-    )
-    store.append_trace_entry(
-        create_entry(
-            contract.id,
-            "method_continuation_scheduled",
-            relation_target=contract.id,
-            disclosed_assets=(redacted.id, first.id),
-        )
-    )
-    statements: list[str] = []
-    store._conn.set_trace_callback(statements.append)
     try:
-        assets = _method_context_assets_for(contract, store)
-        assert [(asset.id, asset.content) for asset in assets] == [
-            (first.id, "first"),
-            (redacted.id, "[redacted]"),
-        ]
-        assert (
-            sum(
-                statement.startswith("SELECT * FROM assets WHERE id IN (")
-                for statement in statements
+        setup = candidate_runtime(store)
+        first = setup.accept_asset(_asset("declared_context", "visible"))
+        unrelated = setup.accept_asset(_asset("unrelated_context", "private"))
+        contract = setup.accept_contract(
+            Contract(
+                id="context-owner",
+                name="owner",
+                inputs=(first.name,),
+                outputs=("result",),
             )
-            == 1
         )
+        before = compute_disclosure(contract, store)
+        store.append_trace_entry(
+            create_entry(
+                contract.id,
+                "method_continuation_context_prepared",
+                relation_target=contract.id,
+                disclosed_assets=(unrelated.id,),
+            )
+        )
+        assert compute_disclosure(contract, store) == before == [first]
     finally:
         store.close()

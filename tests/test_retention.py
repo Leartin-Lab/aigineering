@@ -1,7 +1,7 @@
 """Tests for Asset retention fields (keep_flag, tombstoned, tombstoned_at)."""
 
 from aigineering.core.provenance import sign_asset
-from aigineering.core.store import JsonLStore
+from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.protocol.types import Asset
 
 
@@ -40,11 +40,9 @@ def test_tombstoned_can_be_true():
 
 
 def test_retention_fields_persist_in_store(tmp_path):
-    """Asset retention fields survive a JsonLStore write/read cycle."""
-    store = JsonLStore(
-        str(tmp_path / "assets.jsonl"),
-        str(tmp_path / "contracts.jsonl"),
-    )
+    """Asset retention fields survive a durable SQLite close/reopen cycle."""
+    path = tmp_path / "store.sqlite"
+    store = SQLiteStore(str(path))
 
     asset = sign_asset(
         Asset(
@@ -60,16 +58,15 @@ def test_retention_fields_persist_in_store(tmp_path):
 
     store.add_asset(asset)
 
-    reopened = JsonLStore(
-        str(tmp_path / "assets.jsonl"),
-        str(tmp_path / "contracts.jsonl"),
-    )
+    store.close()
+    reopened = SQLiteStore(str(path))
 
     retrieved = reopened.get_asset("asset_ret")
     assert retrieved is not None
     assert retrieved.keep_flag is True
     assert retrieved.tombstoned is True
     assert retrieved.tombstoned_at == "2026-06-11T12:00:00Z"
+    reopened.close()
 
 
 def test_retention_fields_not_in_canonical_do_not_affect_id():

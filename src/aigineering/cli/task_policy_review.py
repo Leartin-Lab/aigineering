@@ -13,6 +13,7 @@ from aigineering.cli._common import (
     _persistent_store,
 )
 from aigineering.core.domain import load_genesis
+from aigineering.runtime_services import RedisSyncPending
 from aigineering.task_policy_review import (
     publish_task_review_decision,
     publish_task_review_request,
@@ -22,16 +23,61 @@ from aigineering.task_policy_review import (
 )
 
 
-def _failure(code: str, message: str, as_json: bool) -> None:
+def _failure(
+    code: str, message: str, as_json: bool, *, next_step: str | None = None
+) -> None:
     if as_json:
-        _output_json({"ok": False, "error": {"code": code, "message": message}})
+        payload = {"ok": False, "error": {"code": code, "message": message}}
+        if next_step:
+            payload["next_step"] = next_step
+        _output_json(payload)
         raise click.exceptions.Exit(1)
     raise click.ClickException(message)
 
 
-def _success(as_json: bool, data: object, revision: int, human: str) -> None:
+def _redis_pending(exc: RedisSyncPending, as_json: bool) -> None:
+    facts_retained = exc.accepted is True or (
+        exc.accepted is False and exc.decision is not None
+    )
     if as_json:
-        _output_json({"ok": True, "data": data, "revision": revision})
+        _output_json(
+            {
+                "ok": False,
+                "error": "redis_sync_pending",
+                "message": "Required Redis synchronization is pending.",
+                "candidate_accepted": exc.accepted,
+                "facts_retained": facts_retained,
+            }
+        )
+        raise click.exceptions.Exit(1) from exc
+    raise click.ClickException("Required Redis synchronization is pending.") from exc
+
+
+def _review_error_next_step(message: str) -> str | None:
+    if "distinct --worker-id" in message:
+        return (
+            "Request a new bounded review, run its new reviewer Contract with a worker distinct "
+            "from the source output producer, then decide with the default operator only for "
+            "verify.human policies. The existing report cannot be reattributed."
+        )
+    if "cannot satisfy source policy capabilities" in message:
+        return "Use an already-authorized custom actor/key with the capabilities required by the source policy."
+    return None
+
+
+def _success(
+    as_json: bool,
+    data: object,
+    revision: int,
+    human: str,
+    *,
+    next_step: str | None = None,
+) -> None:
+    if as_json:
+        payload = {"ok": True, "data": data, "revision": revision}
+        if next_step:
+            payload["next_step"] = next_step
+        _output_json(payload)
     else:
         click.echo(human)
 
@@ -46,6 +92,26 @@ def _open_snapshot(as_json: bool):
         raise AssertionError("unreachable")
 
 
+def _relation(item: dict) -> dict:
+    return item.get("relation", item)
+
+
+def _is_request(item: dict) -> bool:
+    return (
+        item.get("record_type") == "task.review.requested"
+        or _relation(item).get("relation") == "task-review-request"
+    )
+
+
+def _reviewer_run_command(item: dict) -> str:
+    relation = _relation(item)
+    child = str(
+        relation.get("reviewer_contract_id", relation.get("child_contract_id", ""))
+    )
+    worker_id = f"reviewer:{child[-12:]}"
+    return f"aig run --task {child} --worker-id {worker_id}"
+
+
 def _preflight(snapshot, as_json: bool) -> None:
     try:
         load_genesis(snapshot)
@@ -57,32 +123,37 @@ def _preflight(snapshot, as_json: bool) -> None:
 
 
 def _human_request(item: dict) -> str:
-    child = item["child_contract_id"]
-    worker_id = f"reviewer:{child[-12:]}"
+    relation = _relation(item)
+    request_id = item.get("asset_id", item.get("record_id", ""))
+    child = relation.get("reviewer_contract_id", relation.get("child_contract_id", ""))
     return "\n".join(
         (
-            f"Review request {item['record_id']}",
-            f"  source: {item['contract_id']}",
-            f"  target: {item['output_name']} → {item['asset_id']}",
-            f"  reviewer task: {child} (budget {item['budget']} from source allowance)",
+            f"Review request Asset {request_id}",
+            f"  source: {relation['source_contract_id']}",
+            f"  target: {relation['output_name']} → {relation['asset_id']}",
+            f"  reviewer task: {child} (budget {relation['budget']} from source allowance)",
             "  Reserved review budget reduces allowance available to later source work.",
-            f"  reason: {item['reason']}",
-            f"  run with: aig run --task {child} --worker-id {worker_id}",
+            f"  reason: {relation['reason']}",
+            f"  run with: {_reviewer_run_command(item)}",
+            "  The reviewer must be distinct from the source output producer.",
             "  The reviewer task creates a report; its completion does not accept the source.",
+            f"  after the report: aig task review decide {request_id} --report <report-asset-id> --verdict accept --reason '...'; default operator supports verify.human policies only.",
         )
     )
 
 
 def _human_decision(item: dict) -> str:
+    relation = _relation(item)
+    decision_id = item.get("asset_id", item.get("record_id", ""))
     lines = [
-        f"Review decision {item['record_id']}",
-        f"  source: {item['contract_id']}",
-        f"  reviewer task: {item['child_contract_id']}",
-        f"  report: {item['report_asset_id']}",
-        f"  verdict: {item['verdict']} (policy-bound, not a universal truth claim)",
-        f"  reason: {item['reason']}",
+        f"Review decision Asset {decision_id}",
+        f"  source: {relation['source_contract_id']}",
+        f"  reviewer task: {relation.get('reviewer_contract_id', relation.get('child_contract_id', ''))}",
+        f"  report: {relation['report_asset_id']}",
+        f"  verdict: {relation['verdict']} (policy-bound, not a universal truth claim)",
+        f"  reason: {relation['reason']}",
     ]
-    if item["verdict"] == "changes":
+    if relation["verdict"] == "changes":
         lines.append(
             "  source remains unqualified; this command does not create a revision task."
         )
@@ -95,7 +166,7 @@ def _human_history(items: list[dict], source: str) -> str:
         return f"No review requests or decisions for Contract {source}."
     rendered = []
     for item in items:
-        if item["record_type"] == "task.review.requested":
+        if _is_request(item):
             rendered.append(_human_request(item))
         else:
             rendered.append(_human_decision(item))
@@ -115,10 +186,10 @@ def _human_history(items: list[dict], source: str) -> str:
 )
 @click.option(
     "--budget",
-    type=click.IntRange(min=1),
+    type=click.IntRange(min=1, max=1),
     default=1,
     show_default=True,
-    help="Reviewer allowance reserved from the source Contract.",
+    help="One allowance unit reserved from the source Contract.",
 )
 @click.option("--idempotency-key", default=None, help="Signed Candidate replay key.")
 @click.option("--json", "as_json", is_flag=True)
@@ -156,7 +227,23 @@ def task_request_review(
     except LookupError as exc:
         _failure("not_found", str(exc), as_json)
     except ValueError as exc:
-        _failure("invalid_input", str(exc), as_json)
+        message = str(exc)
+        if "no source allowance available" in message:
+            _failure(
+                "insufficient_allowance",
+                message,
+                as_json,
+                next_step=(
+                    f"Inspect source allowance with `aig task audit {source} --json`; "
+                    "only use an authorized transition that preserves the existing obligation and budget."
+                ),
+            )
+        _failure(
+            "invalid_input",
+            message,
+            as_json,
+            next_step=_review_error_next_step(message),
+        )
     finally:
         snapshot.close()
 
@@ -173,18 +260,31 @@ def task_request_review(
         )
     except LookupError as exc:
         _failure("not_found", str(exc), as_json)
+    except RedisSyncPending as exc:
+        _redis_pending(exc, as_json)
     except ValueError as exc:
         _failure("rejected", str(exc), as_json)
     finally:
         store.close()
-    _success(as_json, data, revision, _human_request(data))
+    _success(
+        as_json,
+        data,
+        revision,
+        _human_request(data),
+        next_step=(
+            f"Run `{_reviewer_run_command(data)}`; then use the request Asset ID with "
+            f"`aig task review decide {data['asset_id']} --report <report-asset-id> "
+            "--verdict accept --reason '...'`. The default operator supports "
+            "verify.human policies only."
+        ),
+    )
 
 
 @click.command("reviews")
 @click.argument("source")
 @click.option("--json", "as_json", is_flag=True)
 def task_reviews(source: str, as_json: bool) -> None:
-    """List immutable review request and decision facts for a source task."""
+    """List immutable review relation Assets and legacy review history."""
     if not source.strip():
         _failure("invalid_input", "source Contract ID must be non-empty", as_json)
     require_redis()
@@ -218,14 +318,14 @@ def task_reviews(source: str, as_json: bool) -> None:
 @click.option(
     "--actor-id",
     default=None,
-    help="Existing authorized domain actor (custom identity tuple).",
+    help="Existing authorized domain actor (custom identity tuple); default uses the operator, limited to verify.human policies.",
 )
 @click.option("--key-id", default=None, help="Existing authorized actor key ID.")
 @click.option(
     "--key-file",
     type=click.Path(path_type=str, exists=True, dir_okay=False),
     default=None,
-    help="Matching private Ed25519 key file; permissions must be 0600 on POSIX.",
+    help="Matching private Ed25519 key file; permissions must be 0600 on POSIX. Custom actors need the capabilities required by the source policy.",
 )
 @click.option("--json", "as_json", is_flag=True)
 def task_review_decide(
@@ -239,7 +339,7 @@ def task_review_decide(
     key_file: str | None,
     as_json: bool,
 ) -> None:
-    """Record a policy-bound decision for an exact reviewer report Asset."""
+    """Publish an ordinary decision Asset and core attestation for an exact report."""
     try:
         if idempotency_key is not None and not idempotency_key.strip():
             raise ValueError("idempotency key must not be blank")
@@ -249,7 +349,13 @@ def task_review_decide(
                 "custom decision identity requires --actor-id, --key-id, and --key-file together"
             )
     except ValueError as exc:
-        _failure("invalid_input", str(exc), as_json)
+        message = str(exc)
+        _failure(
+            "invalid_input",
+            message,
+            as_json,
+            next_step=_review_error_next_step(message),
+        )
 
     require_redis()
     snapshot = _open_snapshot(as_json)
@@ -269,7 +375,13 @@ def task_review_decide(
     except LookupError as exc:
         _failure("not_found", str(exc), as_json)
     except ValueError as exc:
-        _failure("invalid_input", str(exc), as_json)
+        message = str(exc)
+        _failure(
+            "invalid_input",
+            message,
+            as_json,
+            next_step=_review_error_next_step(message),
+        )
     finally:
         snapshot.close()
 
@@ -288,18 +400,28 @@ def task_review_decide(
         )
     except LookupError as exc:
         _failure("not_found", str(exc), as_json)
+    except RedisSyncPending as exc:
+        _redis_pending(exc, as_json)
     except ValueError as exc:
         _failure("rejected", str(exc), as_json)
     finally:
         store.close()
-    _success(as_json, data, revision, _human_decision(data))
+    _success(
+        as_json,
+        data,
+        revision,
+        _human_decision(data),
+        next_step=(
+            f"Inspect the source Contract with `aig task audit {_relation(data)['source_contract_id']} --json`."
+        ),
+    )
 
 
 def register_task_policy_review_commands(task_group: click.Group) -> None:
     task_group.add_command(copy(task_request_review))
     task_group.add_command(copy(task_reviews))
     review_group = click.Group(
-        "review", help="Record a policy-bound decision from an exact review report."
+        "review", help="Inspect review history and publish decisions."
     )
     review_group.add_command(copy(task_review_decide))
     task_group.add_command(review_group)

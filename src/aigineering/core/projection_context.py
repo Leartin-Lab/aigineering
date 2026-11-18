@@ -42,8 +42,6 @@ class ContractDeclarationProjectionRequest:
     parent_contract_ids: tuple[str, ...]
     allowance_source_contract_ids: tuple[str, ...]
     asset_ids: tuple[str, ...]
-    candidate_id: str
-    include_candidate_replay: bool
 
 
 @dataclass(frozen=True)
@@ -60,9 +58,7 @@ class ContractDeclarationProjectionInputs:
 class AssetProposalProjectionRequest:
     """Exact immutable read selection for built-in Asset proposals."""
 
-    candidate_id: str
     claim_bound_contract_id: str | None
-    include_candidate_replay: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,20 +82,34 @@ def build_contract_declaration_projection_request(
     must then load the original full context and let ``reduce_candidate`` retain
     authentication and rejection ownership.
     """
-    if not candidate.effects or any(
-        effect.effect_type != "contract.declare" for effect in candidate.effects
+    declarations = tuple(
+        effect
+        for effect in candidate.effects
+        if effect.effect_type == "contract.declare"
+    )
+    if not declarations or any(
+        effect.effect_type not in {"contract.declare", "asset.propose"}
+        for effect in candidate.effects
     ):
         return None
 
     from aigineering.core.effect_projectors import _contract_from_payload
+    from aigineering.core.declaration_bindings import bind_declaration_assets
     from aigineering.core.input_bindings import input_asset_bindings
 
     incoming_contract_ids: list[str] = []
     parent_contract_ids: list[str] = []
     allowance_source_contract_ids: list[str] = []
     asset_ids: list[str] = []
-    for effect in candidate.effects:
-        contract = _contract_from_payload(effect.payload)
+    local_ids: dict[int, str] = {}
+    for effect_index, effect in enumerate(candidate.effects):
+        if effect.effect_type != "contract.declare":
+            continue
+        contract = bind_declaration_assets(
+            effect, candidate, effect_index, asset_id_cache=local_ids
+        )
+        if contract is None:
+            contract = _contract_from_payload(effect.payload)
         version = _VERSIONED_TASK_ID.match(contract.id)
         if version is not None and version.group(1) not in _KNOWN_TASK_ID_VERSIONS:
             return None
@@ -128,8 +138,6 @@ def build_contract_declaration_projection_request(
         parent_contract_ids=parents,
         allowance_source_contract_ids=unique(allowance_source_contract_ids),
         asset_ids=unique(asset_ids),
-        candidate_id=candidate.id,
-        include_candidate_replay=len(candidate.effects) == 1,
     )
 
 
@@ -194,9 +202,7 @@ def build_asset_proposal_projection_request(
         return None
 
     return AssetProposalProjectionRequest(
-        candidate_id=candidate.id,
         claim_bound_contract_id=parent_id,
-        include_candidate_replay=len(effects) == 1,
     )
 
 

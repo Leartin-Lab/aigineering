@@ -17,7 +17,8 @@ Asset IDs and a payload. Four reference conventions are implemented:
   media type, source URI, retrieval time and an asserted license;
 - document: versioned extraction tool, explicit OCR status and consecutive
   physical page indexes with NFC text, linked to one attachment;
-- evidence: an exact nonempty NFC character range within a document page;
+- evidence: an exact nonempty NFC character range within a document page, or
+  an `asset-json-pointer-v1` scalar quotation from an exact disclosed JSON Asset;
 - report: Markdown and an exhaustive mapping of footnote anchors to evidence.
 
 Canonical Worker `/exec` continues publishing text through its existing signed
@@ -79,3 +80,12 @@ selected metadata, not complete signed receipts or portable signature proofs.
 
 Portable artifact checks cover byte integrity, exact selectors, scoped tools
 and reconstruction. They do not establish semantic support or parser fidelity.
+
+## JSON value quotations
+
+The JSON evidence convention and limits are specified in
+[change 140](../../changes/140-exact-json-value-citations.md). It composes the
+existing evidence/report envelopes without introducing kernel derivation or
+qualification semantics. Raw JSON sources are quotation leaves; artifact roles
+are validated separately. Numeric lexemes are preserved, and full source export
+remains explicit.

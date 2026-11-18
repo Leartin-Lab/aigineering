@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from aigineering.core.provider_config import create_provider_config_snapshot
+from aigineering.core.capability_descriptors import create_provider_config_snapshot
 from aigineering.core.provenance import verify_asset_seal
 from aigineering.core.store import MemoryStore
 from aigineering.protocol.types import Asset

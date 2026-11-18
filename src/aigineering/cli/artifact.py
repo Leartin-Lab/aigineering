@@ -58,6 +58,32 @@ def _publish(store, proposal):
     )
 
 
+def _lineage_records(store, graph):
+    """Select metadata for this exact closure without reading unrelated history."""
+    selected = {
+        record.id: record
+        for node in graph["nodes"]
+        for record in store.read_asset_commit_facts(node["id"])
+    }
+    pending = list(selected.values())
+    seen = set(selected)
+    if len(seen) > 10000:
+        raise ValueError("publication ancestry exceeds traversal limit")
+    while pending:
+        record = pending.pop()
+        for parent_id in record.causal_parents:
+            if parent_id in seen:
+                continue
+            seen.add(parent_id)
+            if len(seen) > 10000:
+                raise ValueError("publication ancestry exceeds traversal limit")
+            parent = store.get_runtime_record(parent_id)
+            if parent is not None:
+                selected[parent_id] = parent
+                pending.append(parent)
+    return tuple(selected.values())
+
+
 @click.group("artifact")
 def artifact_group():
     """Import, cite, inspect and export exact versioned business artifacts."""
@@ -117,22 +143,38 @@ def parse_file(asset_id, name, ocr):
 
 
 @artifact_group.command("cite")
-@click.argument("document_id")
+@click.argument("asset_id")
 @click.option("--name", required=True)
-@click.option("--page", type=int, required=True, help="1-based physical page index.")
-@click.option("--start", type=int, required=True, help="0-based NFC character offset.")
-@click.option("--end", type=int, required=True, help="Exclusive NFC character offset.")
+@click.option("--page", type=int, help="1-based physical page index.")
+@click.option("--start", type=int, help="0-based NFC character offset.")
+@click.option("--end", type=int, help="Exclusive NFC character offset.")
+@click.option(
+    "--pointer",
+    help="JSON Pointer to a scalar in a disclosed JSON Asset; empty selects the root.",
+)
 @_errors
-def cite(document_id, name, page, start, end):
-    """Commit an exact quote from one immutable document page."""
+def cite(asset_id, name, page, start, end, pointer):
+    """Cite a JSON scalar (--pointer) or document text (--page/--start/--end).
+
+    Select exactly one mode. JSON Pointer escapes / as ~1 and ~ as ~0.
+    """
+    bounds = (page, start, end)
+    if (pointer is not None and any(x is not None for x in bounds)) or (
+        pointer is None and any(x is None for x in bounds)
+    ):
+        raise ValueError("use --pointer OR all of --page, --start and --end")
     store = _persistent_store()
     try:
-        _publish(
-            store,
-            artifacts.evidence(
-                name, _get(store, document_id), page=page, start=start, end=end
-            ),
-        )
+        if pointer is not None:
+            source = store.get_asset(asset_id)
+            if source is None:
+                raise ValueError("exact asset ID not found")
+            proposal = artifacts.json_evidence(name, source, pointer)
+        else:
+            proposal = artifacts.evidence(
+                name, _get(store, asset_id), page=page, start=start, end=end
+            )
+        _publish(store, proposal)
     finally:
         store.close()
 
@@ -185,13 +227,14 @@ def lineage(asset_id):
     """Validate every ancestor and print the complete exact-ID graph."""
     store = _persistent_store()
     try:
-        _output_json(
-            artifacts.lineage(
+        with store.read_transaction():
+            graph = artifacts.lineage(asset_id, store.get_asset)
+            result = artifacts.lineage(
                 asset_id,
                 store.get_asset,
-                records=tuple(record for _, record in store.scan_runtime_records()),
+                records=_lineage_records(store, graph),
             )
-        )
+        _output_json(result)
     finally:
         store.close()
 
@@ -200,20 +243,24 @@ def lineage(asset_id):
 @click.argument("report_id")
 @click.option("--output", type=click.Path(path_type=Path), required=True)
 @click.option(
-    "--include-sources", is_flag=True, help="Also redistribute original attachments."
+    "--include-sources",
+    is_flag=True,
+    help="Also redistribute original attachments or JSON sources.",
 )
 @_errors
 def export(report_id, output, include_sources):
     """Export a new offline Markdown/evidence/lineage directory."""
     store = _persistent_store()
     try:
-        export_bundle(
-            report_id,
-            store.get_asset,
-            output,
-            include_sources=include_sources,
-            records=tuple(record for _, record in store.scan_runtime_records()),
-        )
+        with store.read_transaction():
+            graph = artifacts.lineage(report_id, store.get_asset)
+            export_bundle(
+                report_id,
+                store.get_asset,
+                output,
+                include_sources=include_sources,
+                records=_lineage_records(store, graph),
+            )
         _output_json({"report_id": report_id, "output": str(output.absolute())})
     finally:
         store.close()

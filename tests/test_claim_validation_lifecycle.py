@@ -20,7 +20,6 @@ from aigineering.protocol.effect_builders import asset_proposal_effect
 from aigineering.protocol.effect_builders import contract_declaration_effect
 from aigineering.protocol.types import Contract
 from aigineering.business.claim_check_worker import create_structural_gate_worker
-from aigineering.plugins import default_completion_registry
 from aigineering.runtime import (
     claim_next_package,
     execute_claimed_package,
@@ -187,7 +186,6 @@ def test_structural_gate_failure_is_durable_and_has_no_receipt(tmp_path, monkeyp
         execute_claimed_package(claimed, host, store)
         run_runtime_maintenance_step(
             store,
-            default_completion_registry(),
             candidate_publishers=ensure_local_runtime_publishers(store),
         )
         failures = [
@@ -206,8 +204,9 @@ def test_structural_gate_failure_is_durable_and_has_no_receipt(tmp_path, monkeyp
             timeout=3,
             poll_interval=0.01,
         )
-        assert result.status == "failed"
-        assert not result.timed_out
+        assert result.status == "timed_out"
+        assert result.timed_out
+        assert result.projection["terminal"] is False
         assert len(store.get_all_contracts()) == 2
         assert not store.get_assets_by_name("receipt")
     finally:

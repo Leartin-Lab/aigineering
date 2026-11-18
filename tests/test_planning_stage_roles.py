@@ -13,8 +13,6 @@ from aigineering.agent.worker import (
     WorkerExecutionError,
     compile_worker_envelope,
 )
-from aigineering.application import default_completion_registry
-from aigineering.core.candidate_publisher import CandidatePublisherRegistry
 from aigineering.core.capability_descriptors import create_tool_descriptor
 from aigineering.core.control_plane import build_control_plane_contract
 from aigineering.core.domain import initialize_genesis
@@ -23,6 +21,7 @@ from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.core.worker_routing import WorkerRegistration
 from aigineering.plugins.delegation import (
     TaskDelegationPlugin,
+    _legacy_parallel_tool_contracts,
     _legacy_claimed_method_contract,
     _parallel_tool_contracts,
 )
@@ -33,7 +32,11 @@ from aigineering.plugins.planning_roles import (
 )
 from aigineering.plugins.staged_planning import StagedPlanningPlugin
 from aigineering.plugins.base import PluginRequest
-from aigineering.plugins.task_semantics import method_contract, retry_contract
+from aigineering.plugins.task_semantics import (
+    _build_plan_contract,
+    method_contract,
+    retry_contract,
+)
 from aigineering.protocol.actions import WorkerAction
 from aigineering.protocol.envelope import CandidateEnvelope
 from aigineering.protocol.candidate import ActorKey, create_genesis_manifest
@@ -41,7 +44,6 @@ from aigineering.protocol.types import Candidate, Contract, ToolSpec
 from aigineering.runtime import (
     claim_next_package,
     execute_claimed_package,
-    process_task_completions,
 )
 
 
@@ -153,8 +155,13 @@ def test_signed_compile_tool_observation_continuation_and_blueprint(monkeypatch)
     assert claim is not None
     result = execute_claimed_package(claim, compile_host, store)
     assert result["status"] == "task_delegated", result
-    method = store.get_contract(result["child_contract_id"])
-    assert method is not None
+    declared = [store.get_contract(item) for item in result["child_contract_ids"]]
+    method = next(
+        item for item in declared if item is not None and "plugin:tool" in item.labels
+    )
+    continuation = next(
+        item for item in declared if item is not None and item.origin == "continuation"
+    )
     assert not set(method.labels) & PLANNING_STAGE_LABELS
     assert "plugin:tool" in method.labels
     assert active_planning_stage(method) is None
@@ -177,20 +184,10 @@ def test_signed_compile_tool_observation_continuation_and_blueprint(monkeypatch)
     assert len(observations) == 1
     assert json.loads(observations[0].content)["ok"] is True
 
-    publishers = CandidatePublisherRegistry(
-        (("continuation.publish.v1", ingress.publisher),)
-    )
-    assert process_task_completions(
-        store, default_completion_registry(), candidate_publishers=publishers
-    ) == [method.id]
-    continuation = next(
-        item
-        for item in store.get_all_contracts()
-        if item.origin == "continuation" and item.parent_id == stage.id
-    )
+    assert continuation.parent_id == stage.id
     assert "plugin:plan.compile" in continuation.labels
     assert active_planning_stage(continuation) == "plugin:plan.compile"
-    assert continuation.tool_scope == ()
+    assert continuation.tool_scope == stage.tool_scope
     assert "Planning compiler protocol (required)" in contract_prompt(continuation, [])
 
     final_claim = claim_next_package(
@@ -502,3 +499,117 @@ def test_parallel_tool_items_drop_stage_labels_while_join_retains_stage():
     assert all(active_planning_stage(item) is None for item in items)
     assert "plugin:plan.compile" in continuation.labels
     assert active_planning_stage(continuation) == "plugin:plan.compile"
+    assert continuation.acceptance_policy == parent.acceptance_policy
+    assert continuation.tool_scope == parent.tool_scope
+
+
+@pytest.mark.parametrize(
+    "parent_policy,legacy_expected",
+    (
+        ({"mode": "mechanical"}, None),
+        ({"mode": "independent", "policy_version": "review-v1"}, None),
+        (
+            {"mode": "mechanical", "output_source": "contract_tree"},
+            {"mode": "mechanical", "output_source": "contract_tree"},
+        ),
+    ),
+)
+def test_parallel_continuation_preserves_policy_and_legacy_builder_identity(
+    parent_policy, legacy_expected
+):
+    parent = build_control_plane_contract(
+        name="legacy-parallel-parent",
+        outputs=("final_report",),
+        budget=8,
+        tool_scope=("lookup", "lookup2"),
+        acceptance_policy=parent_policy,
+    )
+    action = WorkerAction(
+        type="parallel_tool",
+        payload={
+            "calls": [
+                {"id": "first", "name": "lookup", "args": {}},
+                {"id": "second", "name": "lookup2", "args": {}},
+            ]
+        },
+    )
+
+    continuation = _parallel_tool_contracts(parent, action, allowance=8)[-1]
+    historical_continuation = _legacy_parallel_tool_contracts(
+        parent, action, allowance=8
+    )[-1]
+
+    expected_current = dict(parent_policy)
+    expected_current.pop("output_source", None)
+    assert continuation.acceptance_policy == expected_current
+    assert historical_continuation.acceptance_policy == legacy_expected
+
+
+def test_planned_child_inherits_only_output_conditions_without_tree_gate():
+    parent = build_control_plane_contract(
+        name="strict-planning-parent",
+        outputs=("report",),
+        budget=4,
+        acceptance_policy={
+            "mode": "mechanical",
+            "output_source": "contract_tree",
+            "output_shapes": {"report": {"type": "string"}},
+        },
+    )
+    child = _build_plan_contract(
+        parent_id=parent.id,
+        parent_contract=parent,
+        name="planned-report",
+        description="Publish the report.",
+        inputs=[],
+        outputs=["report"],
+        activation="",
+        budget=1,
+        tool_scope=[],
+        labels=[],
+        capability_needs=[],
+        pool_needs=[],
+        delegation_capabilities=[],
+        delegation_pools=[],
+        context_assets=(),
+    )
+
+    assert child.acceptance_policy == {
+        "mode": "mechanical",
+        "output_shapes": {"report": {"type": "string"}},
+    }
+
+
+def test_planned_child_keeps_legacy_shape_copy_from_independent_parent():
+    parent = build_control_plane_contract(
+        name="independent-planning-parent",
+        outputs=("report",),
+        budget=4,
+        acceptance_policy={
+            "mode": "independent",
+            "policy_version": "review-v1",
+            "output_shapes": {"report": {"type": "string"}},
+        },
+    )
+    child = _build_plan_contract(
+        parent_id=parent.id,
+        parent_contract=parent,
+        name="planned-report",
+        description="Publish the report.",
+        inputs=[],
+        outputs=["report"],
+        activation="",
+        budget=1,
+        tool_scope=[],
+        labels=[],
+        capability_needs=[],
+        pool_needs=[],
+        delegation_capabilities=[],
+        delegation_pools=[],
+        context_assets=(),
+    )
+
+    assert child.acceptance_policy == {
+        "mode": "mechanical",
+        "output_shapes": {"report": {"type": "string"}},
+    }

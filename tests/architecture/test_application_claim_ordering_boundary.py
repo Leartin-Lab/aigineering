@@ -54,11 +54,3 @@ def test_operational_application_claims_use_shared_ordering_boundary():
         and node.func.id == "run_local_cycle"
     ]
     assert local_cycle_calls, "ordinary --once must delegate to the shared cycle owner"
-
-
-def test_priority_is_composed_in_application_services_not_runtime_kernel():
-    runtime = _source("src/aigineering/runtime.py")
-    services = _source("src/aigineering/runtime_services.py")
-    assert "task_priority" not in runtime
-    assert "order_application_contract_ids" in services
-    assert "order_task_contract_ids" in services

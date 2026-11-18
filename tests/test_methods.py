@@ -2,7 +2,7 @@
 
 import pytest
 
-from aigineering.core.methods import method_contract
+from aigineering.plugins.task_semantics import method_contract
 from aigineering.protocol.actions import WorkerAction
 from aigineering.protocol.types import Contract
 

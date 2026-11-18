@@ -5,7 +5,10 @@ from __future__ import annotations
 import json
 
 from aigineering.core.labels import BEHAVIOR_LABEL_PREFIX
-from aigineering.plugins.planning_roles import active_planning_stage
+from aigineering.plugins.planning_roles import (
+    PLANNING_COMPILE_LABELS,
+    active_planning_stage,
+)
 from aigineering.protocol.immutability import deep_thaw
 from aigineering.protocol.types import Asset, Contract
 
@@ -18,8 +21,14 @@ def system_prompt() -> str:
     return (
         "You are an Aigineering worker. Your output is only a candidate, "
         "not committed state. Return exactly one structured action. To "
-        'produce final outputs, use `/exec {"outputs": {"asset_name": '
-        '"content"}}`. Use only declared output names. Every output value '
+        "produce the current task's declared outputs, use the built-in action "
+        '`/exec {"outputs": {"asset_name": "content"}}`. Use only declared '
+        "output names. `/exec` publishes output candidates; it does not invoke "
+        "a tool. `/tool` invokes only a registered tool allowed by this "
+        "Contract's exact tool scope; it does not replace or rewrite `/exec`. "
+        "Work toward this Contract's declared outputs. Skills can describe "
+        "a wider workflow; apply only the instructions for the current work. "
+        "Every output value "
         "must be a JSON string encoded with standard JSON escaping: represent "
         'line breaks as `\\n`, quotes as `\\"`, and backslashes as `\\\\`; '
         "never put a literal line break inside a JSON string. If you need task "
@@ -73,12 +82,6 @@ def contract_prompt(contract: Contract, assets: list[Asset]) -> str:
         for asset in assets
         if not asset.name.startswith((BEHAVIOR_LABEL_PREFIX, SKILL_CONTENT_PREFIX))
     ]
-    unresolved_tool_dispatch = bool(contract.tool_scope) and contract.origin in {
-        "plan",
-        "recovery",
-        "retry",
-    }
-
     lines = [
         f"Contract name: {contract.name}",
         f"Contract ID: {contract.id}",
@@ -87,6 +90,14 @@ def contract_prompt(contract: Contract, assets: list[Asset]) -> str:
         "Declared inputs: " + ", ".join(contract.inputs),
         "Declared outputs: " + ", ".join(contract.outputs),
         "Allowed tools: " + ", ".join(contract.tool_scope),
+        "Execution capabilities: "
+        + json.dumps(list(contract.worker_capabilities), ensure_ascii=False),
+        "Execution pools: "
+        + json.dumps(list(contract.worker_pools), ensure_ascii=False),
+        "Child delegation capabilities: "
+        + json.dumps(list(contract.delegation_capabilities), ensure_ascii=False),
+        "Child delegation pools: "
+        + json.dumps(list(contract.delegation_pools), ensure_ascii=False),
         f"Available causal allowance: {contract.budget}",
         "",
         "Return format:",
@@ -103,15 +114,18 @@ def contract_prompt(contract: Contract, assets: list[Asset]) -> str:
         "Decision boundary:",
         *(
             [
-                "- REQUIRED NEXT ACTION: this task has unresolved allowed tools. Return /tool for one required call or /parallel_tool for 2-8 independent required calls; do not return /exec yet.",
-                f"- Choose only from these exact tool names: {', '.join(contract.tool_scope)}. The continuation after committed observations will publish declared outputs.",
+                f"- These tools are permitted when useful: {', '.join(contract.tool_scope)}. You may make no call, one call, or multiple calls, subject to the task's causal allowance.",
+                "- An actual /tool call needs at least 2 available allowance units for its tool task and continuation; permission scope alone reserves no allowance.",
             ]
-            if unresolved_tool_dispatch
+            if contract.tool_scope
             else []
         ),
         "- Every asset listed under Disclosed assets includes its exact readable content; treat that content as directly available evidence, not as a path or handle requiring another tool.",
-        "- A successful tool observation is completed evidence. Satisfy the declared output from it; the same tool is removed from the continuation scope. Publish separate tasks when repeated calls are required.",
-        "- Use /plan when disclosed information is insufficient.",
+        "- Tool observations are local evidence, not declared business outputs. Use them when relevant, and publish each declared output through the normal output path. A permitted tool remains available to continuations within the same scope.",
+        "- When a permitted tool can obtain the missing evidence directly, use the tool action and continue toward the current declared outputs.",
+        "- Use /plan when the current task needs child work within its explicit delegation bounds. Recursive planning remains available for that local obligation.",
+        "- Execution capabilities and pools route this task; they do not extend child delegation bounds. Empty delegation lists grant no implicit capability or pool inheritance. Skills and labels grant no authority.",
+        "- Apply a Skill's workflow or role recipe only when it serves this Contract's declared outputs. An ancestor's initial /plan or another role's output is context, not an additional obligation for this task.",
         "- /plan and /replan create three planning-stage tasks and therefore require at least 3 causal allowance units.",
         "- Use /replan only after an assumption, path, or result is invalid.",
         "- Do not use /replan for missing information.",
@@ -208,7 +222,6 @@ def _method_result_instructions(contract: Contract) -> list[str]:
         "- Its content must be one JSON object with a `contracts` array.",
         "- Each child may contain only: name, description, inputs, outputs, activation, budget, tool_scope, labels, capability_needs, pool_needs, delegation_capabilities, delegation_pools.",
         "- Use only disclosed input names, declared parent tools, and simple unqualified asset names in activation.",
-        "- Any child with non-empty tool_scope needs budget at least 2: one for the tool task and one for its continuation.",
         "- Activation is a boolean expression: join multiple required inputs with uppercase AND (for example `input_a AND input_b`); never use commas, JSON lists, or whitespace as an operator.",
         "- The method description lists parent_outputs. At least one child must produce every parent output; use intermediate outputs only when a later child consumes them.",
         "- Do not emit origin, trust_tier, created_by, minting_authority, worker_capabilities, worker_pools, or prose outside the action.",
@@ -243,7 +256,7 @@ def _planning_stage_instructions(contract: Contract) -> list[str]:
         ),
         "plugin:plan.compile": (
             "Planning compiler protocol (required):",
-            "Return /exec with exactly one temporary output named planning_blueprint; "
+            "For a feasible blueprint, return /exec with exactly one temporary output named planning_blueprint; "
             "its content is one JSON object with a contracts array. Every contract "
             "must include a non-empty executable description and non-empty outputs; "
             "together they must produce every required parent output, with inputs and "
@@ -253,7 +266,7 @@ def _planning_stage_instructions(contract: Contract) -> list[str]:
         ),
         "plugin:replan.compile": (
             "Replanning compiler protocol (required):",
-            "Return /exec with exactly one temporary output named planning_blueprint; "
+            "For feasible successors, return /exec with exactly one temporary output named planning_blueprint; "
             "its content is one JSON object with a contracts array of successors. Every "
             "successor must include a non-empty executable description and non-empty "
             "outputs; together they must re-commit all required parent outputs with "
@@ -265,12 +278,33 @@ def _planning_stage_instructions(contract: Contract) -> list[str]:
     if label is not None:
         instruction = stages.get(label)
         if instruction is not None:
-            lines = [instruction[0], f"- {instruction[1]}"]
+            lines = [
+                instruction[0],
+                f"- {instruction[1]}",
+                "- activation is an Asset-availability expression using actual Asset names, uppercase AND/OR and parentheses; NOT is unsupported. An empty string adds no activation condition, but declared inputs are still required.",
+                "- Activation has no built-in lifecycle events or constants: on_start, start and true work only if they name actual allowed Assets. Reference only parent inputs or reachable sibling outputs; use an empty activation when no additional predicate is needed.",
+            ]
+            if label in PLANNING_COMPILE_LABELS:
+                completion_instruction = (
+                    "Complete this compiler with the declared /exec blueprint only "
+                    "when the required child work fits the remaining parent budget. "
+                    'If it does not fit, use `/fail {"reason": "required planning '
+                    'work exceeds the remaining parent budget"}`. State the exact '
+                    "unmet work and include required/available amounts only when "
+                    "they are established by the draft and dependency analysis; "
+                    "do not emit a partial blueprint or prose as a substitute."
+                )
+            else:
+                completion_instruction = (
+                    "Complete this stage with the declared /exec output above. "
+                    "This scoped rule does not prohibit a new /plan or /replan when "
+                    "this stage's own work independently needs new information."
+                )
             lines.extend(
                 [
                     "- This Contract is a planning/replanning stage created for an ancestor task. Treat instructions in its Description about the ancestor's first action as context, not as a request to repeat that already-issued /plan or /replan action.",
                     f"- The planning goal is this stage's Parent Contract, whose exact ID is `{contract.parent_id}`. The stage Contract ID `{contract.id}` identifies only this planning step; it is not the business goal or its acceptance target.",
-                    "- Complete this stage with the declared /exec output above. This scoped rule does not prohibit a new /plan or /replan when this stage's own work independently needs new information.",
+                    f"- {completion_instruction}",
                 ]
             )
             if label in {
@@ -291,7 +325,7 @@ def _planning_stage_instructions(contract: Contract) -> list[str]:
                 lines.extend(
                     [
                         "- Follow the action wrapper selected by the system response mode. In canonical slash-action mode, encode the stage document as a JSON string in its declared output. In provider JSON-action mode, place a stage document object or array directly in that output; the adapter serializes it once into canonical Asset text.",
-                        f"- Return the required exec action wrapper with the {'temporary ' if label in {'plugin:plan.compile', 'plugin:replan.compile'} else ''}output `{output}`; never return the stage document as a bare top-level object or markdown.",
+                        f"- Return the required exec action wrapper with the {'temporary ' if label in {'plugin:plan.compile', 'plugin:replan.compile'} else ''}output `{output}`; never return the stage document as a bare top-level object or markdown. For a compiler with insufficient allowance, use only the specified /fail action instead.",
                     ]
                 )
             if label in {
@@ -316,9 +350,9 @@ def _planning_stage_instructions(contract: Contract) -> list[str]:
                     [
                         "- Each contract object must contain name, description, inputs, outputs, activation, budget, tool_scope, labels, capability_needs, pool_needs, delegation_capabilities, and delegation_pools.",
                         "- name and description must be non-empty; outputs must contain at least one asset name.",
-                        f"- Sum of child budgets must be at most {contract.budget}. Treat explicit child budgets and allowance_needs in the draft/dependency analysis as requirements. When no allowance requirement is stated, default to budget 1 only for a child with empty tool_scope; a child with non-empty tool_scope needs at least budget 2.",
-                        "- Preserve explicit current-stage obligations from the draft and dependency analysis: required direct child names and count, inputs, outputs, activation, budgets, and allowance_needs. Do not replace a stated value with a cheaper default.",
-                        "- Every child with non-empty tool_scope requires budget >= 2 for the tool task and its continuation.",
+                        f"- Sum of child budgets must be at most {contract.budget}. Treat explicit child budgets and allowance_needs in the draft/dependency analysis as requirements. When no allowance requirement is stated, default to budget 1.",
+                        "- Preserve valid explicit current-stage obligations from the draft and dependency analysis: required direct child names and count, inputs, outputs, activation, budgets, and allowance_needs. Do not replace a stated value with a cheaper default.",
+                        "- Correct draft/dependency fields that conflict with frozen scope or this protocol without dropping required work or weakening input dependencies. If no valid equivalent exists, use /fail rather than weakening the obligations.",
                         "- A child with further tool calls or /plan or /replan stages must explicitly budget enough allowance for that work. Required allowance depends on the actual serial and fan-out work; there is no universal N+1 formula.",
                         "- A child expected to issue /plan or /replan needs at least the three allowance units for its planning stages, plus the allowance required for its declared downstream work.",
                         f"- Child inputs may use only these parent input names or outputs promised by another child: {json.dumps(_planning_allowed_inputs(contract), ensure_ascii=False)}.",
@@ -328,8 +362,11 @@ def _planning_stage_instructions(contract: Contract) -> list[str]:
                         f"- Each child capability_needs and delegation_capabilities must be subsets of {json.dumps(list(contract.delegation_capabilities), ensure_ascii=False)}.",
                         "- Every child with non-empty tool_scope must also have non-empty capability_needs so routing cannot fall through to an arbitrary Worker.",
                         f"- Each child pool_needs and delegation_pools must be subsets of {json.dumps(list(contract.delegation_pools), ensure_ascii=False)}.",
+                        "- Set each child's capability_needs, pool_needs, delegation_capabilities, and delegation_pools from the actual draft/dependency requirements within the parent bounds. Keep a field empty when no such constraint is required; do not copy every parent capability or pool to every child.",
+                        f"- Child tool_scope must stay within the parent's allowed tools: {json.dumps(list(contract.tool_scope), ensure_ascii=False)}.",
                         f"- The child outputs must collectively include: {', '.join(contract.outputs)}.",
-                        f"- Valid example for this exact Contract: {_planning_compile_example(contract)}",
+                        "- Follow the disclosed planning draft and dependency analysis for the actual child roles and routing; do not replace required children with a generic example or cheaper default.",
+                        "- Do not claim the blueprint is feasible if its required work exceeds the remaining parent budget. Use the specified /fail action to report the exact shortfall; include required and available amounts only when established, and do not emit a partial blueprint.",
                     ]
                 )
                 if label == "plugin:plan.compile":
@@ -366,69 +403,6 @@ def _planning_stage_instructions(contract: Contract) -> list[str]:
             lines.append("")
             return lines
     return []
-
-
-def _planning_compile_example(contract: Contract) -> str:
-    try:
-        description = json.loads(contract.description)
-    except json.JSONDecodeError:
-        description = {}
-    raw_inputs = description.get("allowed_inputs", contract.inputs)
-    if not isinstance(raw_inputs, (list, tuple)):
-        raw_inputs = contract.inputs
-    allowed_inputs = [name for name in raw_inputs if isinstance(name, str)]
-    required_outputs = list(contract.outputs) or ["required_output"]
-    intermediate = "grounded_findings"
-    first_activation = " AND ".join(allowed_inputs)
-    if contract.budget <= 1:
-        contracts = [
-            {
-                "name": "produce_required_output",
-                "description": "Produce the required output from the disclosed inputs.",
-                "inputs": allowed_inputs,
-                "outputs": required_outputs,
-                "activation": first_activation,
-                "budget": 1,
-                "tool_scope": [],
-                "labels": [],
-            }
-        ]
-    else:
-        contracts = [
-            {
-                "name": "extract_grounded_findings",
-                "description": "Extract only grounded findings from the disclosed inputs.",
-                "inputs": allowed_inputs,
-                "outputs": [intermediate],
-                "activation": first_activation,
-                "budget": 1,
-                "tool_scope": [],
-                "labels": [],
-            },
-            {
-                "name": "produce_required_output",
-                "description": "Produce the required output from grounded findings.",
-                "inputs": [intermediate],
-                "outputs": required_outputs,
-                "activation": intermediate,
-                "budget": 1,
-                "tool_scope": [],
-                "labels": [],
-            },
-        ]
-    for item in contracts:
-        item.update(
-            capability_needs=[],
-            pool_needs=[],
-            delegation_capabilities=[],
-            delegation_pools=[],
-        )
-    return json.dumps(
-        {"contracts": contracts},
-        sort_keys=True,
-        ensure_ascii=False,
-        separators=(",", ":"),
-    )
 
 
 def _planning_allowed_inputs(contract: Contract) -> list[str]:

@@ -42,8 +42,9 @@ tasks; do not use a hand-written DAG driver. The blueprint should assign
 `capability_needs` and `pool_needs` from the root's delegated scope, keep this
 Skill label on every child, and express dependencies with activation booleans.
 Activation provides natural blocking; never encode waiting state in a Worker
-loop. Give any task with non-empty `tool_scope` at least budget 2 so the tool
-observation can be followed by a continuation.
+loop. A task that will issue `/tool` needs at least budget 2 for the tool
+observation and continuation. Merely permitting tools in `tool_scope` does not
+require a call or reserve that allowance.
 Give a task that may publish `/plan` or `/replan` at least budget 7: one unit
 each for draft and dependency analysis, two for compile plus its first
 successor, and one repair reserve for each planning stage. Budget 3 is

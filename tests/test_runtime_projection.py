@@ -53,7 +53,9 @@ def test_declared_input_is_a_natural_blocker_without_activation_expression():
 
 def test_historical_invalid_activation_is_an_explicit_blocker():
     store = MemoryStore()
-    contract = Contract(id="task:bad-activation", activation="input_a&input_b")
+    contract = Contract(
+        id="task:bad-activation", activation="input_a&input_b", budget=1
+    )
     store.add_contract(contract)
 
     view = RuntimeProjection(store, MemoryTraceStore()).contract_view(contract)
@@ -104,7 +106,51 @@ def test_projection_snapshot_reuses_runtime_records_across_contract_views():
     ]
 
 
-def test_conflicting_terminal_facts_fail_closed():
+def test_current_projection_reads_only_referenced_asset_names_and_reuses_fact_rows(
+    monkeypatch,
+):
+    with SQLiteStore() as store:
+        contract = Contract(
+            id="target",
+            inputs=("required",),
+            outputs=("report",),
+            activation="required AND (alternative OR optional)",
+            budget=2,
+        )
+        store.add_contract(contract)
+        for name in ("required", "alternative", "unrelated"):
+            store.add_asset(
+                sign_asset(Asset(id=name, name=name, content=name), signed_by="owner")
+            )
+        expected = RuntimeProjection(
+            store, store, available_names={"required", "alternative", "unrelated"}
+        ).contract_view(contract)
+        original_lookup = store.has_asset_named
+        original_scan = store.scan_runtime_records
+        looked_up = set()
+        scans = []
+
+        def lookup(name):
+            looked_up.add(name)
+            return original_lookup(name)
+
+        def scan(*args, **kwargs):
+            scans.append(1)
+            return original_scan(*args, **kwargs)
+
+        def unexpected_asset_scan():
+            raise AssertionError("current view must only query referenced asset names")
+
+        monkeypatch.setattr(store, "has_asset_named", lookup)
+        monkeypatch.setattr(store, "get_all_assets", unexpected_asset_scan)
+        monkeypatch.setattr(store, "scan_runtime_records", scan)
+
+        assert RuntimeProjection(store, store).contract_view(contract) == expected
+        assert looked_up == {"required", "alternative", "optional"}
+        assert len(scans) == 1
+
+
+def test_trace_terminal_events_do_not_affect_projection():
     store = MemoryStore()
     trace = MemoryTraceStore()
     contract = Contract(id="c1", budget=1)
@@ -113,24 +159,27 @@ def test_conflicting_terminal_facts_fail_closed():
     trace.append(create_entry("c1", "failed", sequence=1))
 
     view = RuntimeProjection(store, trace).contract_view(contract)
-    assert view.enabled is False
-    assert view.terminal == "conflict"
-    assert view.terminal_events == ("complete", "failed")
-    assert "terminal_conflict" in view.blockers
+    assert view.enabled is True
+    assert view.terminal is None
+    assert view.terminal_events == ()
+    assert view.blockers == ()
 
 
-def test_projection_as_of_excludes_later_terminal_event():
+def test_projection_as_of_uses_lifecycle_terminal_facts_not_trace():
     store = MemoryStore()
     trace = MemoryTraceStore()
-    contract = Contract(id="c1", budget=1)
-    store.add_contract(contract)
-    first = create_entry("c1", "activation", sequence=0)
-    terminal = create_entry("c1", "complete", sequence=1, parent_id=first.id)
+    ingress = candidate_runtime(store, trace)
+    contract = ingress.accept_contract(Contract(id="c1", budget=1))
+    first = create_entry(contract.id, "activation", sequence=0)
     trace.append(first)
-    trace.append(terminal)
+    trace.append(create_entry(contract.id, "complete", sequence=1, parent_id=first.id))
+    terminal_revision = store.get_runtime_revision()
+    from aigineering.core.lifecycle_facts import create_terminal_record
+
+    store.append_runtime_record(create_terminal_record(contract.id, "complete"))
 
     before_terminal = RuntimeProjection(
-        store, trace, as_of=first.timestamp
+        store, trace, as_of_revision=terminal_revision
     ).contract_view(contract)
     current = RuntimeProjection(store, trace).contract_view(contract)
     assert before_terminal.terminal is None

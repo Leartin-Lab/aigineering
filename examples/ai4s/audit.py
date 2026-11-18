@@ -78,7 +78,7 @@ def attest_report(db_path: str, contract_id: str) -> dict[str, Any]:
         publisher = ensure_local_plugin_publisher(
             store,
             "ai4s.literature.verify.v1",
-            ("asset.attest", "verify.literature"),
+            ("asset.attest", "literature.verify"),
         )
         decision = publisher.publish(
             (

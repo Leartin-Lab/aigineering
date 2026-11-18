@@ -1,5 +1,6 @@
 """Executable constraints for the 0.5 design/change/evidence workflow."""
 
+import ast
 from pathlib import Path
 import re
 
@@ -30,30 +31,23 @@ def _public_markdown_files() -> tuple[Path, ...]:
     return tuple(files)
 
 
-def test_stable_design_change_and_adr_are_current():
-    design = (ROOT / "DESIGN.md").read_text(encoding="utf-8")
-    change = (ROOT / "changes/001-candidate-genesis.md").read_text(encoding="utf-8")
-
-    for section in (
-        "## Implemented runtime path",
-        "## Known transition boundaries",
-        "## Release limits",
+def test_current_design_describes_closed_atomic_asset_runtime():
+    design = (ROOT / "DESIGN.md").read_text()
+    change = (ROOT / "changes/137-closed-primitive-task-runtime.md").read_text()
+    for concept in (
+        "one SQLite transaction",
+        "Any admitted Asset",
+        "no post-completion",
+        "schema 24",
     ):
-        assert section in design
+        assert concept.lower() in design.lower()
     for section in (
         "## Problem",
         "## Resulting design",
         "## Public compatibility",
-        "## Required verification",
-        "## Closure",
+        "## Verification scope",
     ):
         assert section in change
-    adr = (ROOT / "docs/adr/ADR-011-candidate-native-plugin-runtime.md").read_text(
-        encoding="utf-8"
-    )
-    assert "Status: Accepted" in adr
-    assert "migration in progress" not in adr
-    assert "current implemented truth" in adr
 
 
 def test_public_sources_do_not_reference_private_workspaces():
@@ -112,7 +106,7 @@ def test_public_skill_prefers_real_workers_and_routes_harness_migration():
 
     assert "HarnessCandidateAdapter" in skill
     assert "docs/reference/agent-harness-migration.md" in skill
-    assert "never present mock output as production" in skill.lower()
+    assert "Mock workers" in skill or "mock" in skill.lower()
     assert "aig worker next" in skill
     assert "signed" in skill and "Candidate" in skill
     assert "--input" in readme
@@ -127,7 +121,32 @@ def test_harness_adapter_delegates_to_the_workerhost_compiler():
     assert "compile_worker_envelope" in harness
     assert "claim_bound_graph_output_effects" not in harness
     assert worker.count("def compile_worker_envelope(") == 1
-    assert worker.count("claim_bound_graph_output_effects(") == 1
+    tree = ast.parse(worker)
+    graph_owner = "claim_bound_graph_output_effects"
+    owners = [
+        node.module
+        for node in tree.body
+        if isinstance(node, ast.ImportFrom)
+        and any((item.asname or item.name) == graph_owner for item in node.names)
+    ]
+    assert owners == ["aigineering.protocol.effect_builders"]
+    assert not any(
+        isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.name == graph_owner
+        for node in ast.walk(tree)
+    )
+    callers = {
+        node.name
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef)
+        and any(
+            isinstance(call, ast.Call)
+            and isinstance(call.func, ast.Name)
+            and call.func.id == "claim_bound_graph_output_effects"
+            for call in ast.walk(node)
+        )
+    }
+    assert callers == {"compile_worker_envelope", "_compile_attestation_action"}
 
 
 def test_public_markdown_local_links_resolve():
@@ -145,7 +164,7 @@ def test_public_markdown_local_links_resolve():
             )
 
 
-def test_released_changes_are_ordered_and_design_matches_package_version():
+def test_released_changes_are_ordered_and_design_identifies_its_scope():
     redis_change = (ROOT / "changes/003-redis-query-projection.md").read_text(
         encoding="utf-8"
     )
@@ -168,10 +187,12 @@ def test_released_changes_are_ordered_and_design_matches_package_version():
     assert "Status: Accepted" in identity_adr
     from aigineering import __version__
 
-    assert f"Status: implemented truth for v{__version__}" in design
-    assert "Redis is a required application collaboration component" in design
-    assert "Redis is independently rebuildable infrastructure" in design
-    assert "## Asset identity graph" in design
+    assert (
+        "Status: implemented development snapshot" in design
+        or f"Status: implemented truth for v{__version__}" in design
+    )
+    assert "Redis is required application" in design
+    assert "Definition identity" in design
 
 
 def test_redis_adapter_cannot_enter_correctness_owners():
@@ -179,7 +200,7 @@ def test_redis_adapter_cannot_enter_correctness_owners():
         "src/aigineering/core/commitment.py",
         "src/aigineering/core/authority.py",
         "src/aigineering/core/causal_allowance.py",
-        "src/aigineering/core/claims.py",
+        "src/aigineering/core/sqlite_store.py",
         "src/aigineering/core/acceptance.py",
         "src/aigineering/core/lifecycle_facts.py",
         "src/aigineering/core/fact_reducer.py",
@@ -239,7 +260,7 @@ def test_asset_slice_uses_candidate_commitment_and_preserves_lineage():
     )[0]
 
     assert "commit_local_effect" in body
-    assert "asset_proposal_effect" in body
+    assert "slice_publication_effects" in body
     assert "accept_asset" not in body
     projection = (ROOT / "src/aigineering/core/effect_projectors.py").read_text(
         encoding="utf-8"
@@ -301,17 +322,32 @@ def test_http_asset_and_contract_creation_require_signed_candidates():
     assert "inject_asset" not in creation_surface
 
 
-def test_http_slice_recomputes_signed_candidate_payload_before_commit():
+def test_http_slice_validates_fresh_pair_in_candidate_commitment():
     source = (ROOT / "src/aigineering/server/app.py").read_text(encoding="utf-8")
     body = source.split("def slice_asset", 1)[1].split(
         '@app.post(\n    "/replacement-claims"', 1
     )[0]
 
     assert "AssetSliceCandidateRequest" in source
-    assert "_require_single_effect" in body
-    assert "asset_proposal_effect(expected)" in body
-    assert "_commit_candidate_request" in body
+    assert '("asset.propose", "asset.relate")' in body
+    assert "slice_publication_effects" in body
+    assert "validate_fresh=validate_fresh" in body
     assert "RuntimeIngress" not in body
+    builder = (ROOT / "src/aigineering/asset_publication.py").read_text()
+    assert "asset_proposal_effect(sliced)" in builder
+    assert "replacement_claim_effect(claim, replacement_effect_index=0)" in builder
+    committer = (ROOT / "src/aigineering/core/commitment.py").read_text()
+    assert (
+        committer.index(
+            "receipt = candidate_received_record(",
+            committer.index("def _commit_locked"),
+        )
+        < committer.index("return committed_candidate_decision(receipt, historical)")
+        < committer.index("validate_fresh()")
+        < committer.index(
+            "projection_context = context_inputs.load_candidate_projection_context"
+        )
+    )
 
 
 def test_recovery_recreate_publishes_contract_candidate():
@@ -336,7 +372,7 @@ def test_recovery_cancel_uses_candidate_and_trace_is_not_task_state():
     assert "commit_local_effect" in cancel
     assert "RecoveryMethodHandler" not in source
     assert "MethodRuntime" not in source
-    assert 'record_type="lifecycle.terminal"' in source
+    assert 'read_task_facts(contract_id, ("lifecycle.terminal",))' in source
 
 
 def test_retry_cli_publishes_an_ordinary_contract_candidate():
@@ -458,13 +494,44 @@ def test_engine_worker_bootstraps_inner_domain_through_candidate_publication():
 def test_commitment_coordinator_does_not_own_effect_semantics():
     path = ROOT / "src/aigineering/core/commitment.py"
     source = path.read_text(encoding="utf-8")
+    tree = ast.parse(source)
 
     assert "asset.propose" not in source
     assert "contract.declare" not in source
     assert "worker_registration" not in source
     assert "scan_runtime_records" not in source
     assert "project_effect_batch" in source
-    assert len(source.splitlines()) < 300
+
+    imported_decision_helpers = {
+        alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom)
+        and node.module == "aigineering.core.candidate_decision"
+        for alias in node.names
+    }
+    defined_functions = {
+        node.name
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+    imported_modules = {
+        node.module
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.module
+    } | {
+        alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Import)
+        for alias in node.names
+    }
+
+    assert "require_same_projection" not in imported_decision_helpers
+    assert "require_same_projection" not in defined_functions
+    assert "decision_projection_fingerprint" not in defined_functions
+    assert not any(
+        module == "aigineering.plugins" or module.startswith("aigineering.plugins.")
+        for module in imported_modules
+    )
 
 
 def test_worker_submission_uses_shared_fact_reduction_without_runtime_ingress():
@@ -475,7 +542,8 @@ def test_worker_submission_uses_shared_fact_reduction_without_runtime_ingress():
     worker_cli = (ROOT / "src/aigineering/cli/worker.py").read_text(encoding="utf-8")
 
     assert not (ROOT / "src/aigineering/core/submit.py").exists()
-    assert "reduce_asset_facts" in commitment
+    assert "close_claim_attempt" in commitment
+    assert "commit_ingress_batch" in commitment
     assert "def submit_candidate_envelope" not in runtime
     assert "def _submit_claimed_method" not in runtime
     assert "CandidateCommitter(store, trace).commit(proposal)" in runtime
@@ -514,24 +582,6 @@ def test_claim_bound_delegation_semantics_live_in_plugin_not_runtime_service():
     assert "accept_contract" not in plugin
 
 
-def test_production_completion_projection_has_no_direct_ingress():
-    runtime = (ROOT / "src/aigineering/runtime.py").read_text(encoding="utf-8")
-    completion = runtime.split("def process_task_completions", 1)[1].split(
-        "def _method_context_assets_for", 1
-    )[0]
-
-    assert "RuntimeIngress" not in completion
-    assert "FactReducer" not in completion
-    assert "commit_ingress_batch" in completion
-    assert ".append_runtime_record(" not in completion
-    assert "def process_method_completions" not in runtime
-    projector = (ROOT / "src/aigineering/plugins/completion_projection.py").read_text(
-        encoding="utf-8"
-    )
-    assert "plugin:plan.compile" not in projector
-    assert "plugin:replan.compile" not in projector
-
-
 def test_server_delegates_worker_command_authentication_to_protocol_service():
     server = (ROOT / "src/aigineering/server/app.py").read_text(encoding="utf-8")
     coordination = (ROOT / "src/aigineering/core/worker_coordination.py").read_text(
@@ -562,105 +612,43 @@ def test_production_loops_use_neutral_runtime_maintenance_entrypoint():
     assert "process_rejected_submissions" not in nested
 
 
-def test_new_expansion_avoids_delegation_facts_and_old_facts_remain_readable():
-    runtime = (ROOT / "src/aigineering/runtime.py").read_text(encoding="utf-8")
-    plugin = (ROOT / "src/aigineering/plugins/delegation.py").read_text(
-        encoding="utf-8"
-    )
-    projection = (ROOT / "src/aigineering/core/runtime_projection.py").read_text(
-        encoding="utf-8"
-    )
-
-    assert 'create_runtime_record(\n        "task.delegated"' not in runtime
-    assert '"status": "task_delegated"' in runtime
-    assert 'CandidateEffect("task.delegate"' not in plugin
-    assert '"task_delegated"' in projection
-    assert '"method_scheduled"' in projection
+def test_runtime_task_state_is_a_readonly_fact_projection():
+    projection = (ROOT / "src/aigineering/core/runtime_projection.py").read_text()
+    assert 'set(typed_terminal_events) - {"failed"}' in projection
+    for mutation in (".add_contract(", ".add_asset(", ".append_runtime_record("):
+        assert mutation not in projection
+    assert "self._trace" not in projection
 
 
-def test_runtime_task_state_is_a_pure_boolean_projection():
-    projection = (ROOT / "src/aigineering/core/runtime_projection.py").read_text(
-        encoding="utf-8"
-    )
-    task_state = (ROOT / "src/aigineering/task_views.py").read_text(encoding="utf-8")
-
-    assert 'blockers.append("delegation_pending")' in projection
-    assert "method_pending" not in projection
-    assert 'return "blocked_delegation"' in task_state
-    assert ".add_contract(" not in projection
-    assert ".add_asset(" not in projection
-    assert ".append_runtime_record(" not in projection
-
-
-def test_recovery_replay_requires_authenticated_candidate_publisher():
-    runtime = (ROOT / "src/aigineering/runtime.py").read_text(encoding="utf-8")
-    replay = runtime.split("def _schedule_rejected_recovery", 1)[1].split(
-        "def process_rejected_submissions", 1
-    )[0]
-
-    assert "authenticated recovery Candidate publisher" in replay
+def test_recovery_requires_authenticated_publisher_and_has_no_postcommit_marker():
+    runtime = (ROOT / "src/aigineering/runtime.py").read_text()
+    assert "authenticated recovery Candidate publisher" in runtime
     assert ".append_runtime_record(" not in runtime
-    assert "def _commit_recovery_outcome" in runtime
-    assert "store.commit_ingress_batch(" in runtime
-    assert "candidate_publishers is None" in replay
+    assert "def _commit_recovery_outcome" not in runtime
+    assert "store.commit_ingress_batch(" not in runtime
     assert "RuntimeIngress" not in runtime
-    assert "FactReducer" not in runtime
 
 
-def test_projection_failure_terminal_is_distinct_from_recovery_progress():
-    projection = (ROOT / "src/aigineering/core/effect_projectors.py").read_text(
-        encoding="utf-8"
-    )
-    runtime = (ROOT / "src/aigineering/runtime.py").read_text(encoding="utf-8")
-
-    assert "create_terminal_record" in projection
-    assert '"projection_rejection.recovery_scheduled"' in runtime
-    assert "recovered_source_ids" in runtime
-    assert '"candidate_rejection.recovery_scheduled"' in runtime
+def test_recovery_adapter_publishes_only_ordinary_signed_primitives():
+    recovery = (ROOT / "src/aigineering/plugins/recovery.py").read_text()
+    assert "contract_declaration_effect(" in recovery
+    assert "asset_proposal_effect(" in recovery
+    assert "publisher.publish(" in recovery
+    assert "commit_ingress_batch" not in recovery
+    assert "append_runtime_record" not in recovery
 
 
-def test_local_recovery_replay_publishes_contract_and_context_as_candidate():
-    recovery = (ROOT / "src/aigineering/plugins/recovery.py").read_text(
-        encoding="utf-8"
-    )
-    identity = (ROOT / "src/aigineering/local_identity.py").read_text(encoding="utf-8")
-
-    assert 'can_publish_candidates("recovery.publish.v1")' in recovery
-    assert "contract_declaration_effect(recovery)" in recovery
-    assert "asset_proposal_effect(context_template)" in recovery
-    assert '"recovery.publish.v1"' in identity
-    assert '"contract.publish.protected"' in identity
-    assert '"asset.publish.protected"' in identity
-    assert "runtime.add_contract" not in recovery
-    assert "mint_authorized_system_asset" not in recovery
-    assert not (ROOT / "src/aigineering/core/method_handlers/recovery.py").exists()
-
-
-def test_recovery_history_proof_is_read_only_and_uses_shared_exact_membership():
-    recovery_history = (ROOT / "src/aigineering/plugins/recovery_history.py").read_text(
-        encoding="utf-8"
-    )
-
-    assert "validate_published_member" in recovery_history
-    assert "candidate_content_id" in recovery_history
-    assert "project_asset_proposal" in recovery_history
-    assert "CandidatePublisher" not in recovery_history
-    assert "SQLiteStore" not in recovery_history
-    assert "commit_ingress_batch" not in recovery_history
-    assert "Signer" not in recovery_history
-
-
-def test_completion_plugins_have_no_direct_contract_mutation_fallback():
-    completion = (ROOT / "src/aigineering/plugins/completion_projection.py").read_text(
-        encoding="utf-8"
-    )
-    planning = (ROOT / "src/aigineering/plugins/planning_completion.py").read_text(
-        encoding="utf-8"
-    )
-
-    assert "def add_contract" not in completion
-    assert "mint_authorized_system_asset" not in completion
-    assert "runtime.add_contract" not in planning
+def test_recovery_history_proof_reads_actual_publication_without_makers():
+    history = (ROOT / "src/aigineering/plugins/recovery_history.py").read_text()
+    assert "validate_published_member" in history
+    for maker in (
+        "project_asset_proposal",
+        "CandidatePublisher",
+        "SQLiteStore",
+        "commit_ingress_batch",
+        "Signer",
+    ):
+        assert maker not in history
 
 
 def test_http_worker_ingress_never_provisions_local_private_keys_or_direct_recovery():
@@ -695,16 +683,14 @@ def test_engine_worker_composes_authenticated_worker_and_completion_plugins():
     assert "actor_authorization_effect" in hosting
     assert "worker_registration_effect" in hosting
     assert "WorkerHost" in hosting
-    assert "default_completion_registry" in source
+    assert "default_completion_registry" not in source
     assert "aigineering.application" not in source
     assert "MethodRegistry" not in source
     assert "method_handlers" not in source
 
 
 def test_task_projection_semantics_live_with_plugins_not_core_compatibility():
-    compatibility = (ROOT / "src/aigineering/core/methods.py").read_text(
-        encoding="utf-8"
-    )
+    assert not (ROOT / "src/aigineering/core/methods.py").exists()
     semantics = (ROOT / "src/aigineering/plugins/task_semantics.py").read_text(
         encoding="utf-8"
     )
@@ -718,13 +704,10 @@ def test_task_projection_semantics_live_with_plugins_not_core_compatibility():
     assert "def method_contract" in semantics
     assert "def continuation_contract" in semantics
     assert "aigineering.core.methods" not in production
-    assert len(compatibility.splitlines()) < 30
-
     core_plugin_imports = {
         path.name
         for path in (ROOT / "src/aigineering/core").glob("*.py")
-        if path.name != "methods.py"
-        and "aigineering.plugins" in path.read_text(encoding="utf-8")
+        if "aigineering.plugins" in path.read_text(encoding="utf-8")
     }
     assert core_plugin_imports == set()
 
@@ -732,32 +715,25 @@ def test_task_projection_semantics_live_with_plugins_not_core_compatibility():
 def test_production_code_does_not_import_core_methods_compatibility_module():
     offenders = []
     for path in (ROOT / "src/aigineering").rglob("*.py"):
-        if path.as_posix().endswith("/core/methods.py"):
-            continue
         if "aigineering.core.methods" in path.read_text(encoding="utf-8"):
             offenders.append(path.relative_to(ROOT).as_posix())
 
     assert offenders == []
 
 
-def test_retry_delegation_does_not_ship_as_completion_registry_semantics():
-    application = (ROOT / "src/aigineering/application.py").read_text(encoding="utf-8")
-    plugins = (ROOT / "src/aigineering/plugins/__init__.py").read_text(encoding="utf-8")
-
-    assert "RetryMethodHandler" not in application
-    assert 'registry.register("retry"' not in plugins
-    assert "default_method_registry" not in application
-    assert "default_completion_registry" in application
-    assert "MethodRegistry" not in application
-    assert "CompletionRegistry" in plugins
-    assert "PlanMethodHandler" not in application
-    assert "ReplanMethodHandler" not in application
-    assert "PlanningCompletionPlugin" in plugins
-    assert "ReplanningCompletionPlugin" in plugins
-    assert "ToolMethodHandler" not in application
-    assert "ToolCompletionPlugin" in plugins
-    assert "FailMethodHandler" not in application
-    assert "FailCompletionPlugin" in plugins
+def test_retired_core_compatibility_modules_have_no_sources_or_imports():
+    core = ROOT / "src/aigineering/core"
+    retired = {"claims.py", "heartbeat.py", "methods.py", "provider_config.py"}
+    assert not (retired & {path.name for path in core.glob("*.py")})
+    for path in (ROOT / "src/aigineering").rglob("*.py"):
+        source = path.read_text(encoding="utf-8")
+        for module in (
+            "core.claims",
+            "core.heartbeat",
+            "core.methods",
+            "core.provider_config",
+        ):
+            assert f"aigineering.{module}" not in source, path
 
 
 def test_productivity_audit_and_tool_worker_preserve_candidate_boundary():

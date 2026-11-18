@@ -1,14 +1,8 @@
-"""Generic immutable constraints that gate acquisition of new claims.
-
-The first supported predicate is deliberately fixed: a task may be claimed only
-after one exact prerequisite Contract has a typed successful terminal fact.
-These records do not alter Contract identity, disclosure, or output semantics.
-"""
+"""Read-only validation of historical claim constraints records."""
 
 from __future__ import annotations
 
 from collections.abc import Iterable, Iterator
-from dataclasses import dataclass
 
 from aigineering.protocol.runtime_record import RuntimeRecord, validate_runtime_record
 
@@ -35,28 +29,6 @@ _MAX_FIELD_BYTES = 65536
 
 class ClaimConstraintConflict(ValueError):
     """A prerequisite constraint is malformed or conflicts with claim history."""
-
-
-@dataclass(frozen=True)
-class PrerequisiteBlocker:
-    """One active edge that currently prevents a task from being claimed."""
-
-    contract_id: str
-    constraint_id: str
-    prerequisite_contract_id: str
-    predicate: str
-    required_terminal: str
-    observed_terminal: str
-
-    def as_dict(self) -> dict[str, str]:
-        return {
-            "contract_id": self.contract_id,
-            "constraint_id": self.constraint_id,
-            "prerequisite_contract_id": self.prerequisite_contract_id,
-            "predicate": self.predicate,
-            "required_terminal": self.required_terminal,
-            "observed_terminal": self.observed_terminal,
-        }
 
 
 def _validate_fact(record: RuntimeRecord) -> None:
@@ -226,37 +198,6 @@ def claim_constraint_history(
     return tuple(history)
 
 
-def claim_constraint_blockers(
-    records: Iterable[RuntimeRecord], *, contract_id: str
-) -> tuple[dict[str, str], ...]:
-    """Return exact unresolved prerequisite blockers for a task."""
-    records = tuple(records)
-    placements = open_claim_constraints(records, contract_id=contract_id)
-    if not placements:
-        return ()
-    prerequisite_ids = frozenset(
-        str(record.payload["prerequisite_contract_id"]) for record in placements
-    )
-    terminals = _typed_terminal_status(records, contract_ids=prerequisite_ids)
-    blockers = []
-    for placement in placements:
-        prerequisite = str(placement.payload["prerequisite_contract_id"])
-        observed = terminals.get(prerequisite, "missing")
-        if observed == REQUIRED_TERMINAL:
-            continue
-        blockers.append(
-            PrerequisiteBlocker(
-                contract_id=contract_id,
-                constraint_id=placement.id,
-                prerequisite_contract_id=prerequisite,
-                predicate=PREDICATE,
-                required_terminal=REQUIRED_TERMINAL,
-                observed_terminal=observed,
-            ).as_dict()
-        )
-    return tuple(sorted(blockers, key=lambda item: item["constraint_id"]))
-
-
 def _typed_terminal_status(
     records: Iterable[RuntimeRecord], *, contract_ids: frozenset[str] | None = None
 ) -> dict[str, str]:
@@ -291,157 +232,6 @@ def _typed_terminal_status(
     return status
 
 
-def validate_claim_constraint_batch(
-    existing: Iterable[RuntimeRecord],
-    pending: Iterable[RuntimeRecord],
-    *,
-    candidate_id: str,
-    actor_id: str,
-    key_id: str,
-    known_contract_ids: frozenset[str],
-    claimed_contract_ids: frozenset[str],
-    terminal_contract_ids: frozenset[str],
-    output_satisfied_contract_ids: frozenset[str] = frozenset(),
-) -> tuple[RuntimeRecord, ...]:
-    """Validate a single signed transition and all effective graph invariants."""
-    history = tuple(existing)
-    pending = tuple(pending)
-    transitions = tuple(
-        record for record in pending if record.record_type in {PLACED, RELEASED}
-    )
-    if not transitions:
-        return ()
-    if len(transitions) != 1:
-        raise ClaimConstraintConflict("one Candidate may change one claim constraint")
-
-    receipt_records = tuple(
-        record
-        for record in pending
-        if record.record_type == "candidate.received"
-        and record.payload.get("candidate_id") == candidate_id
-        and record.payload.get("actor_id") == actor_id
-        and record.payload.get("key_id") == key_id
-    )
-    heads = tuple(
-        record
-        for record in pending
-        if record.record_type == "candidate.committed"
-        and record.payload.get("candidate_id") == candidate_id
-    )
-    if len(receipt_records) != 1 or len(heads) != 1:
-        raise ClaimConstraintConflict(
-            "constraint lacks authenticated Candidate receipt and head"
-        )
-    receipt, head = receipt_records[0], heads[0]
-    try:
-        validate_runtime_record(receipt)
-        validate_runtime_record(head)
-    except ValueError as exc:
-        raise ClaimConstraintConflict(
-            "constraint Candidate provenance is invalid"
-        ) from exc
-    if receipt.schema_version != 1 or head.schema_version != 1:
-        raise ClaimConstraintConflict("unsupported Candidate provenance schema")
-    if set(head.payload) != {"candidate_id", "committed_record_ids"}:
-        raise ClaimConstraintConflict("committed Candidate head fields are invalid")
-    if head.payload.get("candidate_id") != candidate_id:
-        raise ClaimConstraintConflict("committed Candidate head identity is invalid")
-    if receipt.id not in head.causal_parents:
-        raise ClaimConstraintConflict("committed head omits Candidate receipt")
-    committed_ids = head.payload.get("committed_record_ids")
-    if not isinstance(committed_ids, (tuple, list)):
-        raise ClaimConstraintConflict("committed head record list is invalid")
-
-    transition = transitions[0]
-    _validate_fact(transition)
-    payload = transition.payload
-    if (
-        payload["candidate_id"] != candidate_id
-        or payload["actor_id"] != actor_id
-        or payload["key_id"] != key_id
-        or receipt.id not in transition.causal_parents
-        or transition.id not in committed_ids
-        or transition.id not in head.causal_parents
-    ):
-        raise ClaimConstraintConflict(
-            "constraint provenance does not match Candidate head"
-        )
-
-    validate_claim_constraint_transition(
-        history,
-        transition,
-        known_contract_ids=known_contract_ids,
-        claimed_contract_ids=claimed_contract_ids,
-        terminal_contract_ids=terminal_contract_ids,
-        output_satisfied_contract_ids=output_satisfied_contract_ids,
-    )
-    return (transition,) if transition.record_type == PLACED else ()
-
-
-def validate_claim_constraint_transition(
-    existing: Iterable[RuntimeRecord],
-    transition: RuntimeRecord,
-    *,
-    known_contract_ids: frozenset[str],
-    claimed_contract_ids: frozenset[str],
-    terminal_contract_ids: frozenset[str],
-    output_satisfied_contract_ids: frozenset[str] = frozenset(),
-) -> tuple[RuntimeRecord, ...]:
-    """Validate one pure transition and return the resulting active edge set.
-
-    This form is suitable for authenticated pure projection, where the receipt
-    ID is known but the committed Candidate head does not exist yet. The Store
-    uses the batch form above to add receipt/head verification in its writer.
-    """
-    _validate_fact(transition)
-    if transition.record_type not in {PLACED, RELEASED}:
-        raise ClaimConstraintConflict("expected one claim constraint transition")
-    target = str(transition.payload["contract_id"])
-    prerequisite = str(transition.payload["prerequisite_contract_id"])
-    if target not in known_contract_ids or prerequisite not in known_contract_ids:
-        raise ClaimConstraintConflict("claim constraint references an unknown Contract")
-    if target in terminal_contract_ids:
-        raise ClaimConstraintConflict("claim constraint target is terminal")
-    if target in claimed_contract_ids:
-        raise ClaimConstraintConflict("claim constraint target has claim history")
-    if transition.record_type == PLACED and target in output_satisfied_contract_ids:
-        raise ClaimConstraintConflict(
-            "claim constraint target outputs are already satisfied"
-        )
-
-    active = list(open_claim_constraints(existing))
-    if transition.record_type == PLACED:
-        if any(
-            record.payload["contract_id"] == target
-            and record.payload["prerequisite_contract_id"] == prerequisite
-            for record in active
-        ):
-            raise ClaimConstraintConflict("duplicate open prerequisite constraint")
-        active.append(transition)
-    else:
-        constraint_id = str(transition.payload["constraint_id"])
-        placement = next(
-            (record for record in active if record.id == constraint_id), None
-        )
-        if placement is None:
-            raise ClaimConstraintConflict(
-                "constraint release does not identify an open link"
-            )
-        if any(
-            placement.payload[field] != transition.payload[field]
-            for field in (
-                "contract_id",
-                "prerequisite_contract_id",
-                "predicate",
-                "required_terminal",
-            )
-        ):
-            raise ClaimConstraintConflict("constraint release changes its exact link")
-        active.remove(placement)
-    _validate_acyclic(active)
-    return tuple(active)
-
-
 def _validate_acyclic(placements: Iterable[RuntimeRecord]) -> None:
     graph: dict[str, set[str]] = {}
     for record in placements:
@@ -470,75 +260,3 @@ def _validate_acyclic(placements: Iterable[RuntimeRecord]) -> None:
             if child_state == 0:
                 state[child] = 1
                 stack.append((child, iter(graph.get(child, ()))))
-
-
-def external_prerequisite_blockers(
-    records: Iterable[RuntimeRecord],
-    *,
-    cancelled_contract_ids: frozenset[str],
-    repair_complete_contract_ids: frozenset[str] = frozenset(),
-    repair_only_target_ids: frozenset[str] = frozenset(),
-) -> tuple[dict[str, str], ...]:
-    """Find open edges that prevent transferring cancelled targets.
-
-    Edges internal to the cancellation set and targets explicitly receiving a
-    same-batch canonical completion repair are excluded. No successor IDs are
-    inferred or followed here.
-    """
-    records = tuple(records)
-    placements = open_claim_constraints(records)
-    blockers: list[dict[str, str]] = []
-    relevant: list[RuntimeRecord] = []
-    for placement in placements:
-        target = str(placement.payload["contract_id"])
-        prerequisite = str(placement.payload["prerequisite_contract_id"])
-        if target not in cancelled_contract_ids:
-            continue
-        if target in repair_only_target_ids:
-            continue
-        if prerequisite in cancelled_contract_ids:
-            continue
-        if prerequisite in repair_complete_contract_ids:
-            continue
-        relevant.append(placement)
-    if not relevant:
-        return ()
-    prerequisite_ids = frozenset(
-        str(record.payload["prerequisite_contract_id"]) for record in relevant
-    )
-    terminals = _typed_terminal_status(records, contract_ids=prerequisite_ids)
-    for placement in relevant:
-        target = str(placement.payload["contract_id"])
-        prerequisite = str(placement.payload["prerequisite_contract_id"])
-        observed = terminals.get(prerequisite, "missing")
-        if observed == REQUIRED_TERMINAL:
-            continue
-        blockers.append(
-            PrerequisiteBlocker(
-                contract_id=target,
-                constraint_id=placement.id,
-                prerequisite_contract_id=prerequisite,
-                predicate=PREDICATE,
-                required_terminal=REQUIRED_TERMINAL,
-                observed_terminal=observed,
-            ).as_dict()
-        )
-    return tuple(
-        sorted(blockers, key=lambda item: (item["contract_id"], item["constraint_id"]))
-    )
-
-
-__all__ = [
-    "ClaimConstraintConflict",
-    "PLACED",
-    "PREDICATE",
-    "RELEASED",
-    "REQUIRED_TERMINAL",
-    "PrerequisiteBlocker",
-    "claim_constraint_blockers",
-    "claim_constraint_history",
-    "external_prerequisite_blockers",
-    "open_claim_constraints",
-    "validate_claim_constraint_transition",
-    "validate_claim_constraint_batch",
-]

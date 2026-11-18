@@ -1,4 +1,4 @@
-"""Signed task attachment association and safe metadata/export views."""
+"""Read-only historical attachments views."""
 
 from __future__ import annotations
 
@@ -8,20 +8,12 @@ import json
 import os
 from pathlib import Path
 
-from aigineering.application import collaboration_service, require_redis
+from aigineering.application import collaboration_service
 from aigineering.redis_collaboration import RedisCollaborationUnavailable
 from aigineering.business import artifacts
-from aigineering.core.commitment import CandidateCommitRejected
-from aigineering.local_identity import ensure_local_plugin_publisher
 from aigineering.plugins.task_attachments import (
-    LINKED,
-    TASK_ATTACHMENT_EFFECTS,
-    validate_contract_declaration_member,
     validate_link_history,
-    validate_published_member,
 )
-from aigineering.protocol.candidate import CandidateEffect
-from aigineering.runtime_services import RedisSyncPending, sync_runtime
 from aigineering.core.sqlite_store import SQLiteStore
 
 _PLUGIN_ID = "task.attachments.operator.v1"
@@ -33,135 +25,6 @@ class TaskAttachmentError(ValueError):
     def __init__(self, code: str) -> None:
         self.code = code
         super().__init__(code)
-
-
-def add_task_attachment(
-    store, contract_id: str, asset_id: str, *, idempotency_key: str | None = None
-) -> tuple[dict, int]:
-    """Append one exact, signed relation to an already published attachment."""
-    _validate_text(contract_id, "contract_id")
-    _validate_text(asset_id, "asset_id")
-    if idempotency_key is not None:
-        _validate_text(idempotency_key, "idempotency_key")
-    require_redis()
-    contract = store.get_contract(contract_id)
-    asset = store.get_asset(asset_id)
-    if contract is None:
-        raise TaskAttachmentError("task_not_found")
-    if asset is None:
-        raise TaskAttachmentError("asset_not_found")
-    pairs = store.scan_runtime_records()
-    records = tuple(record for _revision, record in pairs)
-    declaration = _unique_record(
-        records,
-        lambda record: (
-            record.record_type == "contract.declared"
-            and record.payload.get("contract", {}).get("id") == contract_id
-        ),
-    )
-    asset_fact = _unique_record(
-        records,
-        lambda record: (
-            record.record_type == "asset.committed"
-            and record.payload.get("asset", {}).get("id") == asset_id
-        ),
-    )
-    from aigineering.core.domain import load_genesis
-
-    domain_id = load_genesis(store).id
-    try:
-        source_receipt, source_head = validate_published_member(
-            records, asset_fact, domain_id=domain_id
-        )
-        validate_contract_declaration_member(
-            records, declaration, contract_id=contract_id, domain_id=domain_id
-        )
-    except ValueError as exc:
-        raise TaskAttachmentError("publication_unavailable") from exc
-    if tuple(source_receipt.payload.get("effect_types", ())) != ("asset.propose",):
-        raise TaskAttachmentError("asset_publication_unavailable")
-    key = idempotency_key or f"task-attachment:{contract_id}:{asset_id}"
-    effect = CandidateEffect(
-        "task.attachment.link",
-        {
-            "contract_id": contract_id,
-            "asset_id": asset_id,
-            "contract_record_id": declaration.id,
-            "asset_record_id": asset_fact.id,
-            "asset_candidate_id": source_receipt.payload["candidate_id"],
-            "asset_receipt_id": source_receipt.id,
-            "asset_head_id": source_head.id,
-            "idempotency_key": key,
-        },
-    )
-    parents = (declaration.id, asset_fact.id, source_receipt.id, source_head.id)
-    try:
-        publisher = ensure_local_plugin_publisher(store, _PLUGIN_ID, _CAPABILITIES)
-    except (OSError, TypeError, ValueError) as exc:
-        raise TaskAttachmentError("authorization_unavailable") from exc
-    from dataclasses import replace
-
-    publisher = replace(publisher, additional_effects=TASK_ATTACHMENT_EFFECTS)
-    sync_runtime(store)
-    try:
-        decision = publisher.publish(
-            (effect,), idempotency_key=key, causal_parents=parents
-        )
-    except CandidateCommitRejected as exc:
-        sync_runtime(store, accepted=False)
-        raise TaskAttachmentError("candidate_rejected") from exc
-    except RedisSyncPending as exc:
-        decision = exc.decision
-        if decision is None or not decision.accepted:
-            raise
-        data = _accepted_add_result(store, decision, contract_id, asset_id, key)
-        exc.data = data
-        exc.revision = store.get_runtime_revision()
-        raise
-    if not decision.accepted:
-        try:
-            sync_runtime(store, accepted=False)
-        except RedisSyncPending as pending:
-            pending.decision = decision
-            pending.revision = store.get_runtime_revision()
-            raise
-        raise TaskAttachmentError("candidate_rejected")
-    data = _accepted_add_result(store, decision, contract_id, asset_id, key)
-    try:
-        sync_runtime(store, accepted=True)
-    except RedisSyncPending as pending:
-        pending.decision = decision
-        pending.data = data
-        pending.revision = store.get_runtime_revision()
-        raise
-    return data, store.get_runtime_revision()
-
-
-def _accepted_add_result(store, decision, contract_id, asset_id, key):
-    matches = [
-        record
-        for record in decision.runtime_records
-        if record.record_type == LINKED
-        and record.payload.get("contract_id") == contract_id
-        and record.payload.get("asset_id") == asset_id
-    ]
-    if len(matches) != 1:
-        raise RuntimeError("accepted attachment Candidate has no unique link fact")
-    durable = store.get_runtime_record(matches[0].id)
-    if durable is None or durable.id != matches[0].id:
-        raise RuntimeError("accepted attachment fact is not durable")
-    all_records = tuple(record for _, record in store.scan_runtime_records())
-    validate_link_history(all_records, contract_id)
-    source = durable.payload
-    return {
-        "contract_id": contract_id,
-        "asset_id": asset_id,
-        "record_id": durable.id,
-        "candidate_id": decision.candidate_id,
-        "asset_candidate_id": source["asset_candidate_id"],
-        "idempotency_key": key,
-        "fact_ids": [durable.id],
-    }
 
 
 def task_attachment_list(
@@ -178,6 +41,7 @@ def task_attachment_list(
         raise TaskAttachmentError("redis_unavailable") from exc
     pairs = store.scan_runtime_records()
     records = tuple(record for _revision, record in pairs)
+    _validate_task_materialization(store, records, contract_id)
     revision_by_id = {record.id: revision for revision, record in pairs}
     links = validate_link_history(records, contract_id)
     domain_id = _domain_id(store)
@@ -305,6 +169,7 @@ def export_task_attachment(
         raise TaskAttachmentError("task_not_found")
     pairs = store.scan_runtime_records()
     records = tuple(record for _revision, record in pairs)
+    _validate_task_materialization(store, records, contract_id, contract=contract)
     links = validate_link_history(records, contract_id)
     if not any(link.payload.get("asset_id") == asset_id for link in links):
         raise TaskAttachmentError("attachment_not_linked")
@@ -343,6 +208,33 @@ def export_task_attachment(
         },
         "revision": store.get_runtime_revision(),
     }
+
+
+def _validate_task_materialization(store, records, contract_id, *, contract=None):
+    declarations = tuple(
+        record
+        for record in records
+        if record.record_type == "contract.declared"
+        and record.payload.get("contract", {}).get("id") == contract_id
+    )
+    if len(declarations) != 1:
+        raise TaskAttachmentError("task_history_unavailable")
+    try:
+        from aigineering.core.contract_admission import validate_contract_commitment
+        from aigineering.protocol.immutability import deep_thaw
+        from aigineering.protocol.wire import contract_from_dict, contract_to_dict
+
+        declared = contract_from_dict(deep_thaw(declarations[0].payload["contract"]))
+        validate_contract_commitment(declared)
+        materialized = (
+            contract if contract is not None else store.get_contract(contract_id)
+        )
+        if materialized is None or contract_to_dict(materialized) != contract_to_dict(
+            declared
+        ):
+            raise ValueError("task materialization differs from its declaration")
+    except (TypeError, ValueError, KeyError) as exc:
+        raise TaskAttachmentError("task_history_unavailable") from exc
 
 
 def _exclusive_export(path: Path, data: bytes) -> None:

@@ -50,4 +50,4 @@ citations, and respects causal and population limits. Reject semantic errors eve
 when structural_receipt passed. Neither a passing gate nor another model's prior
 acceptance is evidence of scientific truth. Copy IDs from disclosed Asset headers.
 
-The acceptor child description must name the actual original independently accepted root Contract ID as its attestation target. Copy the exact task:v5:... ID exposed by plan compile. Do not leave placeholders; do not include any other Contract IDs. The acceptor checks the unique target ID in its signed description, regardless of prose or JSON presentation.
+The acceptor child description must name the actual original independently accepted root Contract ID as its attestation target. Copy the exact root Contract ID exposed by plan compile. Do not leave placeholders; do not include any other Contract IDs. The acceptor checks the unique target ID in its signed description, regardless of prose or JSON presentation.

@@ -19,7 +19,7 @@ from aigineering.core.capability_descriptors import (
     create_mcp_descriptor,
     create_tool_descriptor,
 )
-from aigineering.core.methods import method_contract, system_asset
+from aigineering.plugins.task_semantics import method_contract, system_asset
 from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.core.tools import ToolRegistry
 from aigineering.protocol.actions import parse_action

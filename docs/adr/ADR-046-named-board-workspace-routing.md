@@ -62,6 +62,19 @@ acceptance. It is local routing consistency, not OS isolation or multi-user ACLs
 External workspace adoption does not promise discovery from an unrelated cwd.
 Archive does not prevent explicitly accessing a directory through `-C`.
 
+A new workspace initializes a new domain and task history. Switching selects
+the target's existing history; switching back resumes that history rather than
+resetting it. Copying a Store preserves its identity and does not create another
+independent domain. For a cold archive, stop new Fleet/Worker claims, wait for
+in-flight execution to finish, and preserve a consistent Store, identity and
+required evidence before moving files; registry archive
+alone does none of those steps. Separating domains excludes unrelated workspace
+history, but does not establish history-independent query cost within a domain.
+
+An Engine Worker may explicitly target another existing workspace through the
+[local bridge](ADR-009-runtime-communication-modes.md). Saved board selection
+does not retarget that pinned adapter or grant receiving-domain authority.
+
 Lifecycle, controlled partial failure, concurrent creation and domain isolation
 require bounded checks. Workspace routing does not qualify real-provider output
 quality or a stable release.

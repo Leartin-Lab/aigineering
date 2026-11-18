@@ -500,6 +500,25 @@ print(json.dumps({
             "adopted": f"x{uuid.uuid4().hex[:10]}",
         }
 
+        registry_discovery_code = (
+            "import json,sys; from pathlib import Path; "
+            "from aigineering.local_boards import discover_registry_root; "
+            "root=discover_registry_root(Path(sys.argv[1])); "
+            "print(json.dumps({'root':str(root.resolve()) if root else None}))"
+        )
+        discovered, _, _ = run_python(
+            "verify-isolated-registry-root",
+            registry_discovery_code,
+            [str(caller)],
+        )
+        discovered_root = discovered.get("root")
+        if discovered_root is not None and not Path(
+            discovered_root
+        ).resolve().is_relative_to(root):
+            raise RuntimeError(
+                "board fixture discovered a registry outside its disposable workspace"
+            )
+
         created = {}
         for alias in ("alpha", "beta"):
             payload, create_stdout, create_stderr = run(
@@ -558,9 +577,13 @@ print(json.dumps({
         )
         adopted_domain_id = initialized.get("domain_id")
         key_file = Path(initialized.get("key_file", ""))
+        if not key_file.is_absolute():
+            key_file = adopted_workspace / key_file
+        expected_key = adopted_workspace / ".aig" / "identity" / "root.ed25519"
         if (
             not isinstance(adopted_domain_id, str)
             or not adopted_domain_id
+            or key_file.resolve() != expected_key.resolve()
             or not key_file.is_file()
             or key_file.stat().st_mode & 0o777 != 0o600
         ):

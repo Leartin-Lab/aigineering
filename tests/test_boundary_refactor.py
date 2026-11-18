@@ -56,7 +56,7 @@ class TestTaskIdentityParentCollision:
 
     def test_retry_contract_has_distinct_id(self):
         """Retry contracts bind the complete replacement security definition."""
-        from aigineering.core.methods import retry_contract
+        from aigineering.plugins.task_semantics import retry_contract
 
         original_id = hash_contract(
             "retry_test",
@@ -85,52 +85,6 @@ class TestTaskIdentityParentCollision:
 # ============================================================================
 # Claim lifecycle monotonicity
 # ============================================================================
-
-
-class TestClaimLifecycleMonotonicity:
-    """Contract claims must be monotonic.  A claimed contract never returns
-    to claimable — retry/recovery creates a new contract.
-
-    The ClaimStore already enforces this at the claim level.  The engine-
-    level gap (verified below) is that Engine.run() does not consult the
-    claim store — it uses private `_completed` and `_suspended` sets
-    without checking whether a contract has been previously claimed.
-    """
-
-    def test_claim_store_blocks_reclaim_of_claimed_contract(self):
-        """ClaimStore prevents re-claiming a contract that has ever been
-        claimed.  This is already enforced by `_claimed_contracts` set.
-        """
-        from aigineering.core.claims import ClaimStore
-
-        store = ClaimStore()
-        claim1 = store.claim("contract_x", "worker_1", lease_seconds=3600)
-
-        assert claim1 is not None, "first claim should succeed"
-        assert claim1.status == "active"
-
-        # Re-claiming the same contract must return None
-        claim2 = store.claim("contract_x", "worker_2", lease_seconds=60)
-        assert claim2 is None, (
-            "ClaimStore must block re-claim of previously claimed contract"
-        )
-
-    def test_submitted_claim_cannot_be_reclaimed(self):
-        """After a claim transitions to 'submitted', the contract remains
-        non-claimable.
-        """
-        from aigineering.core.claims import ClaimStore
-
-        store = ClaimStore()
-        claim = store.claim("contract_y", "worker_1", lease_seconds=3600)
-        assert claim is not None
-
-        submitted = store.submit_claim(claim.claim_id)
-        assert submitted, "submit should succeed"
-
-        # Contract still cannot be re-claimed
-        claim2 = store.claim("contract_y", "worker_2", lease_seconds=60)
-        assert claim2 is None, "Submitted claim should still prevent re-claiming"
 
 
 # ============================================================================

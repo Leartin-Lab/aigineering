@@ -36,7 +36,11 @@ def domain_init(domain_name: str, actor_id: str, key_id: str, as_json: bool) -> 
             )
         except (OSError, ValueError) as exc:
             raise click.ClickException(str(exc)) from exc
-        sync_runtime(store, accepted=True)
+        sync_runtime(
+            store,
+            accepted=True,
+            identifiers={"domain_id": initialized.manifest.id},
+        )
     finally:
         store.close()
 

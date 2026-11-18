@@ -11,14 +11,18 @@ pytest.importorskip("httpx")
 
 from fastapi.testclient import TestClient
 
+from conftest import candidate_runtime
+from test_shared_definition_output import _graph_output_effects
+
 from aigineering import __version__
+from aigineering.adapters.redis_query import QueryProjectionUnavailable
 from aigineering.agent.harness import HarnessCandidateAdapter, candidate_json
+from aigineering.core.commitment import CandidateCommitter
 from aigineering.core.control_plane import build_control_plane_contract
 from aigineering.core.asset_versions import (
     create_replacement_claim,
     create_slice_asset,
 )
-from aigineering.core.commitment import CandidateCommitter
 from aigineering.core.domain import initialize_genesis
 from aigineering.core.signing import Ed25519Signer
 from aigineering.core.sqlite_store import SQLiteStore
@@ -26,11 +30,14 @@ from aigineering.core.worker_routing import WorkerRegistration
 from aigineering.protocol.candidate import (
     ActorKey,
     CandidateEffect,
+    candidate_proposal_from_dict,
     candidate_proposal_to_dict,
     create_candidate_proposal,
     create_genesis_manifest,
 )
 from aigineering.protocol.wire import contract_to_dict
+from aigineering.protocol.immutability import deep_thaw
+from aigineering.runtime_services import claim_next_application_package
 from aigineering.protocol.effect_builders import (
     actor_authorization_effect,
     asset_proposal_effect,
@@ -38,9 +45,7 @@ from aigineering.protocol.effect_builders import (
     worker_claim_effect,
     worker_claim_renewal_effect,
     worker_registration_effect,
-    task_assign_effect,
 )
-from aigineering.plugins.task_assignment import TASK_ASSIGNMENT_EFFECTS
 from aigineering.server.app import app
 
 
@@ -98,16 +103,32 @@ def _signed_client():
     return TestClient(app), (signer, genesis)
 
 
-def _candidate_body(actor, effect: CandidateEffect):
+def _candidate_body(actor, *effects: CandidateEffect):
     signer, genesis = actor
     return candidate_proposal_to_dict(
         create_candidate_proposal(
             domain_id=genesis.id,
             actor_id="test:client",
             key_id="root",
-            effects=[effect],
+            effects=effects,
             signer=signer,
         )
+    )
+
+
+def _signed_slice_effects(source, *, slice_name, range_spec):
+    sliced = create_slice_asset(source, slice_name=slice_name, range_spec=range_spec)
+    claim = create_replacement_claim(
+        source.id,
+        sliced.id,
+        definition_hash=sliced.definition_hash,
+        claim_type="slice",
+        lineage_id=source.lineage_id or source.id,
+        range_spec=range_spec,
+    )
+    return (
+        asset_proposal_effect(sliced),
+        replacement_claim_effect(claim, replacement_effect_index=0),
     )
 
 
@@ -356,11 +377,12 @@ def test_http_slice_response_preserves_non_original_disclosure_view(
     assert source is not None
     source_before = source
     store.close()
-    slice_asset = create_slice_asset(
-        source, slice_name="source_excerpt", range_spec=f"chars:0-{len(marker)}"
+    slice_request = _candidate_body(
+        actor,
+        *_signed_slice_effects(
+            source, slice_name="source_excerpt", range_spec=f"chars:0-{len(marker)}"
+        ),
     )
-    slice_request = _candidate_body(actor, asset_proposal_effect(slice_asset))
-    slice_request["range"] = f"chars:0-{len(marker)}"
     slice_response = client.post("/assets/source_doc/slice", json=slice_request)
     assert slice_response.status_code == 201, slice_response.text
     slice_body = slice_response.json()
@@ -700,6 +722,110 @@ def test_worker_protocol_cross_replica_claim_renew_submit(tmp_path, monkeypatch)
     assert record_types.count("claim.submitted") == 1
 
 
+def test_worker_coordination_pending_identifies_durable_command(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    client, actor = _signed_client()
+    created = _post_contract(client, actor, name="pending_claim", outputs=["out"])
+    assert created.status_code == 201, created.text
+    contract_id = created.json()["id"]
+    worker_key = _register_worker(client, actor, "pending-worker")
+
+    class InterruptedRelay:
+        def sync(self):
+            raise QueryProjectionUnavailable("worker relay interrupted")
+
+    monkeypatch.setattr(
+        "aigineering.runtime_services.collaboration_service",
+        lambda _store: InterruptedRelay(),
+    )
+    packages = []
+
+    def capture_claimed_package(*args, **kwargs):
+        claimed = claim_next_application_package(*args, **kwargs)
+        packages.append(json.loads(claimed.package.to_json()))
+        return claimed
+
+    monkeypatch.setattr(
+        "aigineering.server.app.claim_next_application_package", capture_claimed_package
+    )
+
+    def assert_pending(response, command, record_type):
+        assert response.status_code == 503, response.text
+        payload = response.json()
+        assert command["signature"] not in response.text
+        assert "package" not in payload
+        with SQLiteStore.snapshot_from_path(".aig/store.db") as store:
+            claim = store.get_claim(contract_id)
+            receipt = store.get_runtime_record(payload["receipt_id"])
+            request = store.get_runtime_record(payload["operation_record_id"])
+            assert payload == {
+                "ok": False,
+                "error": "redis_sync_pending",
+                "facts_retained": True,
+                "candidate_accepted": True,
+                "candidate_id": command["id"],
+                "receipt_id": receipt.id,
+                "operation_record_id": request.id,
+                "claim_id": claim["claim_id"],
+                "contract_ids": [contract_id],
+                "revision": store.get_runtime_revision(),
+            }
+            assert receipt.record_type == "candidate.received"
+            assert receipt.payload["candidate_id"] == command["id"]
+            assert request.record_type == record_type
+            assert request.causal_parents == (receipt.id,)
+        return claim
+
+    signed_claim = _worker_command(
+        actor,
+        worker_key,
+        worker_claim_effect("pending-worker", contract_id=contract_id),
+        "claim:pending-worker:1",
+    )
+    claim = assert_pending(
+        client.post("/worker/claims", json=signed_claim),
+        signed_claim,
+        "worker.claim.requested",
+    )
+    renewal = _worker_command(
+        actor,
+        worker_key,
+        worker_claim_renewal_effect(
+            "pending-worker", claim["claim_id"], claim["epoch"]
+        ),
+        "renew:pending-worker:1",
+    )
+    assert_pending(
+        client.post(f"/worker/claims/{claim['claim_id']}/renew", json=renewal),
+        renewal,
+        "worker.claim.renew.requested",
+    )
+
+    submission = _worker_submission(
+        actor,
+        worker_key,
+        packages[0],
+        "out: durable worker output",
+    )
+    submitted = client.post("/worker/submissions", json=submission)
+    assert submitted.status_code == 503, submitted.text
+    pending = submitted.json()
+    assert "durable worker output" not in submitted.text
+    assert pending["candidate_accepted"] and pending["facts_retained"]
+    assert pending["candidate_id"] == submission["id"]
+    assert pending["claim_id"] == claim["claim_id"]
+    assert pending["contract_ids"] == [contract_id]
+    with SQLiteStore.snapshot_from_path(".aig/store.db") as store:
+        history = {
+            record.record_type: record
+            for record in store.read_candidate_publication(submission["id"])
+        }
+        assert pending["receipt_id"] == history["candidate.received"].id
+        assert pending["head_id"] == history["candidate.committed"].id
+        assert pending["asset_ids"] == [store.get_assets_by_name("out")[0].id]
+        assert pending["revision"] == store.get_runtime_revision()
+
+
 def test_worker_submission_authentication_rejection_preserves_claim(
     tmp_path, monkeypatch
 ):
@@ -751,69 +877,6 @@ def test_worker_submission_authentication_rejection_preserves_claim(
         assert not persisted.get_assets_by_name("out")
     finally:
         persisted.close()
-
-
-def test_http_claim_respects_signed_assignment_and_selected_worker(
-    tmp_path, monkeypatch
-):
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr("aigineering.server.app.require_redis", lambda: None)
-    monkeypatch.setattr(
-        "aigineering.server.app.sync_runtime", lambda _store, *, accepted: None
-    )
-    client, actor = _signed_client()
-    created = _post_contract(
-        client, actor, name="http assigned", outputs=["result"], budget=1
-    )
-    contract_id = created.json()["id"]
-    wrong_worker = _register_worker(client, actor, "worker:wrong")
-    selected_worker = _register_worker(client, actor, "worker:selected")
-
-    signer, genesis = actor
-    assignment_candidate = create_candidate_proposal(
-        domain_id=genesis.id,
-        actor_id="test:client",
-        key_id="root",
-        effects=[
-            task_assign_effect(contract_id, "worker:selected", "", "route via HTTP")
-        ],
-        signer=signer,
-        idempotency_key="http-assignment-selected-worker",
-    )
-    store = SQLiteStore(".aig/store.db")
-    assignment = CandidateCommitter(
-        store, store, additional_effects=TASK_ASSIGNMENT_EFFECTS
-    ).commit(assignment_candidate, genesis)
-    assert assignment.accepted
-    store.close()
-
-    denied = client.post(
-        "/worker/claims",
-        json=_worker_command(
-            actor,
-            wrong_worker,
-            worker_claim_effect("worker:wrong", contract_id=contract_id),
-            "claim-wrong-assigned-worker",
-        ),
-    )
-    assert denied.status_code == 409
-    store = SQLiteStore(".aig/store.db")
-    assert store.get_claim(contract_id) is None
-    store.close()
-
-    claimed = client.post(
-        "/worker/claims",
-        json=_worker_command(
-            actor,
-            selected_worker,
-            worker_claim_effect("worker:selected", contract_id=contract_id),
-            "claim-selected-assigned-worker",
-        ),
-    )
-    assert claimed.status_code == 200, claimed.text
-    store = SQLiteStore(".aig/store.db")
-    assert store.get_claim(contract_id)["worker_id"] == "worker:selected"
-    store.close()
 
 
 def test_unregistered_worker_cannot_lock_a_server_task(tmp_path, monkeypatch):
@@ -952,14 +1015,56 @@ def test_asset_slice_versions_and_replacement_claims(tmp_path, monkeypatch):
     store = SQLiteStore(".aig/store.db")
     source_asset = store.get_asset(source["id"])
     assert source_asset is not None
-    proposed_slice = create_slice_asset(
+    slice_effects = _signed_slice_effects(
         source_asset,
         slice_name="doc_excerpt",
         range_spec="lines:2-3",
     )
+    baseline_revision = store.get_runtime_revision()
     store.close()
-    slice_candidate = _candidate_body(actor, asset_proposal_effect(proposed_slice))
-    slice_candidate["range"] = "lines:2-3"
+
+    slice_candidate = _candidate_body(actor, *slice_effects)
+    mismatched_range = client.post(
+        "/assets/doc/slice", json={**slice_candidate, "range": "lines:1-1"}
+    )
+    assert mismatched_range.status_code == 422
+    mismatched_claim = deep_thaw(slice_effects[1].payload)
+    mismatched_claim["claim"]["source_asset_id"] = "missing-exact-source"
+    missing_source = client.post(
+        "/assets/doc/slice",
+        json=_candidate_body(
+            actor, slice_effects[0], CandidateEffect("asset.relate", mismatched_claim)
+        ),
+    )
+    assert missing_source.status_code == 404
+    mismatched_claim["claim"]["source_asset_id"] = source_asset.id
+    mismatched_claim["claim"]["definition_hash"] = "different-definition"
+    forged_relation = client.post(
+        "/assets/doc/slice",
+        json=_candidate_body(
+            actor, slice_effects[0], CandidateEffect("asset.relate", mismatched_claim)
+        ),
+    )
+    assert forged_relation.status_code == 422
+    legacy_slice, _ = _signed_slice_effects(
+        source_asset, slice_name="historical_excerpt", range_spec="lines:1-1"
+    )
+    legacy_candidate = _candidate_body(actor, legacy_slice)
+    legacy_request = {**legacy_candidate, "range": "lines:1-1"}
+    fresh_legacy = client.post("/assets/doc/slice", json=legacy_request)
+    assert fresh_legacy.status_code == 422
+    store = SQLiteStore(".aig/store.db")
+    try:
+        assert store.get_runtime_revision() == baseline_revision
+        assert not store.get_assets_by_name("doc_excerpt")
+        assert not store.get_claims_for_asset(source_asset.id)
+        historical = CandidateCommitter(store, store).commit(
+            candidate_proposal_from_dict(legacy_candidate)
+        )
+        assert historical.accepted
+    finally:
+        store.close()
+
     sliced = client.post("/assets/doc/slice", json=slice_candidate)
     assert sliced.status_code == 201, sliced.text
     replacement = sliced.json()
@@ -991,7 +1096,10 @@ def test_asset_slice_versions_and_replacement_claims(tmp_path, monkeypatch):
         params={"source_asset_id": source["id"]},
     )
     assert by_source.status_code == 200, by_source.text
-    assert [row["id"] for row in by_source.json()] == [claim_body["id"]]
+    related = {row["claim_type"]: row for row in by_source.json()}
+    assert related["summary"]["id"] == claim_body["id"]
+    assert related["slice"]["replacement_asset_id"] == replacement["id"]
+    assert related["slice"]["range_spec"] == "lines:2-3"
 
     by_definition = client.get(
         "/replacement-claims",
@@ -999,6 +1107,87 @@ def test_asset_slice_versions_and_replacement_claims(tmp_path, monkeypatch):
     )
     assert by_definition.status_code == 200, by_definition.text
     assert [row["id"] for row in by_definition.json()] == [claim_body["id"]]
+
+    updated_source = _post_asset(
+        client, actor, name="doc", content="new same-name source"
+    )
+    assert updated_source.status_code == 201, updated_source.text
+    assert updated_source.json()["id"] != source["id"]
+
+    def unexpected_maker(*_args, **_kwargs):
+        pytest.fail("exact HTTP slice replay invoked the fresh slice maker")
+
+    monkeypatch.setattr(
+        "aigineering.server.app.slice_publication_effects", unexpected_maker
+    )
+    store = SQLiteStore(".aig/store.db")
+    try:
+        history = store.read_candidate_publication(slice_candidate["id"])
+        records = {record.record_type: record for record in history}
+        head = records["candidate.committed"]
+        assert set(head.causal_parents) >= {
+            records["candidate.received"].id,
+            records["asset.committed"].id,
+            records["replacement.claimed"].id,
+        }
+        assert records["asset.committed"].payload["asset"]["id"] == replacement["id"]
+        assert (
+            records["replacement.claimed"].payload["claim"]["id"]
+            == related["slice"]["id"]
+        )
+        revision = store.get_runtime_revision()
+        before_claims = store.get_claims_for_asset(source_asset.id)
+        replay = client.post("/assets/doc/slice", json=slice_candidate)
+        assert replay.status_code == 201, replay.text
+        assert replay.json() == replacement
+        historical_replay = client.post("/assets/doc/slice", json=legacy_request)
+        assert historical_replay.status_code == 201, historical_replay.text
+        assert historical_replay.json()["id"] == historical.assets[0].id
+        assert historical_replay.json()["content"] == "line one\n"
+        assert store.get_runtime_revision() == revision
+        assert store.read_candidate_publication(slice_candidate["id"]) == history
+        assert store.get_claims_for_asset(source_asset.id) == before_claims
+    finally:
+        store.close()
+
+
+def test_http_slice_validates_an_exact_graph_source(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    client, actor = _signed_client()
+    signer, genesis = actor
+    actor_key = genesis.root_keys[0]
+    with SQLiteStore(".aig/store.db") as store:
+        runtime = candidate_runtime(
+            store, genesis=genesis, actor_key=actor_key, signer=signer
+        )
+        _, _, _, effects = _graph_output_effects(
+            runtime,
+            (signer, actor_key),
+            name="graph_source",
+            content_text="keep this\nleave this\n",
+            source_uri="fixture:graph-source",
+        )
+        published = runtime.publisher.publish(effects, idempotency_key="graph-source")
+        assert published.accepted
+        (source,) = published.assets
+
+    def unexpected_scan(_store):
+        pytest.fail("slice verification read unrelated graph values")
+
+    monkeypatch.setattr(SQLiteStore, "get_asset_definitions", unexpected_scan)
+    monkeypatch.setattr(SQLiteStore, "get_content_objects", unexpected_scan)
+    candidate = _candidate_body(
+        actor,
+        *_signed_slice_effects(
+            source, slice_name="graph_excerpt", range_spec="lines:1-1"
+        ),
+    )
+    response = client.post("/assets/graph_source/slice", json=candidate)
+    assert response.status_code == 201, response.text
+    assert response.json()["content"] == "keep this\n"
+    with SQLiteStore.snapshot_from_path(".aig/store.db") as store:
+        (claim,) = store.get_claims_for_asset(source.id)
+        assert claim.replacement_asset_id == response.json()["id"]
 
 
 def test_replacement_claim_rejects_invalid_claim_type(tmp_path, monkeypatch):

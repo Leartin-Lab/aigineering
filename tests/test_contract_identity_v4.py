@@ -5,7 +5,7 @@ from aigineering.core.control_plane import (
     bind_contract_label_assets,
     build_control_plane_contract,
 )
-from aigineering.core.methods import (
+from aigineering.plugins.task_semantics import (
     continuation_contract,
     contracts_from_plan_asset,
     method_contract,

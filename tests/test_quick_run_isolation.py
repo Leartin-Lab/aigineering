@@ -152,7 +152,7 @@ def test_quick_run_preserves_root_failure_and_publishes_recovery_successor(
         )
         assert result.exit_code == 1, result.output
         payload = json.loads(result.output)
-        assert payload["status"] == "failed"
+        assert payload["status"] == "stalled"
         assert payload["rejections"]
         assert payload["next_step"].startswith("Inspect with: aig task audit")
         # Click renders a concise error, while runtime evidence remains durable.
@@ -165,7 +165,13 @@ def test_quick_run_preserves_root_failure_and_publishes_recovery_successor(
             ]
             assert len(roots) == 1
             root = roots[0]
-            assert project_task_status(root, store)["status"] == "failed"
+            # The CLI reports this invocation as failed, but a rejected
+            # submission is not a signed Task terminal outcome.
+            assert project_task_status(root, store)["status"] not in {
+                "failed",
+                "completed",
+                "cancelled",
+            }
             rejected = [
                 record
                 for _, record in store.scan_runtime_records(
@@ -174,14 +180,21 @@ def test_quick_run_preserves_root_failure_and_publishes_recovery_successor(
                 if record.payload.get("contract_id") == root.id
             ]
             assert rejected
+            terminals = [
+                record
+                for _, record in store.scan_runtime_records(
+                    record_type="lifecycle.terminal"
+                )
+                if record.payload.get("contract_id") == root.id
+            ]
+            assert terminals == []
             recoveries = [
                 contract
                 for contract in store.get_all_contracts()
                 if contract.origin == "recovery"
             ]
-            assert len(recoveries) == 1
-            assert recoveries[0].parent_id is None
-            assert payload["recoveries"] == [recoveries[0].id]
+            assert recoveries == []
+            assert payload.get("recoveries", []) == []
             claimed_ids = {
                 str(record.payload.get("contract_id", ""))
                 for _, record in store.scan_runtime_records(record_type="claim.granted")

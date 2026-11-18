@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import importlib.util
+import tomllib
 from pathlib import Path
 
 from click.testing import CliRunner
@@ -122,6 +123,8 @@ def test_tool_execution_lane_does_not_claim_generic_task(monkeypatch):
 
 def test_offline_llm_tool_report_requires_distinct_audit(monkeypatch):
     attest_report = _audit_module().attest_report
+    with DESCRIPTION.with_name("run.toml").open("rb") as preset:
+        policy = json.dumps(tomllib.load(preset)["task"]["acceptance_policy"])
     responses = iter(
         (
             {
@@ -191,15 +194,6 @@ def test_offline_llm_tool_report_requires_distinct_audit(monkeypatch):
     runner = CliRunner()
     with runner.isolated_filesystem():
         assert runner.invoke(cli, ["domain", "init"]).exit_code == 0
-        policy = json.dumps(
-            {
-                "mode": "independent",
-                "policy_version": "ai4s-literature-v1",
-                "required_attestations": 1,
-                "verifier_capabilities": ["verify.literature"],
-            },
-            separators=(",", ":"),
-        )
         created = runner.invoke(
             cli,
             [

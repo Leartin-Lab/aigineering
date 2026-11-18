@@ -23,12 +23,8 @@ def test_bulk_collector_contains_no_signing_or_domain_effects():
     assert "CandidateEffect" not in source
 
 
-def test_task_commands_delegate_cancel_and_task_control_to_application_owners():
+def test_task_cancel_delegates_to_the_signed_application_owner():
     board = ROOT / "src/aigineering/cli/task_board.py"
     cancellation = ast.unparse(_function(board, "task_cancel"))
     assert "publish_task_cancel" in cancellation
     assert "contract_cancellation_effect" not in cancellation
-    collab = ROOT / "src/aigineering/cli/task_collaboration.py"
-    for name in ("task_block", "task_unblock", "task_promote"):
-        body = ast.unparse(_function(collab, name))
-        assert "publish_task_" in body

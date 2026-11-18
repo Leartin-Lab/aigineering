@@ -136,10 +136,12 @@ def test_claim_bound_signed_invalid_usage_is_rejected_with_safe_receipt(metadata
         records = [record for _, record in store.scan_runtime_records()]
         assert any(record.record_type == "candidate.received" for record in records)
         assert any(record.record_type == "candidate.rejected" for record in records)
-        assert any(
+        assert not any(
             record.record_type == "candidate_rejection.recovery_scheduled"
             for record in records
         )
+        assert not store.read_task_facts(contract.id, ("lifecycle.terminal",))
+        assert store.read_task_facts(contract.id, ("allowance.extinguished",))
         assert any(record.record_type == "attempt.closed" for record in records)
         receipt = next(
             record

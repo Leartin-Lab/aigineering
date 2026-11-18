@@ -86,6 +86,11 @@ class WorkerHost:
             raise ValueError("WorkerHost registration_version must be a string")
         if self.actor_key.actor_id != self.worker.worker_id:
             raise ValueError("WorkerHost actor_id must equal worker.worker_id")
+        expected_domain_id = getattr(self.worker, "expected_domain_id", None)
+        if expected_domain_id is not None and expected_domain_id != self.genesis.id:
+            raise ValueError(
+                "WorkerHost Genesis does not match the Worker's expected domain"
+            )
         if (
             self.actor_key.kind != self.signer.kind
             or self.actor_key.public_key != self.signer.signer_id
@@ -347,13 +352,7 @@ def compile_worker_envelope(
         else:
             if contract is None or contract.id != envelope.contract_id:
                 raise ValueError("claim-bound output requires the claimed Contract")
-            if contract.origin == "recovery" and contract.tool_scope:
-                raise WorkerExecutionError(
-                    "tool_observation_required",
-                    "tool recovery must request its remaining allowed tool before "
-                    "publishing tool-derived outputs",
-                )
-            effects = _compile_claim_bound_outputs(
+            effects = claim_bound_graph_output_effects(
                 parsed_envelope,
                 contract,
                 domain_id=domain_id,
@@ -431,7 +430,7 @@ def _compile_attestation_action(
         envelope,
         parsed_action={"type": "exec", "outputs": outputs},
     )
-    output_effects = _compile_claim_bound_outputs(
+    output_effects = claim_bound_graph_output_effects(
         output_envelope,
         contract,
         domain_id=domain_id,
@@ -451,23 +450,3 @@ def _compile_attestation_action(
         atomic_group=f"output:{contract.id}",
     )
     return (*output_effects, attestation)
-
-
-def _compile_claim_bound_outputs(
-    envelope: CandidateEnvelope,
-    contract: Contract,
-    *,
-    domain_id: str,
-    actor_id: str,
-    key_id: str,
-    signer: Signer,
-) -> tuple[CandidateEffect, ...]:
-    """Keep ordinary and attested outputs on one canonical graph compiler."""
-    return claim_bound_graph_output_effects(
-        envelope,
-        contract,
-        domain_id=domain_id,
-        actor_id=actor_id,
-        key_id=key_id,
-        signer=signer,
-    )

@@ -32,7 +32,7 @@ from aigineering.protocol.wire import (
     trace_entry_to_dict,
 )
 
-CURRENT_SCHEMA_VERSION = 21
+CURRENT_SCHEMA_VERSION = 24
 
 
 class SQLiteMigrator:
@@ -47,7 +47,6 @@ class SQLiteMigrator:
             self._conn.execute(ddl)
         for idx_ddl in DDL_INDEXES:
             self._conn.execute(idx_ddl)
-        self._conn.commit()
 
     def current_schema_version(self) -> int:
         cur = self._conn.execute("SELECT MAX(version) FROM schema_version")
@@ -103,69 +102,78 @@ class SQLiteMigrator:
         )
 
     def run_migrations(self, current: int) -> None:
-        with self._conn:
-            if current < 1:
-                self._record_schema_version(1)
-            if current < 2:
-                self._migrate_to_v2()
-                self._record_schema_version(2)
-            if current < 3:
-                self._migrate_to_v3()
-                self._record_schema_version(3)
-            if current < 4:
-                self._migrate_to_v4()
-                self._record_schema_version(4)
-            if current < 5:
-                self._migrate_to_v5()
-                self._record_schema_version(5)
-            if current < 6:
-                self._migrate_to_v6()
-                self._record_schema_version(6)
-            if current < 7:
-                self._migrate_to_v7()
-                self._record_schema_version(7)
-            if current < 8:
-                self._migrate_to_v8()
-                self._record_schema_version(8)
-            if current < 9:
-                self._migrate_to_v9()
-                self._record_schema_version(9)
-            if current < 10:
-                self._migrate_to_v10()
-                self._record_schema_version(10)
-            if current < 11:
-                self._migrate_to_v11()
-                self._record_schema_version(11)
-            if current < 12:
-                self._migrate_to_v12()
-                self._record_schema_version(12)
-            if current < 13:
-                self._migrate_to_v13()
-                self._record_schema_version(13)
-            if current < 14:
-                self._migrate_to_v14()
-                self._record_schema_version(14)
-            if current < 15:
-                self._migrate_to_v15()
-                self._record_schema_version(15)
-            if current < 16:
-                self._migrate_to_v16()
-                self._record_schema_version(16)
-            if current < 17:
-                self._migrate_to_v17()
-                self._record_schema_version(17)
-            if current < 18:
-                self._migrate_to_v18()
-                self._record_schema_version(18)
-            if current < 19:
-                self._migrate_to_v19()
-                self._record_schema_version(19)
-            if current < 20:
-                self._migrate_to_v20()
-                self._record_schema_version(20)
-            if current < 21:
-                self._migrate_to_v21()
-                self._record_schema_version(21)
+        """Apply versioned migrations inside the schema writer transaction."""
+        if current < 1:
+            self._record_schema_version(1)
+        if current < 2:
+            self._migrate_to_v2()
+            self._record_schema_version(2)
+        if current < 3:
+            self._migrate_to_v3()
+            self._record_schema_version(3)
+        if current < 4:
+            self._migrate_to_v4()
+            self._record_schema_version(4)
+        if current < 5:
+            self._migrate_to_v5()
+            self._record_schema_version(5)
+        if current < 6:
+            self._migrate_to_v6()
+            self._record_schema_version(6)
+        if current < 7:
+            self._migrate_to_v7()
+            self._record_schema_version(7)
+        if current < 8:
+            self._migrate_to_v8()
+            self._record_schema_version(8)
+        if current < 9:
+            self._migrate_to_v9()
+            self._record_schema_version(9)
+        if current < 10:
+            self._migrate_to_v10()
+            self._record_schema_version(10)
+        if current < 11:
+            self._migrate_to_v11()
+            self._record_schema_version(11)
+        if current < 12:
+            self._migrate_to_v12()
+            self._record_schema_version(12)
+        if current < 13:
+            self._migrate_to_v13()
+            self._record_schema_version(13)
+        if current < 14:
+            self._migrate_to_v14()
+            self._record_schema_version(14)
+        if current < 15:
+            self._migrate_to_v15()
+            self._record_schema_version(15)
+        if current < 16:
+            self._migrate_to_v16()
+            self._record_schema_version(16)
+        if current < 17:
+            self._migrate_to_v17()
+            self._record_schema_version(17)
+        if current < 18:
+            self._migrate_to_v18()
+            self._record_schema_version(18)
+        if current < 19:
+            self._migrate_to_v19()
+            self._record_schema_version(19)
+        if current < 20:
+            self._migrate_to_v20()
+            self._record_schema_version(20)
+        if current < 21:
+            self._migrate_to_v21()
+            self._record_schema_version(21)
+        if current < 22:
+            self._migrate_to_v22()
+            self._record_schema_version(22)
+        if current < 23:
+            self._migrate_to_v23()
+            self._record_schema_version(23)
+        if current < 24:
+            # Complete Candidate heads and receipt-bound claim transitions.
+            self._record_schema_version(24)
 
     def _migrate_to_v17(self) -> None:
         """Separate Contract execution requirements from delegation scope."""
@@ -216,6 +224,12 @@ class SQLiteMigrator:
             raise ValueError(
                 "schema 21 upgrade refuses pre-existing task assignment facts"
             )
+
+    def _migrate_to_v22(self) -> None:
+        """Fence readers that ignore mechanical output-source policy fields."""
+
+    def _migrate_to_v23(self) -> None:
+        """Fence readers lacking declared Asset conditions and completion checks."""
 
     def _migrate_to_v2(self) -> None:
         """Add 040 transactional worker state and contract authority metadata."""
@@ -483,11 +497,7 @@ class SQLiteMigrator:
             )
 
 
-def initialize_sqlite_schema(connection: sqlite3.Connection, store) -> None:
-    """Create current tables and transactionally migrate historical rows."""
-    connection.execute(DDL_CREATE_SCHEMA_VERSION)
-    connection.commit()
-    migrator = SQLiteMigrator(connection, store)
+def _supported_schema_version(migrator: SQLiteMigrator) -> int:
     current = migrator.current_schema_version()
     if current > CURRENT_SCHEMA_VERSION:
         raise RuntimeError(
@@ -495,9 +505,28 @@ def initialize_sqlite_schema(connection: sqlite3.Connection, store) -> None:
             f"version {CURRENT_SCHEMA_VERSION}. Refusing to open — "
             "this build cannot read a newer database."
         )
-    migrator.create_tables()
-    migrator.run_migrations(current)
-    store.rebuild_asset_graph_projection()
+    return current
+
+
+def initialize_sqlite_schema(connection: sqlite3.Connection, store) -> None:
+    """Create or upgrade the Store in one transaction, including projections."""
+    migrator = SQLiteMigrator(connection, store)
+    version_table = connection.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schema_version'"
+    ).fetchone()
+    current = _supported_schema_version(migrator) if version_table is not None else 0
+    if current == CURRENT_SCHEMA_VERSION:
+        migrator.create_tables()
+        return
+
+    with connection:
+        connection.execute("BEGIN IMMEDIATE")
+        connection.execute(DDL_CREATE_SCHEMA_VERSION)
+        current = _supported_schema_version(migrator)
+        if current < CURRENT_SCHEMA_VERSION:
+            migrator.create_tables()
+            migrator.run_migrations(current)
+            store._rebuild_asset_graph_projection()
 
 
 def current_schema_version(connection: sqlite3.Connection) -> int:

@@ -14,23 +14,13 @@ from threading import Barrier
 
 import pytest
 
-from aigineering.core.causal_allowance import (
-    CausalAllowanceConflict,
-    allowance_available,
-    validate_allowance_grants,
-)
-from aigineering.core.commitment import reduce_candidate
+from aigineering.core.causal_allowance import allowance_available
 from aigineering.core.control_plane import build_control_plane_contract
-from aigineering.core.domain import load_genesis
-from aigineering.core.projection_context import load_effect_projection_context
 from aigineering.core.sqlite_store import SQLiteStore
-from aigineering.core.signing import create_verifier
-from aigineering.local_identity import ensure_local_domain, load_actor_signer
+from aigineering.core.commitment import CandidateCommitter
+from aigineering.local_identity import ensure_local_domain
 from aigineering.plugins.task_semantics import retry_contract
-from aigineering.protocol.candidate import create_candidate_proposal
-from aigineering.protocol.effect_builders import contract_declaration_effect
 from aigineering.protocol.identity import contract_from_fields
-from aigineering.protocol.runtime_record import create_runtime_record
 from aigineering.task_publication import (
     RetryPublicationRejected,
     publish_task_contract,
@@ -305,22 +295,19 @@ def test_sqlite_concurrent_retries_commit_only_funded_grants(
     database = tmp_path / ".aig" / "store.db"
     store.close()
     barrier = Barrier(2)
+    commit_candidate = CandidateCommitter.commit
+
+    def synchronized_candidate_commit(committer, candidate, *args, **kwargs):
+        if candidate.idempotency_key.startswith("retry:"):
+            # Both signed retry Candidates reach the commitment boundary before
+            # either can take the SQLite writer lock and spend the shared balance.
+            barrier.wait(timeout=10)
+        return commit_candidate(committer, candidate, *args, **kwargs)
+
+    monkeypatch.setattr(CandidateCommitter, "commit", synchronized_candidate_commit)
 
     def publish(source):
         with SQLiteStore(database) as connection:
-            commit = connection.commit_ingress_batch
-
-            def synchronized(*args, **kwargs):
-                # Both Candidates have passed pure projection at the same balance.
-                # Rejection audit also uses this seam, but must not wait again.
-                if any(
-                    r.record_type == "allowance.granted"
-                    for r in kwargs.get("runtime_records", ())
-                ):
-                    barrier.wait(timeout=10)
-                return commit(*args, **kwargs)
-
-            connection.commit_ingress_batch = synchronized
             try:
                 data, _revision = retry_local_task_result(connection, source.id)
                 return True, data
@@ -361,132 +348,3 @@ def test_sqlite_concurrent_retries_commit_only_funded_grants(
             elif record.record_type == "candidate.committed":
                 assert all(amount >= 0 for amount in balances.values())
                 assert sum(balances.values()) == parent.budget
-
-
-def _pre_fix_root_retry_decision(store, root, monkeypatch):
-    """Reproduce the old signed declaration plus its canonical unfunded grant.
-
-    Only the pure allowance projection is substituted. Authentication, Contract
-    identity and receipt/head/member construction use the production reducer.
-    """
-    import aigineering.core.effect_projection as projection
-
-    genesis = load_genesis(store)
-    signer = load_actor_signer()
-    actor = genesis.root_keys[0]
-    successor = retry_contract(root)
-    proposal = create_candidate_proposal(
-        domain_id=genesis.id,
-        actor_id=actor.actor_id,
-        key_id=actor.key_id,
-        effects=(contract_declaration_effect(successor),),
-        signer=signer,
-        idempotency_key=f"retry:{root.id}:{successor.id}",
-        causal_parents=(root.id,),
-    )
-
-    def old_projection(
-        contracts,
-        existing_contracts,
-        records,
-        *,
-        causal_parent,
-        balance_inputs=None,
-    ):
-        # This legacy root-retry fixture intentionally exercises the full
-        # reference path rather than supplying checkpoint-derived balances.
-        assert balance_inputs is None
-        assert tuple(c.id for c in contracts) == (successor.id,)
-        return (
-            create_runtime_record(
-                "allowance.granted",
-                {
-                    "amount": successor.budget,
-                    "contract_id": successor.id,
-                    "grant_id": f"grant:{successor.id}",
-                    "purpose": "root",
-                    "source_contract_id": "",
-                },
-                causal_parents=(causal_parent,),
-            ),
-        )
-
-    with monkeypatch.context() as patch:
-        patch.setattr(projection, "project_contract_allowance_records", old_projection)
-        decision = reduce_candidate(
-            proposal,
-            genesis,
-            verifier_factory=create_verifier,
-            projection_context=load_effect_projection_context(store),
-        )
-    assert decision.accepted
-    # Prove the generic provenance fence passes before testing the new rule.
-    validate_allowance_grants(
-        (*store.get_all_contracts(), *decision.contracts),
-        _records(store),
-        decision.runtime_records,
-    )
-    return decision
-
-
-def _commit_decision(store, decision):
-    store.commit_ingress_batch(
-        [],
-        list(decision.trace_entries),
-        contracts=decision.contracts,
-        runtime_records=decision.runtime_records,
-        candidate_id=decision.candidate_id,
-    )
-
-
-def test_writer_refuses_canonical_unfunded_retry_batch_atomically(
-    tmp_path, monkeypatch
-):
-    store = _workspace(tmp_path, monkeypatch)
-    root = publish_task_contract(
-        store, build_control_plane_contract(name="root", budget=3)
-    )
-    decision = _pre_fix_root_retry_decision(store, root, monkeypatch)
-    before = _records(store)
-    with pytest.raises(CausalAllowanceConflict, match="unfunded root grant"):
-        _commit_decision(store, decision)
-    assert store.get_contract(retry_contract(root).id) is None
-    assert _records(store) == before
-    store.close()
-
-
-def test_historical_root_retry_stays_readable_and_exactly_replayable(
-    tmp_path, monkeypatch
-):
-    import aigineering.core.causal_allowance as allowance
-    from aigineering.task_lineage import task_lineage
-
-    store = _workspace(tmp_path, monkeypatch)
-    root = publish_task_contract(
-        store, build_control_plane_contract(name="old root", budget=3)
-    )
-    decision = _pre_fix_root_retry_decision(store, root, monkeypatch)
-
-    def old_validator(contracts, existing_records, pending_records, **kwargs):
-        # Root-only pre-fix fixture: no reservation, return or terminal to check.
-        validate_allowance_grants(contracts, existing_records, pending_records)
-
-    with monkeypatch.context() as patch:
-        patch.setattr(allowance, "validate_allowance_commit", old_validator)
-        _commit_decision(store, decision)
-    database = tmp_path / ".aig" / "store.db"
-    before = _records(store)
-    digest = store.runtime_materialization_digest()
-    store.close()
-
-    with SQLiteStore(database) as reopened:
-        assert reopened.rebuild_runtime_materializations() == digest
-        result, _revision = retry_local_task_result(reopened, root.id)
-        assert result["candidate_id"] == decision.candidate_id
-        assert result["retry_contract_id"] == retry_contract(root).id
-        assert _records(reopened) == before
-        lineage = task_lineage(reopened, root.id)["data"]
-        assert any(edge["kind"] == "retry_publication" for edge in lineage["edges"])
-        with pytest.raises(RetryPublicationRejected):
-            retry_local_task_result(reopened, result["retry_contract_id"])
-        assert reopened.get_contract(retry_contract(retry_contract(root)).id) is None

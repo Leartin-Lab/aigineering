@@ -33,6 +33,16 @@ class _OutputWorker:
         return Candidate(worker_id=self.worker_id, raw_output=raw)
 
 
+class _TruncatedWorker:
+    worker_id = "quick-goal-truncated-worker"
+
+    def invoke(self, contract, disclosed_assets):
+        from aigineering.agent.worker import WorkerExecutionError
+
+        del contract, disclosed_assets
+        raise WorkerExecutionError("output_truncated", "private marker")
+
+
 @pytest.mark.parametrize("option", ["--wait-timeout", "--interval"])
 def test_quick_goal_rejects_unused_wait_options_before_setup(
     monkeypatch, tmp_path, option
@@ -125,8 +135,56 @@ def test_run_quick_goal_discloses_file_and_exports_markdown(monkeypatch, tmp_pat
             config = store.get_assets_by_name("_provider_config_openai")[0]
             config_payload = json.loads(config.content)
             assert config_payload["response_format"] == "json_object"
+            declaration = next(
+                record
+                for _, record in store.scan_runtime_records(
+                    record_type="contract.declared"
+                )
+                if record.payload["contract"]["id"] == contract.id
+            )
+            head = next(
+                record
+                for _, record in store.scan_runtime_records(
+                    record_type="candidate.committed"
+                )
+                if declaration.id in record.payload["committed_record_ids"]
+            )
+            members = set(head.payload["committed_record_ids"])
+            admitted = {
+                record.payload["asset"]["id"]
+                for _, record in store.scan_runtime_records(
+                    record_type="asset.committed"
+                )
+                if record.id in members
+            }
+            assert admitted == {config.id, *(asset.id for asset in disclosed)}
         finally:
             store.close()
+
+
+def test_quick_goal_publication_interruption_leaves_no_config_inputs_or_root(
+    monkeypatch,
+):
+    worker = _OutputWorker(lambda contract: "unused")
+    monkeypatch.setattr("aigineering.cli._common.build_worker", lambda *a, **k: worker)
+    insert = SQLiteStore._insert_runtime_record
+
+    def interrupted(store, record):
+        if record.record_type == "contract.declared":
+            raise RuntimeError("injected root publication interruption")
+        return insert(store, record)
+
+    monkeypatch.setattr(SQLiteStore, "_insert_runtime_record", interrupted)
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        result = runner.invoke(
+            cli, ["run", "goal", "--model", "fixture", "--save-config", "--json"]
+        )
+        assert result.exit_code != 0
+        with SQLiteStore(".aig/store.db") as store:
+            assert not store.get_all_assets()
+            assert not store.get_all_contracts()
+            assert not store.scan_runtime_records(record_type="candidate.committed")
 
 
 def test_run_without_files_uses_goal_asset_and_unique_slots(monkeypatch):
@@ -288,6 +346,54 @@ def test_failed_quick_goal_keeps_session_and_trace_diagnostics(monkeypatch):
         assert "aig task audit" in payload["next_step"]
 
 
+@pytest.mark.parametrize("completed", [True, False])
+def test_session_capture_failure_preserves_goal_result(
+    monkeypatch, tmp_path, completed
+):
+    def response(contract):
+        if not completed:
+            return "/exec invalid"
+        return "/exec " + json.dumps({"outputs": {contract.outputs[0]: "# Done"}})
+
+    monkeypatch.setattr(
+        "aigineering.cli._common.build_worker",
+        lambda *_args, **_kwargs: _OutputWorker(response),
+    )
+    runner = CliRunner()
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        Path(".aig").mkdir()
+        Path(".aig/sessions").write_text("blocked", encoding="utf-8")
+        result = runner.invoke(
+            cli,
+            [
+                "run",
+                "goal",
+                "--worker",
+                "llm",
+                "--model",
+                "fixture",
+                "--output",
+                "result.md",
+                "--json",
+            ],
+        )
+        assert result.exit_code == (0 if completed else 1), result.output
+        payload = json.loads(result.output)
+        assert payload["contract_id"]
+        assert payload["session_id"]
+        assert any(
+            "session manifest" in warning for warning in payload["capture_warnings"]
+        )
+        assert payload["ok"] is completed
+        if completed:
+            assert payload["status"] == "complete"
+            assert payload["outputs"][0]["asset_id"]
+            assert Path("result.md").read_text(encoding="utf-8") == "# Done\n"
+        else:
+            assert payload["status"] != "complete"
+            assert not Path("result.md").exists()
+
+
 def test_output_write_failure_preserves_completed_runtime_status(monkeypatch, tmp_path):
     runner = CliRunner()
     worker = _OutputWorker(
@@ -390,3 +496,35 @@ def test_application_worker_preserves_fractional_timeout_and_response_options():
     assert worker._max_output_tokens == 8192
     assert worker._thinking_mode == "disabled"
     assert worker._response_format == "json_object"
+
+
+def test_quick_goal_truncation_reports_current_limit_and_new_task_path(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(
+        "aigineering.cli._common.build_worker",
+        lambda *_args, **_kwargs: _TruncatedWorker(),
+    )
+    runner = CliRunner()
+    with runner.isolated_filesystem(temp_dir=str(tmp_path)):
+        result = runner.invoke(
+            cli,
+            [
+                "run",
+                "Write a report",
+                "--worker",
+                "llm",
+                "--model",
+                "fixture",
+                "--max-output-tokens",
+                "333",
+                "--json",
+            ],
+        )
+
+    assert result.exit_code == 1, result.output
+    payload = json.loads(result.output)
+    assert payload["output_limit"] == 333
+    assert "max_output_tokens=333" in payload["next_step"]
+    assert "rerun this goal as a new task" in payload["next_step"]
+    assert "private marker" not in result.output

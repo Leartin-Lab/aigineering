@@ -1,5 +1,10 @@
 # ADR-031: Bind task review to exact reports and the existing acceptance policy
 
+> Current implementation: conflicting fresh-write, injected-projector and
+> task-completion mechanisms in this historical decision are superseded by
+> [change 137](../../changes/137-closed-primitive-task-runtime.md).
+> Consult [DESIGN](../../DESIGN.md) for the supported primitive surface.
+
 Status: Accepted
 Date: 2026-10-04
 
@@ -59,6 +64,11 @@ a concurrent foreign output may complete the reviewer task. That status does
 not prove a valid review report. Decision independently rejects a foreign report
 and cannot qualify source work with it. A valid exact reviewer report remains
 eligible even if an unrelated same-name Asset also exists.
+
+Change 136 makes the same-name condition the default when no output selectors
+are declared; exact Definition, Content, producer and shape selectors can narrow
+it. The review report's exact requested reviewer-task provenance remains a
+separate method-specific requirement.
 
 Distinct signed actors establish protocol attribution, not different natural
 persons or independent models. Directly writing qualifications, changing task

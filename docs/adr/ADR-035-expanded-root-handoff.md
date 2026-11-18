@@ -1,5 +1,10 @@
 # ADR-035: Continue an expanded obligation through one ordinary successor
 
+> Current implementation: conflicting fresh-write, injected-projector and
+> task-completion mechanisms in this historical decision are superseded by
+> [change 137](../../changes/137-closed-primitive-task-runtime.md).
+> Consult [DESIGN](../../DESIGN.md) for the supported primitive surface.
+
 Status: Accepted
 Date: 2026-10-04
 Related: ADR-030, ADR-032, ADR-034
@@ -65,3 +70,9 @@ work without transferring those authorities to the successor.
 Expanded handoff and its scoped historical completion repair do not establish
 complete Kanban feature parity or stable-release qualification. Other historical
 conflicts and the remaining release gates retain their own observable obligations.
+
+Change 136 supersedes this ADR's tree-based output-eligibility assumptions.
+Expanded handoff still uses its signed cancellation, allowance and history proof;
+successor output conditions are filtered to retained roles, and any admitted
+Asset matching them may satisfy the obligation. Independent qualification and
+the explicit handoff operation remain unchanged.

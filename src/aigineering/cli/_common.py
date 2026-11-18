@@ -21,15 +21,13 @@ from aigineering.core.ids import (
 from aigineering.core.session import runtime_record_contract_references
 from aigineering.application import (
     build_worker,
-    default_completion_registry,
     find_trace_for_session,
     latest_session_file,
     persistent_store,
     query_projection,
 )
-from aigineering.cli._candidate import commit_local_effect, require_accepted
+from aigineering.cli._candidate import commit_local_effects, require_accepted
 from aigineering.local_identity import ensure_local_domain
-from aigineering.plugins import CompletionRegistry
 from aigineering.core.store import StoreProtocol
 from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.core.store import require_operational_store
@@ -44,6 +42,7 @@ from aigineering.protocol.effect_builders import (
 )
 from aigineering.protocol.types import Asset, Contract, TraceEntry
 from aigineering.protocol.wire import trace_entry_from_dict
+from aigineering.runtime_services import RedisSyncPending
 
 _QUICK_INPUT_MAX_BYTES = 1_048_576
 _QUICK_INPUT_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_.:-]*\Z")
@@ -249,11 +248,6 @@ def _get_trace_dir() -> Path:
     return Path(".aig/traces")
 
 
-def _get_store_dir() -> Path:
-    """Return the persistent asset/contract store directory."""
-    return Path(".aig/store")
-
-
 def _persistent_store() -> SQLiteStore:
     """Create the default local persistent store (SQLite-backed)."""
     return persistent_store()
@@ -267,11 +261,6 @@ def _persistent_snapshot(db_path: str | Path = ".aig/store.db") -> SQLiteStore:
 def _query_projection(store: StoreProtocol):
     """Return the configured read-only query projection."""
     return query_projection(store)
-
-
-def _default_completion_registry() -> CompletionRegistry:
-    """Return the transitional completion registry for CLI execution."""
-    return default_completion_registry()
 
 
 def _session_id() -> str:
@@ -388,6 +377,7 @@ def _run_demo(
         raw_output = f"{output_name}: Report content for goal '{goal}'"
         worker.set_output("build_report", raw_output)
 
+    effects = []
     if save_config and worker_kind == "llm" and model:
         from aigineering.core.capability_descriptors import (
             create_provider_config_snapshot,
@@ -404,13 +394,7 @@ def _run_demo(
             thinking_mode=thinking_mode,
             response_format=response_format,
         )
-        require_accepted(
-            commit_local_effect(
-                store,
-                asset_proposal_effect(config_asset),
-                idempotency_key=f"demo:{publication_id}:provider-config",
-            )
-        )
+        effects.append(asset_proposal_effect(config_asset))
 
     if quick_inputs is None:
         data_file = Asset(
@@ -453,26 +437,22 @@ def _run_demo(
         tool_scope=[],
         labels=list(behavior_labels),
         origin="human",
+        acceptance_policy={"mode": "mechanical"},
     )
 
-    publications = [("contract", contract_declaration_effect(contract))]
-    publications.extend(
-        (f"input-{index}", asset_proposal_effect(asset))
-        for index, asset in enumerate(input_assets)
-    )
-    for suffix, effect in publications:
-        require_accepted(
-            commit_local_effect(
-                store,
-                effect,
-                idempotency_key=f"demo:{publication_id}:{suffix}",
-            )
+    effects.append(contract_declaration_effect(contract))
+    effects.extend(asset_proposal_effect(asset) for asset in input_assets)
+    require_accepted(
+        commit_local_effects(
+            store,
+            tuple(effects),
+            idempotency_key=f"demo:{publication_id}",
         )
+    )
 
     from aigineering.runtime import (
         WorkerInvocationError,
         execute_claimed_package,
-        process_task_completions,
         run_runtime_maintenance_step,
     )
     from aigineering.local_identity import (
@@ -484,11 +464,10 @@ def _run_demo(
 
     host = ensure_local_worker_host(store, worker)
     publishers = ensure_local_runtime_publishers(store)
-    registry = default_completion_registry()
     last_submission = "none"
     capture_warnings: list[str] = []
     for _ in range(64):
-        run_runtime_maintenance_step(store, registry, candidate_publishers=publishers)
+        run_runtime_maintenance_step(store, candidate_publishers=publishers)
         sync_runtime(store)
         status = project_task_status(contract, store)
         if status["terminal"]:
@@ -522,7 +501,6 @@ def _run_demo(
             last_submission = "worker_failed"
             continue
         last_submission = str(result.get("status", "unknown"))
-    process_task_completions(store, registry, candidate_publishers=publishers)
     sync_runtime(store)
     status = project_task_status(contract, store)
     if status["status"] != "completed" and raise_on_incomplete:
@@ -568,6 +546,75 @@ def _output_json(payload: object) -> None:
     click.echo(json.dumps(payload, ensure_ascii=False, indent=2, default=str))
 
 
-def _get_idempotency_path() -> str:
-    """Return the path to the idempotency store JSONL file."""
-    return str(_get_store_dir() / "idempotency.jsonl")
+def _cli_result_success(as_json: bool, data: object, revision: int, human: str) -> None:
+    if as_json:
+        _output_json({"ok": True, "data": data, "revision": revision})
+    else:
+        click.echo(human)
+
+
+def _cli_result_failure(code: str, message: str, as_json: bool) -> None:
+    if as_json:
+        _output_json({"ok": False, "error": {"code": code, "message": message}})
+        raise click.exceptions.Exit(1)
+    raise click.ClickException(message)
+
+
+def _cli_json_object_option(value: str | None, option: str) -> dict | None:
+    if value is None:
+        return None
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError as error:
+        raise click.UsageError(f"{option} is not valid JSON: {error}") from error
+    if not isinstance(parsed, dict):
+        raise click.UsageError(f"{option} must be a JSON object")
+    return parsed
+
+
+def _cli_pending_failure(exc: RedisSyncPending, as_json: bool) -> None:
+    facts_retained = exc.accepted is True or (
+        exc.accepted is False and exc.decision is not None
+    )
+    if as_json:
+        payload = {
+            "ok": False,
+            "error": "redis_sync_pending"
+            if exc.accepted is True or exc.accepted is False
+            else "redis_unavailable",
+            "message": "Required Redis synchronization is pending.",
+            "candidate_accepted": exc.accepted,
+            "facts_retained": facts_retained,
+        }
+        if exc.data is not None:
+            payload["data"] = exc.data
+        if exc.revision is not None:
+            payload["revision"] = exc.revision
+        _output_json(payload)
+        raise click.exceptions.Exit(1) from exc
+    if exc.accepted is True and isinstance(exc.data, dict):
+        key = exc.data.get("idempotency_key")
+        record_id = exc.data.get("record_id")
+        if isinstance(key, str) and re.fullmatch(r"[A-Za-z0-9._:-]+", key):
+            suffix = f" Replay with --idempotency-key {key}."
+        else:
+            suffix = (
+                " Replay with the original --idempotency-key value; "
+                "use --json to retrieve the exact key."
+            )
+        click.echo(
+            f"Redis synchronization is pending; committed fact {record_id}.{suffix}",
+            err=True,
+        )
+        raise click.exceptions.Exit(1) from exc
+    raise click.ClickException("Required Redis synchronization is pending.") from exc
+
+
+def _cli_internal_error(exc: Exception, as_json: bool) -> None:
+    message = "Unexpected internal task command error."
+    if as_json:
+        _output_json(
+            {"ok": False, "error": {"code": "internal_error", "message": message}}
+        )
+        raise click.exceptions.Exit(1) from exc
+    raise click.ClickException(message) from exc

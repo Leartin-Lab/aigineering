@@ -784,6 +784,70 @@ def test_watch_conflict_retries_after_a_concurrent_valid_prefix_append():
     ]
 
 
+def test_wait_restarts_prefix_proof_after_events_exhausts_watch_retries():
+    source = MemoryStore([(1, _record(1))])
+    redis = MemoryRedis()
+    service = _service(source, redis)
+    assert service.sync()["watermark"] == 1
+    conflicts = []
+
+    def append_before_exec():
+        revision = source.get_runtime_revision() + 1
+        record = _record(revision)
+        source.records.append((revision, record))
+        fields = service._event_fields(
+            revision, record, {item.id: item for _, item in source.records}
+        )
+        redis.xadd(service.stream_key, fields, id=f"{revision}-0")
+        redis.hset(service.metadata_key, "watermark", str(revision))
+        conflicts.append(revision)
+        if len(conflicts) < 3:
+            redis.before_execute = append_before_exec
+
+    redis.before_execute = append_before_exec
+    assert [event["revision"] for event in service.wait(1, timeout=1)] == [2, 3, 4]
+    assert conflicts == [2, 3, 4]
+
+
+@pytest.mark.parametrize(
+    ("reason", "timeout", "attempts"),
+    [
+        ("sync_contention", 0.025, 3),
+        ("sync_contention", 0, 1),
+        ("source_diverged", 1, 1),
+        ("redis_unavailable", 1, 1),
+    ],
+)
+def test_wait_retries_only_contention_until_original_deadline(
+    monkeypatch, reason, timeout, attempts
+):
+    from aigineering import redis_collaboration
+
+    service = _service(MemoryStore([(1, _record(1))]), MemoryRedis())
+    elapsed = 0.0
+    cursors = []
+
+    def sleep(seconds):
+        nonlocal elapsed
+        elapsed += seconds
+
+    def events(*, after_revision, count):
+        cursors.append(after_revision)
+        raise RedisCollaborationUnavailable("fixture", reason=reason)
+
+    monkeypatch.setattr(
+        redis_collaboration,
+        "time",
+        SimpleNamespace(monotonic=lambda: elapsed, sleep=sleep),
+    )
+    monkeypatch.setattr(service, "events", events)
+    with pytest.raises(RedisCollaborationUnavailable) as error:
+        service.wait(1, timeout=timeout)
+    assert error.value.reason == reason
+    assert cursors == [1] * attempts
+    assert elapsed <= timeout
+
+
 def test_unavailable_service_raises_stable_error_without_connection_details():
     redis = MemoryRedis()
     redis.available = False

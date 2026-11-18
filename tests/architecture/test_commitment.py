@@ -7,7 +7,7 @@ import hashlib
 import ast
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
-from threading import Barrier, Lock
+from threading import Barrier
 
 import pytest
 
@@ -157,7 +157,6 @@ def test_reducer_is_pure_and_accepts_authorized_contract():
     ]
     assert {record.record_type for record in first.runtime_records} >= {
         "candidate.received",
-        "candidate.committed",
         "contract.declared",
     }
 
@@ -1207,7 +1206,7 @@ def test_concurrent_candidate_commit_is_database_idempotent(tmp_path):
 def test_concurrent_outputs_complete_contract_at_sqlite_commit_boundary(
     tmp_path, monkeypatch
 ):
-    """Two stale pure projections converge under SQLite's writer lock."""
+    """Concurrent output actions decide once each under the writer lock."""
     path = tmp_path / "completion-race.db"
     setup = SQLiteStore(str(path))
     signer = _Signer()
@@ -1270,27 +1269,11 @@ def test_concurrent_outputs_complete_contract_at_sqlite_commit_boundary(
         for name in contract.outputs
     )
     barrier = Barrier(2)
-    lock = Lock()
-    calls = 0
-    from aigineering.core import commitment as commitment_module
-
-    original_reduce = commitment_module.reduce_asset_facts
-
-    def synchronized_reduce(*args, **kwargs):
-        nonlocal calls
-        with lock:
-            calls += 1
-            synchronize = calls <= 2
-        result = original_reduce(*args, **kwargs)
-        if synchronize:
-            barrier.wait(timeout=2)
-        return result
-
-    monkeypatch.setattr(commitment_module, "reduce_asset_facts", synchronized_reduce)
 
     def commit_one(candidate):
         store = SQLiteStore(str(path))
         try:
+            barrier.wait(timeout=5)
             return CandidateCommitter(store, store).commit(
                 candidate, verifier_factory=_verifier_factory
             )

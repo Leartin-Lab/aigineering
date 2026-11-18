@@ -1,5 +1,10 @@
 # ADR-034: Return unused causal allowance along its original funding path
 
+> Current implementation: conflicting fresh-write, injected-projector and
+> task-completion mechanisms in this historical decision are superseded by
+> [change 137](../../changes/137-closed-primitive-task-runtime.md).
+> Consult [DESIGN](../../DESIGN.md) for the supported primitive surface.
+
 Status: Accepted
 Date: 2026-10-04
 Related: ADR-013, ADR-030
@@ -63,6 +68,10 @@ raw imports are outside the compatibility gate. No table, column, RuntimeRecord
 schema or Contract identity version changes. Historical v3-v6 identities stay
 unchanged. Causal allowance remains a bound on work expansion, not token billing
 or provider cost.
+
+Change 136 raises the current Store reader floor to schema23 for declared Asset
+output conditions and completion-on-declaration. This ADR's paired-return
+authorization and conservation rules are unchanged.
 
 Rejecting every expanded task leaves the product gap. Cloning the old tree changes
 ancestry and acceptance. Issuing another root grant amplifies the budget. Paired

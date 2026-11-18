@@ -36,6 +36,10 @@ class FleetWorkerSpec:
     profile_id: str = ""
     tool_registry: str = ""
     worker_factory: str = ""
+    target_workspace: str = ""
+    target_domain_id: str = ""
+    receiver_fleet: str = ""
+    receiver_key_file: str = ""
     timeout: float = 60.0
     max_retries: int = 3
     max_output_tokens: int = 2048
@@ -47,8 +51,10 @@ class FleetWorkerSpec:
     def __post_init__(self) -> None:
         if not self.worker_id:
             raise ValueError("fleet worker id must not be empty")
-        if self.kind not in {"llm", "tool", "local"}:
-            raise ValueError("fleet worker kind must be 'llm', 'tool', or 'local'")
+        if self.kind not in {"llm", "tool", "local", "engine"}:
+            raise ValueError(
+                "fleet worker kind must be 'llm', 'tool', 'local', or 'engine'"
+            )
         if isinstance(self.capacity, bool) or not isinstance(self.capacity, int):
             raise ValueError("fleet worker capacity must be an integer")
         if self.capacity < 1:
@@ -63,6 +69,30 @@ class FleetWorkerSpec:
             raise ValueError("worker_factory is only valid for local workers")
         if self.kind == "local" and self.tool_registry:
             raise ValueError("local workers cannot use tool_registry")
+        engine_fields = (
+            self.target_workspace,
+            self.target_domain_id,
+            self.receiver_fleet,
+            self.receiver_key_file,
+        )
+        if self.kind == "engine" and not all(engine_fields):
+            raise ValueError(
+                "fleet engine worker requires target_workspace, target_domain_id, "
+                "receiver_fleet, and receiver_key_file"
+            )
+        if self.kind != "engine" and any(engine_fields):
+            raise ValueError("engine target fields are only valid for engine workers")
+        if self.kind == "engine" and (
+            self.model
+            or self.tool_registry
+            or self.worker_factory
+            or self.provider_capabilities
+            or self.response_format
+            or self.thinking_mode
+        ):
+            raise ValueError(
+                "engine workers cannot use provider, tool, or local adapter fields"
+            )
         if isinstance(self.max_output_tokens, bool) or not isinstance(
             self.max_output_tokens, int
         ):
@@ -127,6 +157,11 @@ def build_fleet_worker(spec: FleetWorkerSpec, *, registry=None):
     """Build one stateless Worker adapter from an operator-owned profile."""
     if spec.kind == "local":
         return build_local_worker(spec.worker_factory, spec)
+    if spec.kind == "engine":
+        raise ValueError(
+            "engine Workers must be built by prepare_fleet_resources with their "
+            "receiver Fleet"
+        )
     if registry is None and spec.tool_registry:
         registry = load_tool_registry(spec.tool_registry)
     if spec.kind == "tool":
@@ -178,6 +213,10 @@ def _worker_spec(raw: object) -> FleetWorkerSpec:
         "profile_id",
         "tool_registry",
         "worker_factory",
+        "target_workspace",
+        "target_domain_id",
+        "receiver_fleet",
+        "receiver_key_file",
         "timeout",
         "max_retries",
         "max_output_tokens",
@@ -202,6 +241,25 @@ def _worker_spec(raw: object) -> FleetWorkerSpec:
             raise ValueError(f"worker {name} must be a list of strings")
     worker_id = _strict_string(raw, "id", "")
     kind = _strict_string(raw, "kind", "")
+    if kind == "engine":
+        invalid_engine_fields = set(raw) & {
+            "model",
+            "base_url",
+            "api_key_env",
+            "provider_capabilities",
+            "tool_registry",
+            "worker_factory",
+            "timeout",
+            "max_retries",
+            "max_output_tokens",
+            "thinking_mode",
+            "response_format",
+        }
+        if invalid_engine_fields:
+            raise ValueError(
+                "engine workers cannot set adapter fields: "
+                + ", ".join(sorted(invalid_engine_fields))
+            )
     capacity = _strict_int(raw, "capacity", 1)
     timeout = _strict_number(raw, "timeout", 60.0)
     max_retries = _strict_int(raw, "max_retries", 3)
@@ -219,6 +277,10 @@ def _worker_spec(raw: object) -> FleetWorkerSpec:
         profile_id=_strict_string(raw, "profile_id", ""),
         tool_registry=_strict_string(raw, "tool_registry", ""),
         worker_factory=_strict_string(raw, "worker_factory", ""),
+        target_workspace=_strict_string(raw, "target_workspace", ""),
+        target_domain_id=_strict_string(raw, "target_domain_id", ""),
+        receiver_fleet=_strict_string(raw, "receiver_fleet", ""),
+        receiver_key_file=_strict_string(raw, "receiver_key_file", ""),
         timeout=timeout,
         max_retries=max_retries,
         max_output_tokens=max_output_tokens,

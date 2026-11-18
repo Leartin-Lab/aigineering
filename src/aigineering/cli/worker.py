@@ -19,8 +19,7 @@ from aigineering.cli._candidate import commit_local_effects, require_accepted
 from aigineering.agent.worker import WorkerExecutionError
 from aigineering.runtime import (
     WorkerSubmissionCommitError,
-    _method_context_assets_for,
-    submit_worker_proposal,
+    submit_worker_proposal_with_decision,
 )
 from aigineering.runtime_services import (
     claim_next_application_package,
@@ -108,7 +107,6 @@ def worker_package(contract_id: str, json_output: bool) -> None:
             raise click.exceptions.Exit(1)
 
         scope = compute_disclosure(contract, store)
-        method_context_assets = _method_context_assets_for(contract, store)
 
         def metadata(asset: object) -> dict[str, object]:
             if isinstance(asset, dict):
@@ -139,9 +137,6 @@ def worker_package(contract_id: str, json_output: bool) -> None:
             "contract_id": contract.id,
             "contract": contract_to_dict(contract),
             "disclosed_assets": [metadata(asset) for asset in scope],
-            "method_context_assets": [
-                metadata(asset) for asset in method_context_assets
-            ],
             "tool_scope": list(contract.tool_scope),
             "budget_remaining": contract.budget,
             "capability_requirements": list(contract.worker_capabilities),
@@ -582,13 +577,13 @@ def worker_submit(candidate_json: str, idempotency_key: Optional[str]) -> None:
 
     store = _persistent_store()
     try:
-        result = submit_worker_proposal(
+        result, decision = submit_worker_proposal_with_decision(
             candidate,
             store,
             trace_store=store,
         )
     except CandidateCommitRejected as e:
-        sync_runtime(store)
+        sync_runtime(store, decision=e.decision)
         _output_json({"error": str(e), "status": "error"})
         raise click.exceptions.Exit(1) from None
     except (DisclosurePolicyError, TypeError, ValueError) as e:
@@ -599,7 +594,7 @@ def worker_submit(candidate_json: str, idempotency_key: Optional[str]) -> None:
         _output_json({"error": str(e), "status": "error"})
         raise click.exceptions.Exit(1) from None
     else:
-        sync_runtime(store)
+        sync_runtime(store, decision=decision)
         # Redact sealed config from result
         result = _redact_sealed(result)
         _output_json(result)

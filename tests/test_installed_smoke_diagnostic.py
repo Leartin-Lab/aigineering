@@ -37,6 +37,12 @@ def test_safe_failure_schema_is_closed_and_sanitizes_untrusted_values():
         "fixture_seed",
         "root_task_smoke",
         "feature_smokes",
+        "feature_boards",
+        "feature_registration_digest",
+        "feature_task_context",
+        "feature_task_diagnostics",
+        "feature_task_logs",
+        "feature_task_attachments",
         "reconstruction",
         "configured_run",
         "evidence_write",
@@ -538,3 +544,41 @@ def test_installed_smoke_workflow_has_required_redis_service_and_address():
     assert '--health-cmd "redis-cli ping"' in installed_job
     assert "AIGINEERING_REDIS_URL: redis://127.0.0.1:6379/14" in installed_job
     assert "if: always()" in installed_job
+
+
+def test_feature_failure_phases_retain_detail_privately_without_public_payloads(
+    monkeypatch, tmp_path
+):
+    marker = "PRIVATE_FEATURE_FAILURE_DETAIL"
+    for phase in (
+        "feature_boards",
+        "feature_registration_digest",
+        "feature_task_context",
+        "feature_task_diagnostics",
+        "feature_task_logs",
+        "feature_task_attachments",
+    ):
+        workdir = tmp_path / phase
+        workdir.mkdir()
+        evidence = tmp_path / (phase + "-safe")
+        monkeypatch.setattr(
+            installed_smoke.tempfile, "mkdtemp", lambda **kwargs: str(workdir)
+        )
+        try:
+            with installed_smoke.smoke_workspace(evidence):
+                installed_smoke._set_phase(phase)
+                raise RuntimeError(marker)
+        except RuntimeError as error:
+            assert f"phase={phase}" in str(error)
+            assert marker not in str(error)
+        else:
+            raise AssertionError("feature failure was suppressed")
+        safe = json.loads(
+            next(evidence.glob("installed-smoke-failure-*.json")).read_text()
+        )
+        assert safe["phase"] == phase
+        assert marker not in json.dumps(safe)
+        private = json.loads(
+            next(workdir.glob("failed-installed-run-*.json")).read_text()
+        )
+        assert marker in private["traceback"]

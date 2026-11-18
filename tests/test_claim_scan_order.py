@@ -5,43 +5,20 @@ from dataclasses import replace
 import pytest
 
 from aigineering.agent.mock import MockWorker
-from aigineering.core.candidate_publisher import CandidatePublisher
 from aigineering.core.domain import initialize_genesis
 from aigineering.core.signing import Ed25519Signer
 from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.core.worker_routing import WorkerRegistration
-from aigineering.plugins.collaboration import COLLABORATION_EFFECTS
-from aigineering.plugins.task_assignment import TASK_ASSIGNMENT_EFFECTS
 from aigineering.protocol.candidate import (
     ActorKey,
-    CandidateEffect,
     create_genesis_manifest,
 )
-from aigineering.protocol.effect_builders import (
-    contract_declaration_effect,
-    task_block_effect,
-)
-from aigineering.protocol.identity import contract_identity_v3
 from aigineering.protocol.types import Contract
 from aigineering.runtime import claim_next_package
 
 
-def _environment(tmp_path, *, worker_id="scan-worker", authority_caps=()):
+def _environment(tmp_path, *, worker_id="scan-worker"):
     store = SQLiteStore(tmp_path / "claim-scan-order.sqlite")
-    authority_signer = Ed25519Signer()
-    authority_key = ActorKey(
-        "test:scan-authority",
-        "scan-authority-key",
-        authority_signer.kind,
-        authority_signer.signer_id,
-        (
-            "actor.authorize",
-            "worker.register",
-            "contract.publish",
-            "task.assignment.manage",
-            *authority_caps,
-        ),
-    )
     signer = Ed25519Signer()
     key = ActorKey(
         worker_id,
@@ -50,18 +27,8 @@ def _environment(tmp_path, *, worker_id="scan-worker", authority_caps=()):
         signer.signer_id,
         ("worker.submit",),
     )
-    alternate_signer = Ed25519Signer()
-    alternate_key = ActorKey(
-        "assigned-to-other",
-        "key:assigned-to-other",
-        alternate_signer.kind,
-        alternate_signer.signer_id,
-        ("worker.submit",),
-    )
     genesis = create_genesis_manifest(
-        "claim-scan-order-test",
-        (authority_key, key, alternate_key),
-        "policy:scan-order",
+        "claim-scan-order-test", (key,), "policy:scan-order"
     )
     initialize_genesis(store, genesis)
     store.register_worker(
@@ -72,30 +39,11 @@ def _environment(tmp_path, *, worker_id="scan-worker", authority_caps=()):
             key_id=key.key_id,
         )
     )
-    store.register_worker(
-        WorkerRegistration(
-            alternate_key.actor_id,
-            version="1",
-            actor_id=alternate_key.actor_id,
-            key_id=alternate_key.key_id,
-        )
-    )
-    additional = dict(TASK_ASSIGNMENT_EFFECTS)
-    if "task.block" in authority_caps:
-        additional.update(COLLABORATION_EFFECTS)
-    publisher = CandidatePublisher(
-        store,
-        store,
-        genesis,
-        authority_key,
-        authority_signer,
-        additional_effects=additional,
-    )
     worker = MockWorker(worker_id=worker_id)
     from aigineering.agent.worker import WorkerHost
 
     host = WorkerHost(worker, genesis, key, signer, registration_version="1")
-    return store, publisher, host
+    return store, None, host
 
 
 def _add_tasks(store, *contracts):
@@ -227,43 +175,6 @@ def test_hook_only_sees_worker_routed_contracts(tmp_path):
     store.close()
 
 
-def test_hook_sees_only_contracts_after_assignment_filtering(tmp_path):
-    store, publisher, host = _environment(tmp_path)
-    assigned = Contract(id="task:assigned-draft", outputs=("assigned",), budget=1)
-    assigned = replace(assigned, id=contract_identity_v3(assigned))
-    declaration = publisher.publish(
-        (contract_declaration_effect(assigned),), idempotency_key="declare-assigned"
-    )
-    assert declaration.accepted
-    assignment = publisher.publish(
-        (
-            CandidateEffect(
-                "task.assign",
-                {
-                    "contract_id": assigned.id,
-                    "previous_assignment_id": "",
-                    "reason": "route to the registered alternate worker",
-                    "worker_id": "assigned-to-other",
-                },
-            ),
-        ),
-        idempotency_key="assign-other",
-    )
-    assert assignment.accepted
-    store.add_contract(Contract(id="task:general", outputs=("general",), budget=1))
-    observed = []
-
-    def capture(ids):
-        observed.append(ids)
-        return ids
-
-    claimed = _claim(store, host, order_contract_ids=capture)
-    assert observed == [("task:general",)]
-    assert claimed is not None and claimed.contract.id == "task:general"
-    assert store.get_claim(assigned.id) is None
-    store.close()
-
-
 def test_explicit_target_bypasses_order_hook(tmp_path):
     store, _publisher, host = _environment(tmp_path)
     _add_tasks(
@@ -283,27 +194,6 @@ def test_explicit_target_bypasses_order_hook(tmp_path):
     )
     assert claimed is not None
     assert claimed.contract.id == "task:a"
-    store.close()
-
-
-def test_writer_still_fences_hold_added_after_order_hook_preflight(tmp_path):
-    store, publisher, host = _environment(tmp_path, authority_caps=("task.block",))
-    contract = Contract(id="task:held", outputs=("held",), budget=1)
-    store.add_contract(contract)
-
-    def place_hold(contract_ids):
-        assert contract_ids == (contract.id,)
-        decision = publisher.publish(
-            (task_block_effect(contract.id, "pause before claim"),),
-            idempotency_key="hold-before-claim",
-        )
-        assert decision.accepted
-        return contract_ids
-
-    claimed = _claim(store, host, order_contract_ids=place_hold)
-    assert claimed is None
-    assert store.get_claim(contract.id) is None
-    assert store.scan_runtime_records(record_type="claim.hold.placed")
     store.close()
 
 

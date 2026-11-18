@@ -3,6 +3,10 @@
 Status: Implemented development increment
 Date: 2026-10-23
 
+The scope-based default and minimum described here were superseded by
+[change 135](135-execution-permission-and-exact-output-eligibility.md).
+Actual tool calls still require funding for their tool task and continuation.
+
 Planning expansion now defaults an omitted child `budget` to 2 when that child
 declares a non-empty `tool_scope`, covering one tool task and its continuation.
 Children without tools still default to 1. Legacy `contracts` blueprints and

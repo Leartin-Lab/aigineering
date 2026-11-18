@@ -23,6 +23,12 @@ A disclosure policy that declares accepted claim types requires a valid
 incoming relation for the exact Asset. Signed but invalid relation Candidates
 remain auditable assertions and do not satisfy the policy.
 
+Slice ingress publishes its Asset and relation in one Candidate. A relation
+may refer to a preceding `asset.propose` by its signed batch index; projection
+stores the exact resulting Asset ID. This is a static reference within the
+publication, not a mutable name or a new derivation policy. See
+[change 138](../../changes/138-atomic-local-asset-publication.md).
+
 ## Consequences
 
 - replay is independent of a changed name or label catalog;

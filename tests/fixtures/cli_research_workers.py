@@ -196,58 +196,65 @@ class ResearchWorker:
                 {"planning_blueprint": json.dumps(blueprint, sort_keys=True)},
             )
 
-        if contract.tool_scope:
-            if "summarize_sample" in contract.tool_scope:
-                _sample, sample_payload = _asset_json(disclosed_assets, "sample")
+        observations = _observation_assets(disclosed_assets)
+        summaries = [
+            item
+            for item in observations
+            if item[1].get("tool") == "summarize_sample" and item[1].get("ok") is True
+        ]
+        conversions = [
+            item
+            for item in observations
+            if item[1].get("tool") == "convert_mean" and item[1].get("ok") is True
+        ]
+        if len(summaries) > 1 or len(conversions) > 1:
+            return _action(
+                self.worker_id,
+                '/fail {"reason":"multiple successful tool observations are ambiguous"}',
+            )
+        if not summaries:
+            if "summarize_sample" not in contract.tool_scope:
                 return _action(
                     self.worker_id,
-                    "/tool "
-                    + json.dumps(
-                        {
-                            "name": "summarize_sample",
-                            "args": {"values": sample_payload["values"]},
-                        },
-                        sort_keys=True,
-                    ),
+                    '/fail {"reason":"required summary tool is not permitted"}',
                 )
-            if "convert_mean" in contract.tool_scope:
-                observations = _observation_assets(disclosed_assets)
-                summaries = [
-                    item
-                    for item in observations
-                    if item[1].get("tool") == "summarize_sample"
-                    and item[1].get("ok") is True
-                ]
-                if len(summaries) != 1:
-                    return _action(
-                        self.worker_id,
-                        "/fail "
-                        + json.dumps(
-                            {"reason": "missing the committed summary observation"}
-                        ),
-                    )
-                result = summaries[0][1].get("result")
-                if not isinstance(result, str):
-                    return _action(
-                        self.worker_id,
-                        '/fail {"reason":"summary result is not JSON text"}',
-                    )
-                try:
-                    summary = json.loads(result)
-                except ValueError:
-                    return _action(
-                        self.worker_id, '/fail {"reason":"summary result is malformed"}'
-                    )
+            _sample, sample_payload = _asset_json(disclosed_assets, "sample")
+            return _action(
+                self.worker_id,
+                "/tool "
+                + json.dumps(
+                    {
+                        "name": "summarize_sample",
+                        "args": {"values": sample_payload["values"]},
+                    },
+                    sort_keys=True,
+                ),
+            )
+        if not conversions:
+            if "convert_mean" not in contract.tool_scope:
                 return _action(
                     self.worker_id,
-                    "/tool "
-                    + json.dumps(
-                        {"name": "convert_mean", "args": {"summary": summary}},
-                        sort_keys=True,
-                    ),
+                    '/fail {"reason":"required conversion tool is not permitted"}',
+                )
+            result = summaries[0][1].get("result")
+            if not isinstance(result, str):
+                return _action(
+                    self.worker_id,
+                    '/fail {"reason":"summary result is not JSON text"}',
+                )
+            try:
+                summary = json.loads(result)
+            except ValueError:
+                return _action(
+                    self.worker_id, '/fail {"reason":"summary result is malformed"}'
                 )
             return _action(
-                self.worker_id, '/fail {"reason":"unexpected remaining tool scope"}'
+                self.worker_id,
+                "/tool "
+                + json.dumps(
+                    {"name": "convert_mean", "args": {"summary": summary}},
+                    sort_keys=True,
+                ),
             )
 
         return self._publish_measurements(contract, disclosed_assets)

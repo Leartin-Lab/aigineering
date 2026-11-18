@@ -29,14 +29,23 @@ if TYPE_CHECKING:
 def _asset_identity_check(store: AssetReader, asset) -> tuple[str, str, bool]:
     if asset.definition_hash.startswith("definition:v1:"):
         expected_content = content_object_id(asset.content)
-        definitions = {
-            str(value["id"]): value for value in store.get_asset_definitions()
-        }
-        contents = {str(value["id"]): value for value in store.get_content_objects()}
-        definition = definitions.get(asset.definition_hash)
-        content = contents.get(asset.content_hash)
-        if definition is None or content is None:
-            return expected_content, asset.definition_hash, False
+        read_graph_values = getattr(store, "read_asset_graph_values", None)
+        if callable(read_graph_values):
+            values = read_graph_values(asset.definition_hash, asset.content_hash)
+            if values is None:
+                return expected_content, asset.definition_hash, False
+            definition, content = values
+        else:
+            definitions = {
+                str(value["id"]): value for value in store.get_asset_definitions()
+            }
+            contents = {
+                str(value["id"]): value for value in store.get_content_objects()
+            }
+            definition = definitions.get(asset.definition_hash)
+            content = contents.get(asset.content_hash)
+            if definition is None or content is None:
+                return expected_content, asset.definition_hash, False
         assertions = store.get_definition_content_assertions(
             definition_id=asset.definition_hash,
             content_id=asset.content_hash,

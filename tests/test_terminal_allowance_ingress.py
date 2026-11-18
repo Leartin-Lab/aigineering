@@ -138,11 +138,10 @@ def test_claimed_signed_worker_failure_extinguishes_remaining_allowance(
         for record in _records(store, "allowance.extinguished")
         if record.payload.get("contract_id") == contract.id
     )
-    assert len(failures) == len(terminals) == len(extinguishments) == 1
-    assert terminals[0].payload["terminal"] == "failed"
-    assert terminals[0].payload["contract_id"] == contract.id
+    assert len(failures) == len(extinguishments) == 1
+    assert terminals == ()
     assert extinguishments[0].payload["amount"] == 3
-    assert extinguishments[0].causal_parents == (terminals[0].id,)
+    assert extinguishments[0].causal_parents == (failures[0].id,)
     assert store.get_claim(contract.id)["status"] == "released"
     assert failures[0].payload["category"] == "worker_error:fixture_timeout"
     store.close()
@@ -343,13 +342,12 @@ def test_expired_claim_extinguishes_remaining_allowance(tmp_path, monkeypatch):
     recovery_publishers = CandidatePublisherRegistry(
         (("recovery.publish.v1", setup.publisher),)
     )
-    assert process_expired_claims(store, candidate_publishers=recovery_publishers) == [
-        contract.id
-    ]
+    assert process_expired_claims(store, candidate_publishers=recovery_publishers) == []
 
-    terminal = next(
+    assert not _records(store, "lifecycle.terminal")
+    expiration = next(
         record
-        for record in _records(store, "lifecycle.terminal")
+        for record in _records(store, "claim.expired")
         if record.payload.get("contract_id") == contract.id
     )
     extinguished = next(
@@ -357,9 +355,8 @@ def test_expired_claim_extinguishes_remaining_allowance(tmp_path, monkeypatch):
         for record in _records(store, "allowance.extinguished")
         if record.payload.get("contract_id") == contract.id
     )
-    assert terminal.payload["terminal"] == "failed"
     assert extinguished.payload["amount"] == 5
-    assert extinguished.causal_parents == (terminal.id,)
+    assert extinguished.causal_parents == (expiration.id,)
     assert store.get_claim(contract.id)["status"] == "expired"
     store.close()
 
@@ -379,7 +376,7 @@ def test_asset_free_internal_writer_does_not_replace_a_forged_extinguishment():
         causal_parents=(terminal.id,),
     )
 
-    with pytest.raises(ValueError, match="exact terminal parent and reason"):
+    with pytest.raises(ValueError, match="exact closure parent and reason"):
         store.commit_ingress_batch(
             accepted_assets=[],
             trace_entries=[],
@@ -399,7 +396,7 @@ def test_signed_new_child_cannot_reserve_from_historical_terminal_source():
     source = setup.accept_contract(
         Contract(id="task:legacy-terminal-source", outputs=("source",), budget=3)
     )
-    legacy_terminal = create_terminal_record(source.id, "failed")
+    legacy_terminal = create_terminal_record(source.id, "cancelled")
     store.append_runtime_record(legacy_terminal)
     child = Contract(
         id="task:post-terminal-child",

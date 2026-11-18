@@ -124,7 +124,7 @@ class TestCLIRetryBypass:
         )
 
         # ── Functional test: CLI retry still creates the retry contract ──
-        from aigineering.core.methods import retry_contract
+        from aigineering.plugins.task_semantics import retry_contract
         from aigineering.core.control_plane import build_control_plane_contract
         from aigineering.protocol.identity import contract_from_fields
         from aigineering.task_publication import publish_task_contract
@@ -201,7 +201,7 @@ class TestAuthorityClamp:
         Gate: G6 (Deny-By-Default Capability Containment)
         """
         # Behavior: rejects child (action="rejected"), child skipped entirely
-        from aigineering.core.methods import contracts_from_plan_asset
+        from aigineering.plugins.task_semantics import contracts_from_plan_asset
 
         parent = Contract(
             id="parent-scope",
@@ -257,7 +257,7 @@ class TestAuthorityClamp:
         """
         # Budget containment: child is accepted with reduced budget, but the trace
         # MUST record requested, effective, and remaining budget fields.
-        from aigineering.core.methods import contracts_from_plan_asset
+        from aigineering.plugins.task_semantics import contracts_from_plan_asset
 
         parent = Contract(
             id="parent-budget",
@@ -939,7 +939,7 @@ class TestPlanContainment:
 
         Gate: G6
         """
-        from aigineering.core.methods import contracts_from_plan_asset
+        from aigineering.plugins.task_semantics import contracts_from_plan_asset
         from aigineering.protocol.types import Asset, Contract
 
         parent = Contract(
@@ -975,7 +975,7 @@ class TestPlanContainment:
 
         Gate: G6
         """
-        from aigineering.core.methods import contracts_from_plan_asset
+        from aigineering.plugins.task_semantics import contracts_from_plan_asset
         from aigineering.protocol.types import Asset, Contract
 
         parent = Contract(
@@ -1136,8 +1136,8 @@ class TestReplayIntegrity:
 class TestPublicDocs:
     """G11: Public docs must match reality."""
 
-    def test_public_docs_match_release_scope(self):
-        """README and ROADMAP describe the release without overclaiming."""
+    def test_public_docs_match_current_scope(self):
+        """README and ROADMAP identify their scope without overclaiming."""
         import os
 
         repo_root = os.path.join(os.path.dirname(__file__), "..")
@@ -1159,7 +1159,6 @@ class TestPublicDocs:
             )
         from aigineering import __version__
 
-        assert f"v{__version__}" in readme.lower()
         assert "candidate" in readme.lower()
         assert "transaction" in readme.lower()
         assert "single-machine" in readme.lower()
@@ -1170,7 +1169,11 @@ class TestPublicDocs:
             roadmap = f.read()
 
         roadmap_lower = roadmap.lower()
-        assert "v0.5" in roadmap_lower
+        if "development branch: **dev**" in readme.lower():
+            assert "**dev** branch" in roadmap_lower
+        else:
+            assert f"v{__version__}" in readme.lower()
+            assert f"v{__version__}" in roadmap_lower
         assert "actor-signed candidate commitment" in roadmap_lower
         assert "single-machine" in roadmap_lower
         assert "release gates" in roadmap_lower

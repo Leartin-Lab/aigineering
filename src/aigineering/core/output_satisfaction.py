@@ -8,7 +8,10 @@ submission must share this logic.
 from __future__ import annotations
 
 from collections.abc import Mapping
+import re
 from typing import TYPE_CHECKING
+
+from aigineering.core.authority import matched_reserved_prefix
 
 if TYPE_CHECKING:
     from aigineering.core.store import StoreProtocol
@@ -34,6 +37,85 @@ NON_OUTPUT_PREFIXES: tuple[str, ...] = (
 )
 
 
+class CompletionConditionConflict(ValueError):
+    """A fresh completion fact has no satisfying declared Asset conditions."""
+
+
+_OUTPUT_REQUIREMENT_SELECTORS = frozenset(
+    {"definition_id", "content_id", "producer_actor_ids"}
+)
+_GRAPH_ID_PATTERNS = {
+    "definition_id": re.compile(r"definition:v1:[0-9a-f]{64}\Z"),
+    "content_id": re.compile(r"content:v1:[0-9a-f]{64}\Z"),
+}
+
+
+def validate_output_requirements(contract: Contract) -> None:
+    """Validate the small, exact selector map attached to output roles."""
+    policy = contract.acceptance_policy
+    if policy is None:
+        return
+    if not isinstance(policy, Mapping):
+        raise ValueError("Contract acceptance_policy must be an object")
+    if "output_requirements" not in policy:
+        return
+    requirements = policy["output_requirements"]
+    if not isinstance(requirements, Mapping):
+        raise ValueError("acceptance_policy.output_requirements must be an object")
+    declared = set(contract.outputs)
+    for output_name, selectors in requirements.items():
+        if not isinstance(output_name, str) or output_name not in declared:
+            raise ValueError(
+                "acceptance_policy.output_requirements keys must be declared outputs"
+            )
+        if not isinstance(selectors, Mapping):
+            raise ValueError(
+                f"output requirement for {output_name!r} must be an object"
+            )
+        _validate_output_requirement_selectors(output_name, selectors)
+
+
+def _validate_output_requirement_selectors(
+    output_name: str, selectors: Mapping
+) -> None:
+    unknown = set(selectors) - _OUTPUT_REQUIREMENT_SELECTORS
+    if unknown:
+        raise ValueError(
+            f"output requirement for {output_name!r} has unknown selectors: "
+            f"{sorted(map(str, unknown))}"
+        )
+    if not selectors:
+        raise ValueError(
+            f"output requirement for {output_name!r} needs at least one selector"
+        )
+    for field, pattern in _GRAPH_ID_PATTERNS.items():
+        if field not in selectors:
+            continue
+        value = selectors[field]
+        if not isinstance(value, str) or pattern.fullmatch(value) is None:
+            raise ValueError(
+                f"output requirement {output_name!r}.{field} must be an exact "
+                f"{field.removesuffix('_id')}:v1 identity"
+            )
+    if "producer_actor_ids" in selectors:
+        actor_ids = selectors["producer_actor_ids"]
+        if (
+            not isinstance(actor_ids, (list, tuple))
+            or not actor_ids
+            or any(
+                not isinstance(actor_id, str)
+                or not actor_id
+                or actor_id != actor_id.strip()
+                for actor_id in actor_ids
+            )
+            or tuple(actor_ids) != tuple(sorted(set(actor_ids)))
+        ):
+            raise ValueError(
+                f"output requirement {output_name!r}.producer_actor_ids must be "
+                "non-empty, sorted, unique Actor ID strings"
+            )
+
+
 def is_business_output(asset: object, declared_output_name: str) -> bool:
     """Return True when *asset* can satisfy a declared business output."""
     name: str = getattr(asset, "name", "")
@@ -44,6 +126,102 @@ def is_business_output(asset: object, declared_output_name: str) -> bool:
     if origin in NON_OUTPUT_ORIGINS:
         return False
     return not any(name.startswith(prefix) for prefix in NON_OUTPUT_PREFIXES)
+
+
+def output_asset_is_eligible(
+    contract: Contract,
+    output_name: str,
+    asset: Asset,
+    store: StoreProtocol,
+    *,
+    qualified_asset_ids: set[str] | frozenset[str] = frozenset(),
+) -> bool:
+    """Return whether one exact Asset can satisfy this Contract output slot."""
+    if not is_output_role_asset(asset, output_name):
+        return False
+
+    policy = contract.acceptance_policy
+    if not output_asset_meets_conditions(contract, output_name, asset):
+        return False
+    if isinstance(policy, Mapping) and policy.get("mode") == "independent":
+        return asset.id in qualified_asset_ids
+    return True
+
+
+def is_output_role_asset(asset: Asset, output_name: str) -> bool:
+    """Keep observation roles distinct without giving task origins authority.
+
+    An explicit reserved observation role can be required by an ordinary task.
+    Publication still enforces its namespace authority. An observation cannot
+    masquerade as a business output just by sharing its name.
+    """
+    return is_business_output(asset, output_name) or (
+        asset.name == output_name
+        and asset.origin != "label_placeholder"
+        and matched_reserved_prefix(output_name) is not None
+    )
+
+
+def output_asset_meets_conditions(
+    contract: Contract, output_name: str, asset: Asset
+) -> bool:
+    """Match an admitted Asset to the exact conditions declared for one role.
+
+    This pure matcher checks declared shape and identity conditions but reads no
+    Store and verifies no publication signatures. Callers supply an Asset
+    already admitted by the normal runtime path; producer identity is its
+    authenticated signer metadata.
+    """
+    if getattr(asset, "name", None) != output_name:
+        return False
+    policy = contract.acceptance_policy
+    if not isinstance(policy, Mapping):
+        return True
+    if "output_shapes" in policy:
+        from aigineering.core.acceptance import validate_output_shape
+
+        try:
+            validate_output_shape(policy, output_name, asset.content)
+        except ValueError:
+            return False
+    requirements = policy.get("output_requirements", {})
+    if not isinstance(requirements, Mapping):
+        return False
+    selectors = requirements.get(output_name)
+    if selectors is None:
+        return True
+    if not isinstance(selectors, Mapping):
+        return False
+    try:
+        _validate_output_requirement_selectors(output_name, selectors)
+    except (TypeError, ValueError):
+        return False
+    definition_id = selectors.get("definition_id")
+    if definition_id is not None and asset.definition_hash != definition_id:
+        return False
+    content_id = selectors.get("content_id")
+    if content_id is not None and asset.content_hash != content_id:
+        return False
+    producer_actor_ids = selectors.get("producer_actor_ids")
+    if producer_actor_ids is not None and asset.signed_by not in producer_actor_ids:
+        return False
+    return True
+
+
+def unmet_output_names(
+    contract: Contract,
+    store: StoreProtocol,
+    *,
+    pending_assets: tuple[Asset, ...] = (),
+    extra_qualified_asset_ids: Mapping[tuple[str, str], set[str]] | None = None,
+) -> tuple[str, ...]:
+    """Return declared output names without a matching admitted Asset condition."""
+    return _unmet_output_names(
+        contract,
+        store,
+        pending_assets=pending_assets,
+        extra_qualified_asset_ids=extra_qualified_asset_ids,
+    )
 
 
 def all_outputs_satisfied(
@@ -66,61 +244,110 @@ def all_outputs_satisfied(
     """
     if require_outputs and not contract.outputs:
         return False
+    return not _unmet_output_names(
+        contract,
+        store,
+        extra_output_names=extra_output_names or set(),
+        pending_assets=pending_assets,
+        extra_qualified_asset_ids=extra_qualified_asset_ids,
+    )
 
-    extra_output_names = extra_output_names or set()
+
+def selected_output_assets(
+    contract: Contract,
+    store: StoreProtocol,
+    *,
+    pending_assets: tuple[Asset, ...] = (),
+    extra_qualified_asset_ids: Mapping[tuple[str, str], set[str]] | None = None,
+) -> dict[str, Asset]:
     extra_qualified_asset_ids = extra_qualified_asset_ids or {}
-    for output_name in contract.outputs:
-        policy = contract.acceptance_policy
-        if policy is not None and policy.get("mode") == "independent":
-            qualified_ids = {
-                str(record.payload.get("asset_id", ""))
-                for _, record in store.scan_runtime_records(
-                    record_type="output.qualified"
+    policy = contract.acceptance_policy
+    try:
+        validate_output_requirements(contract)
+    except (TypeError, ValueError):
+        return {}
+    requirements = (
+        policy.get("output_requirements", {}) if isinstance(policy, Mapping) else {}
+    )
+    qualified_by_output: dict[str, set[str]] = {}
+    independent = isinstance(policy, Mapping) and policy.get("mode") == "independent"
+    if independent:
+        for record in store.read_task_facts(contract.id, ("output.qualified",)):
+            output_name = record.payload.get("output_name")
+            if isinstance(output_name, str):
+                qualified_by_output.setdefault(output_name, set()).add(
+                    str(record.payload.get("asset_id", ""))
                 )
-                if record.payload.get("contract_id") == contract.id
-                and record.payload.get("output_name") == output_name
-            }
+
+    selected: dict[str, Asset] = {}
+    for output_name in contract.outputs:
+        if independent:
+            qualified_ids = set(qualified_by_output.get(output_name, ()))
             qualified_ids.update(
                 extra_qualified_asset_ids.get((contract.id, output_name), set())
             )
             if not qualified_ids:
-                return False
-            matching = store.get_assets_by_name(output_name)
-            if not any(
-                asset.id in qualified_ids
-                and _is_contract_or_descendant(asset.created_by, contract.id, store)
-                and is_business_output(asset, output_name)
-                for asset in matching
-            ):
-                return False
-            continue
-        if output_name in extra_output_names:
-            continue
+                continue
+        else:
+            qualified_ids = set()
+
+        selectors = (
+            requirements.get(output_name) if isinstance(requirements, Mapping) else None
+        )
+        definition_id = (
+            selectors.get("definition_id") if isinstance(selectors, Mapping) else None
+        )
+        if definition_id is not None:
+            get_by_definition = getattr(store, "get_assets_by_definition", None)
+            committed = (
+                get_by_definition(definition_id)
+                if callable(get_by_definition)
+                else store.get_assets_by_name(output_name)
+            )
+        else:
+            committed = store.get_assets_by_name(output_name)
         matching = (
-            *store.get_assets_by_name(output_name),
+            *committed,
             *(asset for asset in pending_assets if asset.name == output_name),
         )
-        if not matching:
-            return False
-        if contract.origin in {"system", "recovery"}:
-            if not any(
-                getattr(asset, "created_by", "") == contract.id for asset in matching
-            ):
-                return False
-            continue
-        if not any(is_business_output(asset, output_name) for asset in matching):
-            return False
-    return True
+        eligible = [
+            asset
+            for asset in matching
+            if output_asset_is_eligible(
+                contract, output_name, asset, store, qualified_asset_ids=qualified_ids
+            )
+        ]
+        if eligible:
+            selected[output_name] = min(eligible, key=lambda asset: asset.id)
+    return selected
 
 
-def _is_contract_or_descendant(producer_id: str, contract_id: str, store) -> bool:
-    """Return whether immutable Contract ancestry binds producer to owner."""
-    current_id = producer_id
-    visited: set[str] = set()
-    while current_id and current_id not in visited:
-        if current_id == contract_id:
-            return True
-        visited.add(current_id)
-        current = store.get_contract(current_id)
-        current_id = str(current.parent_id or "") if current is not None else ""
-    return False
+def _unmet_output_names(
+    contract: Contract,
+    store: StoreProtocol,
+    *,
+    extra_output_names: set[str] | None = None,
+    pending_assets: tuple[Asset, ...] = (),
+    extra_qualified_asset_ids: Mapping[tuple[str, str], set[str]] | None = None,
+) -> tuple[str, ...]:
+    selected = selected_output_assets(
+        contract,
+        store,
+        pending_assets=pending_assets,
+        extra_qualified_asset_ids=extra_qualified_asset_ids,
+    )
+    policy = contract.acceptance_policy or {}
+    requirements = policy.get("output_requirements", {})
+    shapes = policy.get("output_shapes", {})
+    extra = extra_output_names or set()
+    return tuple(
+        output
+        for output in contract.outputs
+        if output not in selected
+        and not (
+            output in extra
+            and output not in requirements
+            and output not in shapes
+            and policy.get("mode") != "independent"
+        )
+    )

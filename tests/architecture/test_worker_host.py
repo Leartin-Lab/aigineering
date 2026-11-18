@@ -45,7 +45,7 @@ def _runtime(output: str, *, budget: int = 3):
         "hosted-1",
         signer.kind,
         signer.signer_id,
-        ("worker.register", "worker.submit"),
+        ("worker.register", "worker.submit", "contract.publish"),
     )
     genesis = create_genesis_manifest(
         "worker-host-test", (actor,), "policy:worker-host-test"
@@ -78,7 +78,17 @@ def _runtime(output: str, *, budget: int = 3):
         "origin": "human",
     }
     contract = Contract(id=hash_contract_v3(**fields), **fields)
-    store.add_contract(contract)
+    decision = publish_effect(
+        store,
+        store,
+        genesis,
+        actor,
+        signer,
+        contract_declaration_effect(contract),
+        idempotency_key="fixture-contract",
+    )
+    assert decision.accepted
+    contract = decision.contract
     worker = MockWorker({contract.name: output}, worker_id=actor.actor_id)
     return store, contract, WorkerHost(worker, genesis, actor, signer)
 
@@ -133,7 +143,17 @@ def test_worker_outputs_share_content_without_collapsing_assertion_identity():
         "origin": "human",
     }
     second = Contract(id=hash_contract_v3(**fields), **fields)
-    store.add_contract(second)
+    decision = publish_effect(
+        store,
+        store,
+        original_host.genesis,
+        original_host.actor_key,
+        original_host.signer,
+        contract_declaration_effect(second),
+        idempotency_key="fixture-second",
+    )
+    assert decision.accepted
+    second = decision.contract
     host = WorkerHost(
         MockWorker(
             {
@@ -173,8 +193,8 @@ def test_invalid_host_action_closes_claim_instead_of_ending_silently():
     assert store.get_claim(contract.id)["status"] == "released"
     failure = store.scan_runtime_records(record_type="worker.invocation_failed")[-1][1]
     assert failure.payload["category"] == "worker_error:invalid_action"
-    terminal = store.scan_runtime_records(record_type="lifecycle.terminal")[-1][1]
-    assert terminal.payload["terminal"] == "failed"
+    assert not store.scan_runtime_records(record_type="lifecycle.terminal")
+    assert store.scan_runtime_records(record_type="allowance.extinguished")
 
 
 def test_worker_host_plan_publishes_three_claim_bound_stage_contracts():
@@ -304,7 +324,7 @@ def test_verifier_worker_compiles_exact_disclosed_asset_attestation():
     }
 
 
-def test_tool_recovery_cannot_replace_missing_observation_with_direct_output():
+def test_tool_recovery_may_publish_valid_output_without_using_optional_tool_scope():
     store, _, original_host = _runtime('/exec {"result":"unused"}')
     fields = {
         "name": "retrieve.recover",
@@ -318,7 +338,17 @@ def test_tool_recovery_cannot_replace_missing_observation_with_direct_output():
         "origin": "recovery",
     }
     recovery = Contract(id=hash_contract_v3(**fields), **fields)
-    store.add_contract(recovery)
+    decision = publish_effect(
+        store,
+        store,
+        original_host.genesis,
+        original_host.actor_key,
+        original_host.signer,
+        contract_declaration_effect(recovery),
+        idempotency_key="fixture-explicit-recovery",
+    )
+    assert decision.accepted
+    recovery = decision.contract
     host = WorkerHost(
         MockWorker(
             {recovery.name: '/exec {"result":"fabricated"}'},
@@ -333,12 +363,11 @@ def test_tool_recovery_cannot_replace_missing_observation_with_direct_output():
     )
     assert claimed is not None
 
-    with pytest.raises(WorkerInvocationError, match="worker invocation failed"):
-        execute_claimed_package(claimed, host, store)
-
-    failure = store.scan_runtime_records(record_type="worker.invocation_failed")[-1][1]
-    assert failure.payload["category"] == "worker_error:tool_observation_required"
-    assert store.get_assets_by_name("result") == []
+    result = execute_claimed_package(claimed, host, store)
+    assert result["status"] == "accepted"
+    assert [asset.content for asset in store.get_assets_by_name("result")] == [
+        "fabricated"
+    ]
 
 
 def test_claim_bound_graph_output_rejects_partial_endpoint_batch():
@@ -516,12 +545,8 @@ def test_claim_bound_expansion_cannot_widen_parent_tool_scope():
     assert store.get_claim(contract.id)["status"] == "submitted"
     attempt = store.scan_runtime_records(record_type="attempt.closed")[-1][1]
     assert attempt.payload["outcome"] == "failed"
-    terminal = store.scan_runtime_records(record_type="lifecycle.terminal")[-1][1]
-    assert terminal.payload == {
-        "contract_id": contract.id,
-        "reason": "claim-bound Candidate was rejected",
-        "terminal": "failed",
-    }
+    assert not store.scan_runtime_records(record_type="lifecycle.terminal")
+    assert store.scan_runtime_records(record_type="allowance.extinguished")
 
 
 def test_claim_bound_child_cannot_self_grant_protected_authority():
@@ -578,6 +603,7 @@ def test_worker_host_delegates_without_method_handler_authorization():
         record
         for _, record in store.scan_runtime_records(record_type="candidate.received")
         if record.payload.get("effect_types") == ("contract.declare",)
+        and record.payload.get("contract_id") == contract.id
     )
     declared = store.scan_runtime_records(record_type="contract.declared")[-1][1]
     assert declared.causal_parents == (receipt.id,)
@@ -626,5 +652,5 @@ def test_claim_bound_legacy_wrapper_is_rejected_and_closes_attempt(effect_type):
     assert store.get_claim(claimed.contract.id)["status"] == "submitted"
     assert store.get_contract(claimed.contract.id) is not None
     assert len(store.get_all_contracts()) == 1
-    terminal = store.scan_runtime_records(record_type="lifecycle.terminal")[-1][1]
-    assert terminal.payload["terminal"] == "failed"
+    assert not store.scan_runtime_records(record_type="lifecycle.terminal")
+    assert store.scan_runtime_records(record_type="allowance.extinguished")

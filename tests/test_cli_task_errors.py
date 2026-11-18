@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from contextlib import nullcontext
 
 import pytest
 from click.testing import CliRunner
@@ -100,17 +101,15 @@ def test_task_create_rejects_non_utf8_description_before_store(tmp_path, monkeyp
 
 @pytest.mark.parametrize("command", ["status", "wait", "audit"])
 def test_task_json_not_found_exits_nonzero(monkeypatch, command):
-    class MissingStore:
-        closed = False
-
+    class MissingStore(_WaitStore):
         def get_contract(self, _contract_id):
             return None
 
-        def close(self):
-            self.closed = True
-
     store = MissingStore()
     monkeypatch.setattr("aigineering.cli.task._persistent_snapshot", lambda: store)
+    monkeypatch.setattr(
+        "aigineering.cli.task.SQLiteStore", lambda _path, *, read_only: store
+    )
 
     result = CliRunner().invoke(cli, ["task", command, "missing-task", "--json"])
 
@@ -137,10 +136,10 @@ def test_task_json_not_found_exits_nonzero(monkeypatch, command):
     ],
 )
 def test_task_wait_rejects_invalid_duration_before_store(monkeypatch, option, value):
-    def fail_if_opened():
+    def fail_if_opened(*_args, **_kwargs):
         pytest.fail("invalid wait durations must be rejected before opening Store")
 
-    monkeypatch.setattr("aigineering.cli.task._persistent_snapshot", fail_if_opened)
+    monkeypatch.setattr("aigineering.cli.task.SQLiteStore", fail_if_opened)
 
     result = CliRunner().invoke(
         cli,
@@ -151,18 +150,30 @@ def test_task_wait_rejects_invalid_duration_before_store(monkeypatch, option, va
     assert "finite number" in result.output
 
 
+class _WaitStore:
+    closed = False
+
+    def get_contract(self, _contract_id):
+        return object()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        self.close()
+
+    def close(self):
+        self.closed = True
+
+    def read_transaction(self):
+        return nullcontext()
+
+
 def test_task_wait_timeout_exits_nonzero(monkeypatch):
-    class PendingStore:
-        closed = False
-
-        def get_contract(self, _contract_id):
-            return object()
-
-        def close(self):
-            self.closed = True
-
-    store = PendingStore()
-    monkeypatch.setattr("aigineering.cli.task._persistent_snapshot", lambda: store)
+    store = _WaitStore()
+    monkeypatch.setattr(
+        "aigineering.cli.task.SQLiteStore", lambda _path, *, read_only: store
+    )
     synced = []
 
     class Collaboration:
@@ -196,17 +207,10 @@ def test_task_wait_timeout_exits_nonzero(monkeypatch):
 
 
 def test_task_wait_terminal_failure_exits_nonzero_and_preserves_status(monkeypatch):
-    class FailedStore:
-        closed = False
-
-        def get_contract(self, _contract_id):
-            return object()
-
-        def close(self):
-            self.closed = True
-
-    store = FailedStore()
-    monkeypatch.setattr("aigineering.cli.task._persistent_snapshot", lambda: store)
+    store = _WaitStore()
+    monkeypatch.setattr(
+        "aigineering.cli.task.SQLiteStore", lambda _path, *, read_only: store
+    )
     synced = []
 
     class Collaboration:

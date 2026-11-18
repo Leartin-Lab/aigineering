@@ -5,7 +5,7 @@ import json
 import pytest
 
 from aigineering.core.ids import hash_contract, hash_contract_v3
-from aigineering.core.methods import contracts_from_plan_asset
+from aigineering.plugins.task_semantics import contracts_from_plan_asset
 from aigineering.protocol.types import Asset, Contract
 
 

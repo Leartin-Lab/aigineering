@@ -36,5 +36,4 @@ def test_plugins_do_not_import_candidate_commit_capability():
             for alias in node.names
         }
         assert "CandidateCommitStore" not in imported, path
-        assert "StoreProtocol" not in imported, path
         assert "commit_ingress_batch" not in path.read_text(encoding="utf-8"), path

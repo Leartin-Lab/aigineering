@@ -192,10 +192,9 @@ def list_versions(store, name: str) -> list[Asset]:
 
 
 def resolve_latest(store, name: str) -> Asset | None:
-    """Return the most recent asset with *name*.
+    """Return the Asset most recently committed for the first time under *name*.
 
-    "Most recent" means highest content_hash (deterministic ordering).
-    Returns None if no matching asset exists.
+    Legacy materializations without a commit revision follow all committed
+    versions and use a deterministic ID tie-break.
     """
-    versions = list_versions(store, name)
-    return versions[-1] if versions else None
+    return store.get_latest_asset_by_name(name)

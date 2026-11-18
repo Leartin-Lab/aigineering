@@ -8,7 +8,7 @@ from aigineering.core.ids import hash_claim
 from aigineering.core.provenance import sign_asset
 from aigineering.core.record_conflict import ImmutableRecordConflict
 from aigineering.core.sqlite_store import SQLiteStore
-from aigineering.core.store import JsonLStore, MemoryStore
+from aigineering.core.store import MemoryStore
 from aigineering.protocol.types import Asset, ReplacementClaim
 from aigineering.protocol.wire import asset_to_canonical, asset_to_dict
 
@@ -140,10 +140,8 @@ class TestLineageId:
         assert retrieved is not None
         assert retrieved.lineage_id == "lineage:abc"
 
-    def test_lineage_id_persists_jsonl_store(self, tmp_path):
-        assets_path = tmp_path / "assets.jsonl"
-        contracts_path = tmp_path / "contracts.jsonl"
-
+    def test_lineage_id_persists_sqlite_store(self, tmp_path):
+        path = tmp_path / "store.sqlite"
         asset = sign_asset(
             Asset(
                 id="a1",
@@ -153,17 +151,18 @@ class TestLineageId:
                 origin="test",
             )
         )
-        store = JsonLStore(str(assets_path), str(contracts_path))
+        store = SQLiteStore(str(path))
         store.add_asset(asset)
         retrieved = store.get_asset("a1")
         assert retrieved is not None
         assert retrieved.lineage_id == "lineage:abc"
+        store.close()
 
-        # Re-load from disk and verify persistence
-        store2 = JsonLStore(str(assets_path), str(contracts_path))
+        store2 = SQLiteStore(str(path))
         retrieved2 = store2.get_asset("a1")
         assert retrieved2 is not None
         assert retrieved2.lineage_id == "lineage:abc"
+        store2.close()
 
     def test_lineage_id_not_in_canonical(self):
         """lineage_id is metadata, not identity — must NOT appear in canonical form."""

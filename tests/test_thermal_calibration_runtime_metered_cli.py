@@ -57,100 +57,6 @@ def _require_g0c_test_redis(monkeypatch):
     monkeypatch.setenv("AIGINEERING_REDIS_URL", redis_url)
 
 
-def _resume_recovery_with_fake_success(tmp_path, workspace, config, recovery_id):
-    bootstrap = tmp_path / f"recovery-bootstrap-{recovery_id[-8:]}"
-    bootstrap.mkdir()
-    marker = tmp_path / f"fake-recovery-transport-{recovery_id[-8:]}.txt"
-    sitecustomize = "\n".join(
-        [
-            "import json, os, socket",
-            "from pathlib import Path",
-            "from urllib.parse import urlsplit",
-            "redis = urlsplit(os.environ['AIGINEERING_REDIS_URL'])",
-            "redis_port = redis.port",
-            "redis_addresses = {item[4][0] for item in socket.getaddrinfo(redis.hostname, redis_port, type=socket.SOCK_STREAM)}",
-            "original_connect = socket.socket.connect",
-            "def guarded_connect(self, address):",
-            "    if not isinstance(address, tuple) or len(address) < 2 or address[1] != redis_port or address[0] not in redis_addresses:",
-            "        raise OSError('test network denied')",
-            "    return original_connect(self, address)",
-            "socket.socket.connect = guarded_connect",
-            "from examples.thermal_calibration import runtime_meter as meter",
-            "from test_thermal_calibration_runtime_metered_cli import _provider_reply",
-            "def fake_transport(**kwargs):",
-            "    with Path(os.environ['G0C_FAKE_TRANSPORT_MARKER']).open('a') as stream:",
-            "        stream.write('dispatch\\n')",
-            "    payload = json.loads(kwargs['body'])",
-            "    response = _provider_reply(payload)",
-            "    return meter.TransportReply(200, json.dumps(response).encode())",
-            "meter._stdlib_https_transport = fake_transport",
-        ]
-    )
-    (bootstrap / "sitecustomize.py").write_text(sitecustomize + "\n", encoding="utf-8")
-    child_env = os.environ.copy()
-    child_env["AIGINEERING_API_KEY"] = "dummy-g0c-cli-key"
-    child_env.pop("OPENAI_API_KEY", None)
-    child_env["AIGINEERING_G0C_MAX_ATTEMPTS"] = "16"
-    child_env["AIGINEERING_G0C_OUTPUT_RESERVATION_CEILING"] = "131072"
-    child_env["AIGINEERING_G0C_RUN_DEADLINE_SECONDS"] = "900"
-    child_env["AIGINEERING_REDIS_URL"] = os.environ["AIGINEERING_REDIS_URL"]
-    child_env["G0C_FAKE_TRANSPORT_MARKER"] = str(marker)
-    child_env["PYTHONPATH"] = os.pathsep.join(
-        item
-        for item in (
-            str(bootstrap),
-            str(ROOT / "src"),
-            str(ROOT),
-            str(ROOT / "tests"),
-            str(ROOT / "tests" / "fixtures"),
-            child_env.get("PYTHONPATH", ""),
-        )
-        if item
-    )
-    resumed = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "aigineering.cli.main",
-            "-C",
-            str(workspace),
-            "run",
-            "--config",
-            str(config),
-            "--resume",
-            recovery_id,
-            "--wait-timeout",
-            "60",
-            "--json",
-        ],
-        cwd=ROOT,
-        env=child_env,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert resumed.returncode == 0, resumed.stdout + resumed.stderr
-    resumed_payload = json.loads(resumed.stdout)
-    assert resumed_payload["completed"] is True
-    assert marker.read_text(encoding="utf-8").splitlines()
-    assert "dummy-g0c-cli-key" not in resumed.stdout + resumed.stderr
-    return resumed
-
-
-def _assert_no_unblocked_unfinished_tasks(store):
-    from aigineering.task_views import project_task_status
-
-    views = [
-        project_task_status(contract, store, check_integrity=True)
-        for contract in store.get_all_contracts()
-    ]
-    unfinished = [
-        view for view in views if not view["terminal"] and not view["blockers"]
-    ]
-    assert unfinished == []
-    return views
-
-
 @pytest.mark.parametrize(
     "redis_url",
     [
@@ -304,7 +210,7 @@ def _provider_reply(payload: dict) -> dict:
                 output_name: json.dumps(
                     {
                         "method": "fail",
-                        "reason": "the provider attempt failed and the exact recovery decision is terminal",
+                        "reason": "the provider attempt failed and needs exact recovery evidence",
                     },
                     sort_keys=True,
                 )
@@ -709,7 +615,7 @@ def test_ordinary_cli_runtime_metered_profile_completes_and_is_independently_acc
     runtime_meter.reset_process_session_for_tests()
 
 
-def test_ordinary_cli_provider_http_failure_records_recovery_and_terminal(
+def test_ordinary_cli_provider_http_failure_records_attempt_without_unfunded_recovery(
     tmp_path, monkeypatch
 ):
     _require_g0c_test_redis(monkeypatch)
@@ -778,37 +684,21 @@ def test_ordinary_cli_provider_http_failure_records_recovery_and_terminal(
         ]
         assert len(root_failures) == 1
         assert root_failures[0].payload["status_code"] == 503
-        scheduled = [
+        assert not store.scan_runtime_records(
+            record_type="worker_failure.recovery_scheduled"
+        )
+        assert not any(contract.parent_id == root_id for contract in contracts.values())
+        assert not store.scan_runtime_records(record_type="lifecycle.terminal")
+        extinguished = [
             record
             for _, record in store.scan_runtime_records(
-                record_type="worker_failure.recovery_scheduled"
+                record_type="allowance.extinguished"
             )
             if record.payload.get("contract_id") == root_id
         ]
-        assert len(scheduled) == 1
-        recovery_contracts = [
-            contract
-            for contract in contracts.values()
-            if contract.origin == "recovery"
-            and contract.name == contracts[root_id].name + ".recover"
-        ]
-        assert len(recovery_contracts) == 1
-        recovery_id = recovery_contracts[0].id
-        recovery_claims = [
-            record
-            for _, record in store.scan_runtime_records(record_type="claim.granted")
-            if record.payload.get("contract_id") == recovery_id
-        ]
-        assert recovery_claims == []
-        root_terminal = [
-            record
-            for _, record in store.scan_runtime_records(
-                record_type="lifecycle.terminal"
-            )
-            if record.payload.get("contract_id") == root_id
-        ]
-        assert len(root_terminal) == 1
-        assert root_terminal[0].payload["terminal"] == "failed"
+        assert len(extinguished) == 1
+        root = contracts[root_id]
+        assert extinguished[0].payload["amount"] == root.budget
         assert calls == 1
         logs = list((workspace / ".aig" / "worker-logs").glob("*.jsonl"))
         event_text = "\n".join(path.read_text(encoding="utf-8") for path in logs)
@@ -846,86 +736,6 @@ def test_ordinary_cli_provider_http_failure_records_recovery_and_terminal(
         assert "dummy-g0c-cli-key" not in result.output
     finally:
         store.close()
-
-    _resume_recovery_with_fake_success(tmp_path, workspace, config, recovery_id)
-
-    store = SQLiteStore(workspace / ".aig" / "store.db")
-    try:
-        recovery = store.get_contract(recovery_id)
-        assert recovery is not None
-        recovery_view = __import__(
-            "aigineering.task_views", fromlist=["project_task_status"]
-        ).project_task_status(recovery, store, check_integrity=True)
-        assert recovery_view["status"] == "completed"
-        assert recovery_view["terminal"] is True
-        assert recovery_view["outputs_satisfied"] is True
-        assert root_id != recovery_id
-        root_contract = store.get_contract(root_id)
-        assert root_contract is not None
-        root_view = __import__(
-            "aigineering.task_views", fromlist=["project_task_status"]
-        ).project_task_status(root_contract, store, check_integrity=True)
-        assert root_view["status"] == "failed"
-        _assert_no_unblocked_unfinished_tasks(store)
-        recovery_logs = list((workspace / ".aig" / "worker-logs").glob("*.jsonl"))
-        recovery_epochs = set()
-        for path in recovery_logs:
-            rows = [
-                json.loads(line)
-                for line in path.read_text(encoding="utf-8").splitlines()
-            ]
-            if rows and rows[0].get("contract_id") == recovery_id:
-                recovery_epochs.update(
-                    row["fields"]["meter_epoch_id"]
-                    for row in rows
-                    if row.get("event") == "provider.attempt_finalized"
-                )
-        assert recovery_epochs
-        assert initial_epochs.isdisjoint(recovery_epochs)
-        records = [record for _, record in store.scan_runtime_records()]
-        recovery_claims = [
-            record
-            for record in records
-            if record.record_type.startswith("claim.")
-            and record.payload.get("contract_id") == recovery_id
-        ]
-        recovery_failures = [
-            record
-            for record in records
-            if record.record_type == "worker.invocation_failed"
-            and record.payload.get("contract_id") == recovery_id
-        ]
-        recovery_terminals = [
-            record
-            for record in records
-            if record.record_type == "lifecycle.terminal"
-            and record.payload.get("contract_id") == recovery_id
-        ]
-        assert recovery_claims
-        assert recovery_failures == []
-        assert len(recovery_terminals) == 1
-        assert recovery_terminals[0].payload["terminal"] == "complete"
-        accepted_recovery_report = [
-            record
-            for record in records
-            if record.record_type == "output.qualified"
-            and record.payload.get("contract_id") == recovery_id
-            and record.payload.get("output_name") == "calibration_report"
-        ]
-        assert len(accepted_recovery_report) == 1
-        accepted_asset_id = accepted_recovery_report[0].payload["asset_id"]
-        recovery_attestations = [
-            record
-            for record in records
-            if record.record_type == "asset.attested"
-            and record.payload.get("contract_id") == recovery_id
-            and record.payload.get("output_name") == "calibration_report"
-            and record.payload.get("asset_id") == accepted_asset_id
-        ]
-        assert len(recovery_attestations) == 1
-        assert recovery_attestations[0].payload["verdict"] == "accepted"
-    finally:
-        store.close()
     runtime_meter.reset_process_session_for_tests()
 
 
@@ -937,7 +747,7 @@ def test_ordinary_cli_provider_http_failure_records_recovery_and_terminal(
         ("expired-deadline", "16", "131072", "0.001"),
     ],
 )
-def test_ordinary_cli_meter_limits_fail_without_transport_and_recover_observably(
+def test_ordinary_cli_meter_limits_fail_without_transport_or_unfunded_recovery(
     tmp_path, monkeypatch, case, attempts, ceiling, deadline
 ):
     _require_g0c_test_redis(monkeypatch)
@@ -1013,63 +823,26 @@ def test_ordinary_cli_meter_limits_fail_without_transport_and_recover_observably
             else "provider_request_budget_exhausted"
         )
         assert failure.payload["category"] == f"worker_error:{expected_error}"
-        scheduled = [
-            record
-            for record in records
-            if record.record_type == "worker_failure.recovery_scheduled"
-            and record.payload.get("contract_id") == root_id
-        ]
-        assert len(scheduled) == 1
         contracts = {contract.id: contract for contract in store.get_all_contracts()}
-        recovery = next(
-            contract
-            for contract in contracts.values()
-            if contract.origin == "recovery"
-            and contract.name == contracts[root_id].name + ".recover"
+        assert not any(contract.parent_id == root_id for contract in contracts.values())
+        assert not any(
+            record.record_type == "worker_failure.recovery_scheduled"
+            for record in records
         )
         assert not any(
-            record.record_type == "claim.granted"
-            and record.payload.get("contract_id") == recovery.id
+            record.record_type == "lifecycle.terminal"
+            and record.payload.get("contract_id") == root_id
             for record in records
         )
+        extinguished = [
+            record
+            for record in records
+            if record.record_type == "allowance.extinguished"
+            and record.payload.get("contract_id") == root_id
+        ]
+        assert len(extinguished) == 1
+        assert extinguished[0].payload["amount"] == contracts[root_id].budget
     finally:
         store.close()
 
-    runtime_meter.reset_process_session_for_tests()
-    resumed = _resume_recovery_with_fake_success(
-        tmp_path, workspace, config, recovery.id
-    )
-    assert resumed.returncode == 0
-    store = SQLiteStore(workspace / ".aig" / "store.db")
-    try:
-        recovery_view = __import__(
-            "aigineering.task_views", fromlist=["project_task_status"]
-        ).project_task_status(recovery, store, check_integrity=True)
-        assert recovery_view["status"] == "completed"
-        assert recovery_view["terminal"] is True
-        assert recovery_view["outputs_satisfied"] is True
-        views = _assert_no_unblocked_unfinished_tasks(store)
-        assert all(view["terminal"] or view["blockers"] for view in views)
-        records = [record for _, record in store.scan_runtime_records()]
-        assert any(
-            record.record_type == "claim.granted"
-            and record.payload.get("contract_id") == recovery.id
-            for record in records
-        )
-        assert (
-            any(
-                record.record_type == "worker.invocation_failed"
-                and record.payload.get("contract_id") == recovery.id
-                for record in records
-            )
-            is False
-        )
-        assert any(
-            record.record_type == "lifecycle.terminal"
-            and record.payload.get("contract_id") == recovery.id
-            and record.payload.get("terminal") == "complete"
-            for record in records
-        )
-    finally:
-        store.close()
     runtime_meter.reset_process_session_for_tests()
