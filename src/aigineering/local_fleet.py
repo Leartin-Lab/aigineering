@@ -21,7 +21,6 @@ from aigineering.runtime_services import (
     order_application_contract_ids,
     sync_runtime,
 )
-from aigineering.task_views import contract_tree_ids
 from aigineering.run_failure_diagnostics import (
     format_worker_failure_detail as _format_worker_failure_detail,
     invocation_failure_detail as _invocation_failure_detail,
@@ -35,7 +34,7 @@ from aigineering.runtime import (
     run_runtime_maintenance_step,
 )
 from aigineering.task_logs import execute_captured_package
-from aigineering.task_views import project_task_status
+from aigineering.task_views import project_task_status, read_contract_tree
 from aigineering.core.session import runtime_record_contract_references
 from collections.abc import Mapping
 
@@ -641,19 +640,17 @@ def _claim_cycle_slot(
             ),
             expected_registration_version=host.registration_version,
         )
-    contracts = store.get_all_contracts()
-    allowed = (
-        contract_tree_ids(contracts, target_contract_id)
+    contracts = (
+        read_contract_tree(store, target_contract_id)
         if target_contract_id is not None
-        else {item.id for item in contracts}
+        else store.get_all_contracts()
     )
-    if required_contract_capability is not None:
-        allowed = {
-            item.id
-            for item in contracts
-            if item.id in allowed
-            and required_contract_capability in item.worker_capabilities
-        }
+    allowed = {
+        item.id
+        for item in contracts
+        if required_contract_capability is None
+        or required_contract_capability in item.worker_capabilities
+    }
     for contract_id in order_application_contract_ids(store, tuple(sorted(allowed))):
         claimed = claim_next_application_package(
             store,

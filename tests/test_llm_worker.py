@@ -934,20 +934,19 @@ def test_map_tool_calls_invalid_json_arguments():
         LLMWorker._map_tool_calls_to_actions(tc, allowed_names=frozenset({"f"}))
 
 
-def test_tool_mapping_error_carries_reported_usage():
+@pytest.mark.parametrize(
+    ("calls", "error_code"),
+    [
+        ([None], "tool_call_invalid_entry"),
+        (
+            [{"type": "function", "function": {"name": "lookup", "arguments": "{"}}],
+            "tool_call_invalid_arguments",
+        ),
+    ],
+)
+def test_tool_mapping_error_carries_reported_usage(calls, error_code):
     response = {
-        "choices": [
-            {
-                "message": {
-                    "tool_calls": [
-                        {
-                            "type": "function",
-                            "function": {"name": "lookup", "arguments": "{"},
-                        }
-                    ]
-                }
-            }
-        ],
+        "choices": [{"message": {"tool_calls": calls}}],
         "usage": {"total_tokens": 13},
     }
     worker = LLMWorker(
@@ -960,7 +959,7 @@ def test_tool_mapping_error_carries_reported_usage():
     with pytest.raises(WorkerExecutionError) as raised:
         worker.invoke(Contract(id="native-usage", tool_scope=("lookup",)), [])
 
-    assert raised.value.code == "tool_call_invalid_arguments"
+    assert raised.value.code == error_code
     assert dict(raised.value.usage_metadata or {}) == {
         "total_tokens": 13,
         "model": "test-model",

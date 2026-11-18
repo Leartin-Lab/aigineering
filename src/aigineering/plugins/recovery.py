@@ -76,13 +76,7 @@ def schedule_projection_recovery(
         ):
             result = RecoveryDisposition(None, "source_proof_missing")
             return result if include_disposition else None
-        from aigineering.plugins.recovery_history import RecoveryHistoryCaptureUnstable
-
-        try:
-            snapshot = recovery_snapshot or _capture_recovery_history(store, publisher)
-        except RecoveryHistoryCaptureUnstable:
-            result = RecoveryDisposition(None, "recovery_history_conflict")
-            return result if include_disposition else None
+        snapshot = recovery_snapshot or _capture_recovery_history(store, publisher)
         if snapshot is None:
             result = RecoveryDisposition(None, "recovery_history_unavailable")
             return result if include_disposition else None
@@ -130,13 +124,7 @@ def schedule_projection_recovery(
         return result if include_disposition else result.contract
 
     source_record_ids = _normalize_source_record_ids(source_record_ids)
-    from aigineering.plugins.recovery_history import RecoveryHistoryCaptureUnstable
-
-    try:
-        snapshot = recovery_snapshot or _capture_recovery_history(store, publisher)
-    except RecoveryHistoryCaptureUnstable:
-        result = RecoveryDisposition(None, "recovery_history_conflict")
-        return result if include_disposition else None
+    snapshot = recovery_snapshot or _capture_recovery_history(store, publisher)
     if snapshot is None:
         result = RecoveryDisposition(None, "recovery_history_unavailable")
         return result if include_disposition else None
@@ -201,13 +189,20 @@ def _recoverable_tool_method(contract: Contract) -> tuple[dict | None, str]:
 
 def _with_task_view_query(snapshot, store):
     """Attach the existing immutable query reader for the live Store revision."""
+    if snapshot.query_context is not None:
+        if snapshot.query_context.revision != store.get_runtime_revision():
+            return RecoveryDisposition(None, "recovery_history_conflict")
+        return snapshot
+
     from aigineering.task_view_query import (
         TaskViewQueryMismatch,
         load_task_view_query_context,
     )
 
     try:
-        query = load_task_view_query_context(store)
+        read_scope = getattr(store, "read_transaction", nullcontext)
+        with read_scope():
+            query = load_task_view_query_context(store)
     except (TaskViewQueryMismatch, TypeError, ValueError):
         return RecoveryDisposition(None, "recovery_history_conflict")
     if query.revision != snapshot.revision:
@@ -579,12 +574,7 @@ def _schedule_tool_method_recovery(
     recovery_snapshot=None,
 ) -> RecoveryDisposition:
     """Recognize exact prior facts, then publish one ordinary recovery Candidate."""
-    from aigineering.plugins.recovery_history import RecoveryHistoryCaptureUnstable
-
-    try:
-        snapshot = recovery_snapshot or _capture_recovery_history(store, publisher)
-    except RecoveryHistoryCaptureUnstable:
-        return RecoveryDisposition(None, "recovery_history_conflict")
+    snapshot = recovery_snapshot or _capture_recovery_history(store, publisher)
     if snapshot is None:
         return RecoveryDisposition(None, "recovery_history_unavailable")
     existing = _find_recovery_for_failure(
@@ -607,10 +597,7 @@ def _schedule_tool_method_recovery(
     )
     if decision.accepted and len(decision.contracts) == 1:
         return RecoveryDisposition(decision.contracts[0])
-    try:
-        recaptured = _capture_recovery_history(publisher.store, publisher)
-    except RecoveryHistoryCaptureUnstable:
-        return RecoveryDisposition(None, "recovery_history_conflict")
+    recaptured = _capture_recovery_history(publisher.store, publisher)
     existing = _find_recovery_for_failure(
         recaptured,
         publisher,
@@ -901,12 +888,7 @@ def _publish_recovery(
         causal_parents=causal_parents,
     )
     if not decision.accepted:
-        from aigineering.plugins.recovery_history import RecoveryHistoryCaptureUnstable
-
-        try:
-            recaptured = _capture_recovery_history(publisher.store, publisher)
-        except RecoveryHistoryCaptureUnstable:
-            return None
+        recaptured = _capture_recovery_history(publisher.store, publisher)
         proof = _prove_existing_recovery(
             publisher.store,
             publisher,
@@ -947,17 +929,12 @@ def _prove_existing_recovery(
     recovery_snapshot=None,
 ) -> RecoveryPublicationProof | None:
     from aigineering.plugins.recovery_history import (
-        RecoveryHistoryCaptureUnstable,
-        RecoveryPublicationProof,
         prove_recovery_publication,
     )
 
-    try:
-        snapshot = recovery_snapshot or _capture_recovery_history(
-            publisher.store, publisher
-        )
-    except RecoveryHistoryCaptureUnstable:
-        return RecoveryPublicationProof("conflict", reason="history_capture_unstable")
+    snapshot = recovery_snapshot or _capture_recovery_history(
+        publisher.store, publisher
+    )
     if snapshot is None:
         return None
     return prove_recovery_publication(

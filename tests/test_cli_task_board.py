@@ -428,6 +428,42 @@ def test_result_refuses_nonpromptable_assets(tmp_path, monkeypatch):
     assert not path.exists()
 
 
+def test_result_exports_selected_slot_without_disclosing_unselected_slot(
+    tmp_path, monkeypatch
+):
+    db_path = tmp_path / "selective-export.sqlite"
+    with SQLiteStore(str(db_path)) as store:
+        publisher = candidate_runtime(store)
+        task = publisher.accept_contract(
+            build_control_plane_contract(
+                name="mixed outputs", outputs=("public", "restricted")
+            )
+        )
+        public = publisher.accept_asset(
+            build_control_plane_asset(name="public", content="Public content")
+        )
+        publisher.accept_asset(
+            build_control_plane_asset(
+                name="restricted", content="Private content", promptable=False
+            )
+        )
+    _attach_cli(monkeypatch, db_path)
+
+    output = tmp_path / "report.txt"
+    selected = _invoke(
+        ["result", task.id, "--output", "public", "--to", str(output), "--json"]
+    )
+    assert selected.exit_code == 0, selected.output
+    payload = json.loads(selected.output)
+    assert [item["asset_id"] for item in payload["data"]["outputs"]] == [public.id]
+    assert output.read_bytes() == b"Public content"
+
+    restricted = _invoke(["result", task.id, "--output", "restricted", "--json"])
+    assert restricted.exit_code == 1
+    assert json.loads(restricted.output)["error"]["code"] == "result_unavailable"
+    assert "Private content" not in restricted.output
+
+
 def test_result_exports_only_exact_independently_qualified_asset(tmp_path, monkeypatch):
     db_path = tmp_path / "independent.sqlite"
     store = SQLiteStore(db_path=str(db_path))

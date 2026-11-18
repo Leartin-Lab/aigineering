@@ -454,12 +454,16 @@ def task_show(contract_id: str, as_json: bool) -> None:
         click.echo(f"recoveries: {data['recovery_contract_ids']}")
 
 
-def _qualified_outputs(contract, store) -> list[dict]:
+def _qualified_outputs(
+    contract, store, *, output_names: tuple[str, ...] = ()
+) -> list[dict]:
     if not all_outputs_satisfied(contract, store):
         raise ValueError("task outputs are not all committed and policy-qualified")
     selected: list[dict] = []
     policy = contract.acceptance_policy
     for output_name in contract.outputs:
+        if output_names and output_name not in output_names:
+            continue
         qualified_ids: set[str] | None = None
         if policy is not None and policy.get("mode") == "independent":
             qualified_ids = {
@@ -560,11 +564,9 @@ def task_result(
                 as_json,
                 code="not_completed",
             )
-        outputs = _qualified_outputs(contract, store)
-        declared = {item["name"] for item in outputs}
         if output_names and (
             len(set(output_names)) != len(output_names)
-            or not set(output_names) <= declared
+            or not set(output_names) <= set(contract.outputs)
         ):
             _emit_failure(
                 "--output must name each selected declared output at most once",
@@ -573,9 +575,7 @@ def task_result(
                 code="invalid_output",
                 exit_code=2,
             )
-        selected = [
-            item for item in outputs if not output_names or item["name"] in output_names
-        ]
+        selected = _qualified_outputs(contract, store, output_names=output_names)
         if destination is not None and len(selected) != 1:
             _emit_failure(
                 "--to requires exactly one selected output; use --output NAME",

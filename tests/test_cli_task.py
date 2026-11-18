@@ -131,10 +131,16 @@ def test_task_status_and_audit_do_not_pass_tampered_materialization():
         assert audit_payload["task"]["ok"] is False
 
 
-def test_timed_out_task_wait_states_integrity_was_not_checked():
+def test_timed_out_task_wait_states_integrity_was_not_checked(monkeypatch):
     runner = CliRunner()
     with runner.isolated_filesystem():
         contract_id = _seed_build_report_task(runner)
+
+        def fail_if_copied(*_args, **_kwargs):
+            pytest.fail("A nonterminal wait must not copy the workspace database")
+
+        monkeypatch.setattr(SQLiteStore, "snapshot", fail_if_copied)
+        monkeypatch.setattr(SQLiteStore, "snapshot_from_path", fail_if_copied)
         result = runner.invoke(
             cli,
             ["task", "wait", contract_id, "--timeout", "0", "--json"],

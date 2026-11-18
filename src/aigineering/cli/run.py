@@ -603,11 +603,16 @@ def run(
         produced_asset_ids=scope.produced_asset_ids,
         unassigned_trace_ids=scope.unassigned_trace_ids,
     )
-    session_store = SessionStore()
-    session_store.create_session(session)
+    capture_warnings = list(scope.capture_warnings)
+    try:
+        SessionStore().create_session(session)
+    except (OSError, TypeError, ValueError) as exc:
+        capture_warnings.append(
+            f"could not save session manifest ({type(exc).__name__})"
+        )
     task_status = project_task_status(contract, store)
     task_status["rejections"] = safe_task_rejections(task_status.get("rejections", ()))
-    task_status["capture_warnings"] = list(scope.capture_warnings)
+    task_status["capture_warnings"] = capture_warnings
     if not task_status["ok"]:
         categories = _worker_failure_categories(store, {contract.id})
         if any(
@@ -686,6 +691,8 @@ def run(
         elif entry.event_type == "complete":
             click.echo("✓ contract complete")
 
+    for warning in capture_warnings:
+        click.echo(f"capture warning: {warning}")
     click.echo(f"Trace saved to {trace_path}")
     if not task_status["ok"]:
         click.echo(

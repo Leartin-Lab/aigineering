@@ -499,7 +499,7 @@ class LLMWorker:
 
     @staticmethod
     def _map_tool_calls_to_actions(
-        tool_calls: list[dict[str, object]],
+        tool_calls: list[object],
         *,
         allowed_names: frozenset[str],
     ) -> tuple[str, dict[str, object]]:
@@ -532,6 +532,10 @@ class LLMWorker:
 
         actions: list[dict[str, object]] = []
         for tc in tool_calls:
+            if not isinstance(tc, dict):
+                raise WorkerExecutionError(
+                    "tool_call_invalid_entry", "tool call must be a JSON object"
+                )
             func = tc.get("function")
             if not isinstance(func, dict):
                 raise WorkerExecutionError(
@@ -771,7 +775,7 @@ def _normalize_provider_action(raw_output: str) -> str:
 
 def _extract_tool_calls(
     response: Mapping[str, object],
-) -> list[dict[str, object]] | None:
+) -> list[object] | None:
     """Extract tool_calls from an OpenAI-compatible chat completion response.
 
     Returns ``None`` when the message has no tool_calls (text-only response).

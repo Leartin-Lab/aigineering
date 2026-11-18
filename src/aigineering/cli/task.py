@@ -18,6 +18,7 @@ from aigineering.cli._common import (
 )
 from aigineering.cli.task_state import project_task_status
 from aigineering.core.session import runtime_record_contract_references
+from aigineering.core.sqlite_store import SQLiteStore
 from aigineering.core.task_productivity import project_task_productivity
 from aigineering.protocol.wire import trace_entry_to_dict
 from aigineering.task_publication import prepare_task_contract, publish_task_contract
@@ -227,8 +228,10 @@ def task_wait(
     last_status: dict | None = None
     while True:
         try:
-            store = _persistent_snapshot()
-            try:
+            with (
+                SQLiteStore(".aig/store.db", read_only=True) as store,
+                store.read_transaction(),
+            ):
                 contract = store.get_contract(contract_id)
                 if contract is None:
                     _emit_error(f"Task '{contract_id}' not found.", as_json)
@@ -266,8 +269,6 @@ def task_wait(
                     else:
                         click.echo(f"{contract_id} {last_status['status']} (timed out)")
                     raise click.exceptions.Exit(1)
-            finally:
-                store.close()
         except (click.exceptions.Exit, click.ClickException):
             raise
         except Exception as error:

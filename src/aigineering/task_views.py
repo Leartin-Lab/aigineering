@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections import defaultdict
 from collections.abc import Mapping
 
 from aigineering.core.runtime_projection import (
@@ -38,17 +39,39 @@ from aigineering.plugins.task_semantics import method_payload
 
 
 def contract_tree_ids(contracts: list[Contract], root_contract_id: str) -> set[str]:
-    """Select an immutable root and descendants for every application entry."""
-    by_id = {contract.id: contract for contract in contracts}
-    selected = {root_contract_id} if root_contract_id in by_id else set()
-    changed = True
-    while changed:
-        changed = False
-        for contract in contracts:
-            if contract.parent_id in selected and contract.id not in selected:
-                selected.add(contract.id)
-                changed = True
-    return selected
+    """Select an immutable root and descendants from a captured collection."""
+    children = defaultdict(list)
+    root = None
+    for contract in contracts:
+        if contract.id == root_contract_id:
+            root = contract
+        children[contract.parent_id].append(contract)
+    return {
+        contract.id
+        for contract in _walk_contract_tree(root, lambda parent: children[parent])
+    }
+
+
+def read_contract_tree(store, root_contract_id: str) -> list[Contract]:
+    """Read one root and its descendants from the Store's parent index."""
+    with store.read_transaction():
+        return list(
+            _walk_contract_tree(
+                store.get_contract(root_contract_id), store.get_child_contracts
+            )
+        )
+
+
+def _walk_contract_tree(root, get_children):
+    pending = [root] if root is not None else []
+    seen = set()
+    while pending:
+        contract = pending.pop()
+        if contract.id in seen:
+            continue
+        seen.add(contract.id)
+        yield contract
+        pending.extend(get_children(contract.id))
 
 
 def task_priority_histories(projection_context, contract_ids) -> dict[str, tuple]:

@@ -248,11 +248,6 @@ def _get_trace_dir() -> Path:
     return Path(".aig/traces")
 
 
-def _get_store_dir() -> Path:
-    """Return the persistent asset/contract store directory."""
-    return Path(".aig/store")
-
-
 def _persistent_store() -> SQLiteStore:
     """Create the default local persistent store (SQLite-backed)."""
     return persistent_store()
@@ -623,8 +618,3 @@ def _cli_internal_error(exc: Exception, as_json: bool) -> None:
         )
         raise click.exceptions.Exit(1) from exc
     raise click.ClickException(message) from exc
-
-
-def _get_idempotency_path() -> str:
-    """Return the path to the idempotency store JSONL file."""
-    return str(_get_store_dir() / "idempotency.jsonl")

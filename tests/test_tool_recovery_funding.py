@@ -206,6 +206,10 @@ def test_repeated_tool_recovery_spends_waiting_consumer_once_per_failure(
     assert allowance_available(env.parent, root_records) == 0
     assert allowance_available(env.consumer, root_records) == 3
 
+    def fail_if_copied(*_args, **_kwargs):
+        pytest.fail("Tool recovery should prove its source in a read transaction")
+
+    monkeypatch.setattr(type(env.store), "snapshot", fail_if_copied)
     _source_claim, source_failure = _fail_once(env, env.source, "claim:tool-source")
     from aigineering.task_diagnostics import (
         TaskDiagnosticError,

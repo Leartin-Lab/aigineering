@@ -186,30 +186,44 @@ class SQLiteStore:
         db_path: str = ":memory:",
         *,
         allowance_checkpoint_mode: str = "checkpoint",
+        read_only: bool = False,
     ) -> None:
         if allowance_checkpoint_mode not in {"checkpoint", "reference"}:
             raise ValueError("unknown allowance checkpoint mode")
         self._allowance_checkpoint_mode = allowance_checkpoint_mode
         self._db_path = db_path
 
-        if db_path != ":memory:":
+        if read_only:
+            source_path = Path(db_path).resolve()
+            if not source_path.is_file():
+                raise FileNotFoundError("SQLite source database does not exist")
+            connect_path = f"{source_path.as_uri()}?mode=ro"
+        else:
+            connect_path = db_path
+        if not read_only and db_path != ":memory:":
             parent = Path(db_path).parent
             if str(parent) and not parent.exists():
                 parent.mkdir(parents=True, exist_ok=True)
 
         self._conn = sqlite3.connect(
-            db_path, check_same_thread=False, factory=_SerializedConnection
+            connect_path,
+            uri=read_only,
+            check_same_thread=False,
+            factory=_SerializedConnection,
         )
         self._candidate_transaction_owner = None
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA foreign_keys=ON")
 
         # WAL only applies to file-backed databases; :memory: uses "memory" journal
-        if db_path != ":memory:":
+        if not read_only and db_path != ":memory:":
             self._conn.execute("PRAGMA journal_mode=WAL")
 
         try:
-            initialize_sqlite_schema(self._conn, self)
+            if read_only:
+                self._validate_read_schema()
+            else:
+                initialize_sqlite_schema(self._conn, self)
         except Exception:
             self._conn.close()
             raise
@@ -241,39 +255,28 @@ class SQLiteStore:
         apply schema upgrades or repair materialized tables. A schema mismatch
         fails closed; callers receive only the isolated copy.
         """
-        source_path = Path(db_path).resolve()
-        if not source_path.is_file():
-            raise FileNotFoundError("SQLite source database does not exist")
-        source_uri = f"{source_path.as_uri()}?mode=ro"
-        source = sqlite3.connect(source_uri, uri=True, check_same_thread=False)
-        snapshot: SQLiteStore | None = None
+        with cls(str(db_path), read_only=True) as source, source.read_transaction():
+            source._validate_read_schema()
+            return source.snapshot()
+
+    def _validate_read_schema(self) -> None:
         try:
-            snapshot = cls(":memory:")
-            source.backup(snapshot._conn)
-            try:
-                version = current_schema_version(snapshot._conn)
-                tables = {
-                    str(row[0])
-                    for row in snapshot._conn.execute(
-                        "SELECT name FROM sqlite_master WHERE type = 'table'"
-                    )
-                }
-            except sqlite3.Error as exc:
-                raise ValueError(
-                    "SQLite source database schema is incompatible for read-only snapshot"
-                ) from exc
-            required_tables = {"assets", "contracts", "trace_events", "runtime_records"}
-            if version != CURRENT_SCHEMA_VERSION or not required_tables <= tables:
-                raise ValueError(
-                    "SQLite source database schema is incompatible for read-only snapshot"
+            version = current_schema_version(self._conn)
+            tables = {
+                str(row[0])
+                for row in self._conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table'"
                 )
-            return snapshot
-        except Exception:
-            if snapshot is not None:
-                snapshot.close()
-            raise
-        finally:
-            source.close()
+            }
+        except sqlite3.Error as exc:
+            raise ValueError(
+                "SQLite source database schema is incompatible for read-only snapshot"
+            ) from exc
+        required_tables = {"assets", "contracts", "trace_events", "runtime_records"}
+        if version != CURRENT_SCHEMA_VERSION or not required_tables <= tables:
+            raise ValueError(
+                "SQLite source database schema is incompatible for read-only snapshot"
+            )
 
     # ── Immutable runtime-record envelope ────────────────────────────────
 

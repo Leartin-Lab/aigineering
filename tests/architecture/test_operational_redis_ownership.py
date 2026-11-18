@@ -28,4 +28,4 @@ def test_execution_entries_sync_after_commit_and_use_redis_wakes():
     source = (ROOT / "src/aigineering/local_fleet.py").read_text()
     assert "sync_runtime(store)" in source
     assert "collaboration_service(store).wait(" in source
-    assert "contract_tree_ids(" in source
+    assert "read_contract_tree(store, target_contract_id)" in source

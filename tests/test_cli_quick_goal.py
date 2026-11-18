@@ -346,6 +346,54 @@ def test_failed_quick_goal_keeps_session_and_trace_diagnostics(monkeypatch):
         assert "aig task audit" in payload["next_step"]
 
 
+@pytest.mark.parametrize("completed", [True, False])
+def test_session_capture_failure_preserves_goal_result(
+    monkeypatch, tmp_path, completed
+):
+    def response(contract):
+        if not completed:
+            return "/exec invalid"
+        return "/exec " + json.dumps({"outputs": {contract.outputs[0]: "# Done"}})
+
+    monkeypatch.setattr(
+        "aigineering.cli._common.build_worker",
+        lambda *_args, **_kwargs: _OutputWorker(response),
+    )
+    runner = CliRunner()
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        Path(".aig").mkdir()
+        Path(".aig/sessions").write_text("blocked", encoding="utf-8")
+        result = runner.invoke(
+            cli,
+            [
+                "run",
+                "goal",
+                "--worker",
+                "llm",
+                "--model",
+                "fixture",
+                "--output",
+                "result.md",
+                "--json",
+            ],
+        )
+        assert result.exit_code == (0 if completed else 1), result.output
+        payload = json.loads(result.output)
+        assert payload["contract_id"]
+        assert payload["session_id"]
+        assert any(
+            "session manifest" in warning for warning in payload["capture_warnings"]
+        )
+        assert payload["ok"] is completed
+        if completed:
+            assert payload["status"] == "complete"
+            assert payload["outputs"][0]["asset_id"]
+            assert Path("result.md").read_text(encoding="utf-8") == "# Done\n"
+        else:
+            assert payload["status"] != "complete"
+            assert not Path("result.md").exists()
+
+
 def test_output_write_failure_preserves_completed_runtime_status(monkeypatch, tmp_path):
     runner = CliRunner()
     worker = _OutputWorker(

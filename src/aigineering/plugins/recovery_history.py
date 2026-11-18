@@ -32,10 +32,6 @@ class RecoveryHistorySnapshot:
     query_context: object | None = None
 
 
-class RecoveryHistoryCaptureUnstable(RuntimeError):
-    """The Store revision changed on every bounded immutable read attempt."""
-
-
 def capture_recovery_history(store, publisher) -> RecoveryHistorySnapshot:
     """Capture exact recovery facts from a caller-owned immutable Store view.
 

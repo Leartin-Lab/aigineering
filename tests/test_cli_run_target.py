@@ -1,6 +1,7 @@
 """Target-scoped behavior for ``aig run --task``."""
 
 import json
+from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -489,8 +490,13 @@ def test_target_pool_claims_child_recovery_and_tool_descendants(monkeypatch):
     }
 
     class Store:
-        def get_all_contracts(self):
-            return list(contracts.values())
+        def read_transaction(self):
+            return nullcontext()
+
+        def get_child_contracts(self, contract_id):
+            return [
+                item for item in contracts.values() if item.parent_id == contract_id
+            ]
 
         def get_contract(self, contract_id):
             return contracts.get(contract_id)

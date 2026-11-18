@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from contextlib import nullcontext
 from datetime import datetime, timezone
 from collections.abc import Callable, Mapping
 import sqlite3
@@ -745,15 +746,14 @@ def _schedule_rejected_recovery(
             from aigineering.task_diagnostics import TaskDiagnosticError
 
             raise TaskDiagnosticError("recovery_source_integrity_error")
-        snapshot_factory = getattr(store, "snapshot", None)
-        proof_store = snapshot_factory() if callable(snapshot_factory) else store
-        try:
-            snapshot = capture_recovery_history(proof_store, publisher)
+        read_scope = getattr(store, "read_transaction", nullcontext)
+        with read_scope():
+            snapshot = capture_recovery_history(store, publisher)
             if snapshot is None or snapshot.query_context is None:
                 raise TaskDiagnosticError("recovery_source_snapshot_unavailable")
             query = snapshot.query_context
             proven_binding = task_recovery_source_binding(
-                proof_store,
+                store,
                 contract.id,
                 claim_id,
                 source_record_id,
@@ -776,18 +776,13 @@ def _schedule_rejected_recovery(
             source_record_ids = tuple(proven_binding["witness_record_ids"])
             try:
                 ancestor_source_bindings = task_recovery_ancestor_source_bindings(
-                    proof_store, contract.id, query_context=query
+                    store, contract.id, query_context=query
                 )
             except TaskDiagnosticError:
                 # The current failure is authenticated, so malformed prior history
                 # is an unsupported method disposition; it cannot authorize work.
                 ancestor_source_bindings = {}
-            # The immutable projection is sufficient for publication planning;
-            # do not retain a query context that points at a closed snapshot Store.
-            recovery_snapshot = replace(snapshot, query_context=None)
-        finally:
-            if proof_store is not store:
-                proof_store.close()
+            recovery_snapshot = snapshot
     recovery = schedule_projection_recovery(
         store,
         publisher=publisher,

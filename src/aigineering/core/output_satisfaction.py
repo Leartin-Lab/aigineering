@@ -351,16 +351,3 @@ def _unmet_output_names(
             and policy.get("mode") != "independent"
         )
     )
-
-
-def _is_contract_or_descendant(producer_id: str, contract_id: str, store) -> bool:
-    """Return whether immutable Contract ancestry binds producer to owner."""
-    current_id = producer_id
-    visited: set[str] = set()
-    while current_id and current_id not in visited:
-        if current_id == contract_id:
-            return True
-        visited.add(current_id)
-        current = store.get_contract(current_id)
-        current_id = str(current.parent_id or "") if current is not None else ""
-    return False

@@ -189,8 +189,8 @@ def test_signed_submitted_independent_outputs_are_a_qualification_blocker(
 
     monkeypatch.setattr(
         task_cli,
-        "_persistent_snapshot",
-        lambda: SQLiteStore.snapshot_from_path(database),
+        "SQLiteStore",
+        lambda _path, *, read_only: SQLiteStore(str(database), read_only=read_only),
     )
     monkeypatch.setattr(
         task_cli, "collaboration_service", lambda _store: _NoopCollaboration()
