@@ -118,11 +118,20 @@ def _prove(snapshot, recovery, context_asset, failed, source_id):
     )
 
 
-def test_generic_recovery_is_proven_from_one_actual_receipt_and_head(tmp_path):
+def test_generic_recovery_is_proven_from_one_actual_receipt_and_head(
+    tmp_path, monkeypatch
+):
+    from aigineering.plugins.recovery import _capture_recovery_history
+
     store, failed, publisher, source_id, recovery, context_asset = (
         _published_generic_recovery(tmp_path)
     )
-    snapshot = capture_recovery_history(store, publisher)
+
+    def unexpected_trace_scan():
+        raise AssertionError("publication proof must not load trace materializations")
+
+    monkeypatch.setattr(store, "get_all", unexpected_trace_scan)
+    snapshot = _capture_recovery_history(store, publisher)
     proof = _prove(snapshot, recovery, context_asset, failed, source_id)
     assert proof.status == "matched", proof.reason
     assert proof.contract == recovery

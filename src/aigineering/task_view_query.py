@@ -32,11 +32,16 @@ class TaskViewQueryContext:
     _assets_by_name: Mapping = field(init=False, repr=False, compare=False)
     _assets_by_id: Mapping = field(init=False, repr=False, compare=False)
     _contracts_by_id: Mapping = field(init=False, repr=False, compare=False)
+    _contracts_by_parent: Mapping = field(init=False, repr=False, compare=False)
 
     def __post_init__(self):
         assets_by_name = defaultdict(list)
         for asset in self.assets:
             assets_by_name[asset.name].append(asset)
+        contracts_by_parent = defaultdict(list)
+        for contract in self.contracts:
+            if contract.parent_id is not None:
+                contracts_by_parent[contract.parent_id].append(contract)
         for name, values in (
             (
                 "_assets_by_name",
@@ -46,6 +51,13 @@ class TaskViewQueryContext:
             (
                 "_contracts_by_id",
                 {contract.id: contract for contract in self.contracts},
+            ),
+            (
+                "_contracts_by_parent",
+                {
+                    parent: tuple(children)
+                    for parent, children in contracts_by_parent.items()
+                },
             ),
         ):
             object.__setattr__(self, name, MappingProxyType(values))
@@ -76,6 +88,9 @@ class TaskViewQueryContext:
 
     def get_contract(self, contract_id):
         return self._contracts_by_id.get(contract_id)
+
+    def get_child_contracts(self, parent_id):
+        return list(self._contracts_by_parent.get(parent_id, ()))
 
     def read_task_facts(self, contract_id, record_types):
         return tuple(

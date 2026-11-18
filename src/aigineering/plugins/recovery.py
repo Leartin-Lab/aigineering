@@ -76,7 +76,9 @@ def schedule_projection_recovery(
         ):
             result = RecoveryDisposition(None, "source_proof_missing")
             return result if include_disposition else None
-        snapshot = recovery_snapshot or _capture_recovery_history(store, publisher)
+        snapshot = recovery_snapshot or _capture_recovery_history(
+            store, publisher, include_task_views=True
+        )
         if snapshot is None:
             result = RecoveryDisposition(None, "recovery_history_unavailable")
             return result if include_disposition else None
@@ -948,12 +950,14 @@ def _prove_existing_recovery(
     )
 
 
-def _capture_recovery_history(store, publisher):
+def _capture_recovery_history(store, publisher, *, include_task_views=False):
     from aigineering.plugins.recovery_history import capture_recovery_history
 
     read_scope = getattr(store, "read_transaction", nullcontext)
     with read_scope():
-        return capture_recovery_history(store, publisher)
+        return capture_recovery_history(
+            store, publisher, include_task_views=include_task_views
+        )
 
 
 def _normalize_source_record_ids(record_ids: tuple[str, ...]) -> tuple[str, ...]:

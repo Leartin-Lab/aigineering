@@ -6,7 +6,10 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Literal
 
-from aigineering.core.projection_context import EffectProjectionContext
+from aigineering.core.projection_context import (
+    EffectProjectionContext,
+    load_effect_projection_context,
+)
 from aigineering.core.publication_history import (
     index_published_records,
     read_effect_types,
@@ -32,16 +35,17 @@ class RecoveryHistorySnapshot:
     query_context: object | None = None
 
 
-def capture_recovery_history(store, publisher) -> RecoveryHistorySnapshot:
-    """Capture exact recovery facts from a caller-owned immutable Store view.
-
-    Callers that need a stable multi-reader proof pass their own SQLite snapshot;
-    this function does not retain a live Store handle or create another state
-    owner. The snapshot context is read-only projection input only.
-    """
+def capture_recovery_history(
+    store, publisher, *, include_task_views: bool = True
+) -> RecoveryHistorySnapshot:
+    """Read recovery facts from a caller-owned snapshot or read transaction."""
     from aigineering.core.domain import load_genesis
-    from aigineering.task_view_query import load_task_view_query_context
+    from aigineering.task_view_query import (
+        TaskViewQueryMismatch,
+        load_task_view_query_context,
+    )
 
+    revision = store.get_runtime_revision()
     domain_id = load_genesis(store).id
     publisher_domain_id = getattr(getattr(publisher, "genesis", None), "id", None)
     actor_key = getattr(publisher, "actor_key", None)
@@ -52,13 +56,20 @@ def capture_recovery_history(store, publisher) -> RecoveryHistorySnapshot:
         raise ValueError("recovery publisher has no Actor identity")
     if publisher_domain_id != domain_id:
         raise ValueError("recovery publisher belongs to another domain")
-    query = load_task_view_query_context(store)
+    query = load_task_view_query_context(store) if include_task_views else None
+    context = (
+        query.effect_projection
+        if query is not None
+        else load_effect_projection_context(store)
+    )
+    if store.get_runtime_revision() != revision:
+        raise TaskViewQueryMismatch("source Store changed while capturing recovery")
     return RecoveryHistorySnapshot(
-        context=query.effect_projection,
+        context=context,
         store_domain_id=domain_id,
         publisher_domain_id=publisher_domain_id,
         publisher_actor_id=actor_id,
-        revision=store.get_runtime_revision(),
+        revision=revision,
         query_context=query,
     )
 

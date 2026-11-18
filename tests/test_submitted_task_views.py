@@ -462,6 +462,45 @@ def test_terminal_expansion_active_claim_and_unclaimed_ready_precedence():
     store.close()
 
 
+def test_attempt_and_descendant_reads_stay_within_the_target_tree(monkeypatch):
+    from aigineering.core.lifecycle_facts import create_terminal_record
+    from aigineering.protocol.runtime_record import create_runtime_record
+    from aigineering.task_views import (
+        _has_unfinished_descendant,
+        _latest_attempt_outcome,
+    )
+
+    with SQLiteStore() as store:
+        publisher = candidate_runtime(store)
+        parent = _publish_task(store, publisher, name="parent", outputs=("report",))
+        child = _publish_task(
+            store, publisher, name="child", outputs=("notes",), parent_id=parent.id
+        )
+        unrelated = _publish_task(store, publisher, name="other", outputs=("extra",))
+        for task_id, outcome in (
+            (parent.id, "failed"),
+            (parent.id, "expanded"),
+            (unrelated.id, "failed"),
+        ):
+            store.append_runtime_record(
+                create_runtime_record(
+                    "attempt.closed", {"contract_id": task_id, "outcome": outcome}
+                )
+            )
+        assert _has_unfinished_descendant(parent, store)
+        store.append_runtime_record(create_terminal_record(child.id, "failed"))
+        query = load_task_view_query_context(store)
+
+        def unexpected_scan(*_args, **_kwargs):
+            raise AssertionError("target reads must not scan unrelated history")
+
+        monkeypatch.setattr(store, "get_all_contracts", unexpected_scan)
+        monkeypatch.setattr(store, "scan_runtime_records", unexpected_scan)
+        for reader in (store, query):
+            assert _latest_attempt_outcome(reader, parent.id) == "expanded"
+            assert not _has_unfinished_descendant(parent, reader)
+
+
 def test_ordinary_complete_output_stays_completed(tmp_path, monkeypatch):
     store = SQLiteStore(db_path=str(tmp_path / "complete.sqlite"))
     publisher = candidate_runtime(store)
