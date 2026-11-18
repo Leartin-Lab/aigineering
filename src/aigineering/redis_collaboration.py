@@ -101,7 +101,7 @@ return 1
 
 _MAX_APPEND_EVENTS = 256
 _MAX_APPEND_BYTES = 1_048_576
-_XRANGE_PAGE_SIZE = 256
+_XRANGE_PAGE_SIZE = 1024
 _STAGE_TTL_SECONDS = 600
 _MAX_WATCH_ATTEMPTS = 3
 
@@ -707,7 +707,7 @@ class RedisCollaborationService:
             raise ValueError("timeout must be a finite non-negative number")
         deadline = time.monotonic() + float(timeout)
         source_revision = int(self._store.get_runtime_revision())
-        initial_events = self.events(after_revision=after_revision, count=100)
+        initial_events = self._wait_events(after_revision, deadline)
         if initial_events:
             return initial_events
         try:
@@ -726,7 +726,7 @@ class RedisCollaborationService:
             current_revision = int(self._store.get_runtime_revision())
             if current_revision != source_revision:
                 source_revision = current_revision
-                events = self.events(after_revision=after_revision, count=100)
+                events = self._wait_events(after_revision, deadline)
                 if events:
                     return events
             while True:
@@ -744,13 +744,28 @@ class RedisCollaborationService:
                 current_revision = int(self._store.get_runtime_revision())
                 if current_revision != source_revision:
                     source_revision = current_revision
-                    events = self.events(after_revision=after_revision, count=100)
+                    events = self._wait_events(after_revision, deadline)
                     if events:
                         return events
         except self._redis_errors as exc:
             raise RedisCollaborationUnavailable(
                 "Redis collaboration service unavailable"
             ) from exc
+
+    def _wait_events(
+        self, after_revision: int, deadline: float
+    ) -> list[dict[str, Any]]:
+        """Refresh the exact proof after contention within the caller's wait."""
+        while True:
+            try:
+                return self.events(after_revision=after_revision, count=100)
+            except RedisCollaborationUnavailable as exc:
+                remaining = deadline - time.monotonic()
+                if exc.reason != "sync_contention" or remaining <= 0:
+                    raise
+                time.sleep(min(0.01, remaining))
+                if time.monotonic() >= deadline:
+                    raise
 
     def status(self) -> dict[str, object]:
         """Return health and revision lag without exposing connection details."""

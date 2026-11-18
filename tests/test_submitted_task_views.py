@@ -489,6 +489,7 @@ def test_attempt_and_descendant_reads_stay_within_the_target_tree(monkeypatch):
             )
         assert _has_unfinished_descendant(parent, store)
         store.append_runtime_record(create_terminal_record(child.id, "failed"))
+        store.append_runtime_record(create_terminal_record(parent.id, "failed"))
         query = load_task_view_query_context(store)
 
         def unexpected_scan(*_args, **_kwargs):
@@ -496,9 +497,20 @@ def test_attempt_and_descendant_reads_stay_within_the_target_tree(monkeypatch):
 
         monkeypatch.setattr(store, "get_all_contracts", unexpected_scan)
         monkeypatch.setattr(store, "scan_runtime_records", unexpected_scan)
+
+        class NoRecordScan(tuple):
+            __iter__ = unexpected_scan
+
+        object.__setattr__(query, "runtime_records", NoRecordScan())
         for reader in (store, query):
             assert _latest_attempt_outcome(reader, parent.id) == "expanded"
             assert not _has_unfinished_descendant(parent, reader)
+            assert [
+                record.record_type
+                for record in reader.read_task_facts(
+                    parent.id, ("lifecycle.terminal", "attempt.closed")
+                )
+            ] == ["attempt.closed", "attempt.closed", "lifecycle.terminal"]
 
 
 def test_ordinary_complete_output_stays_completed(tmp_path, monkeypatch):

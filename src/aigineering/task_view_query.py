@@ -10,6 +10,8 @@ from types import MappingProxyType
 from aigineering.core.projection_context import EffectProjectionContext
 from aigineering.core.runtime_projection import RuntimeProjection
 
+_TASK_STATUS_FACT_TYPES = frozenset({"attempt.closed", "lifecycle.terminal"})
+
 
 class TaskViewQueryMismatch(ValueError):
     """A query context was reused with a different Store snapshot."""
@@ -33,6 +35,7 @@ class TaskViewQueryContext:
     _assets_by_id: Mapping = field(init=False, repr=False, compare=False)
     _contracts_by_id: Mapping = field(init=False, repr=False, compare=False)
     _contracts_by_parent: Mapping = field(init=False, repr=False, compare=False)
+    _status_facts_by_contract: Mapping = field(init=False, repr=False, compare=False)
 
     def __post_init__(self):
         assets_by_name = defaultdict(list)
@@ -42,6 +45,12 @@ class TaskViewQueryContext:
         for contract in self.contracts:
             if contract.parent_id is not None:
                 contracts_by_parent[contract.parent_id].append(contract)
+        status_facts_by_contract = defaultdict(list)
+        for _, record in self.runtime_records:
+            if record.record_type in _TASK_STATUS_FACT_TYPES:
+                status_facts_by_contract[record.payload.get("contract_id")].append(
+                    record
+                )
         for name, values in (
             (
                 "_assets_by_name",
@@ -58,6 +67,10 @@ class TaskViewQueryContext:
                     parent: tuple(children)
                     for parent, children in contracts_by_parent.items()
                 },
+            ),
+            (
+                "_status_facts_by_contract",
+                {key: tuple(value) for key, value in status_facts_by_contract.items()},
             ),
         ):
             object.__setattr__(self, name, MappingProxyType(values))
@@ -93,6 +106,12 @@ class TaskViewQueryContext:
         return list(self._contracts_by_parent.get(parent_id, ()))
 
     def read_task_facts(self, contract_id, record_types):
+        if _TASK_STATUS_FACT_TYPES.issuperset(record_types):
+            return tuple(
+                record
+                for record in self._status_facts_by_contract.get(contract_id, ())
+                if record.record_type in record_types
+            )
         return tuple(
             record
             for _, record in self.runtime_records
@@ -122,6 +141,9 @@ class TaskViewQueryContext:
 
     def get_assets_by_name(self, name):
         return list(self._assets_by_name.get(name, ()))
+
+    def has_asset_named(self, name):
+        return name in self._assets_by_name
 
     def get_worker_registrations(self):
         return list(self.registrations)

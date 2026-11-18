@@ -79,16 +79,30 @@ class RuntimeProjection:
 
     def contract_view(self, contract: Contract) -> ContractView:
         historical = self._historical_facts(contract)
+        required_inputs = set(contract.inputs)
+        invalid_activation = False
+        try:
+            validate_execution_activation(contract.activation)
+            activation_references = activation_names(contract.activation)
+        except (RecursionError, ValueError):
+            invalid_activation = True
+            activation_references = set()
+
+        current_rows = None
         if historical is None:
             if self._available_names is None:
-                assets = self._store.get_all_assets()
-                available_names = {asset.name for asset in assets}
+                available_names = {
+                    name
+                    for name in required_inputs | activation_references
+                    if self._store.has_asset_named(name)
+                }
             else:
                 available_names = self._available_names
             outputs_satisfied = bool(contract.outputs) and all_outputs_satisfied(
                 contract, self._store
             )
-            current_records = tuple(record for _, record in self._records())
+            current_rows = self._records()
+            current_records = tuple(record for _, record in current_rows)
             typed_terminal_events = tuple(
                 str(record.payload["terminal"])
                 for record in current_records
@@ -117,18 +131,9 @@ class RuntimeProjection:
                 ),
                 require_outputs=True,
             )
-        invalid_activation = False
-        try:
-            validate_execution_activation(contract.activation)
-            activation_satisfied = check_activation(
-                contract.activation, available_names
-            )
-            activation_references = activation_names(contract.activation)
-        except (RecursionError, ValueError):
-            invalid_activation = True
-            activation_satisfied = False
-            activation_references = set()
-        required_inputs = set(contract.inputs)
+        activation_satisfied = not invalid_activation and check_activation(
+            contract.activation, available_names
+        )
         missing_inputs = required_inputs - available_names
         missing_activation = activation_references - available_names
         missing_assets = tuple(sorted(missing_inputs | missing_activation))
@@ -189,7 +194,7 @@ class RuntimeProjection:
                         break
                     parent_id = parent.parent_id
         budget_remaining = typed_budget
-        current_claim_id, claim_status = self._claim_view(contract.id)
+        current_claim_id, claim_status = self._claim_view(contract.id, current_rows)
         blockers: list[str] = []
         if terminal == "conflict":
             blockers.append("terminal_conflict")
@@ -326,10 +331,12 @@ class RuntimeProjection:
             self._as_of
         )
 
-    def _claim_view(self, contract_id: str) -> tuple[str | None, str | None]:
+    def _claim_view(
+        self, contract_id: str, records: tuple[tuple[int, RuntimeRecord], ...] | None
+    ) -> tuple[str | None, str | None]:
         claim_id: str | None = None
         status: str | None = None
-        for revision, record in self._records():
+        for revision, record in self._records() if records is None else records:
             if not self._record_selected(revision, record.recorded_at):
                 continue
             payload = record.payload

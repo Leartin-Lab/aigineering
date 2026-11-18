@@ -106,6 +106,50 @@ def test_projection_snapshot_reuses_runtime_records_across_contract_views():
     ]
 
 
+def test_current_projection_reads_only_referenced_asset_names_and_reuses_fact_rows(
+    monkeypatch,
+):
+    with SQLiteStore() as store:
+        contract = Contract(
+            id="target",
+            inputs=("required",),
+            outputs=("report",),
+            activation="required AND (alternative OR optional)",
+            budget=2,
+        )
+        store.add_contract(contract)
+        for name in ("required", "alternative", "unrelated"):
+            store.add_asset(
+                sign_asset(Asset(id=name, name=name, content=name), signed_by="owner")
+            )
+        expected = RuntimeProjection(
+            store, store, available_names={"required", "alternative", "unrelated"}
+        ).contract_view(contract)
+        original_lookup = store.has_asset_named
+        original_scan = store.scan_runtime_records
+        looked_up = set()
+        scans = []
+
+        def lookup(name):
+            looked_up.add(name)
+            return original_lookup(name)
+
+        def scan(*args, **kwargs):
+            scans.append(1)
+            return original_scan(*args, **kwargs)
+
+        def unexpected_asset_scan():
+            raise AssertionError("current view must only query referenced asset names")
+
+        monkeypatch.setattr(store, "has_asset_named", lookup)
+        monkeypatch.setattr(store, "get_all_assets", unexpected_asset_scan)
+        monkeypatch.setattr(store, "scan_runtime_records", scan)
+
+        assert RuntimeProjection(store, store).contract_view(contract) == expected
+        assert looked_up == {"required", "alternative", "optional"}
+        assert len(scans) == 1
+
+
 def test_trace_terminal_events_do_not_affect_projection():
     store = MemoryStore()
     trace = MemoryTraceStore()

@@ -88,7 +88,7 @@ def test_usage_contract_keeps_known_tool_and_custom_adapter_fields():
     assert normalize_usage_metadata(metadata) == metadata
 
 
-def test_productivity_omits_identity_only_llm_but_keeps_explicit_zero_and_tool():
+def test_productivity_keeps_identity_only_llm_and_counts_known_usage():
     contract = Contract(id="task:usage-projection")
     traces = (
         TraceEntry(
@@ -118,13 +118,63 @@ def test_productivity_omits_identity_only_llm_but_keeps_explicit_zero_and_tool()
         ),
     )
 
-    records, totals = _usage_projection(traces, [contract])
+    records, totals, coverage = _usage_projection(traces, [contract])
 
     assert [item["usage"] for item in records] == [
+        {"model": "fixture", "provider": "test", "worker_profile": "fixture-profile"},
         {"total_tokens": 0},
         {"tool": "lookup"},
     ]
-    assert totals == {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+    assert totals == {
+        "prompt_tokens": None,
+        "completion_tokens": None,
+        "total_tokens": None,
+    }
+    assert coverage["total_tokens"] == {
+        "known_subtotal": 0,
+        "known_observations": 1,
+        "observations": 2,
+    }
+    assert coverage["prompt_tokens"]["known_observations"] == 0
+
+
+@pytest.mark.parametrize(
+    ("usage", "expected"),
+    [
+        ({}, (None, None, None)),
+        ({"prompt_tokens": 7}, (7, None, None)),
+        ({"total_tokens": 0}, (None, None, 0)),
+        ({"prompt_tokens": 2, "completion_tokens": 3}, (2, 3, 5)),
+        ({"prompt_tokens": 2, "completion_tokens": 3, "total_tokens": 9}, (2, 3, 9)),
+    ],
+)
+def test_productivity_exact_totals_only_when_known(usage, expected):
+    contract = Contract(id="task:usage-observation")
+    trace = TraceEntry(
+        id="trace:usage-observation",
+        contract_id=contract.id,
+        event_type="candidate_committed",
+        usage_metadata={"model": "fixture", **usage},
+    )
+    records, totals, coverage = _usage_projection([trace], [contract])
+    assert records[0]["usage"] == {"model": "fixture", **usage}
+    assert totals == dict(
+        zip(
+            ("prompt_tokens", "completion_tokens", "total_tokens"),
+            expected,
+            strict=True,
+        )
+    )
+    assert coverage["total_tokens"]["observations"] == 1
+    assert coverage["total_tokens"]["known_observations"] == int(
+        expected[-1] is not None
+    )
+
+
+def test_productivity_without_model_observations_has_unknown_totals():
+    _, totals, coverage = _usage_projection([], [])
+    assert all(value is None for value in totals.values())
+    assert all(row["observations"] == 0 for row in coverage.values())
 
 
 @pytest.mark.parametrize(
